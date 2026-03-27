@@ -131,6 +131,10 @@ document.getElementById("welcome-skip-btn")?.addEventListener("click", async () 
   AppState.showApp(profile);
 });
 
+document.getElementById("onboarding-back-btn")?.addEventListener("click", () => {
+  AppState.showScreen("welcome-screen");
+});
+
 // ── Onboarding: Sleeper link ───────────────────────────────
 document.getElementById("sleeper-link-btn")?.addEventListener("click", async () => {
   const sleeperUsername = document.getElementById("sleeper-username-input").value.trim();

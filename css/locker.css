@@ -8,7 +8,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-6);
+  padding: var(--space-4) var(--space-6);
   background:
     radial-gradient(ellipse 70% 50% at 50% 0%, rgba(240,180,41,.15) 0%, transparent 65%),
     var(--color-bg);
@@ -21,7 +21,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-3);
   animation: welcome-in 0.5s ease both;
 }
 
@@ -31,7 +31,7 @@
 }
 
 .welcome-trophy {
-  font-size: 4rem;
+  font-size: 2.8rem;
   filter: drop-shadow(0 0 24px rgba(240,180,41,.5));
   animation: trophy-pulse 2s ease infinite;
 }
@@ -43,7 +43,7 @@
 
 .welcome-title {
   font-family: var(--font-display);
-  font-size: 2.4rem;
+  font-size: 2rem;
   font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -53,7 +53,7 @@
 
 .welcome-username {
   font-family: var(--font-display);
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: .1em;
   color: var(--color-gold);
@@ -61,75 +61,12 @@
 
 .welcome-sub {
   color: var(--color-text-muted);
-  font-size: .95rem;
+  font-size: .88rem;
   max-width: 340px;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
-/* Steps progress */
-.welcome-steps {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  margin: var(--space-2) 0;
-  width: 100%;
-  justify-content: center;
-}
-
-.welcome-step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.step-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-display);
-  font-size: .9rem;
-  font-weight: 800;
-  background: var(--color-surface);
-  border: 2px solid var(--color-border);
-  color: var(--color-text-dim);
-  transition: all var(--transition-md);
-}
-
-.step-label {
-  font-size: .72rem;
-  font-weight: 600;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-}
-
-.welcome-step.done .step-icon {
-  background: rgba(34,197,94,.15);
-  border-color: var(--color-green);
-  color: var(--color-green);
-}
-.welcome-step.done .step-label { color: var(--color-green); }
-
-.welcome-step.active .step-icon {
-  background: rgba(240,180,41,.15);
-  border-color: var(--color-gold);
-  color: var(--color-gold);
-}
-.welcome-step.active .step-label { color: var(--color-gold); }
-
-.welcome-step-connector {
-  flex: 1;
-  height: 2px;
-  background: var(--color-border);
-  margin: 0 var(--space-2);
-  margin-bottom: 20px;
-  max-width: 60px;
-}
+/* Steps progress — removed, keeping for future use */
 
 .welcome-container .btn-primary {
   width: 100%;
@@ -146,6 +83,11 @@
   transition: color var(--transition);
 }
 .btn-ghost:hover { color: var(--color-text-muted); }
+
+/* ── Onboarding back button ───────────────────────────── */
+.onboarding-back {
+  margin-bottom: var(--space-2);
+}
 
 /* ── Toast notifications ──────────────────────────────── */
 .toast-container {
