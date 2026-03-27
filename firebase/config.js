@@ -8,13 +8,14 @@
 // ─────────────────────────────────────────────────────────
 
 const firebaseConfig = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT.firebaseapp.com",
-  databaseURL:       "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
+  apiKey: "AIzaSyC6hhUjpTI2gYVgLW2Ru4-CYSjgKKyJ3Ek",
+  authDomain: "sleeperbid.firebaseapp.com",
+  databaseURL: "https://sleeperbid-default-rtdb.firebaseio.com",
+  projectId: "sleeperbid",
+  storageBucket: "sleeperbid.firebasestorage.app",
+  messagingSenderId: "81288888200",
+  appId: "1:81288888200:web:2e3b4c28250fc2da7b043d",
+  measurementId: "G-ZKZ73PRXVS"
 };
 
 // Initialize Firebase (compat v9 SDK — matches SleeperBid)
