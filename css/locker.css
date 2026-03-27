@@ -1,0 +1,359 @@
+/* ─────────────────────────────────────────────────────────
+   GM Dynasty — Locker + Onboarding CSS
+   ───────────────────────────────────────────────────────── */
+
+/* ── Onboarding ───────────────────────────────────────── */
+#onboarding-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-10) var(--space-6);
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(240,180,41,.08) 0%, transparent 60%),
+    var(--color-bg);
+}
+
+.onboarding-container {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.onboarding-header h2 {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+}
+.onboarding-header p {
+  color: var(--color-text-muted);
+  font-size: .9rem;
+}
+
+/* ── Platform cards ───────────────────────────────────── */
+.platform-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  transition: border-color var(--transition-md);
+}
+.platform-card:has(.status-connected) {
+  border-color: var(--color-green);
+}
+
+.platform-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.platform-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  object-fit: contain;
+}
+.platform-icon-text {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-size: .85rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  color: var(--color-gold);
+}
+
+.platform-info h3 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.platform-status {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+}
+.platform-status.status-connected { color: var(--color-green); }
+.platform-status.status-error     { color: var(--color-red);   }
+
+.platform-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.btn-link-platform {
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: .9rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  align-self: flex-start;
+}
+.btn-link-platform:hover:not(:disabled) {
+  background: var(--color-surface-2);
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.btn-link-platform:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* ── League preview ───────────────────────────────────── */
+.leagues-preview {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--color-bg-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+
+.preview-count {
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--color-green);
+  margin-bottom: var(--space-3);
+}
+
+.preview-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.preview-list li {
+  font-size: .88rem;
+  color: var(--color-text-muted);
+}
+.preview-season {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  margin-left: var(--space-2);
+}
+.preview-more {
+  color: var(--color-text-dim) !important;
+  font-style: italic;
+  font-size: .82rem !important;
+}
+
+/* ── Onboarding actions ───────────────────────────────── */
+.onboarding-actions {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+.onboarding-actions .btn-primary { flex: 1; }
+
+/* ── Locker container ─────────────────────────────────── */
+.locker-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-top: var(--space-6);
+}
+
+/* ── Locker header ────────────────────────────────────── */
+.locker-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.locker-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--color-gold-dim), var(--color-gold));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+#locker-avatar-initials {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--color-bg);
+  letter-spacing: .04em;
+}
+
+.locker-identity {
+  flex: 1;
+}
+.locker-identity h2 {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+.locker-tagline {
+  color: var(--color-text-muted);
+  font-size: .88rem;
+  margin-top: var(--space-1);
+}
+
+/* ── Platforms summary ────────────────────────────────── */
+.platforms-list {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.platform-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+}
+.platform-badge-name {
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+.platform-badge-user {
+  font-size: .82rem;
+  color: var(--color-text-muted);
+}
+
+/* ── Leagues grid ─────────────────────────────────────── */
+.leagues-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+
+.league-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  transition: border-color var(--transition), transform var(--transition);
+}
+.league-card:hover {
+  border-color: var(--color-border-light);
+  transform: translateY(-2px);
+}
+.league-card--champion {
+  border-color: var(--color-gold-dim);
+  background: linear-gradient(135deg, var(--color-bg-2), rgba(240,180,41,.06));
+}
+
+.league-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.league-platform-tag {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.league-platform-tag--sleeper {
+  background: rgba(90,158,255,.15);
+  color: #7abaff;
+}
+.league-platform-tag--mfl {
+  background: rgba(34,197,94,.12);
+  color: #4ade80;
+}
+
+.league-season {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  margin-left: auto;
+}
+
+.champion-badge {
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--color-gold);
+  letter-spacing: .03em;
+}
+
+.league-card-name {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  margin-bottom: var(--space-1);
+  line-height: 1.2;
+}
+
+.league-card-team {
+  font-size: .85rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.league-card-record {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  margin-bottom: var(--space-2);
+}
+.record-wins   { color: var(--color-green); }
+.record-losses { color: var(--color-red);   }
+.record-sep    { color: var(--color-text-dim); margin: 0 2px; }
+.record-rank   { font-size: .85rem; color: var(--color-text-muted); }
+
+.league-card-pts {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  display: flex;
+  gap: var(--space-2);
+}
+.pts-sep { opacity: .4; }
+
+/* ── Trophy shelf placeholder ─────────────────────────── */
+.trophy-shelf-placeholder {
+  padding: var(--space-6);
+  background: var(--color-bg-2);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}

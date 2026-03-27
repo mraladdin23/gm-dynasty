@@ -1,0 +1,26 @@
+# GM Dynasty .gitignore
+
+# Never commit real Firebase config
+# firebase/config.js is committed as a stub with placeholder values.
+# If you want to keep real keys out of git, add your actual config to
+# firebase/config.local.js and load it conditionally, or use GitHub Secrets
+# to inject config values at deploy time.
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (if you add any build tools later)
+node_modules/
+npm-debug.log*
+
+# Env files
+.env
+.env.local
+*.local
