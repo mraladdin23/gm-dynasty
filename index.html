@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GM Dynasty — Your Fantasy Legacy</title>
+  <title>Dynasty Locker Room — Your Fantasy Legacy</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/auth.css" />
   <link rel="stylesheet" href="css/locker.css" />
 
-  <!-- Firebase v9 compat (matches your existing SleeperBid setup) -->
+  <!-- Firebase v9 compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -16,17 +17,16 @@
 <body>
 
   <!-- ═══════════════════════════════════════
-       AUTH SCREENS
+       AUTH SCREEN
   ═══════════════════════════════════════ -->
   <div id="auth-screen" class="screen active">
     <div class="auth-container">
       <div class="auth-brand">
         <div class="brand-logo">🏆</div>
-        <h1 class="brand-name">GM Dynasty</h1>
+        <h1 class="brand-name">Dynasty<br>Locker Room</h1>
         <p class="brand-tagline">Your Fantasy Legacy Starts Here</p>
       </div>
 
-      <!-- Tab switcher -->
       <div class="auth-tabs">
         <button class="auth-tab active" data-tab="login">Sign In</button>
         <button class="auth-tab" data-tab="register">Create Account</button>
@@ -36,21 +36,21 @@
       <div id="login-form" class="auth-form active">
         <div class="form-group">
           <label for="login-username">Username</label>
-          <input type="text" id="login-username" placeholder="your_gm_handle" autocomplete="username" />
+          <input type="text" id="login-username" placeholder="your_dlr_handle" autocomplete="username" />
         </div>
         <div class="form-group">
           <label for="login-password">Password</label>
           <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
         </div>
         <div id="login-error" class="auth-error hidden"></div>
-        <button id="login-btn" class="btn-primary">Sign In</button>
+        <button id="login-btn" class="btn-primary">Enter the Locker Room</button>
       </div>
 
       <!-- Register Form -->
       <div id="register-form" class="auth-form">
         <div class="form-group">
           <label for="reg-username">Choose a Username</label>
-          <input type="text" id="reg-username" placeholder="your_gm_handle" maxlength="20" autocomplete="username" />
+          <input type="text" id="reg-username" placeholder="your_dlr_handle" maxlength="20" autocomplete="username" />
           <span class="field-hint">Letters, numbers, underscores. This is your GM identity.</span>
         </div>
         <div class="form-group">
@@ -66,8 +66,38 @@
           <input type="password" id="reg-password2" placeholder="Repeat password" autocomplete="new-password" />
         </div>
         <div id="register-error" class="auth-error hidden"></div>
-        <button id="register-btn" class="btn-primary">Create My Dynasty</button>
+        <button id="register-btn" class="btn-primary">Claim My Locker</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       WELCOME SCREEN (post-registration)
+  ═══════════════════════════════════════ -->
+  <div id="welcome-screen" class="screen">
+    <div class="welcome-container">
+      <div class="welcome-trophy">🏆</div>
+      <h1 class="welcome-title">Welcome to the<br>Locker Room</h1>
+      <p class="welcome-username" id="welcome-username"></p>
+      <p class="welcome-sub">Your locker is ready. Let's connect your leagues so your dynasty legacy can begin.</p>
+      <div class="welcome-steps">
+        <div class="welcome-step done">
+          <span class="step-icon">✓</span>
+          <span class="step-label">Locker created</span>
+        </div>
+        <div class="welcome-step-connector"></div>
+        <div class="welcome-step active">
+          <span class="step-icon">2</span>
+          <span class="step-label">Link your leagues</span>
+        </div>
+        <div class="welcome-step-connector"></div>
+        <div class="welcome-step">
+          <span class="step-icon">3</span>
+          <span class="step-label">Build your legacy</span>
+        </div>
+      </div>
+      <button id="welcome-continue-btn" class="btn-primary">Link My Leagues →</button>
+      <button id="welcome-skip-btn" class="btn-ghost">Skip for now</button>
     </div>
   </div>
 
@@ -84,7 +114,7 @@
       <!-- Sleeper -->
       <div class="platform-card" id="sleeper-card">
         <div class="platform-header">
-          <img src="assets/icons/sleeper.svg" onerror="this.style.display='none'" class="platform-icon" alt="" />
+          <div class="platform-icon platform-icon-text" style="color:#5a9eff">SLP</div>
           <div class="platform-info">
             <h3>Sleeper</h3>
             <span class="platform-status" id="sleeper-status">Not connected</span>
@@ -126,11 +156,10 @@
   ═══════════════════════════════════════ -->
   <div id="app-screen" class="screen">
 
-    <!-- Top Nav -->
     <nav class="top-nav">
       <div class="nav-brand">
         <span class="nav-logo">🏆</span>
-        <span class="nav-title">GM Dynasty</span>
+        <span class="nav-title">Dynasty Locker Room</span>
       </div>
       <div class="nav-links">
         <a href="#" class="nav-link active" data-view="locker">My Locker</a>
@@ -143,11 +172,8 @@
       </div>
     </nav>
 
-    <!-- View: My Locker -->
     <div id="view-locker" class="app-view active">
       <div class="locker-container">
-
-        <!-- Profile header -->
         <div class="locker-header">
           <div class="locker-avatar" id="locker-avatar">
             <span id="locker-avatar-initials"></span>
@@ -159,7 +185,6 @@
           <button class="btn-secondary btn-sm" id="edit-profile-btn">Edit Profile</button>
         </div>
 
-        <!-- Platform connections summary -->
         <div class="platforms-summary" id="platforms-summary">
           <h3 class="section-title">Connected Platforms</h3>
           <div class="platforms-list" id="platforms-list">
@@ -167,7 +192,6 @@
           </div>
         </div>
 
-        <!-- League affiliations -->
         <div class="leagues-section" id="leagues-section">
           <h3 class="section-title">League Affiliations</h3>
           <div class="leagues-grid" id="leagues-grid">
@@ -175,16 +199,13 @@
           </div>
         </div>
 
-        <!-- Trophy shelf placeholder -->
         <div class="trophy-shelf-placeholder">
           <h3 class="section-title">Trophy Shelf</h3>
           <p class="empty-state coming-soon">🏆 Trophy display coming in Phase 2</p>
         </div>
-
       </div>
     </div>
 
-    <!-- View: Hallway (placeholder) -->
     <div id="view-hallway" class="app-view">
       <div class="placeholder-view">
         <div class="placeholder-icon">🚪</div>
@@ -194,7 +215,6 @@
       </div>
     </div>
 
-    <!-- View: Trophies (placeholder) -->
     <div id="view-trophies" class="app-view">
       <div class="placeholder-view">
         <div class="placeholder-icon">🏅</div>
@@ -206,17 +226,15 @@
 
   </div>
 
-  <!-- ═══════════════════════════════════════
-       LOADING OVERLAY
-  ═══════════════════════════════════════ -->
+  <!-- Loading Overlay -->
   <div id="loading-overlay" class="loading-overlay">
     <div class="loading-spinner"></div>
     <p id="loading-message">Loading...</p>
   </div>
 
-  <!-- ═══════════════════════════════════════
-       SCRIPTS
-  ═══════════════════════════════════════ -->
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
   <script src="firebase/config.js"></script>
   <script src="js/firebase-db.js"></script>
   <script src="js/auth.js"></script>

@@ -2,6 +2,187 @@
    GM Dynasty — Locker + Onboarding CSS
    ───────────────────────────────────────────────────────── */
 
+/* ── Welcome screen ───────────────────────────────────── */
+#welcome-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(240,180,41,.15) 0%, transparent 65%),
+    var(--color-bg);
+}
+
+.welcome-container {
+  width: 100%;
+  max-width: 480px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  animation: welcome-in 0.5s ease both;
+}
+
+@keyframes welcome-in {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.welcome-trophy {
+  font-size: 4rem;
+  filter: drop-shadow(0 0 24px rgba(240,180,41,.5));
+  animation: trophy-pulse 2s ease infinite;
+}
+
+@keyframes trophy-pulse {
+  0%, 100% { filter: drop-shadow(0 0 16px rgba(240,180,41,.4)); }
+  50%       { filter: drop-shadow(0 0 32px rgba(240,180,41,.8)); }
+}
+
+.welcome-title {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  color: var(--color-text);
+}
+
+.welcome-username {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--color-gold);
+}
+
+.welcome-sub {
+  color: var(--color-text-muted);
+  font-size: .95rem;
+  max-width: 340px;
+  line-height: 1.6;
+}
+
+/* Steps progress */
+.welcome-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: var(--space-2) 0;
+  width: 100%;
+  justify-content: center;
+}
+
+.welcome-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.step-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: .9rem;
+  font-weight: 800;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  color: var(--color-text-dim);
+  transition: all var(--transition-md);
+}
+
+.step-label {
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.welcome-step.done .step-icon {
+  background: rgba(34,197,94,.15);
+  border-color: var(--color-green);
+  color: var(--color-green);
+}
+.welcome-step.done .step-label { color: var(--color-green); }
+
+.welcome-step.active .step-icon {
+  background: rgba(240,180,41,.15);
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.welcome-step.active .step-label { color: var(--color-gold); }
+
+.welcome-step-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--color-border);
+  margin: 0 var(--space-2);
+  margin-bottom: 20px;
+  max-width: 60px;
+}
+
+.welcome-container .btn-primary {
+  width: 100%;
+  max-width: 320px;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: .85rem;
+  cursor: pointer;
+  padding: var(--space-2);
+  transition: color var(--transition);
+}
+.btn-ghost:hover { color: var(--color-text-muted); }
+
+/* ── Toast notifications ──────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: var(--space-6);
+  right: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.toast {
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  font-size: .9rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 0.3s ease both;
+  pointer-events: all;
+}
+.toast--success { border-color: var(--color-green); }
+.toast--error   { border-color: var(--color-red);   }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(20px); }
+}
+
 /* ── Onboarding ───────────────────────────────────────── */
 #onboarding-screen {
   min-height: 100vh;
