@@ -15,6 +15,14 @@ const AppState = {
     if (target) target.classList.add("active");
   },
 
+  showWelcome(profile) {
+    AppState.currentProfile = profile;
+    const el = document.getElementById("welcome-username");
+    if (el) el.textContent = "@" + profile.username;
+    AppState.showScreen("welcome-screen");
+    setLoading(false);
+  },
+
   showOnboarding() {
     AppState.showScreen("onboarding-screen");
   },
@@ -90,12 +98,11 @@ document.getElementById("register-btn")?.addEventListener("click", async () => {
     return;
   }
 
-  setLoading(true, "Creating your dynasty...");
+  setLoading(true, "Claiming your locker...");
   try {
-    await Auth.register({ username, email, password });
-    // After registration, go to onboarding to link platforms
+    const { profile } = await Auth.register({ username, email, password });
     setLoading(false);
-    AppState.showScreen("onboarding-screen");
+    AppState.showWelcome(profile);
   } catch (err) {
     setLoading(false);
     showError(errorEl, err.message);
@@ -108,6 +115,17 @@ document.getElementById("login-password")?.addEventListener("keydown", e => {
 });
 document.getElementById("reg-password2")?.addEventListener("keydown", e => {
   if (e.key === "Enter") document.getElementById("register-btn")?.click();
+});
+
+// ── Welcome screen buttons ─────────────────────────────────
+document.getElementById("welcome-continue-btn")?.addEventListener("click", () => {
+  AppState.showOnboarding();
+});
+
+document.getElementById("welcome-skip-btn")?.addEventListener("click", async () => {
+  setLoading(true, "Loading your locker...");
+  const profile = await Auth.refreshProfile();
+  AppState.showApp(profile);
 });
 
 // ── Onboarding: Sleeper link ───────────────────────────────
@@ -231,6 +249,19 @@ function showError(el, message) {
   if (!el) return;
   el.textContent = message;
   el.classList.remove("hidden");
+}
+
+function showToast(message, type = "success", duration = 3500) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast toast--${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.animation = "toast-out 0.3s ease forwards";
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
 }
 
 // ── Init ───────────────────────────────────────────────────
