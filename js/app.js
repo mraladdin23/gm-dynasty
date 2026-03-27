@@ -100,10 +100,13 @@ document.getElementById("register-btn")?.addEventListener("click", async () => {
 
   setLoading(true, "Claiming your locker...");
   try {
-    const { profile } = await Auth.register({ username, email, password });
+    const result = await Auth.register({ username, email, password });
+    console.log("[Register] result:", result);
+    const profile = result?.profile || { username, email, platforms: {}, leagues: {} };
     setLoading(false);
     AppState.showWelcome(profile);
   } catch (err) {
+    console.error("[Register] error:", err);
     setLoading(false);
     showError(errorEl, err.message);
   }

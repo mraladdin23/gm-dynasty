@@ -24,30 +24,37 @@ const Auth = (() => {
     const usernameError = GMDB.validateUsername(username);
     if (usernameError) throw new Error(usernameError);
 
+    console.log("[Auth] register — checking username availability:", username);
     const taken = await GMDB.usernameExists(username);
+    console.log("[Auth] register — username taken?", taken);
     if (taken) throw new Error("That username is already taken. Choose another.");
 
-    _isRegistering = true; // block observer from racing the profile write
+    _isRegistering = true;
 
     let fbUser;
     try {
+      console.log("[Auth] register step 1 — creating Firebase Auth user");
       const cred = await auth.createUserWithEmailAndPassword(
         _syntheticEmail(username),
         password
       );
       fbUser = cred.user;
+      console.log("[Auth] register step 2 — Auth user created:", fbUser.uid);
     } catch (err) {
       _isRegistering = false;
       throw new Error(_friendlyAuthError(err.code));
     }
 
     try {
+      console.log("[Auth] register step 3 — writing profile to DB");
       _currentProfile = await GMDB.createUser({
         username,
         email,
         uid: fbUser.uid
       });
+      console.log("[Auth] register step 4 — profile written:", _currentProfile);
     } catch (err) {
+      console.error("[Auth] register step 3 FAILED:", err);
       await fbUser.delete();
       _isRegistering = false;
       throw new Error("Failed to create profile. Please try again.");
@@ -55,6 +62,7 @@ const Auth = (() => {
 
     _currentUser   = fbUser;
     _isRegistering = false;
+    console.log("[Auth] register complete");
     return { user: fbUser, profile: _currentProfile };
   }
 

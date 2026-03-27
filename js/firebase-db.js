@@ -63,11 +63,12 @@ const GMDB = (() => {
         dynastyScore:  0
       }
     };
+    console.log("[GMDB] createUser step 1 — writing profile for:", key);
     await userRef(key).set(profile);
-    // Store uid→username mapping for login lookup
+    console.log("[GMDB] createUser step 2 — writing uid_map");
     await GMD.child(`uid_map/${uid}`).set(key);
-    // Bump meta counter
-    await metaRef().child("totalUsers").transaction(n => (n || 0) + 1);
+    console.log("[GMDB] createUser step 3 — done");
+    // Note: skipping meta counter transaction (can hang on slow connections)
     return profile;
   }
 
