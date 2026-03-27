@@ -29,8 +29,31 @@ const GMDB = (() => {
   // ── Users ──────────────────────────────────────────────
 
   async function usernameExists(username) {
-    const snap = await userRef(username).child("uid").once("value");
-    return snap.exists();
+    // Use REST API directly to bypass WebSocket connection requirement.
+    // The SDK's .once() hangs until WebSocket connects; REST works immediately.
+    try {
+      const url = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/users/${username.toLowerCase()}/uid.json`;
+      const res  = await fetch(url);
+      const data = await res.json();
+      return data !== null;
+    } catch (err) {
+      console.warn("[GMDB] usernameExists REST check failed:", err.message);
+      // If REST check fails, assume username is available and let Firebase
+      // Auth catch any duplicates downstream
+      return false;
+    }
+  }
+
+  async function _restPut(path, data) {
+    // Helper: write to Firebase REST API (bypasses WebSocket)
+    const url = `https://sleeperbid-default-rtdb.firebaseio.com/${path}.json`;
+    const res  = await fetch(url, {
+      method:  "PUT",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error(`REST write failed: ${res.status} at ${path}`);
+    return res.json();
   }
 
   async function createUser({ username, email, uid }) {
@@ -38,7 +61,7 @@ const GMDB = (() => {
     const now = Date.now();
     const profile = {
       uid,
-      username,          // original casing
+      username,
       email,
       createdAt: now,
       bio: "",
@@ -63,20 +86,21 @@ const GMDB = (() => {
         dynastyScore:  0
       }
     };
-    console.log("[GMDB] createUser step 1 — writing profile for:", key);
-    await userRef(key).set(profile);
-    console.log("[GMDB] createUser step 2 — writing uid_map");
-    await GMD.child(`uid_map/${uid}`).set(key);
+
+    console.log("[GMDB] createUser step 1 — writing profile via REST for:", key);
+    await _restPut(`gmd/users/${key}`, profile);
+    console.log("[GMDB] createUser step 2 — writing uid_map via REST");
+    await _restPut(`gmd/uid_map/${uid}`, key);
     console.log("[GMDB] createUser step 3 — done");
-    // Note: skipping meta counter transaction (can hang on slow connections)
     return profile;
   }
 
   async function getUserByUid(uid) {
     try {
-      const snap = await GMD.child(`uid_map/${uid}`).once("value");
-      if (!snap.exists()) return null;
-      const key = snap.val();
+      const mapUrl  = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/uid_map/${uid}.json`;
+      const mapRes  = await fetch(mapUrl);
+      const key     = await mapRes.json();
+      if (!key) return null;
       return getUser(key);
     } catch (err) {
       console.warn("[GMDB] getUserByUid failed:", err.message);
@@ -85,8 +109,15 @@ const GMDB = (() => {
   }
 
   async function getUser(username) {
-    const snap = await userRef(username).once("value");
-    return snap.exists() ? snap.val() : null;
+    try {
+      const url  = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/users/${username.toLowerCase()}.json`;
+      const res  = await fetch(url);
+      const data = await res.json();
+      return data || null;
+    } catch (err) {
+      console.warn("[GMDB] getUser failed:", err.message);
+      return null;
+    }
   }
 
   async function updateUser(username, updates) {
