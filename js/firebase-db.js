@@ -29,30 +29,40 @@ const GMDB = (() => {
   // ── Users ──────────────────────────────────────────────
 
   async function usernameExists(username) {
-    // Use REST API directly to bypass WebSocket connection requirement.
-    // The SDK's .once() hangs until WebSocket connects; REST works immediately.
     try {
-      const url = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/users/${username.toLowerCase()}/uid.json`;
-      const res  = await fetch(url);
-      const data = await res.json();
+      const data = await _restGet(`gmd/users/${username.toLowerCase()}/uid`);
       return data !== null;
     } catch (err) {
-      console.warn("[GMDB] usernameExists REST check failed:", err.message);
-      // If REST check fails, assume username is available and let Firebase
-      // Auth catch any duplicates downstream
+      console.warn("[GMDB] usernameExists failed:", err.message);
       return false;
     }
   }
 
+  async function _getAuthToken() {
+    const user = firebase.auth().currentUser;
+    if (!user) return null;
+    return user.getIdToken();
+  }
+
   async function _restPut(path, data) {
-    // Helper: write to Firebase REST API (bypasses WebSocket)
-    const url = `https://sleeperbid-default-rtdb.firebaseio.com/${path}.json`;
-    const res  = await fetch(url, {
+    const token = await _getAuthToken();
+    const auth  = token ? `?auth=${token}` : "";
+    const url   = `https://sleeperbid-default-rtdb.firebaseio.com/${path}.json${auth}`;
+    const res   = await fetch(url, {
       method:  "PUT",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify(data)
     });
     if (!res.ok) throw new Error(`REST write failed: ${res.status} at ${path}`);
+    return res.json();
+  }
+
+  async function _restGet(path) {
+    const token = await _getAuthToken();
+    const auth  = token ? `?auth=${token}` : "";
+    const url   = `https://sleeperbid-default-rtdb.firebaseio.com/${path}.json${auth}`;
+    const res   = await fetch(url);
+    if (!res.ok) throw new Error(`REST read failed: ${res.status} at ${path}`);
     return res.json();
   }
 
@@ -97,10 +107,8 @@ const GMDB = (() => {
 
   async function getUserByUid(uid) {
     try {
-      const mapUrl  = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/uid_map/${uid}.json`;
-      const mapRes  = await fetch(mapUrl);
-      const key     = await mapRes.json();
-      if (!key) return null;
+      const key = await _restGet(`gmd/uid_map/${uid}`);
+      if (!key || typeof key !== "string") return null;
       return getUser(key);
     } catch (err) {
       console.warn("[GMDB] getUserByUid failed:", err.message);
@@ -110,9 +118,7 @@ const GMDB = (() => {
 
   async function getUser(username) {
     try {
-      const url  = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/users/${username.toLowerCase()}.json`;
-      const res  = await fetch(url);
-      const data = await res.json();
+      const data = await _restGet(`gmd/users/${username.toLowerCase()}`);
       return data || null;
     } catch (err) {
       console.warn("[GMDB] getUser failed:", err.message);
