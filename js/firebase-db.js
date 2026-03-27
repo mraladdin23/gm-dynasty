@@ -72,10 +72,15 @@ const GMDB = (() => {
   }
 
   async function getUserByUid(uid) {
-    const snap = await GMD.child(`uid_map/${uid}`).once("value");
-    if (!snap.exists()) return null;
-    const key = snap.val();
-    return getUser(key);
+    try {
+      const snap = await GMD.child(`uid_map/${uid}`).once("value");
+      if (!snap.exists()) return null;
+      const key = snap.val();
+      return getUser(key);
+    } catch (err) {
+      console.warn("[GMDB] getUserByUid failed:", err.message);
+      return null;
+    }
   }
 
   async function getUser(username) {
