@@ -7,9 +7,10 @@
 
 const Auth = (() => {
 
-  let _currentUser  = null;   // Firebase Auth user
-  let _currentProfile = null; // gmd/users/{username} snapshot
-  let _onAuthChange = null;   // callback set by app.js
+  let _currentUser    = null;   // Firebase Auth user
+  let _currentProfile = null;   // gmd/users/{username} snapshot
+  let _onAuthChange   = null;   // callback set by app.js
+  let _isRegistering  = false;  // prevents observer from racing profile write
 
   // ── Internal email builder ─────────────────────────────
   // Firebase Auth requires an email. We synthesize one from
@@ -20,16 +21,14 @@ const Auth = (() => {
 
   // ── Register ───────────────────────────────────────────
   async function register({ username, email, password }) {
-    // 1. Validate username format
     const usernameError = GMDB.validateUsername(username);
     if (usernameError) throw new Error(usernameError);
 
-    // 2. Check availability
     const taken = await GMDB.usernameExists(username);
     if (taken) throw new Error("That username is already taken. Choose another.");
 
-    // 3. Create Firebase Auth account using synthetic email
-    //    (we store the real email separately in the profile)
+    _isRegistering = true; // block observer from racing the profile write
+
     let fbUser;
     try {
       const cred = await auth.createUserWithEmailAndPassword(
@@ -38,11 +37,10 @@ const Auth = (() => {
       );
       fbUser = cred.user;
     } catch (err) {
-      // Translate Firebase error codes to friendly messages
+      _isRegistering = false;
       throw new Error(_friendlyAuthError(err.code));
     }
 
-    // 4. Write profile to gmd/users/
     try {
       _currentProfile = await GMDB.createUser({
         username,
@@ -50,13 +48,13 @@ const Auth = (() => {
         uid: fbUser.uid
       });
     } catch (err) {
-      // Profile write failed — clean up the Auth account so
-      // the user isn't stuck in a half-created state
       await fbUser.delete();
+      _isRegistering = false;
       throw new Error("Failed to create profile. Please try again.");
     }
 
-    _currentUser = fbUser;
+    _currentUser   = fbUser;
+    _isRegistering = false;
     return { user: fbUser, profile: _currentProfile };
   }
 
@@ -93,9 +91,12 @@ const Auth = (() => {
   function onAuthStateChanged(callback) {
     _onAuthChange = callback;
     auth.onAuthStateChanged(async (fbUser) => {
+      // Skip if registration is in progress — that flow sets
+      // _currentProfile itself and calls the screen transition directly
+      if (_isRegistering) return;
+
       if (fbUser) {
         _currentUser = fbUser;
-        // Wait for auth token to be fully ready before hitting DB
         try {
           await fbUser.getIdToken(true);
           if (!_currentProfile) {
