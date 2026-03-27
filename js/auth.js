@@ -95,9 +95,15 @@ const Auth = (() => {
     auth.onAuthStateChanged(async (fbUser) => {
       if (fbUser) {
         _currentUser = fbUser;
-        // Load profile if not already loaded
-        if (!_currentProfile) {
-          _currentProfile = await GMDB.getUserByUid(fbUser.uid);
+        // Wait for auth token to be fully ready before hitting DB
+        try {
+          await fbUser.getIdToken(true);
+          if (!_currentProfile) {
+            _currentProfile = await GMDB.getUserByUid(fbUser.uid);
+          }
+        } catch (err) {
+          console.warn("[Auth] Profile load failed:", err.message);
+          _currentProfile = null;
         }
       } else {
         _currentUser    = null;
