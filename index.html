@@ -124,9 +124,10 @@
           </div>
         </div>
         <div class="platform-body">
-          <input type="text" id="mfl-email-input" placeholder="MFL username or email prefix (e.g. johndoe)" />
-          <input type="password" id="mfl-password-input" placeholder="MFL password (optional, for verification)" autocomplete="current-password" />
-          <span class="field-hint">Enter your MFL owner/team name or the part of your email before the @. Your password is never stored.</span>
+          <input type="text" id="mfl-email-input" placeholder="MFL username (e.g. mraladdin23)" />
+          <input type="password" id="mfl-password-input" placeholder="MFL password (optional)" autocomplete="current-password" />
+          <input type="text" id="mfl-league-ids-input" placeholder="League IDs, comma-separated (e.g. 21600, 54321)" />
+          <span class="field-hint">Add your league IDs from the MFL URL for best results. Password is never stored.</span>
           <button class="btn-link-platform" id="mfl-link-btn">Find My Leagues</button>
         </div>
         <div id="mfl-leagues-preview" class="leagues-preview hidden"></div>

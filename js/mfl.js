@@ -226,82 +226,107 @@ const MFLAPI = (() => {
   }
 
   // ── Full import ────────────────────────────────────────
-  async function importUserLeagues(email, password) {
-    if (!email?.trim()) throw new Error("Enter your MFL email address.");
+  // MFL blocks browser cookie headers and leagueSearch matches league names, not owners.
+  // Best approach: user provides their league IDs directly, we find their franchise within each.
+  // If league IDs not provided, fall back to leagueSearch by username.
+  async function importUserLeagues(emailOrUsername, password, knownLeagueIds = []) {
+    if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username or email.");
 
-    // MFL owner names are often the part before @ in their email
-    // Try both the full email prefix and any provided username
-    const mflUsername = email.includes("@") ? email.split("@")[0] : email;
+    const mflUsername = emailOrUsername.includes("@")
+      ? emailOrUsername.split("@")[0]
+      : emailOrUsername;
 
-    // Step 1: Optional login just to verify credentials
-    // We can't actually use the cookie due to browser CORS restrictions
+    // Step 1: optional login to verify credentials
     if (password?.trim()) {
       try {
-        await login(email.trim(), password.trim());
-        console.log("[MFL] Login verified successfully");
+        await login(emailOrUsername.trim(), password.trim());
+        console.log("[MFL] Login verified");
       } catch(e) {
-        console.warn("[MFL] Login check failed:", e.message);
+        console.warn("[MFL] Login failed:", e.message);
       }
     }
 
-    // Step 2: Find leagues via public leagueSearch (no auth needed)
-    const myLeagues = await getMyLeagues(mflUsername);
-    if (!myLeagues.length) {
+    // Step 2: Build list of league+year pairs to process
+    const toProcess = []; // [{ leagueId, leagueName, year }]
+
+    // If user provided known league IDs, search those across years
+    if (knownLeagueIds.length) {
+      const currentYear = new Date().getFullYear();
+      const years = [currentYear, currentYear-1, currentYear-2, currentYear-3, currentYear-4].map(String);
+      for (const leagueId of knownLeagueIds) {
+        for (const year of years) {
+          try {
+            const data = await getLeague(leagueId, year);
+            if (data) {
+              toProcess.push({ leagueId, leagueName: data.name || `League ${leagueId}`, year });
+              break; // found this league in this year, move to next
+            }
+          } catch(e) {}
+        }
+      }
+    }
+
+    // Fallback: leagueSearch by username
+    if (!toProcess.length) {
+      const found = await getMyLeagues(mflUsername);
+      toProcess.push(...found);
+    }
+
+    if (!toProcess.length) {
       throw new Error(
-        `No MFL leagues found searching for "${mflUsername}". ` +
-        `Your MFL owner/team name must match your username. ` +
-        `Try entering your MFL team name or owner name instead.`
+        `No MFL leagues found. Try entering your MFL league IDs directly in the ` +
+        `"League IDs" field (e.g. 21600). You can find these in your MFL league URL.`
       );
     }
 
     const leaguesMap = {};
 
-    for (const { leagueId, leagueName, year } of myLeagues) {
+    for (const { leagueId, leagueName, year } of toProcess) {
       try {
         const [leagueData, standings] = await Promise.all([
           getLeague(leagueId, year),
           getStandings(leagueId, year)
         ]);
+        if (!leagueData) continue;
 
-        // Find my franchise by matching username against owner names
+        // Find the user's franchise — try multiple name formats
         const franchiseInfo = await findMyFranchise(leagueId, year, mflUsername);
         if (!franchiseInfo) {
-          console.warn(`[MFL] Could not find franchise for ${mflUsername} in league ${leagueId}`);
+          console.warn(`[MFL] Could not match franchise for "${mflUsername}" in league ${leagueId} (${year})`);
           continue;
         }
 
         const { franchiseId, teamName } = franchiseInfo;
         const myStanding = standings.find(s => s.franchiseId === franchiseId);
-        const rank       = myStanding?.rank || null;
         const finish     = await getPlayoffFinish(leagueId, year, franchiseId);
 
-        const franchises    = leagueData?.franchises?.franchise;
-        const franchiseArr  = franchises ? (Array.isArray(franchises) ? franchises : [franchises]) : [];
-        const leagueType    = _detectLeagueType(leagueData, leagueName);
+        const franchises   = leagueData?.franchises?.franchise;
+        const franchiseArr = franchises ? (Array.isArray(franchises) ? franchises : [franchises]) : [];
+        const leagueType   = _detectLeagueType(leagueData, leagueName);
 
         const key = `mfl_${year}_${leagueId}`;
         leaguesMap[key] = {
           platform:       "mfl",
           leagueId,
           franchiseId,
-          leagueName,
+          leagueName:     leagueData.name || leagueName,
           season:         year,
           leagueType,
           totalTeams:     franchiseArr.length || 12,
           teamName:       teamName || "My Team",
           isCommissioner: false,
-          wins:           myStanding?.wins   || 0,
-          losses:         myStanding?.losses || 0,
-          ties:           myStanding?.ties   || 0,
-          pointsFor:      myStanding?.ptsFor || 0,
+          wins:           myStanding?.wins      || 0,
+          losses:         myStanding?.losses    || 0,
+          ties:           myStanding?.ties      || 0,
+          pointsFor:      myStanding?.ptsFor    || 0,
           pointsAgainst:  myStanding?.ptsAgainst || 0,
-          standing:       rank,
+          standing:       myStanding?.rank      || null,
           playoffFinish:  finish,
           isChampion:     finish === 1,
           playoffResult:  _finishLabel(finish)
         };
       } catch(e) {
-        console.warn(`[MFL] Skipping league ${leagueId} (${year}):`, e.message);
+        console.warn(`[MFL] Skipping ${leagueId} (${year}):`, e.message);
       }
     }
 
