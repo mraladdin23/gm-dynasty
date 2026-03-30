@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dynasty Locker Room — Your Fantasy Legacy</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
-  <link rel="stylesheet" href="css/base.css?v=4" />
-  <link rel="stylesheet" href="css/auth.css?v=4" />
-  <link rel="stylesheet" href="css/locker.css?v=4" />
+  <link rel="stylesheet" href="css/base.css?v=5" />
+  <link rel="stylesheet" href="css/auth.css?v=5" />
+  <link rel="stylesheet" href="css/locker.css?v=5" />
 
   <!-- Firebase v9 compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -381,16 +381,37 @@
   </div>
 
   <!-- ═══════════════════════════════════════
-       CHAT PANEL (slide-in)
+       LEAGUE DETAIL PANEL
   ═══════════════════════════════════════ -->
-  <div id="chat-panel" class="chat-panel hidden">
-    <div class="chat-panel-header">
-      <span id="chat-panel-title" class="chat-panel-title">League Chat</span>
-      <button id="chat-panel-close" class="modal-close">✕</button>
+  <div id="league-detail-panel" class="league-detail-panel hidden">
+    <div class="league-detail-header">
+      <div class="league-detail-header-info">
+        <div class="league-detail-name" id="detail-league-name"></div>
+        <div class="league-detail-meta" id="detail-league-meta"></div>
+      </div>
+      <button class="modal-close" id="league-detail-close">✕</button>
     </div>
-    <div id="chat-panel-body" class="chat-panel-body"></div>
+    <div class="league-detail-tabs">
+      <button class="detail-tab active" data-dtab="overview">Overview</button>
+      <button class="detail-tab" data-dtab="history">History</button>
+      <button class="detail-tab" data-dtab="standings">Standings</button>
+      <button class="detail-tab" data-dtab="chat">Chat</button>
+    </div>
+    <div class="league-detail-body">
+      <div id="dtab-overview" class="detail-tab-content active"></div>
+      <div id="dtab-history"   class="detail-tab-content"></div>
+      <div id="dtab-standings" class="detail-tab-content"></div>
+      <div id="dtab-chat"      class="detail-tab-content">
+        <div id="chat-panel-body" class="chat-panel-body"></div>
+      </div>
+    </div>
   </div>
-  <div id="chat-panel-backdrop" class="chat-panel-backdrop hidden"></div>
+  <div id="league-detail-backdrop" class="chat-panel-backdrop hidden"></div>
+
+  <!-- ═══════════════════════════════════════
+       CHAT PANEL (slide-in) - kept for group broadcast
+  ═══════════════════════════════════════ -->
+  <div id="chat-panel" class="chat-panel hidden" style="display:none!important"></div>
 
   <script src="firebase/config.js"></script>
   <script src="js/firebase-db.js"></script>

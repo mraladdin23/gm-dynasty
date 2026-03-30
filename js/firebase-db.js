@@ -175,18 +175,27 @@ const GMDB = (() => {
 
   /**
    * Recompute + save aggregated career stats from all leagues.
+   * Tracks 1st/2nd/3rd finishes separately for scoring.
    */
   async function recomputeStats(username) {
     const leagues = await getLeagues(username);
     const values  = Object.values(leagues);
 
+    const championships = values.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+    const runnerUps     = values.filter(l => l.playoffFinish === 2).length;
+    const thirdPlace    = values.filter(l => l.playoffFinish === 3).length;
+    const playoffs      = values.filter(l => l.playoffFinish != null && l.playoffFinish <= 5).length;
+
     const stats = {
-      totalWins:     values.reduce((s, l) => s + (l.wins   || 0), 0),
-      totalLosses:   values.reduce((s, l) => s + (l.losses || 0), 0),
-      championships: values.filter(l => l.isChampion).length,
-      leaguesPlayed: values.length,
-      winPct:        0,
-      dynastyScore:  0
+      totalWins:      values.reduce((s, l) => s + (l.wins   || 0), 0),
+      totalLosses:    values.reduce((s, l) => s + (l.losses || 0), 0),
+      championships,
+      runnerUps,
+      thirdPlace,
+      playoffAppearances: playoffs,
+      leaguesPlayed:  values.length,
+      winPct:         0,
+      dynastyScore:   0
     };
 
     const totalGames = stats.totalWins + stats.totalLosses;
@@ -194,15 +203,21 @@ const GMDB = (() => {
       ? parseFloat((stats.totalWins / totalGames).toFixed(4))
       : 0;
 
-    // Basic dynasty score formula (Phase 4 will refine this):
-    // Base: win% * 100 + championships * 15 + seasons * 2
-    const seasons = new Set(values.map(l => l.season)).size;
+    // Dynasty score formula:
+    // Win% * 100 + champ * 20 + runner-up * 10 + 3rd * 5 + playoff * 2 + seasons * 2
+    const seasons = new Set(values.map(l => l.season).filter(Boolean)).size;
     stats.dynastyScore = Math.round(
       stats.winPct * 100 +
-      stats.championships * 15 +
-      seasons * 2
+      championships * 20 +
+      runnerUps     * 10 +
+      thirdPlace    * 5  +
+      playoffs      * 2  +
+      seasons       * 2
     );
 
+    await _restPut(`gmd/users/${username.toLowerCase()}/stats`, stats);
+    return stats;
+  }
     await userRef(username).child("stats").set(stats);
     return stats;
   }
@@ -270,7 +285,10 @@ const GMDB = (() => {
     subscribeStickyNotes,
     addReaction,
     updateRivalry,
-    getRivalry
+    getRivalry,
+    // REST helpers exposed for modules that need direct path access
+    _restGet,
+    _restPut
   };
 
 })();
