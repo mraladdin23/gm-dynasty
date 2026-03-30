@@ -6,7 +6,7 @@
 
 const GMDB = (() => {
 
-  // ── Refs ──────────────────────────────────────────────
+  // ── Refs (lazy — called only when needed, not at load time) ──
   const usersRef    = () => GMD.child("users");
   const userRef     = (username) => GMD.child(`users/${username.toLowerCase()}`);
   const socialRef   = (username) => GMD.child(`social/${username.toLowerCase()}`);
@@ -216,9 +216,6 @@ const GMDB = (() => {
     );
 
     await _restPut(`gmd/users/${username.toLowerCase()}/stats`, stats);
-    return stats;
-  }
-    await userRef(username).child("stats").set(stats);
     return stats;
   }
 
