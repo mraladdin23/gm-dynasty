@@ -474,3 +474,558 @@
   border-radius: var(--radius-lg);
   text-align: center;
 }
+
+/* ── Locker header additions ──────────────────────────── */
+.locker-header-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.locker-stats-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+.locker-stat {
+  font-size: .82rem;
+  color: var(--color-text-muted);
+}
+.locker-stat strong { color: var(--color-text); }
+.locker-stat-sep {
+  color: var(--color-text-dim);
+  font-size: .75rem;
+}
+
+/* ── Leagues section header ───────────────────────────── */
+.leagues-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+.leagues-header .section-title { margin-bottom: 0; }
+
+.btn-add-league {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.btn-add-league:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+/* ── League filter bar ────────────────────────────────── */
+.league-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.filter-tab {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  color: var(--color-text-muted);
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.filter-tab:hover {
+  border-color: var(--color-border-light);
+  color: var(--color-text);
+}
+.filter-tab.active {
+  background: var(--color-surface);
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+.filter-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  margin: 0 var(--space-1);
+}
+
+/* ── League grid — 3 across ───────────────────────────── */
+.leagues-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .leagues-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 580px) {
+  .leagues-grid { grid-template-columns: 1fr; }
+}
+
+/* ── League card updates ──────────────────────────────── */
+.league-card--pinned {
+  border-color: var(--color-gold-dim);
+}
+.league-card--archived {
+  opacity: .7;
+}
+.league-card--archived .league-card-name {
+  color: var(--color-text-muted);
+}
+
+.league-pin-badge {
+  font-size: .8rem;
+}
+
+.league-options-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  margin-left: auto;
+  line-height: 1;
+  transition: color var(--transition);
+}
+.league-options-btn:hover { color: var(--color-text); }
+
+.league-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.league-tag {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.league-tag--commish {
+  background: rgba(240,180,41,.15);
+  color: var(--color-gold);
+}
+.league-tag--label {
+  background: rgba(59,130,246,.15);
+  color: #7ab8ff;
+}
+.league-tag--group {
+  background: rgba(168,85,247,.15);
+  color: #c084fc;
+}
+.league-tag--type {
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+}
+
+/* ── Archived section ─────────────────────────────────── */
+.archived-section {
+  margin-top: var(--space-6);
+}
+
+.archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-muted);
+  font-family: var(--font-display);
+  font-size: .9rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color var(--transition);
+  margin-bottom: var(--space-4);
+}
+.archived-toggle:hover { border-color: var(--color-border-light); }
+
+.archived-count {
+  padding: 2px 8px;
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  font-size: .75rem;
+  color: var(--color-text-dim);
+}
+
+.archived-chevron { margin-left: auto; font-size: .75rem; }
+
+/* ── Modal system ─────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  padding: var(--space-6);
+  backdrop-filter: blur(4px);
+}
+.modal-overlay.hidden { display: none; }
+
+.modal-box {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+.modal-box--sm { max-width: 400px; }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+.modal-header h3 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition);
+}
+.modal-close:hover { color: var(--color-text); }
+
+.modal-body {
+  padding: var(--space-5) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.modal-section-title {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.modal-footer {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-border);
+  justify-content: flex-end;
+}
+.modal-footer .btn-primary  { width: auto; }
+.modal-footer .btn-secondary { width: auto; }
+
+/* Platform relink row */
+.platform-relink-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.platform-relink-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.platform-relink-user {
+  font-size: .85rem;
+  color: var(--color-text-muted);
+}
+
+/* Label modal */
+.label-league-name {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-3);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-2);
+}
+
+.label-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.label-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  font-size: .9rem;
+  color: var(--color-text-muted);
+}
+.label-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-gold);
+  cursor: pointer;
+}
+
+/* Select element styling */
+select {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: .95rem;
+  transition: border-color var(--transition);
+  outline: none;
+  cursor: pointer;
+}
+select:focus { border-color: var(--color-gold); }
+select option { background: var(--color-bg-2); }
+
+
+/* ── League card footer (chat button) ─────────────────── */
+.league-card-footer {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.league-chat-btn {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: var(--font-body);
+}
+.league-chat-btn:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+/* ── Chat panel (slide-in) ────────────────────────────── */
+.chat-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 100vw;
+  background: var(--color-bg-2);
+  border-left: 1px solid var(--color-border);
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  transition: transform var(--transition-md);
+}
+.chat-panel.hidden { display: none; }
+
+.chat-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 399;
+}
+.chat-panel-backdrop.hidden { display: none; }
+
+.chat-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.chat-panel-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+
+.chat-panel-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--space-4);
+  gap: var(--space-3);
+}
+
+.chat-league-title {
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.chat-empty {
+  text-align: center;
+  color: var(--color-text-dim);
+  font-size: .85rem;
+  padding: var(--space-8) 0;
+}
+
+.chat-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-row--mine  { align-items: flex-end; }
+.chat-row--theirs { align-items: flex-start; }
+
+.chat-name {
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+
+.chat-bubble {
+  max-width: 75%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 12px;
+  font-size: .88rem;
+  line-height: 1.5;
+  word-break: break-word;
+  position: relative;
+}
+.chat-bubble--mine {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-radius: 12px 12px 4px 12px;
+}
+.chat-bubble--theirs {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 12px 12px 12px 4px;
+}
+
+.chat-time {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+}
+
+.chat-del-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  color: var(--color-text-dim);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 1px 5px;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.chat-toolbar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.chat-tool-btn {
+  padding: var(--space-2) var(--space-2);
+  font-size: .9rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.chat-tool-btn:hover { border-color: var(--color-gold); }
+
+.chat-input-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1;
+  padding: var(--space-3) var(--space-3);
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: .9rem;
+  outline: none;
+  resize: none;
+  min-height: 44px;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+.chat-input:focus { border-color: var(--color-gold); }
+
