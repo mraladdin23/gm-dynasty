@@ -59,8 +59,10 @@ const MFLAPI = (() => {
     console.log("[MFL] Login response:", text.slice(0, 200));
 
     // Parse cookie from XML response
-    // Expected: <status cookie_name="MFL_USER_ID" cookie_value="abc123" ... />
-    const cookieMatch = text.match(/cookie_value="([^"]+)"/);
+    // MFL returns: <status MFL_USER_ID="abc123">OK</status>
+    // OR:          <status cookie_name="MFL_USER_ID" cookie_value="abc123" .../>
+    const directMatch  = text.match(/MFL_USER_ID="([^"]+)"/);
+    const cookieMatch  = directMatch || text.match(/cookie_value="([^"]+)"/);
     if (!cookieMatch) {
       // Check for error
       if (text.includes('<error') || text.includes('error status')) {

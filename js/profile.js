@@ -176,6 +176,35 @@ const Profile = (() => {
 
   // ── League grid rendering ──────────────────────────────
 
+  // Group all league seasons into franchises
+  function _buildFranchises() {
+    const franchises = {}; // franchiseId → { key, seasons: [], latestKey, meta }
+
+    Object.entries(_allLeagues).forEach(([key, league]) => {
+      // Use franchiseId if present, otherwise fall back to leagueId (ungrouped)
+      const fid = league.franchiseId || league.leagueId || key;
+
+      if (!franchises[fid]) {
+        franchises[fid] = { franchiseId: fid, seasons: [], latestKey: key, meta: _leagueMeta[key] || {} };
+      }
+
+      franchises[fid].seasons.push({ key, league, meta: _leagueMeta[key] || {} });
+
+      // Track the most recent season as the primary display
+      const current = franchises[fid].seasons.find(s => s.key === franchises[fid].latestKey);
+      if (!current || (league.season || "0") > (current.league.season || "0")) {
+        franchises[fid].latestKey = key;
+      }
+    });
+
+    // Sort each franchise's seasons newest first
+    Object.values(franchises).forEach(f => {
+      f.seasons.sort((a, b) => (b.league.season || "0").localeCompare(a.league.season || "0"));
+    });
+
+    return franchises;
+  }
+
   function _renderLeagues(filter) {
     const grid         = document.getElementById("leagues-grid");
     const archivedSec  = document.getElementById("archived-section");
@@ -183,36 +212,42 @@ const Profile = (() => {
     const archivedCount= document.getElementById("archived-count");
     if (!grid) return;
 
-    const entries = Object.entries(_allLeagues);
-    if (entries.length === 0) {
+    const allEntries = Object.entries(_allLeagues);
+    if (allEntries.length === 0) {
       grid.innerHTML = `<p class="empty-state">No leagues imported yet.</p>`;
       if (archivedSec) archivedSec.classList.add("hidden");
       return;
     }
 
-    // Split active vs archived
+    // Build franchise groups
+    const franchises = _buildFranchises();
+    const franchiseList = Object.values(franchises);
+
+    // For each franchise, determine if active (has current season) or archived
     const active   = [];
     const archived = [];
 
-    entries.forEach(([key, league]) => {
-      const meta       = _leagueMeta[key] || {};
-      const isArchived = meta.archived || league.season !== CURRENT_SEASON;
+    franchiseList.forEach(f => {
+      const latestLeague = _allLeagues[f.latestKey];
+      const meta         = _leagueMeta[f.latestKey] || {};
+      const isArchived   = meta.archived || (latestLeague?.season !== CURRENT_SEASON && f.seasons.every(s => s.league.season !== CURRENT_SEASON));
+
       if (isArchived) {
-        archived.push([key, league, meta]);
+        archived.push(f);
       } else {
-        active.push([key, league, meta]);
+        active.push(f);
       }
     });
 
-    // Apply filter to active leagues
-    const filtered = _applyFilter(active, filter);
+    // Apply filter
+    const filtered = _applyFranchiseFilter(active, filter);
 
-    // Sort: pinned first, then by season desc
+    // Sort: pinned first, then by latest season desc
     filtered.sort((a, b) => {
-      const aPinned = a[2].pinned ? 1 : 0;
-      const bPinned = b[2].pinned ? 1 : 0;
+      const aPinned = (_leagueMeta[a.latestKey]?.pinned) ? 1 : 0;
+      const bPinned = (_leagueMeta[b.latestKey]?.pinned) ? 1 : 0;
       if (bPinned !== aPinned) return bPinned - aPinned;
-      return (b[1].season || "0").localeCompare(a[1].season || "0");
+      return (_allLeagues[b.latestKey]?.season || "0").localeCompare(_allLeagues[a.latestKey]?.season || "0");
     });
 
     if (filter === "archived") {
@@ -221,32 +256,25 @@ const Profile = (() => {
       if (archived.length === 0) {
         grid.innerHTML = `<p class="empty-state">No archived leagues.</p>`;
       } else {
-        grid.innerHTML = archived.map(([key, league, meta]) =>
-          _leagueCardHTML(key, league, meta, true)
-        ).join("");
+        grid.innerHTML = archived.map(f => _franchiseCardHTML(f)).join("");
         _wireCardEvents(grid);
       }
       return;
     }
 
-    // Active grid
     if (filtered.length === 0) {
       grid.innerHTML = `<p class="empty-state">No leagues match this filter.</p>`;
     } else {
-      grid.innerHTML = filtered.map(([key, league, meta]) =>
-        _leagueCardHTML(key, league, meta, false)
-      ).join("");
+      grid.innerHTML = filtered.map(f => _franchiseCardHTML(f)).join("");
       _wireCardEvents(grid);
     }
 
-    // Archived section
+    // Archived accordion
     if (archived.length > 0) {
       if (archivedSec) archivedSec.classList.remove("hidden");
       if (archivedCount) archivedCount.textContent = `${archived.length}`;
       if (archivedGrid) {
-        archivedGrid.innerHTML = archived.map(([key, league, meta]) =>
-          _leagueCardHTML(key, league, meta, true)
-        ).join("");
+        archivedGrid.innerHTML = archived.map(f => _franchiseCardHTML(f, true)).join("");
         _wireCardEvents(archivedGrid);
       }
     } else {
@@ -254,47 +282,67 @@ const Profile = (() => {
     }
   }
 
-  function _applyFilter(entries, filter) {
-    if (filter === "all" || filter === "archived") return entries;
-    if (filter === "active")      return entries.filter(([,l]) => l.season === CURRENT_SEASON);
-    if (filter === "pinned")      return entries.filter(([k]) => _leagueMeta[k]?.pinned);
-    if (filter === "dynasty")     return entries.filter(([,l]) => l.leagueType === "dynasty");
-    if (filter === "redraft")     return entries.filter(([,l]) => l.leagueType === "redraft");
-    if (filter === "keeper")      return entries.filter(([,l]) => l.leagueType === "keeper");
-    if (filter === "commissioner")return entries.filter(([,l]) => l.isCommissioner);
-    if (filter.startsWith("label:")) {
-      const label = filter.slice(6);
-      return entries.filter(([k]) => _leagueMeta[k]?.customLabel === label);
-    }
-    if (filter.startsWith("group:")) {
-      const group = filter.slice(6);
-      return entries.filter(([k]) => _leagueMeta[k]?.commishGroup === group);
-    }
-    return entries;
+  function _applyFranchiseFilter(franchises, filter) {
+    if (filter === "all" || filter === "archived") return franchises;
+    return franchises.filter(f => {
+      const latest = _allLeagues[f.latestKey];
+      const meta   = _leagueMeta[f.latestKey] || {};
+      if (filter === "active")        return latest?.season === CURRENT_SEASON;
+      if (filter === "pinned")        return meta.pinned;
+      if (filter === "dynasty")       return latest?.leagueType === "dynasty";
+      if (filter === "redraft")       return latest?.leagueType === "redraft";
+      if (filter === "keeper")        return latest?.leagueType === "keeper";
+      if (filter === "commissioner")  return f.seasons.some(s => s.league.isCommissioner);
+      if (filter.startsWith("label:")) return meta.customLabel === filter.slice(6);
+      if (filter.startsWith("group:")) return meta.commishGroup === filter.slice(6);
+      return true;
+    });
   }
 
-  // ── League card HTML ───────────────────────────────────
+  // ── Franchise card HTML ────────────────────────────────
 
-  function _leagueCardHTML(key, league, meta, isArchived) {
-    const pinned    = meta.pinned    ? "league-card--pinned" : "";
-    const archived  = isArchived     ? "league-card--archived" : "";
-    const champion  = league.isChampion ? "league-card--champion" : "";
-    const label     = meta.customLabel  ? `<span class="league-tag league-tag--label">🏷 ${_escHtml(meta.customLabel)}</span>` : "";
-    const group     = meta.commishGroup ? `<span class="league-tag league-tag--group">⚡ ${_escHtml(meta.commishGroup)}</span>` : "";
-    const pinnedBadge = meta.pinned    ? `<span class="league-pin-badge">📌</span>` : "";
-    const commishBadge = league.isCommissioner
-      ? `<span class="league-tag league-tag--commish">👑 Commish</span>` : "";
-    const wins   = league.wins   || 0;
-    const losses = league.losses || 0;
-    const ties   = league.ties   || 0;
+  function _franchiseCardHTML(franchise, isArchived = false) {
+    const key      = franchise.latestKey;
+    const league   = _allLeagues[key];
+    const meta     = _leagueMeta[key] || {};
+    const seasons  = franchise.seasons;
+
+    if (!league) return "";
+
+    // Aggregate career stats across all seasons of this franchise
+    const totalWins   = seasons.reduce((s, x) => s + (x.league.wins   || 0), 0);
+    const totalLosses = seasons.reduce((s, x) => s + (x.league.losses || 0), 0);
+    const titles      = seasons.filter(x => x.league.playoffFinish === 1 || x.league.isChampion).length;
+    const runnerUps   = seasons.filter(x => x.league.playoffFinish === 2).length;
+    const isCommish   = seasons.some(x => x.league.isCommissioner);
+
+    const pinned      = meta.pinned       ? "league-card--pinned"   : "";
+    const archivedCls = isArchived        ? "league-card--archived" : "";
+    const champCls    = titles > 0        ? "league-card--champion" : "";
+    const pinnedBadge = meta.pinned       ? `<span class="league-pin-badge">📌</span>` : "";
+    const label       = meta.customLabel  ? `<span class="league-tag league-tag--label">🏷 ${_escHtml(meta.customLabel)}</span>` : "";
+    const group       = meta.commishGroup ? `<span class="league-tag league-tag--group">⚡ ${_escHtml(meta.commishGroup)}</span>` : "";
+    const commishBadge = isCommish        ? `<span class="league-tag league-tag--commish">👑 Commish</span>` : "";
+
+    // Season pills — show each season, highlight current
+    const seasonPills = seasons.slice(0, 6).map(s => {
+      const isCurrent = s.league.season === CURRENT_SEASON;
+      const finish    = s.league.playoffFinish;
+      const icon      = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
+      return `<span class="season-pill ${isCurrent ? "season-pill--current" : ""}" 
+        data-key="${s.key}" title="${s.league.season}: ${s.league.wins}W–${s.league.losses}L${icon ? " "+icon : ""}">
+        ${s.league.season}${icon}
+      </span>`;
+    }).join("");
+
+    const moreSeasons = seasons.length > 6 ? `<span class="season-pill season-pill--more">+${seasons.length - 6}</span>` : "";
 
     return `
-      <div class="league-card ${pinned} ${archived} ${champion}" data-key="${key}">
+      <div class="league-card ${pinned} ${archivedCls} ${champCls}" data-key="${key}">
         <div class="league-card-header">
           <span class="league-platform-tag league-platform-tag--${league.platform}">${(league.platform||"").toUpperCase()}</span>
-          <span class="league-season">${league.season || ""}</span>
-          ${league.isChampion ? `<span class="champion-badge">🏆</span>` : ""}
           ${pinnedBadge}
+          ${titles > 0 ? `<span class="champion-badge">🏆 ×${titles}</span>` : ""}
           <button class="league-options-btn" data-key="${key}" title="Options">⋯</button>
         </div>
         <div class="league-card-name">${_escHtml(league.leagueName)}</div>
@@ -302,25 +350,28 @@ const Profile = (() => {
         <div class="league-tags-row">
           ${commishBadge}${label}${group}
           <span class="league-tag league-tag--type">${league.leagueType || "redraft"}</span>
+          <span class="league-tag" style="background:var(--color-surface);color:var(--color-text-dim);">${seasons.length} seasons</span>
         </div>
         <div class="league-card-record">
-          <span class="record-wins">${wins}W</span>
+          <span class="record-wins">${totalWins}W</span>
           <span class="record-sep">–</span>
-          <span class="record-losses">${losses}L</span>
-          ${ties ? `<span class="record-sep">–</span><span class="record-ties">${ties}T</span>` : ""}
-          ${league.standing ? `<span class="record-rank">&nbsp;· #${league.standing}/${league.totalTeams}</span>` : ""}
+          <span class="record-losses">${totalLosses}L</span>
+          <span class="record-rank"> all-time</span>
+          ${runnerUps > 0 ? `<span class="record-rank"> · 🥈×${runnerUps}</span>` : ""}
         </div>
-        ${league.pointsFor ? `
-        <div class="league-card-pts">
-          <span>${parseFloat(league.pointsFor).toFixed(1)} PF</span>
-          <span class="pts-sep">·</span>
-          <span>${parseFloat(league.pointsAgainst || 0).toFixed(1)} PA</span>
-        </div>` : ""}
+        <div class="season-pills-row">
+          ${seasonPills}${moreSeasons}
+        </div>
         <div class="league-card-footer">
           <button class="league-chat-btn" data-key="${key}" title="League Chat">💬 Chat</button>
         </div>
       </div>
     `;
+  }
+
+  // Keep old _leagueCardHTML for detail panel use
+  function _leagueCardHTML(key, league, meta, isArchived) {
+    return _franchiseCardHTML({ latestKey: key, seasons: [{ key, league, meta }] }, isArchived);
   }
 
   function _wireCardEvents(container) {

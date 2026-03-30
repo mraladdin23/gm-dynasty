@@ -125,7 +125,9 @@
 
 /* ── Onboarding ───────────────────────────────────────── */
 #onboarding-screen {
-  padding: var(--space-10) var(--space-6);
+  align-items: center;
+  justify-content: flex-start;
+  padding: var(--space-8) var(--space-6);
   background:
     radial-gradient(ellipse 60% 40% at 50% 0%, rgba(240,180,41,.08) 0%, transparent 60%),
     var(--color-bg);
@@ -1303,3 +1305,40 @@ select option { background: var(--color-bg-2); }
 /* Make league cards clickable */
 .league-card { cursor: pointer; }
 
+
+/* ── Season pills (franchise card) ───────────────────── */
+.season-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+}
+
+.season-pill {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: .72rem;
+  font-weight: 600;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.season-pill:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.season-pill--current {
+  background: rgba(240,180,41,.12);
+  border-color: var(--color-gold-dim);
+  color: var(--color-gold);
+}
+.season-pill--more {
+  color: var(--color-text-dim);
+  cursor: default;
+}
+.season-pill--more:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-dim);
+}
