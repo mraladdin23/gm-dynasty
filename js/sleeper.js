@@ -49,7 +49,8 @@ const SleeperAPI = (() => {
   }
 
   async function getBracket(leagueId, type = "winners") {
-    return _get(`/league/${leagueId}/playoffs/${type}_bracket`) || [];
+    // Correct Sleeper endpoint: /league/{id}/winners_bracket or /losers_bracket
+    return _get(`/league/${leagueId}/${type}_bracket`) || [];
   }
 
   async function getTransactions(leagueId, round) {
@@ -100,46 +101,45 @@ const SleeperAPI = (() => {
    * Returns the playoff finish for a user: 1, 2, 3, or null.
    * Uses winners bracket to find championship and consolation games.
    */
+  // ── Playoff finish detection ───────────────────────────
+  // KEY INSIGHT from SleeperBid: ALL placement games are in the winners bracket.
+  // p=1 = Championship, p=3 = 3rd place, p=5 = 5th place.
+  // w = winning roster_id, l = losing roster_id, t1/t2 = competing roster_ids.
   async function getPlayoffFinish(leagueId, userId) {
-    const [bracket, rosters] = await Promise.all([
+    const [winners, rosters] = await Promise.all([
       getBracket(leagueId, "winners"),
       getRosters(leagueId)
     ]);
 
-    if (!bracket || bracket.length === 0) return null;
+    if (!winners || !winners.length) return null;
 
-    // Build roster_id → user_id map
-    const rosterToUser = {};
-    for (const r of rosters) {
-      if (r.owner_id) rosterToUser[r.roster_id] = r.owner_id;
-    }
-
-    // Find my roster_id
     const myRoster = rosters.find(r => r.owner_id === userId);
     if (!myRoster) return null;
-    const myRosterId = myRoster.roster_id;
+    const rid = myRoster.roster_id;
 
-    // Find the highest round (championship round)
-    const maxRound = Math.max(...bracket.map(g => g.r));
-
-    // Championship game = highest round, p=1 (or no p field)
-    const champGame = bracket.find(g => g.r === maxRound && (g.p === 1 || !g.p));
-
-    // 3rd place game = highest round, p=3
-    const thirdGame = bracket.find(g => g.r === maxRound && g.p === 3);
+    // Placement games have p field
+    const champGame = winners.find(m => m.p === 1);
+    const thirdGame = winners.find(m => m.p === 3);
+    const fifthGame = winners.find(m => m.p === 5);
 
     if (champGame) {
-      if (champGame.w === myRosterId) return 1; // champion
-      if (champGame.l === myRosterId) return 2; // runner-up
+      if (champGame.w === rid) return 1; // champion
+      if (champGame.l === rid) return 2; // runner-up
     }
     if (thirdGame) {
-      if (thirdGame.w === myRosterId) return 3; // 3rd place
-      if (thirdGame.l === myRosterId) return 4; // 4th place
+      if (thirdGame.w === rid) return 3;
+      if (thirdGame.l === rid) return 4;
+    }
+    if (fifthGame) {
+      if (fifthGame.w === rid) return 5;
+      if (fifthGame.l === rid) return 6;
     }
 
-    // Made playoffs but didn't place top 4
-    const anyGame = bracket.find(g => g.w === myRosterId || g.l === myRosterId);
-    if (anyGame) return 5; // made playoffs
+    // Appeared in any playoff game (including regular bracket rounds with no p)
+    const inPlayoffs = winners.some(m =>
+      m.t1 === rid || m.t2 === rid || m.w === rid || m.l === rid
+    );
+    if (inPlayoffs) return 7; // made playoffs but early exit
 
     return null; // missed playoffs
   }
@@ -184,19 +184,22 @@ const SleeperAPI = (() => {
     if (!sleeperUser) throw new Error(`Sleeper user "${sleeperUsername}" not found.`);
     const userId = sleeperUser.user_id;
 
-    // Start with current year, fall back to prior year if empty
+    // Try current year first, fall back to prior year
     let startingLeagues = await getUserLeagues(userId, "nfl", currentYear.toString());
+    const mostRecentSeason = startingLeagues.length
+      ? currentYear.toString()
+      : (currentYear - 1).toString();
     if (!startingLeagues.length) {
-      startingLeagues = await getUserLeagues(userId, "nfl", (currentYear - 1).toString());
+      startingLeagues = await getUserLeagues(userId, "nfl", mostRecentSeason);
     }
 
     const leaguesMap    = {};
     const seenLeagueIds = new Set();
 
     for (const league of startingLeagues) {
-      // Walk prev_league_id chain to get all historical seasons
-      const lineage    = await getLeagueLineage(league.league_id);
-      const franchiseId = lineage[0]; // oldest league ID = franchise anchor
+      // Walk prev_league_id chain oldest → newest
+      const lineage     = await getLeagueLineage(league.league_id);
+      const franchiseId = lineage[0]; // oldest = franchise anchor
 
       for (const leagueId of lineage) {
         if (seenLeagueIds.has(leagueId)) continue;
@@ -210,27 +213,34 @@ const SleeperAPI = (() => {
           ]);
 
           if (!leagueData) continue;
-          const myRoster = rosters.find(r => r.owner_id === userId);
-          if (!myRoster) continue;
 
           const me     = leagueUsers.find(u => u.user_id === userId);
           const isComm = me?.is_owner === true;
+
+          // Find my roster — commissioners may not have one
+          const myRoster = rosters.find(r => r.owner_id === userId);
+
+          // Skip if not a member AND not the commissioner
+          if (!myRoster && !isComm) continue;
+
           const season = leagueData.season || currentYear.toString();
+          const status = leagueData.status;
 
-          const wins   = myRoster.settings?.wins   || 0;
-          const losses = myRoster.settings?.losses || 0;
-          const ties   = myRoster.settings?.ties   || 0;
+          const wins   = myRoster?.settings?.wins   || 0;
+          const losses = myRoster?.settings?.losses || 0;
+          const ties   = myRoster?.settings?.ties   || 0;
+          const ptsFor     = (myRoster?.settings?.fpts         || 0) + (myRoster?.settings?.fpts_decimal         || 0) / 100;
+          const ptsAgainst = (myRoster?.settings?.fpts_against || 0) + (myRoster?.settings?.fpts_against_decimal || 0) / 100;
 
-          // Get standings rank
-          const standings  = await getStandings(leagueId);
+          // Standings rank
+          const standings  = myRoster ? await getStandings(leagueId) : [];
           const myStanding = standings.find(s => s.userId === userId);
           const rank       = myStanding?.rank || null;
 
-          // Only fetch playoffs for completed seasons — skips pre-draft/in-season
-          // to avoid hundreds of unnecessary 404s
-          const status = leagueData.status; // "pre_draft" | "drafting" | "in_season" | "complete"
-          const isComplete = status === "complete";
-          const finish = isComplete ? await getPlayoffFinish(leagueId, userId) : null;
+          // Playoff finish only for completed seasons
+          const finish = (status === "complete" && myRoster)
+            ? await getPlayoffFinish(leagueId, userId)
+            : null;
 
           const key = `sleeper_${leagueId}`;
           leaguesMap[key] = {
@@ -240,15 +250,16 @@ const SleeperAPI = (() => {
             leagueName:     leagueData.name,
             season,
             status,
+            mostRecentSeason, // used for active/archived split
             leagueType:     _mapLeagueType(leagueData.settings?.type),
             totalTeams:     leagueData.total_rosters || 12,
-            teamName:       me?.metadata?.team_name || me?.display_name || "My Team",
+            teamName:       me?.metadata?.team_name || me?.display_name || (isComm ? "Commissioner" : "My Team"),
             isCommissioner: isComm,
             wins,
             losses,
             ties,
-            pointsFor:      (myRoster.settings?.fpts         || 0) + (myRoster.settings?.fpts_decimal         || 0) / 100,
-            pointsAgainst:  (myRoster.settings?.fpts_against || 0) + (myRoster.settings?.fpts_against_decimal || 0) / 100,
+            pointsFor:      ptsFor,
+            pointsAgainst:  ptsAgainst,
             standing:       rank,
             playoffFinish:  finish,
             isChampion:     finish === 1,
@@ -261,11 +272,12 @@ const SleeperAPI = (() => {
     }
 
     return {
-      sleeperUserId:   userId,
-      sleeperUsername: sleeperUser.username,
-      displayName:     sleeperUser.display_name,
-      avatar:          sleeperUser.avatar,
-      leagues:         leaguesMap
+      sleeperUserId:    userId,
+      sleeperUsername:  sleeperUser.username,
+      displayName:      sleeperUser.display_name,
+      avatar:           sleeperUser.avatar,
+      mostRecentSeason,
+      leagues:          leaguesMap
     };
   }
 
@@ -276,7 +288,7 @@ const SleeperAPI = (() => {
   }
 
   function _finishLabel(finish) {
-    return { 1: "champion", 2: "finalist", 3: "third", 4: "fourth" }[finish] || null;
+    return { 1:"champion", 2:"finalist", 3:"third", 4:"fourth", 5:"fifth", 6:"sixth", 7:"playoffs" }[finish] || null;
   }
 
   // ── Public API ─────────────────────────────────────────

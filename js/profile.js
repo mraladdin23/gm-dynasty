@@ -21,26 +21,26 @@ const Profile = (() => {
       throw new Error(`No leagues found for Sleeper user "${sleeperUsername}".`);
     }
     await GMDB.linkPlatform(gmdUsername, "sleeper", {
-      sleeperUserId:   result.sleeperUserId,
-      sleeperUsername: result.sleeperUsername,
-      displayName:     result.displayName,
-      avatar:          result.avatar
+      sleeperUserId:    result.sleeperUserId,
+      sleeperUsername:  result.sleeperUsername,
+      displayName:      result.displayName,
+      avatar:           result.avatar,
+      mostRecentSeason: result.mostRecentSeason
     });
     await GMDB.saveLeagues(gmdUsername, result.leagues);
     await GMDB.recomputeStats(gmdUsername);
     return result;
   }
 
-  async function linkMFL(gmdUsername, email, password) {
-    if (!email?.trim())    throw new Error("Enter your MFL email address.");
-    if (!password?.trim()) throw new Error("Enter your MFL password.");
-    const result = await MFLAPI.importUserLeagues(email.trim(), password.trim());
+  async function linkMFL(gmdUsername, email, password, leagueIds = []) {
+    if (!email?.trim()) throw new Error("Enter your MFL username.");
+    const result = await MFLAPI.importUserLeagues(email.trim(), password?.trim() || "", leagueIds);
     if (Object.keys(result.leagues).length === 0) {
-      throw new Error("No MFL leagues found for this account.");
+      throw new Error("No MFL leagues found. Add your league IDs (from the MFL URL) to the League IDs field.");
     }
     await GMDB.linkPlatform(gmdUsername, "mfl", {
-      mflEmail: email.trim(),
-      mflUsername: email.trim()
+      mflEmail:    email.trim(),
+      mflUsername: result.mflUsername
     });
     await GMDB.saveLeagues(gmdUsername, result.leagues);
     await GMDB.recomputeStats(gmdUsername);
@@ -95,12 +95,16 @@ const Profile = (() => {
     const winPct = totalGames > 0
       ? ((stats.totalWins / totalGames) * 100).toFixed(1) + "%"
       : "—";
+    const trophies = [
+      stats.championships > 0 ? `🏆 ${stats.championships}` : null,
+      stats.runnerUps     > 0 ? `🥈 ${stats.runnerUps}`     : null,
+      stats.thirdPlace    > 0 ? `🥉 ${stats.thirdPlace}`     : null,
+    ].filter(Boolean).join(" ");
     el.innerHTML = `
       <span class="locker-stat"><strong>${stats.totalWins || 0}W–${stats.totalLosses || 0}L</strong></span>
       <span class="locker-stat-sep">·</span>
       <span class="locker-stat">${winPct} win rate</span>
-      <span class="locker-stat-sep">·</span>
-      <span class="locker-stat">🏆 ${stats.championships || 0} titles</span>
+      ${trophies ? `<span class="locker-stat-sep">·</span><span class="locker-stat">${trophies}</span>` : ""}
       <span class="locker-stat-sep">·</span>
       <span class="locker-stat">⭐ ${stats.dynastyScore || 0} pts</span>
     `;
@@ -224,14 +228,23 @@ const Profile = (() => {
     const franchises = _buildFranchises();
     const franchiseList = Object.values(franchises);
 
-    // For each franchise, determine if active (has current season) or archived
+    // Determine the most recent season present in the data
+    // (may be 2025 even though calendar year is 2026 if no leagues started yet)
+    const allSeasons = Object.values(_allLeagues).map(l => l.season).filter(Boolean);
+    const newestSeason = allSeasons.length
+      ? allSeasons.reduce((a, b) => a > b ? a : b)
+      : CURRENT_SEASON;
+
+    // For each franchise, determine if active or archived
     const active   = [];
     const archived = [];
 
     franchiseList.forEach(f => {
       const latestLeague = _allLeagues[f.latestKey];
       const meta         = _leagueMeta[f.latestKey] || {};
-      const isArchived   = meta.archived || (latestLeague?.season !== CURRENT_SEASON && f.seasons.every(s => s.league.season !== CURRENT_SEASON));
+      // Active = has a season matching the newest season in the data
+      const hasCurrentSeason = f.seasons.some(s => s.league.season === newestSeason);
+      const isArchived = meta.archived || !hasCurrentSeason;
 
       if (isArchived) {
         archived.push(f);

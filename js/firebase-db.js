@@ -184,7 +184,7 @@ const GMDB = (() => {
     const championships = values.filter(l => l.playoffFinish === 1 || l.isChampion).length;
     const runnerUps     = values.filter(l => l.playoffFinish === 2).length;
     const thirdPlace    = values.filter(l => l.playoffFinish === 3).length;
-    const playoffs      = values.filter(l => l.playoffFinish != null && l.playoffFinish <= 5).length;
+    const playoffs      = values.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
 
     const stats = {
       totalWins:      values.reduce((s, l) => s + (l.wins   || 0), 0),

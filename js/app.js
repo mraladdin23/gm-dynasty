@@ -166,27 +166,32 @@ document.getElementById("sleeper-link-btn")?.addEventListener("click", async () 
 
 // ── Onboarding: MFL link ───────────────────────────────────
 document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
-  const email    = document.getElementById("mfl-email-input")?.value.trim();
-  const password = document.getElementById("mfl-password-input")?.value.trim();
-  const statusEl = document.getElementById("mfl-status");
-  const btn      = document.getElementById("mfl-link-btn");
-  const profile  = Auth.getCurrentProfile();
+  const email      = document.getElementById("mfl-email-input")?.value.trim();
+  const password   = document.getElementById("mfl-password-input")?.value.trim();
+  const leagueIdsRaw = document.getElementById("mfl-league-ids-input")?.value.trim();
+  const leagueIds  = leagueIdsRaw
+    ? leagueIdsRaw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
+    : [];
+  const statusEl   = document.getElementById("mfl-status");
+  const btn        = document.getElementById("mfl-link-btn");
+  const profile    = Auth.getCurrentProfile();
   if (!profile) return;
 
-  if (!email || !password) {
-    statusEl.textContent = "Enter your MFL email and password.";
+  if (!email) {
+    statusEl.textContent = "Enter your MFL username.";
     statusEl.classList.add("status-error");
     return;
   }
 
   btn.disabled = true;
   btn.textContent = "Connecting…";
-  statusEl.textContent = "Logging into MFL…";
+  statusEl.textContent = leagueIds.length ? `Searching ${leagueIds.length} league(s)…` : "Searching…";
   statusEl.classList.remove("status-connected", "status-error");
 
   try {
-    const result = await Profile.linkMFL(profile.username, email, password);
-    statusEl.textContent = `✓ Connected — ${Object.keys(result.leagues).length} leagues`;
+    const result = await Profile.linkMFL(profile.username, email, password, leagueIds);
+    const count  = Object.keys(result.leagues).length;
+    statusEl.textContent = `✓ Connected — ${count} league${count !== 1 ? "s" : ""}`;
     statusEl.classList.add("status-connected");
     Profile.renderLeaguePreview("mfl-leagues-preview", result.leagues);
     document.getElementById("onboarding-save-btn").disabled = false;
