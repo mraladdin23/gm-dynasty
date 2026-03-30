@@ -77,33 +77,42 @@ const MFLAPI = (() => {
   // ── Get user's leagues ─────────────────────────────────
   /**
    * Fetch all leagues for an authenticated MFL user.
-   * Uses the `myleagues` export type which requires a valid cookie.
-   *
-   * Returns array of { leagueId, name, year, franchiseId, host }
+   * NOTE: Browsers block Cookie headers on fetch (forbidden header).
+   * MFL accepts the session cookie as a URL param: MFL_USER_ID=value
    */
   async function getMyLeagues(cookieValue, years = null) {
     const currentYear = new Date().getFullYear();
-    const searchYears = years || [currentYear.toString(), (currentYear - 1).toString()];
-    const allLeagues  = [];
+    // Search current year + past 5 years to catch all leagues
+    const searchYears = years || [
+      currentYear.toString(),
+      (currentYear - 1).toString(),
+      (currentYear - 2).toString(),
+      (currentYear - 3).toString(),
+      (currentYear - 4).toString(),
+    ];
+    const allLeagues = [];
+    const seen = new Set();
 
     for (const year of searchYears) {
       try {
-        const url  = `${MFL_API_HOST}/${year}/export?TYPE=myleagues&JSON=1`;
+        // Pass auth via URL param — browsers cannot set Cookie headers
+        const url = `${MFL_API_HOST}/${year}/export?TYPE=myleagues&JSON=1&MFL_USER_ID=${cookieValue}`;
         const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-        const res  = await fetch(proxied, {
-          headers: { Cookie: `MFL_USER_ID=${cookieValue}` }
-        });
+        const res = await fetch(proxied);
         if (!res.ok) continue;
         const data = await res.json();
+        console.log(`[MFL] myleagues ${year}:`, JSON.stringify(data).slice(0, 200));
         const leagues = data?.leagues?.league;
         if (!leagues) continue;
         const arr = Array.isArray(leagues) ? leagues : [leagues];
         arr.forEach(l => {
+          const id = l.league_id || l.id;
+          if (!id || seen.has(`${year}_${id}`)) return;
+          seen.add(`${year}_${id}`);
           allLeagues.push({
-            leagueId:    l.league_id || l.id,
+            leagueId:    id,
             leagueName:  l.name,
             franchiseId: l.franchise_id,
-            host:        l.url?.match(/https?:\/\/([^/]+)/)?.[1] || MFL_API_HOST,
             year
           });
         });
@@ -117,21 +126,20 @@ const MFLAPI = (() => {
 
   // ── Get league details ─────────────────────────────────
   async function getLeague(leagueId, year, cookieValue = null) {
-    const headers = cookieValue ? { Cookie: `MFL_USER_ID=${cookieValue}` } : {};
-    const url  = `${MFL_API_HOST}/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
+    const auth = cookieValue ? `&MFL_USER_ID=${cookieValue}` : "";
+    const url  = `${MFL_API_HOST}/${year}/export?TYPE=league&L=${leagueId}&JSON=1${auth}`;
     const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res  = await fetch(proxied, { headers });
+    const res  = await fetch(proxied);
     if (!res.ok) return null;
     const data = await res.json();
     return data?.league || null;
   }
 
-  // ── Get standings ──────────────────────────────────────
   async function getStandings(leagueId, year, cookieValue = null) {
-    const headers = cookieValue ? { Cookie: `MFL_USER_ID=${cookieValue}` } : {};
-    const url  = `${MFL_API_HOST}/${year}/export?TYPE=leagueStandings&L=${leagueId}&JSON=1`;
+    const auth = cookieValue ? `&MFL_USER_ID=${cookieValue}` : "";
+    const url  = `${MFL_API_HOST}/${year}/export?TYPE=leagueStandings&L=${leagueId}&JSON=1${auth}`;
     const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res  = await fetch(proxied, { headers });
+    const res  = await fetch(proxied);
     if (!res.ok) return [];
     const data = await res.json();
     const standings = data?.leagueStandings?.franchise;
@@ -148,12 +156,11 @@ const MFLAPI = (() => {
     }));
   }
 
-  // ── Get playoff results ────────────────────────────────
   async function getPlayoffResults(leagueId, year, cookieValue = null) {
-    const headers = cookieValue ? { Cookie: `MFL_USER_ID=${cookieValue}` } : {};
-    const url  = `${MFL_API_HOST}/${year}/export?TYPE=playoffResults&L=${leagueId}&JSON=1`;
+    const auth = cookieValue ? `&MFL_USER_ID=${cookieValue}` : "";
+    const url  = `${MFL_API_HOST}/${year}/export?TYPE=playoffResults&L=${leagueId}&JSON=1${auth}`;
     const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res  = await fetch(proxied, { headers });
+    const res  = await fetch(proxied);
     if (!res.ok) return null;
     const data = await res.json();
     return data?.playoffResults || null;

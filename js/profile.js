@@ -176,30 +176,31 @@ const Profile = (() => {
 
   // ── League grid rendering ──────────────────────────────
 
-  // Group all league seasons into franchises
+  // Group all league seasons into franchises using prev_league_id lineage.
+  // Sleeper import stores franchiseId = oldest leagueId in the chain.
+  // All seasons with the same franchiseId belong to one franchise card.
+  // Seasons without franchiseId (old imports) show as individual cards.
   function _buildFranchises() {
-    const franchises = {}; // franchiseId → { key, seasons: [], latestKey, meta }
+    const franchises = {};
 
     Object.entries(_allLeagues).forEach(([key, league]) => {
-      // Use franchiseId if present, otherwise fall back to leagueId (ungrouped)
-      const fid = league.franchiseId || league.leagueId || key;
+      // Use franchiseId if present (set during import via prev_league_id chain)
+      // Fall back to the league's own key so it shows as a solo card
+      const fid = league.franchiseId || key;
 
       if (!franchises[fid]) {
-        franchises[fid] = { franchiseId: fid, seasons: [], latestKey: key, meta: _leagueMeta[key] || {} };
+        franchises[fid] = { franchiseId: fid, seasons: [], latestKey: key };
       }
 
       franchises[fid].seasons.push({ key, league, meta: _leagueMeta[key] || {} });
-
-      // Track the most recent season as the primary display
-      const current = franchises[fid].seasons.find(s => s.key === franchises[fid].latestKey);
-      if (!current || (league.season || "0") > (current.league.season || "0")) {
-        franchises[fid].latestKey = key;
-      }
     });
 
-    // Sort each franchise's seasons newest first
+    // For each franchise, sort seasons newest first and set latestKey
     Object.values(franchises).forEach(f => {
-      f.seasons.sort((a, b) => (b.league.season || "0").localeCompare(a.league.season || "0"));
+      f.seasons.sort((a, b) =>
+        (b.league.season || "0").localeCompare(a.league.season || "0")
+      );
+      f.latestKey = f.seasons[0].key;
     });
 
     return franchises;
