@@ -1,335 +1,304 @@
 // ─────────────────────────────────────────────────────────
-//  GM Dynasty — MyFantasyLeague (MFL) API Module
-//  MFL has a JSON API at api.myfantasyleague.com.
-//  Auth: uses franchise credentials OR public read access.
-//  Docs: https://www03.myfantasyleague.com/2024/api_info
+//  Dynasty Locker Room — MyFantasyLeague (MFL) API
 //
-//  CORS note: MFL does not send CORS headers for direct
-//  browser requests. A lightweight proxy is needed for
-//  production. See CORS_PROXY below — swap in your own
-//  or use the Cloudflare Worker stub included in /functions/.
+//  MFL CORS POLICY: MFL explicitly blocks all browser JS
+//  calls from outside myfantasyleague.com. All requests
+//  MUST go through a server-side proxy.
+//
+//  MFL AUTH: Uses email + password → returns a cookie.
+//  The cookie must be passed on all subsequent requests.
+//
+//  PROXY: Set MFL_PROXY_URL to your Cloudflare Worker URL.
+//  The worker in /functions/mfl-proxy.js handles this.
+//
+//  FINDING USER LEAGUES: Use the `myleagues` export type,
+//  which returns all leagues for an authenticated user.
 // ─────────────────────────────────────────────────────────
 
 const MFLAPI = (() => {
 
   // ── Configuration ──────────────────────────────────────
-  // MFL API base. Their JSON API appends ?JSON=1 to XML endpoints.
-  const MFL_BASE = "https://api.myfantasyleague.com";
+  // Your deployed Cloudflare Worker URL (see /functions/mfl-proxy.js)
+  // Set this after deploying the worker.
+  const MFL_PROXY_URL = "https://corsproxy.io/?";
 
-  // CORS proxy for browser requests.
-  // In dev you can use a public proxy; for production deploy a
-  // Cloudflare Worker (see /functions/mfl-proxy.js).
-  // Set to "" to disable proxying (only works if MFL ever adds CORS).
-  const CORS_PROXY = "https://corsproxy.io/?";
+  const MFL_API_HOST  = "https://api.myfantasyleague.com";
 
-  function _url(year, path, params = {}) {
-    const qs = new URLSearchParams({ JSON: "1", ...params }).toString();
-    const direct = `${MFL_BASE}/${year}/export?TYPE=${path}&${qs}`;
-    return CORS_PROXY ? `${CORS_PROXY}${encodeURIComponent(direct)}` : direct;
-  }
-
-  // ── Low-level fetch ────────────────────────────────────
-  async function _get(year, type, params = {}) {
-    const url = _url(year, type, params);
-    const res = await fetch(url);
+  // ── Proxy fetch ────────────────────────────────────────
+  // All MFL requests go through the proxy to bypass CORS block.
+  async function _proxyFetch(url, options = {}) {
+    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
+    const res = await fetch(proxied, options);
     if (!res.ok) {
+      if (res.status === 429) throw new Error("MFL rate limit hit — please wait a moment and try again.");
       if (res.status === 404) return null;
-      throw new Error(`MFL API error ${res.status}: ${type}`);
+      throw new Error(`MFL API error ${res.status}`);
     }
-    const data = await res.json();
-    // MFL wraps responses: { version, encoding, [type]: { ... } }
-    return data;
+    return res.json();
   }
 
-  // ── League search by username ──────────────────────────
-
+  // ── Login → get auth cookie ────────────────────────────
   /**
-   * Search for leagues associated with an MFL username.
-   * MFL doesn't have a direct "get all leagues for user" endpoint,
-   * so we use their leagueSearch endpoint filtered by franchise owner.
-   * Returns array of { leagueId, name, year } objects.
+   * Authenticate with MFL using email + password.
+   * Returns the MFL_USER_ID cookie value needed for subsequent calls,
+   * or throws a descriptive error.
+   *
+   * MFL login endpoint: /year/login?USERNAME=email&PASSWORD=pass&XML=1
+   * Returns: <status cookie_name="MFL_USER_ID" cookie_value="..." />
    */
-  async function searchLeaguesByUser(mflUsername, year = null) {
+  async function login(email, password) {
+    const year = new Date().getFullYear();
+    const url  = `${MFL_API_HOST}/${year}/login?USERNAME=${encodeURIComponent(email)}&PASSWORD=${encodeURIComponent(password)}&XML=1`;
+
+    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
+    const res = await fetch(proxied);
+    if (!res.ok) throw new Error(`MFL login failed: ${res.status}`);
+
+    // MFL login returns XML even with JSON=1 flag omitted
+    const text = await res.text();
+    console.log("[MFL] Login response:", text.slice(0, 200));
+
+    // Parse cookie from XML response
+    // Expected: <status cookie_name="MFL_USER_ID" cookie_value="abc123" ... />
+    const cookieMatch = text.match(/cookie_value="([^"]+)"/);
+    if (!cookieMatch) {
+      // Check for error
+      if (text.includes('<error') || text.includes('error status')) {
+        throw new Error("Invalid MFL email or password.");
+      }
+      throw new Error("MFL login did not return a valid session. Check your credentials.");
+    }
+
+    return cookieMatch[1]; // the cookie value
+  }
+
+  // ── Get user's leagues ─────────────────────────────────
+  /**
+   * Fetch all leagues for an authenticated MFL user.
+   * Uses the `myleagues` export type which requires a valid cookie.
+   *
+   * Returns array of { leagueId, name, year, franchiseId, host }
+   */
+  async function getMyLeagues(cookieValue, years = null) {
     const currentYear = new Date().getFullYear();
-    const searchYears = year ? [year] : [
-      currentYear.toString(),
-      (currentYear - 1).toString()
-    ];
+    const searchYears = years || [currentYear.toString(), (currentYear - 1).toString()];
+    const allLeagues  = [];
 
-    const results = [];
-
-    for (const yr of searchYears) {
+    for (const year of searchYears) {
       try {
-        const data = await _get(yr, "leagueSearch", { SEARCH: mflUsername });
+        const url  = `${MFL_API_HOST}/${year}/export?TYPE=myleagues&JSON=1`;
+        const proxied = MFL_PROXY_URL + encodeURIComponent(url);
+        const res  = await fetch(proxied, {
+          headers: { Cookie: `MFL_USER_ID=${cookieValue}` }
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
         const leagues = data?.leagues?.league;
         if (!leagues) continue;
-
         const arr = Array.isArray(leagues) ? leagues : [leagues];
-        for (const l of arr) {
-          results.push({
-            leagueId:   l.league_id || l.id,
-            leagueName: l.name,
-            year:       yr,
-            url:        l.url
+        arr.forEach(l => {
+          allLeagues.push({
+            leagueId:    l.league_id || l.id,
+            leagueName:  l.name,
+            franchiseId: l.franchise_id,
+            host:        l.url?.match(/https?:\/\/([^/]+)/)?.[1] || MFL_API_HOST,
+            year
           });
-        }
-      } catch (_) {
-        // Year not found or rate limited — skip
+        });
+      } catch(e) {
+        console.warn(`[MFL] getMyLeagues ${year}:`, e.message);
       }
     }
 
-    return results;
+    return allLeagues;
   }
 
-  // ── League details ─────────────────────────────────────
-
-  /**
-   * Get full league details.
-   */
-  async function getLeague(leagueId, year = null) {
-    const yr = year || new Date().getFullYear().toString();
-    const data = await _get(yr, "league", { L: leagueId });
+  // ── Get league details ─────────────────────────────────
+  async function getLeague(leagueId, year, cookieValue = null) {
+    const headers = cookieValue ? { Cookie: `MFL_USER_ID=${cookieValue}` } : {};
+    const url  = `${MFL_API_HOST}/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
+    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
+    const res  = await fetch(proxied, { headers });
+    if (!res.ok) return null;
+    const data = await res.json();
     return data?.league || null;
   }
 
-  /**
-   * Get all franchises (teams) in a league.
-   * Returns array of franchise objects with id, name, ownedBy fields.
-   */
-  async function getFranchises(leagueId, year = null) {
-    const yr = year || new Date().getFullYear().toString();
-    const data = await _get(yr, "league", { L: leagueId });
-    const franchises = data?.league?.franchises?.franchise;
-    if (!franchises) return [];
-    return Array.isArray(franchises) ? franchises : [franchises];
-  }
-
-  // ── Rosters ────────────────────────────────────────────
-
-  /**
-   * Get rosters for all franchises in a league.
-   * Returns: [{ franchiseId, players: [{ id, status, ... }] }]
-   */
-  async function getRosters(leagueId, year = null) {
-    const yr = year || new Date().getFullYear().toString();
-    const data = await _get(yr, "rosters", { L: leagueId });
-    const franchises = data?.rosters?.franchise;
-    if (!franchises) return [];
-    const arr = Array.isArray(franchises) ? franchises : [franchises];
-    return arr.map(f => ({
-      franchiseId: f.id,
-      players:     Array.isArray(f.player) ? f.player : (f.player ? [f.player] : [])
+  // ── Get standings ──────────────────────────────────────
+  async function getStandings(leagueId, year, cookieValue = null) {
+    const headers = cookieValue ? { Cookie: `MFL_USER_ID=${cookieValue}` } : {};
+    const url  = `${MFL_API_HOST}/${year}/export?TYPE=leagueStandings&L=${leagueId}&JSON=1`;
+    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
+    const res  = await fetch(proxied, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const standings = data?.leagueStandings?.franchise;
+    if (!standings) return [];
+    const arr = Array.isArray(standings) ? standings : [standings];
+    return arr.map((s, i) => ({
+      franchiseId:  s.id,
+      wins:         parseInt(s.h2hw  || s.W  || 0),
+      losses:       parseInt(s.h2hl  || s.L  || 0),
+      ties:         parseInt(s.h2ht  || s.T  || 0),
+      ptsFor:       parseFloat(s.pf  || s.PF || 0),
+      ptsAgainst:   parseFloat(s.pa  || s.PA || 0),
+      rank:         i + 1
     }));
   }
 
-  // ── Standings ──────────────────────────────────────────
-
-  /**
-   * Get full standings for a league.
-   * Returns sorted array matching gmd schema shape.
-   */
-  async function getStandings(leagueId, year = null) {
-    const yr = year || new Date().getFullYear().toString();
-
-    const [leagueData, standingsData] = await Promise.all([
-      _get(yr, "league",    { L: leagueId }),
-      _get(yr, "standings", { L: leagueId })
-    ]);
-
-    const franchises = leagueData?.league?.franchises?.franchise;
-    const franchiseArr = franchises
-      ? (Array.isArray(franchises) ? franchises : [franchises])
-      : [];
-
-    // Build a franchise name/owner map
-    const franchiseMap = {};
-    for (const f of franchiseArr) {
-      franchiseMap[f.id] = {
-        teamName: f.name,
-        owner:    f.owner_name || f.ownedBy || ""
-      };
-    }
-
-    const standings = standingsData?.standings?.franchise;
-    if (!standings) return [];
-    const arr = Array.isArray(standings) ? standings : [standings];
-
-    const shaped = arr.map(s => {
-      const info = franchiseMap[s.id] || {};
-      return {
-        franchiseId:  s.id,
-        teamName:     info.teamName || "Unknown Team",
-        owner:        info.owner    || "",
-        wins:         parseInt(s.h2hw  || 0),
-        losses:       parseInt(s.h2hl  || 0),
-        ties:         parseInt(s.h2ht  || 0),
-        ptsFor:       parseFloat(s.pf  || 0),
-        ptsAgainst:   parseFloat(s.pa  || 0),
-        streak:       s.streak         || "",
-        vp:           parseFloat(s.vp  || 0)   // "victory points" if used
-      };
-    });
-
-    // Sort: wins desc → ptsFor desc
-    shaped.sort((a, b) => b.wins - a.wins || b.ptsFor - a.ptsFor);
-    return shaped.map((s, i) => ({ rank: i + 1, ...s }));
-  }
-
-  // ── Matchup results ────────────────────────────────────
-
-  /**
-   * Get weekly results for a given week.
-   */
-  async function getResults(leagueId, week, year = null) {
-    const yr = year || new Date().getFullYear().toString();
-    const data = await _get(yr, "weeklyResults", { L: leagueId, W: week });
-    const matchups = data?.weeklyResults?.matchup;
-    if (!matchups) return [];
-    return Array.isArray(matchups) ? matchups : [matchups];
-  }
-
-  /**
-   * Get playoff bracket structure.
-   */
-  async function getPlayoffBracket(leagueId, year = null) {
-    const yr = year || new Date().getFullYear().toString();
-    const data = await _get(yr, "playoffResults", { L: leagueId });
+  // ── Get playoff results ────────────────────────────────
+  async function getPlayoffResults(leagueId, year, cookieValue = null) {
+    const headers = cookieValue ? { Cookie: `MFL_USER_ID=${cookieValue}` } : {};
+    const url  = `${MFL_API_HOST}/${year}/export?TYPE=playoffResults&L=${leagueId}&JSON=1`;
+    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
+    const res  = await fetch(proxied, { headers });
+    if (!res.ok) return null;
+    const data = await res.json();
     return data?.playoffResults || null;
   }
 
-  // ── Champion detection ─────────────────────────────────
+  // ── Detect playoff finish ──────────────────────────────
+  async function getPlayoffFinish(leagueId, year, franchiseId, cookieValue = null) {
+    try {
+      const results = await getPlayoffResults(leagueId, year, cookieValue);
+      if (!results) return null;
 
-  /**
-   * Try to detect the champion franchise ID from playoff results.
-   * Returns the winning franchise ID or null if not determinable.
-   */
-  async function getChampionFranchiseId(leagueId, year = null) {
-    const bracket = await getPlayoffBracket(leagueId, year);
-    if (!bracket) return null;
+      const games = results.playoffGame;
+      if (!games) return null;
+      const arr = Array.isArray(games) ? games : [games];
 
-    // MFL playoff results have a "playoffGame" array; the championship
-    // is typically the game with the highest week number.
-    const games = bracket.playoffGame;
-    if (!games) return null;
-    const arr = Array.isArray(games) ? games : [games];
-    const finalGame = arr.reduce((prev, cur) =>
-      parseInt(cur.week) > parseInt(prev.week) ? cur : prev
-    , arr[0]);
+      // Sort by week descending — last game is final
+      arr.sort((a, b) => parseInt(b.week) - parseInt(a.week));
 
-    return finalGame?.winner || null;
+      // Championship game (highest week, away/home includes our franchise)
+      const champGame = arr[0];
+      if (!champGame) return null;
+
+      const winners  = [champGame.winner].flat();
+      const losers   = [champGame.loser].flat();
+
+      if (winners.includes(franchiseId)) return 1;
+      if (losers.includes(franchiseId))  return 2;
+
+      // Check 3rd place game (same week, different game)
+      const thirdGame = arr.find(g =>
+        g.week === champGame.week && g !== champGame
+      );
+      if (thirdGame) {
+        if ([thirdGame.winner].flat().includes(franchiseId)) return 3;
+        if ([thirdGame.loser].flat().includes(franchiseId))  return 4;
+      }
+
+      // Made playoffs (appeared in any game)
+      if (arr.some(g => [...[g.winner].flat(), ...[g.loser].flat()].includes(franchiseId))) {
+        return 5;
+      }
+    } catch(e) {
+      console.warn("[MFL] getPlayoffFinish:", e.message);
+    }
+    return null;
   }
 
-  // ── Full import for a user ─────────────────────────────
-
+  // ── Full import ────────────────────────────────────────
   /**
-   * Find all leagues for an MFL username and shape them into
-   * the gmd/users/{username}/leagues/ schema.
-   *
-   * Returns: { leagueKey: leagueData } map ready for GMDB.saveLeagues()
+   * Authenticate the user and import all their leagues.
+   * Returns { mflUsername, leagues: { leagueKey: leagueData } }
    */
-  async function importUserLeagues(mflUsername, years = null) {
-    const currentYear = new Date().getFullYear();
-    const searchYears = years || [
-      currentYear.toString(),
-      (currentYear - 1).toString()
-    ];
+  async function importUserLeagues(email, password) {
+    if (!email?.trim()) throw new Error("Enter your MFL email address.");
+    if (!password?.trim()) throw new Error("Enter your MFL password.");
 
-    // Find leagues for this username
-    const foundLeagues = [];
-    for (const yr of searchYears) {
-      const leagues = await searchLeaguesByUser(mflUsername, yr);
-      for (const l of leagues) foundLeagues.push({ ...l, year: yr });
+    // Step 1: Login
+    let cookieValue;
+    try {
+      cookieValue = await login(email.trim(), password.trim());
+    } catch(e) {
+      throw new Error(`MFL Login: ${e.message}`);
     }
 
-    if (foundLeagues.length === 0) {
-      throw new Error(`No MFL leagues found for username "${mflUsername}".`);
+    // Step 2: Get all leagues
+    const myLeagues = await getMyLeagues(cookieValue);
+    if (!myLeagues.length) {
+      throw new Error("No MFL leagues found for this account. Make sure you have leagues for the current or prior season.");
     }
 
     const leaguesMap = {};
 
-    for (const league of foundLeagues) {
-      const { leagueId, year } = league;
+    // Step 3: For each league get details + standings + finish
+    for (const { leagueId, leagueName, franchiseId, year } of myLeagues) {
       try {
-        // Get standings + franchises in parallel
-        const [standings, franchises, championFranchiseId] = await Promise.all([
-          getStandings(leagueId, year),
-          getFranchises(leagueId, year),
-          getChampionFranchiseId(leagueId, year)
+        const [leagueData, standings] = await Promise.all([
+          getLeague(leagueId, year, cookieValue),
+          getStandings(leagueId, year, cookieValue)
         ]);
 
-        // Find MY franchise (by owner name match)
-        const myFranchise = franchises.find(f =>
-          (f.owner_name || f.ownedBy || "").toLowerCase() === mflUsername.toLowerCase() ||
-          (f.name || "").toLowerCase().includes(mflUsername.toLowerCase())
-        );
+        const myStanding = standings.find(s => s.franchiseId === franchiseId);
+        const rank       = myStanding?.rank || null;
+        const finish     = await getPlayoffFinish(leagueId, year, franchiseId, cookieValue);
 
-        if (!myFranchise) continue;
+        // Get team name from league franchises
+        const franchises = leagueData?.franchises?.franchise;
+        const franchiseArr = franchises
+          ? (Array.isArray(franchises) ? franchises : [franchises])
+          : [];
+        const myFranchise = franchiseArr.find(f => f.id === franchiseId);
+        const teamName    = myFranchise?.name || "My Team";
+        const isComm      = myFranchise?.owner_name?.toLowerCase() === email.toLowerCase()
+                         || myFranchise?.abbrev === "COMMISH";
 
-        const myStanding = standings.find(s => s.franchiseId === myFranchise.id);
-        const isChampion = myFranchise.id === championFranchiseId;
-        const rank = myStanding?.rank || null;
-
-        // League type detection from league name/settings heuristic
-        const leagueDetail = await getLeague(leagueId, year);
-        const leagueType   = _detectLeagueType(leagueDetail);
+        const leagueType = _detectLeagueType(leagueData, leagueName);
 
         const key = `mfl_${year}_${leagueId}`;
         leaguesMap[key] = {
-          platform:      "mfl",
+          platform:       "mfl",
           leagueId,
-          leagueName:    league.leagueName,
-          season:        year,
+          franchiseId,
+          leagueName,
+          season:         year,
           leagueType,
-          totalTeams:    franchises.length,
-          teamName:      myFranchise.name   || "My Team",
-          wins:          myStanding?.wins    || 0,
-          losses:        myStanding?.losses  || 0,
-          ties:          myStanding?.ties    || 0,
-          pointsFor:     myStanding?.ptsFor  || 0,
-          pointsAgainst: myStanding?.ptsAgainst || 0,
-          standing:      rank,
-          isChampion:    isChampion,
-          playoffResult: _mapPlayoffResult(isChampion, rank)
+          totalTeams:     franchiseArr.length || 12,
+          teamName,
+          isCommissioner: isComm,
+          wins:           myStanding?.wins   || 0,
+          losses:         myStanding?.losses || 0,
+          ties:           myStanding?.ties   || 0,
+          pointsFor:      myStanding?.ptsFor || 0,
+          pointsAgainst:  myStanding?.ptsAgainst || 0,
+          standing:       rank,
+          playoffFinish:  finish,
+          isChampion:     finish === 1,
+          playoffResult:  _finishLabel(finish)
         };
-      } catch (err) {
-        console.warn(`[MFL] Skipping league ${leagueId} (${year}):`, err.message);
+      } catch(e) {
+        console.warn(`[MFL] Skipping league ${leagueId} (${year}):`, e.message);
       }
     }
 
-    return {
-      mflUsername,
-      leagues: leaguesMap
-    };
+    return { mflUsername: email, leagues: leaguesMap };
   }
 
-  // ── Type/result helpers ────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────
 
-  function _detectLeagueType(leagueData) {
-    if (!leagueData) return "redraft";
-    const name = (leagueData.name || "").toLowerCase();
-    const keeperType = leagueData.keeperType || "";
-    if (keeperType === "unlimited" || name.includes("dynasty")) return "dynasty";
-    if (keeperType || name.includes("keeper"))                   return "keeper";
+  function _detectLeagueType(leagueData, name = "") {
+    const keeperType = leagueData?.keeperType || leagueData?.keeper_type || "";
+    const lname = (name || leagueData?.name || "").toLowerCase();
+    if (keeperType === "unlimited" || lname.includes("dynasty")) return "dynasty";
+    if (keeperType || lname.includes("keeper"))                   return "keeper";
     return "redraft";
   }
 
-  function _mapPlayoffResult(isChamp, rank) {
-    if (isChamp)  return "champion";
-    if (rank === 2) return "finalist";
-    if (rank <= 4)  return "semifinal";
-    return null;
+  function _finishLabel(finish) {
+    return { 1:"champion", 2:"finalist", 3:"third", 4:"fourth" }[finish] || null;
   }
 
   // ── Public API ─────────────────────────────────────────
   return {
-    searchLeaguesByUser,
+    login,
+    getMyLeagues,
     getLeague,
-    getFranchises,
-    getRosters,
     getStandings,
-    getResults,
-    getPlayoffBracket,
-    getChampionFranchiseId,
+    getPlayoffResults,
+    getPlayoffFinish,
     importUserLeagues
   };
 

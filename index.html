@@ -124,8 +124,9 @@
           </div>
         </div>
         <div class="platform-body">
-          <input type="text" id="mfl-username-input" placeholder="Your MFL username" />
-          <input type="text" id="mfl-league-id-input" placeholder="League ID (optional, speeds up search)" />
+          <input type="email" id="mfl-email-input" placeholder="Your MFL email address" autocomplete="email" />
+          <input type="password" id="mfl-password-input" placeholder="Your MFL password" autocomplete="current-password" />
+          <span class="field-hint">MFL requires your login credentials to find your leagues. Your password is only used to fetch your league list and is never stored.</span>
           <button class="btn-link-platform" id="mfl-link-btn">Find My Leagues</button>
         </div>
         <div id="mfl-leagues-preview" class="leagues-preview hidden"></div>
