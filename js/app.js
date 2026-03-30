@@ -166,23 +166,31 @@ document.getElementById("sleeper-link-btn")?.addEventListener("click", async () 
 
 // ── Onboarding: MFL link ───────────────────────────────────
 document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
-  const mflUsername = document.getElementById("mfl-username-input").value.trim();
+  const email    = document.getElementById("mfl-email-input")?.value.trim();
+  const password = document.getElementById("mfl-password-input")?.value.trim();
   const statusEl = document.getElementById("mfl-status");
   const btn      = document.getElementById("mfl-link-btn");
   const profile  = Auth.getCurrentProfile();
   if (!profile) return;
 
+  if (!email || !password) {
+    statusEl.textContent = "Enter your MFL email and password.";
+    statusEl.classList.add("status-error");
+    return;
+  }
+
   btn.disabled = true;
-  btn.textContent = "Searching...";
-  statusEl.textContent = "Looking up leagues...";
+  btn.textContent = "Connecting…";
+  statusEl.textContent = "Logging into MFL…";
+  statusEl.classList.remove("status-connected", "status-error");
 
   try {
-    const result = await Profile.linkMFL(profile.username, mflUsername);
+    const result = await Profile.linkMFL(profile.username, email, password);
     statusEl.textContent = `✓ Connected — ${Object.keys(result.leagues).length} leagues`;
     statusEl.classList.add("status-connected");
     Profile.renderLeaguePreview("mfl-leagues-preview", result.leagues);
     document.getElementById("onboarding-save-btn").disabled = false;
-    btn.textContent = "Update";
+    btn.textContent = "Reconnect";
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.add("status-error");
@@ -261,12 +269,14 @@ document.getElementById("relink-sleeper-btn")?.addEventListener("click", async (
   }
 });
 document.getElementById("relink-mfl-btn")?.addEventListener("click", async () => {
-  const username = prompt("Enter your MFL username:");
-  if (!username) return;
+  const email    = prompt("Enter your MFL email address:");
+  if (!email) return;
+  const password = prompt("Enter your MFL password:");
+  if (!password) return;
   const profile = Auth.getCurrentProfile();
   try {
     setLoading(true, "Relinking MFL...");
-    const result = await Profile.linkMFL(profile.username, username);
+    const result = await Profile.linkMFL(profile.username, email, password);
     setLoading(false);
     showToast(`MFL relinked — ${Object.keys(result.leagues).length} leagues`);
     const updated = await Auth.refreshProfile();

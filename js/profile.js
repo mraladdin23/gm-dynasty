@@ -31,13 +31,17 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, mflUsername) {
-    if (!mflUsername?.trim()) throw new Error("Enter your MFL username.");
-    const result = await MFLAPI.importUserLeagues(mflUsername.trim());
+  async function linkMFL(gmdUsername, email, password) {
+    if (!email?.trim())    throw new Error("Enter your MFL email address.");
+    if (!password?.trim()) throw new Error("Enter your MFL password.");
+    const result = await MFLAPI.importUserLeagues(email.trim(), password.trim());
     if (Object.keys(result.leagues).length === 0) {
-      throw new Error(`No MFL leagues found for "${mflUsername}".`);
+      throw new Error("No MFL leagues found for this account.");
     }
-    await GMDB.linkPlatform(gmdUsername, "mfl", { mflUsername: result.mflUsername });
+    await GMDB.linkPlatform(gmdUsername, "mfl", {
+      mflEmail: email.trim(),
+      mflUsername: email.trim()
+    });
     await GMDB.saveLeagues(gmdUsername, result.leagues);
     await GMDB.recomputeStats(gmdUsername);
     return result;
