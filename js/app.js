@@ -296,6 +296,14 @@ document.getElementById("league-groups-btn")?.addEventListener("click", () => {
   LeagueGroups.showGroupManager(entries);
 });
 
+// ── League detail panel close ──────────────────────────────
+document.getElementById("league-detail-close")?.addEventListener("click", () => {
+  Profile.closeLeagueDetail();
+});
+document.getElementById("league-detail-backdrop")?.addEventListener("click", () => {
+  Profile.closeLeagueDetail();
+});
+
 // ── Chat panel close ───────────────────────────────────────
 document.getElementById("chat-panel-close")?.addEventListener("click", () => {
   Profile.closeLeagueChat();

@@ -322,6 +322,13 @@ const Profile = (() => {
   function _wireCardEvents(container) {
     container.querySelectorAll(".league-card").forEach(card => {
       const key = card.dataset.key;
+
+      // Click card body → open detail panel
+      card.addEventListener("click", e => {
+        if (e.target.closest(".league-options-btn") || e.target.closest(".league-chat-btn")) return;
+        openLeagueDetail(key);
+      });
+
       // Drag to reorder
       card.draggable = true;
       card.addEventListener("dragstart", e => LeagueGroups.onLeagueDragStart(e, key));
@@ -329,12 +336,14 @@ const Profile = (() => {
       card.addEventListener("dragover",  e => LeagueGroups.onLeagueDragOver(e));
       card.addEventListener("dragleave", e => LeagueGroups.onLeagueDragLeave(e));
       card.addEventListener("drop",      e => LeagueGroups.onLeagueDrop(e, key));
+
       // Chat button
       card.querySelector(".league-chat-btn")?.addEventListener("click", e => {
         e.stopPropagation();
         openLeagueChat(key, _allLeagues[key]?.leagueName);
       });
     });
+
     container.querySelectorAll(".league-options-btn").forEach(btn => {
       btn.addEventListener("click", e => {
         e.stopPropagation();
@@ -465,23 +474,188 @@ const Profile = (() => {
       .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   }
 
-  // ── League chat ────────────────────────────────────────────
+  // ── League detail panel ────────────────────────────────────
+
+  let _detailLeagueKey = null;
+  let _detailActiveTab = "overview";
+
+  function openLeagueDetail(leagueKey) {
+    const league = _allLeagues[leagueKey];
+    if (!league) return;
+    _detailLeagueKey = leagueKey;
+
+    // Header
+    document.getElementById("detail-league-name").textContent = league.leagueName;
+    document.getElementById("detail-league-meta").innerHTML = `
+      <span class="league-platform-tag league-platform-tag--${league.platform}">${(league.platform||"").toUpperCase()}</span>
+      <span style="color:var(--color-text-dim);font-size:.82rem;">${league.season} · ${league.leagueType} · ${league.totalTeams} teams</span>
+      ${league.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
+    `;
+
+    // Show panel
+    document.getElementById("league-detail-panel").classList.remove("hidden");
+    document.getElementById("league-detail-backdrop").classList.remove("hidden");
+
+    // Wire tabs
+    document.querySelectorAll(".detail-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".detail-tab").forEach(t => t.classList.remove("active"));
+        document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
+        tab.classList.add("active");
+        const name = tab.dataset.dtab;
+        document.getElementById(`dtab-${name}`)?.classList.add("active");
+        _detailActiveTab = name;
+        _renderDetailTab(name, leagueKey, league);
+      });
+    });
+
+    // Render default tab
+    _renderDetailTab("overview", leagueKey, league);
+  }
+
+  function closeLeagueDetail() {
+    document.getElementById("league-detail-panel")?.classList.add("hidden");
+    document.getElementById("league-detail-backdrop")?.classList.add("hidden");
+    DLRChat.unsubscribe();
+    _detailLeagueKey = null;
+  }
+
+  function _renderDetailTab(tab, leagueKey, league) {
+    const el = document.getElementById(`dtab-${tab}`);
+    if (!el) return;
+
+    if (tab === "overview")   _renderOverview(el, leagueKey, league);
+    if (tab === "history")    _renderHistory(el, leagueKey, league);
+    if (tab === "standings")  _renderStandings(el, leagueKey, league);
+    if (tab === "chat")       _renderChat(el, leagueKey, league);
+  }
+
+  function _renderOverview(el, leagueKey, league) {
+    const finish      = league.playoffFinish;
+    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 5:"Made Playoffs" }[finish] || "Missed Playoffs";
+    const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";
+
+    el.innerHTML = `
+      <div class="detail-stats-grid">
+        <div class="detail-stat">
+          <div class="detail-stat-val">${league.wins || 0}–${league.losses || 0}${league.ties ? `–${league.ties}` : ""}</div>
+          <div class="detail-stat-lbl">Record</div>
+        </div>
+        <div class="detail-stat">
+          <div class="detail-stat-val">#${league.standing || "—"}</div>
+          <div class="detail-stat-lbl">Standing</div>
+        </div>
+        <div class="detail-stat">
+          <div class="detail-stat-val">${league.pointsFor ? parseFloat(league.pointsFor).toFixed(1) : "—"}</div>
+          <div class="detail-stat-lbl">Points For</div>
+        </div>
+        <div class="detail-stat">
+          <div class="detail-stat-val">${league.pointsAgainst ? parseFloat(league.pointsAgainst).toFixed(1) : "—"}</div>
+          <div class="detail-stat-lbl">Points Against</div>
+        </div>
+      </div>
+      <div class="detail-finish" style="border-color:${finishColor};color:${finishColor};">
+        ${finishLabel}
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">Team Name</span>
+        <span>${_escHtml(league.teamName || "—")}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">League Type</span>
+        <span style="text-transform:capitalize;">${league.leagueType || "redraft"}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">Commissioner</span>
+        <span>${league.isCommissioner ? "👑 Yes" : "No"}</span>
+      </div>
+      ${league.franchiseId ? `
+      <div class="detail-info-row">
+        <span class="detail-info-label">Franchise ID</span>
+        <span style="font-size:.78rem;color:var(--color-text-dim);">${league.franchiseId}</span>
+      </div>` : ""}
+    `;
+  }
+
+  function _renderHistory(el, leagueKey, league) {
+    // Find all seasons of same franchise (same franchiseId)
+    const franchiseId = league.franchiseId || league.leagueId;
+    const allSeasons  = Object.entries(_allLeagues)
+      .filter(([, l]) => l.franchiseId === franchiseId || l.leagueId === league.leagueId)
+      .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
+
+    if (allSeasons.length <= 1) {
+      el.innerHTML = `<p class="empty-state">Only one season found for this league. Re-import to pull full history via league lineage.</p>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="detail-history-list">
+        ${allSeasons.map(([key, s]) => {
+          const finish = s.playoffFinish;
+          const icon   = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish ? "🏅" : "");
+          const isCurrent = key === leagueKey;
+          return `
+            <div class="detail-history-row ${isCurrent ? "detail-history-row--current" : ""}">
+              <span class="detail-history-season">${s.season}</span>
+              <span class="detail-history-team">${_escHtml(s.teamName || "")}</span>
+              <span class="detail-history-record">${s.wins}–${s.losses}</span>
+              <span class="detail-history-finish">${icon} ${s.playoffResult || "—"}</span>
+            </div>`;
+        }).join("")}
+      </div>
+      <div class="detail-history-summary">
+        <span>${allSeasons.length} seasons</span>
+        <span>·</span>
+        <span>${allSeasons.filter(([,s]) => s.playoffFinish === 1).length} titles</span>
+        <span>·</span>
+        <span>${(allSeasons.reduce((sum,[,s])=>sum+(s.wins||0),0))}W–${allSeasons.reduce((sum,[,s])=>sum+(s.losses||0),0)}L all-time</span>
+      </div>
+    `;
+  }
+
+  async function _renderStandings(el, leagueKey, league) {
+    el.innerHTML = `<p class="empty-state" style="padding:var(--space-6);">Loading standings…</p>`;
+    try {
+      const standings = await SleeperAPI.getStandings(league.leagueId);
+      if (!standings.length) {
+        el.innerHTML = `<p class="empty-state">No standings available.</p>`;
+        return;
+      }
+      el.innerHTML = `
+        <div class="detail-standings">
+          <div class="detail-standings-header">
+            <span>#</span><span>Team</span><span>W–L</span><span>PF</span>
+          </div>
+          ${standings.map(s => `
+            <div class="detail-standings-row ${s.userId === league.ownerId ? "detail-standings-row--me" : ""}">
+              <span class="detail-rank">${s.rank}</span>
+              <span class="detail-team-name">${_escHtml(s.teamName)}</span>
+              <span class="detail-record">${s.wins}–${s.losses}</span>
+              <span class="detail-pts">${s.ptsFor.toFixed(1)}</span>
+            </div>`).join("")}
+        </div>`;
+    } catch(err) {
+      el.innerHTML = `<p class="empty-state">Could not load standings: ${err.message}</p>`;
+    }
+  }
+
+  function _renderChat(el, leagueKey, league) {
+    // Chat is rendered in the dtab-chat container which has chat-panel-body inside
+    DLRChat.init(leagueKey, league.leagueName);
+  }
 
   function openLeagueChat(leagueKey, leagueName) {
-    const panel    = document.getElementById("chat-panel");
-    const backdrop = document.getElementById("chat-panel-backdrop");
-    const title    = document.getElementById("chat-panel-title");
-    if (!panel) return;
-    if (title) title.textContent = leagueName || "League Chat";
-    panel.classList.remove("hidden");
-    if (backdrop) backdrop.classList.remove("hidden");
-    DLRChat.init(leagueKey, leagueName);
+    // Now opens league detail panel on chat tab instead of separate panel
+    openLeagueDetail(leagueKey);
+    // Switch to chat tab
+    setTimeout(() => {
+      document.querySelector('[data-dtab="chat"]')?.click();
+    }, 50);
   }
 
   function closeLeagueChat() {
-    document.getElementById("chat-panel")?.classList.add("hidden");
-    document.getElementById("chat-panel-backdrop")?.classList.add("hidden");
-    DLRChat.unsubscribe();
+    closeLeagueDetail();
   }
 
   // ── Public API ─────────────────────────────────────────
@@ -496,6 +670,8 @@ const Profile = (() => {
     openLeagueLabelModal,
     closeLabelModal,
     initArchivedToggle,
+    openLeagueDetail,
+    closeLeagueDetail,
     openLeagueChat,
     closeLeagueChat
   };
