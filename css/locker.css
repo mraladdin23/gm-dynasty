@@ -4,8 +4,6 @@
 
 /* ── Welcome screen ───────────────────────────────────── */
 #welcome-screen {
-  min-height: 100vh;
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-4) var(--space-6);
@@ -127,10 +125,6 @@
 
 /* ── Onboarding ───────────────────────────────────────── */
 #onboarding-screen {
-  min-height: 100vh;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding: var(--space-10) var(--space-6);
   background:
     radial-gradient(ellipse 60% 40% at 50% 0%, rgba(240,180,41,.08) 0%, transparent 60%),
