@@ -30,6 +30,7 @@ const AppState = {
   showApp(profile) {
     AppState.currentProfile = profile;
     Profile.renderLocker(profile);
+    Profile.initArchivedToggle();
     AppState.showScreen("app-screen");
     setLoading(false);
   }
@@ -216,6 +217,107 @@ document.querySelectorAll(".nav-link").forEach(link => {
     document.getElementById(`view-${view}`)?.classList.add("active");
     AppState.currentView = view;
   });
+});
+
+// ── Edit profile modal ─────────────────────────────────────
+document.getElementById("edit-profile-btn")?.addEventListener("click", () => {
+  const profile = Auth.getCurrentProfile();
+  if (profile) Profile.openEditProfileModal(profile);
+});
+document.getElementById("edit-profile-close")?.addEventListener("click", () => {
+  Profile.closeEditProfileModal();
+});
+document.getElementById("edit-profile-cancel")?.addEventListener("click", () => {
+  Profile.closeEditProfileModal();
+});
+document.getElementById("edit-profile-save")?.addEventListener("click", async () => {
+  const profile = Auth.getCurrentProfile();
+  if (!profile) return;
+  try {
+    await Profile.saveProfileEdits(profile.username);
+    await Auth.refreshProfile();
+    showToast("Profile saved ✓");
+  } catch (err) {
+    showToast("Failed to save profile", "error");
+  }
+});
+
+// Relink platform buttons inside edit profile modal
+document.getElementById("relink-sleeper-btn")?.addEventListener("click", async () => {
+  const username = prompt("Enter your Sleeper username:");
+  if (!username) return;
+  const profile = Auth.getCurrentProfile();
+  try {
+    setLoading(true, "Relinking Sleeper...");
+    const result = await Profile.linkSleeper(profile.username, username);
+    setLoading(false);
+    showToast(`Sleeper relinked — ${Object.keys(result.leagues).length} leagues`);
+    const updated = await Auth.refreshProfile();
+    Profile.renderLocker(updated);
+    Profile.openEditProfileModal(updated);
+  } catch (err) {
+    setLoading(false);
+    showToast(err.message, "error");
+  }
+});
+document.getElementById("relink-mfl-btn")?.addEventListener("click", async () => {
+  const username = prompt("Enter your MFL username:");
+  if (!username) return;
+  const profile = Auth.getCurrentProfile();
+  try {
+    setLoading(true, "Relinking MFL...");
+    const result = await Profile.linkMFL(profile.username, username);
+    setLoading(false);
+    showToast(`MFL relinked — ${Object.keys(result.leagues).length} leagues`);
+    const updated = await Auth.refreshProfile();
+    Profile.renderLocker(updated);
+    Profile.openEditProfileModal(updated);
+  } catch (err) {
+    setLoading(false);
+    showToast(err.message, "error");
+  }
+});
+
+// ── Manage leagues (go to onboarding to re-import) ────────
+document.getElementById("manage-leagues-btn")?.addEventListener("click", () => {
+  AppState.showOnboarding();
+});
+
+// ── Groups manager ─────────────────────────────────────────
+document.getElementById("add-league-btn")?.addEventListener("click", () => {
+  AppState.showOnboarding();
+});
+
+// ── League groups button ───────────────────────────────────
+document.getElementById("league-groups-btn")?.addEventListener("click", () => {
+  const profile = Auth.getCurrentProfile();
+  if (!profile?.leagues) return;
+  const entries = Object.entries(profile.leagues).map(([key, league]) => ({ key, league }));
+  LeagueGroups.showGroupManager(entries);
+});
+
+// ── Chat panel close ───────────────────────────────────────
+document.getElementById("chat-panel-close")?.addEventListener("click", () => {
+  Profile.closeLeagueChat();
+});
+document.getElementById("chat-panel-backdrop")?.addEventListener("click", () => {
+  Profile.closeLeagueChat();
+});
+
+// ── League label modal close ───────────────────────────────
+document.getElementById("label-modal-close")?.addEventListener("click", () => {
+  Profile.closeLabelModal();
+});
+document.getElementById("label-modal-cancel")?.addEventListener("click", () => {
+  Profile.closeLabelModal();
+});
+
+// Close modals on overlay click
+document.getElementById("edit-profile-modal")?.addEventListener("click", e => {
+  if (e.target === e.currentTarget) Profile.closeEditProfileModal();
+});
+document.getElementById("league-label-modal")?.addEventListener("click", e => {
+  if (e.target === e.currentTarget) Profile.closeLabelModal();
 });
 
 // ── Logout ─────────────────────────────────────────────────
