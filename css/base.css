@@ -92,8 +92,13 @@ img { max-width: 100%; display: block; }
 .screen {
   display: none;
   min-height: 100vh;
+  width: 100%;
+  position: relative;
 }
-.screen.active { display: block; }
+.screen.active {
+  display: flex;
+  flex-direction: column;
+}
 
 /* ── App views ────────────────────────────────────────── */
 .app-view {
