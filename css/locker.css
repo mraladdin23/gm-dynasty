@@ -1606,3 +1606,26 @@ select option { background: var(--color-bg-2); }
   text-align: center;
 }
 
+
+/* ── Detail panel season selector ────────────────────── */
+.detail-season-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* ── Overview section titles ──────────────────────────── */
+.overview-section-title {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin: var(--space-4) 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.overview-section-title:first-child { margin-top: 0; }
+

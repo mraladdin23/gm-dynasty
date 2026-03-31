@@ -293,12 +293,14 @@ const Profile = (() => {
     const isArchived = _activeFilters.has("archived");
     const filtered = isArchived ? [] : _applyFranchiseFilter(active);
 
-    // Sort: pinned first, then by latest season desc
+    // Sort: pinned first, then alphabetical by league name
     filtered.sort((a, b) => {
       const aPinned = (_leagueMeta[a.latestKey]?.pinned) ? 1 : 0;
       const bPinned = (_leagueMeta[b.latestKey]?.pinned) ? 1 : 0;
       if (bPinned !== aPinned) return bPinned - aPinned;
-      return (_allLeagues[b.latestKey]?.season || "0").localeCompare(_allLeagues[a.latestKey]?.season || "0");
+      const aName = (_allLeagues[a.latestKey]?.leagueName || "").toLowerCase();
+      const bName = (_allLeagues[b.latestKey]?.leagueName || "").toLowerCase();
+      return aName.localeCompare(bName);
     });
 
     if (isArchived) {
@@ -596,26 +598,55 @@ const Profile = (() => {
   // ── League detail panel ────────────────────────────────────
 
   let _detailLeagueKey = null;
-  let _detailActiveTab = "overview";
+  let _detailLeague    = null;
 
   function openLeagueDetail(leagueKey) {
     const league = _allLeagues[leagueKey];
     if (!league) return;
+
+    // Find all seasons of this franchise for the season selector
+    const franchiseId = league.franchiseId || league.leagueId;
+    const franchiseSeasons = Object.entries(_allLeagues)
+      .filter(([, l]) => (l.franchiseId || l.leagueId) === franchiseId)
+      .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
+
     _detailLeagueKey = leagueKey;
+    _detailLeague    = league;
+
+    // Reset DLRStandings fully so no state bleeds between cards
+    DLRStandings.reset();
 
     // Header
     document.getElementById("detail-league-name").textContent = league.leagueName;
     document.getElementById("detail-league-meta").innerHTML = `
       <span class="league-platform-tag league-platform-tag--${league.platform}">${(league.platform||"").toUpperCase()}</span>
-      <span style="color:var(--color-text-dim);font-size:.82rem;">${league.season} · ${league.leagueType} · ${league.totalTeams} teams</span>
+      <span style="color:var(--color-text-dim);font-size:.82rem;">${league.leagueType} · ${league.totalTeams} teams</span>
       ${league.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
+
+    // Season selector in header (shared across all tabs)
+    const seasonSel = document.getElementById("detail-season-selector");
+    if (seasonSel) {
+      if (franchiseSeasons.length > 1) {
+        seasonSel.style.display = "";
+        seasonSel.innerHTML = franchiseSeasons.map(([k, l]) =>
+          `<button class="season-pill ${k === leagueKey ? "season-pill--current" : ""}"
+            data-key="${k}" onclick="Profile.switchDetailSeason('${k}')">${l.season}</button>`
+        ).join("");
+      } else {
+        seasonSel.style.display = "none";
+      }
+    }
 
     // Show panel
     document.getElementById("league-detail-panel").classList.remove("hidden");
     document.getElementById("league-detail-backdrop").classList.remove("hidden");
 
-    // Wire tabs
+    // Re-wire tab clicks (clone to remove stale listeners)
+    document.querySelectorAll(".detail-tab").forEach(tab => {
+      const fresh = tab.cloneNode(true);
+      tab.parentNode.replaceChild(fresh, tab);
+    });
     document.querySelectorAll(".detail-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         document.querySelectorAll(".detail-tab").forEach(t => t.classList.remove("active"));
@@ -623,20 +654,46 @@ const Profile = (() => {
         tab.classList.add("active");
         const name = tab.dataset.dtab;
         document.getElementById(`dtab-${name}`)?.classList.add("active");
-        _detailActiveTab = name;
-        _renderDetailTab(name, leagueKey, league);
+        _renderDetailTab(name, _detailLeagueKey, _detailLeague);
       });
     });
 
-    // Render default tab
+    // Reset to overview tab
+    document.querySelectorAll(".detail-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
+    document.querySelector('[data-dtab="overview"]')?.classList.add("active");
+    document.getElementById("dtab-overview")?.classList.add("active");
     _renderDetailTab("overview", leagueKey, league);
+  }
+
+  function switchDetailSeason(newKey) {
+    const newLeague = _allLeagues[newKey];
+    if (!newLeague) return;
+    // Update active pill
+    document.querySelectorAll("#detail-season-selector .season-pill").forEach(p => {
+      p.classList.toggle("season-pill--current", p.dataset.key === newKey);
+    });
+    // Update header season info
+    document.getElementById("detail-league-meta").innerHTML = `
+      <span class="league-platform-tag league-platform-tag--${newLeague.platform}">${(newLeague.platform||"").toUpperCase()}</span>
+      <span style="color:var(--color-text-dim);font-size:.82rem;">${newLeague.leagueType} · ${newLeague.totalTeams} teams</span>
+      ${newLeague.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
+    `;
+    _detailLeagueKey = newKey;
+    _detailLeague    = newLeague;
+    // Re-render current active tab for the new season
+    const activeTab = document.querySelector(".detail-tab.active")?.dataset.dtab || "overview";
+    DLRStandings.reset();
+    _renderDetailTab(activeTab, newKey, newLeague);
   }
 
   function closeLeagueDetail() {
     document.getElementById("league-detail-panel")?.classList.add("hidden");
     document.getElementById("league-detail-backdrop")?.classList.add("hidden");
     DLRChat.unsubscribe();
+    DLRStandings.reset();
     _detailLeagueKey = null;
+    _detailLeague    = null;
   }
 
   function _renderDetailTab(tab, leagueKey, league) {
@@ -644,7 +701,7 @@ const Profile = (() => {
     if (!el) return;
     if (tab === "overview")   _renderOverview(el, leagueKey, league);
     if (tab === "history")    _renderHistory(el, leagueKey, league);
-    if (tab === "standings")  DLRStandings.init(league.leagueId, league);
+    if (tab === "standings")  DLRStandings.init(league.leagueId, league.platform);
     if (tab === "matchups")   DLRStandings.initMatchups();
     if (tab === "playoffs")   DLRStandings.initPlayoffs();
     if (tab === "chat")       _renderChat(el, leagueKey, league);
@@ -652,10 +709,24 @@ const Profile = (() => {
 
   function _renderOverview(el, leagueKey, league) {
     const finish      = league.playoffFinish;
-    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 5:"Made Playoffs" }[finish] || "Missed Playoffs";
+    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 5:"5th Place", 6:"6th Place", 7:"Made Playoffs" }[finish] || (league.status === "complete" ? "Missed Playoffs" : "Season in Progress");
     const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";
 
+    // Franchise all-time stats
+    const franchiseId = league.franchiseId || league.leagueId;
+    const allSeasons  = Object.entries(_allLeagues)
+      .filter(([, l]) => (l.franchiseId || l.leagueId) === franchiseId)
+      .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
+
+    const totalWins   = allSeasons.reduce((s, [,l]) => s + (l.wins   || 0), 0);
+    const totalLosses = allSeasons.reduce((s, [,l]) => s + (l.losses || 0), 0);
+    const titles      = allSeasons.filter(([,l]) => l.playoffFinish === 1 || l.isChampion).length;
+    const runnerUps   = allSeasons.filter(([,l]) => l.playoffFinish === 2).length;
+    const hasHistory  = allSeasons.length > 1;
+
     el.innerHTML = `
+      <!-- This season -->
+      <div class="overview-section-title">This Season (${league.season})</div>
       <div class="detail-stats-grid">
         <div class="detail-stat">
           <div class="detail-stat-val">${league.wins || 0}–${league.losses || 0}${league.ties ? `–${league.ties}` : ""}</div>
@@ -674,9 +745,8 @@ const Profile = (() => {
           <div class="detail-stat-lbl">Points Against</div>
         </div>
       </div>
-      <div class="detail-finish" style="border-color:${finishColor};color:${finishColor};">
-        ${finishLabel}
-      </div>
+      <div class="detail-finish" style="border-color:${finishColor};color:${finishColor};">${finishLabel}</div>
+
       <div class="detail-info-row">
         <span class="detail-info-label">Team Name</span>
         <span>${_escHtml(league.teamName || "—")}</span>
@@ -689,10 +759,30 @@ const Profile = (() => {
         <span class="detail-info-label">Commissioner</span>
         <span>${league.isCommissioner ? "👑 Yes" : "No"}</span>
       </div>
-      ${league.franchiseId ? `
-      <div class="detail-info-row">
-        <span class="detail-info-label">Franchise ID</span>
-        <span style="font-size:.78rem;color:var(--color-text-dim);">${league.franchiseId}</span>
+
+      ${hasHistory ? `
+      <!-- Franchise history -->
+      <div class="overview-section-title" style="margin-top:var(--space-5);">
+        Franchise History
+        <span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim);">
+          ${totalWins}W–${totalLosses}L all-time
+          ${titles > 0 ? ` · 🏆×${titles}` : ""}
+          ${runnerUps > 0 ? ` · 🥈×${runnerUps}` : ""}
+        </span>
+      </div>
+      <div class="detail-history-list">
+        ${allSeasons.map(([key, s]) => {
+          const f    = s.playoffFinish;
+          const icon = { 1:"🏆", 2:"🥈", 3:"🥉" }[f] || (f && f <= 7 ? "🏅" : "");
+          return `
+            <div class="detail-history-row ${key === leagueKey ? "detail-history-row--current" : ""}"
+              onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;">
+              <span class="detail-history-season">${s.season}</span>
+              <span class="detail-history-team">${_escHtml(s.teamName || "")}</span>
+              <span class="detail-history-record">${s.wins}–${s.losses}</span>
+              <span class="detail-history-finish">${icon} ${s.playoffResult || (s.status === "complete" ? "—" : "active")}</span>
+            </div>`;
+        }).join("")}
       </div>` : ""}
     `;
   }
@@ -792,6 +882,7 @@ const Profile = (() => {
     initArchivedToggle,
     openLeagueDetail,
     closeLeagueDetail,
+    switchDetailSeason,
     openLeagueChat,
     closeLeagueChat
   };
