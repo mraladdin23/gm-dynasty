@@ -1342,3 +1342,267 @@ select option { background: var(--color-bg-2); }
   border-color: var(--color-border);
   color: var(--color-text-dim);
 }
+
+/* ── Filter bar multi-select ─────────────────────────── */
+.filter-tab.active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-color: var(--color-gold);
+}
+
+/* ── Standings table ─────────────────────────────────── */
+.standings-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: .82rem;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.btn-refresh {
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: .78rem;
+  font-family: var(--font-body);
+}
+.standings-table-wrap { overflow-x: auto; }
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+.standings-table thead th {
+  text-align: left;
+  padding: var(--space-2) var(--space-2);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  border-bottom: 1px solid var(--color-border);
+}
+.standings-table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+  transition: background var(--transition);
+}
+.standings-table tbody tr:hover { background: var(--color-surface); }
+.standings-table td {
+  padding: var(--space-2) var(--space-2);
+  vertical-align: middle;
+}
+.standings-row--playoff { background: rgba(240,180,41,.04); }
+.standings-rank { color: var(--color-text-dim); text-align: center; font-size: .75rem; }
+.standings-team-cell { display: flex; align-items: center; gap: var(--space-2); }
+.standings-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.st-av { width: 26px; height: 26px; border-radius: 50%; background: var(--color-surface); display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; color: var(--color-text-muted); flex-shrink: 0; }
+.bubble-tag { font-size: .65rem; color: var(--color-gold-dim); margin-left: var(--space-1); }
+.standings-win  { color: var(--color-green); font-weight: 700; text-align: center; }
+.standings-loss { color: var(--color-red);   text-align: center; }
+.standings-tie  { color: var(--color-text-dim); text-align: center; }
+.standings-num  { font-family: var(--font-mono); font-size: .78rem; text-align: right; }
+.standings-num.dim { color: var(--color-text-dim); }
+.standings-streak { font-family: var(--font-mono); font-size: .78rem; text-align: center; }
+.fw-700 { font-weight: 700; }
+.standings-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  margin-top: var(--space-3);
+}
+.legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+/* Season bar */
+.season-bar-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.season-bar-pills { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+
+/* ── Matchups ─────────────────────────────────────────── */
+.matchups-week-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+.matchups-week-label {
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.matchups-week-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.mu-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+  overflow: hidden;
+}
+.mu-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.mu-team { display: flex; align-items: center; gap: var(--space-2); font-size: .85rem; }
+.mu-team--right { flex-direction: row-reverse; text-align: right; }
+.mu-scores { display: flex; align-items: center; gap: var(--space-2); justify-content: center; }
+.mu-score { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+.mu-score--win  { color: var(--color-green); }
+.mu-score--lose { color: var(--color-text-dim); }
+.mu-dash { color: var(--color-text-dim); }
+.mu-detail { border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4); }
+.mu-detail.hidden { display: none; }
+.mu-no-detail { font-size: .75rem; color: var(--color-text-dim); text-align: center; padding: var(--space-2); }
+.mu-sbs-header {
+  display: grid;
+  grid-template-columns: 52px 1fr 42px 1fr 52px;
+  gap: var(--space-1);
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.mu-sbs-team { text-align: center; }
+.mu-sbs-pos  { text-align: center; }
+.mu-sbs-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 42px 1fr 52px;
+  gap: var(--space-1);
+  align-items: center;
+  padding: 3px 0;
+  font-size: .78rem;
+}
+.mu-sbs-row--bench { opacity: .6; }
+.mu-pts { font-family: var(--font-mono); font-size: .75rem; text-align: right; }
+.mu-pts--right { text-align: left; }
+.mu-pts--win { color: var(--color-green); font-weight: 700; }
+.mu-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; }
+.mu-name--left  { text-align: right; }
+.mu-name--right { text-align: left; }
+.mu-slot { font-size: .68rem; font-weight: 700; text-align: center; }
+.mu-bench-header {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.dim { color: var(--color-text-dim); }
+
+/* ── Bracket ──────────────────────────────────────────── */
+.bracket-wrap { padding: var(--space-2) 0; }
+.bracket-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  margin-bottom: var(--space-4);
+}
+.bracket-container {
+  display: flex;
+  gap: var(--space-5);
+  overflow-x: auto;
+  align-items: flex-start;
+  padding-bottom: var(--space-3);
+}
+.bracket-round { min-width: 180px; }
+.bracket-round-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-3);
+}
+.bracket-match-group { margin-bottom: var(--space-4); }
+.bracket-match-sublabel {
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1);
+}
+.bracket-match-sublabel.place-3 { color: #cd7f32; }
+.bracket-match-sublabel.place-5 { color: var(--color-text-muted); }
+.bracket-match {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.bracket-slot {
+  font-size: .82rem;
+  padding: var(--space-1) 0;
+}
+.bracket-slot--win  { color: var(--color-green); font-weight: 700; }
+.bracket-slot--lose { color: var(--color-text-dim); text-decoration: line-through; opacity: .6; }
+.bracket-vs { font-size: .65rem; color: var(--color-text-dim); margin: 2px 0; }
+.bracket-result { font-size: .68rem; color: var(--color-text-dim); margin-top: var(--space-1); }
+.bracket-winner { color: var(--color-green); font-weight: 600; }
+.seed-tag { font-size: .65rem; color: var(--color-text-dim); }
+.playoffs-pending {
+  text-align: center;
+  padding: var(--space-10) var(--space-4);
+  color: var(--color-text-dim);
+}
+.playoffs-icon  { font-size: 2.5rem; margin-bottom: var(--space-3); }
+.playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
+.playoffs-sub   { font-size: .85rem; }
+.draft-order-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.draft-order-title { font-size: .9rem; font-weight: 700; margin-bottom: var(--space-1); }
+.draft-order-sub { font-size: .75rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
+.draft-order-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-2); }
+.draft-order-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: .82rem;
+}
+.draft-pick { font-family: var(--font-mono); font-weight: 700; color: var(--color-gold); min-width: 36px; }
+.draft-team { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-maxpf { font-family: var(--font-mono); font-size: .72rem; color: var(--color-text-dim); }
+
+/* Loading/error states */
+.detail-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-4);
+  color: var(--color-text-dim);
+  justify-content: center;
+}
+.detail-error {
+  padding: var(--space-6);
+  color: var(--color-red);
+  text-align: center;
+}
+

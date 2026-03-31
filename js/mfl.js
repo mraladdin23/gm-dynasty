@@ -341,7 +341,7 @@ const MFLAPI = (() => {
         leaguesMap[key] = {
           platform:       "mfl",
           leagueId,
-          franchiseId,
+          franchiseId:    _mflFranchiseId(leagueData.name || leagueName),
           leagueName:     leagueData.name || leagueName,
           season:         year,
           leagueType,
@@ -366,7 +366,18 @@ const MFLAPI = (() => {
     return { mflUsername, leagues: leaguesMap };
   }
 
-  // ── Helpers ────────────────────────────────────────────
+  // ── MFL franchise linking by league name ─────────────────
+  // MFL doesn't have a prev_league_id chain like Sleeper.
+  // We group seasons of the same franchise by matching league name (normalized).
+  // The franchiseId = normalized name key so profile.js can group them.
+  function _mflFranchiseId(leagueName) {
+    return "mfl__" + (leagueName || "")
+      .toLowerCase()
+      .replace(/\b(20\d{2}|season\s*\d+|s\d+|year\s*\d+)\b/gi, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .trim();
+  }
 
   function _detectLeagueType(leagueData, name = "") {
     const keeperType = leagueData?.keeperType || leagueData?.keeper_type || "";
