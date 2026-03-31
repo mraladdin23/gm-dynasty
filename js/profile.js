@@ -290,10 +290,10 @@ const Profile = (() => {
     });
 
     // Apply multi-select filters
-    const isArchived = _activeFilters.has("archived");
-    const filtered = isArchived ? [] : _applyFranchiseFilter(active);
+    const showArchived = _activeFilters.has("archived");
+    const filtered = showArchived ? archived : _applyFranchiseFilter(active);
 
-    // Sort: pinned first, then alphabetical by league name
+    // Sort: pinned first, then alphabetical
     filtered.sort((a, b) => {
       const aPinned = (_leagueMeta[a.latestKey]?.pinned) ? 1 : 0;
       const bPinned = (_leagueMeta[b.latestKey]?.pinned) ? 1 : 0;
@@ -303,27 +303,15 @@ const Profile = (() => {
       return aName.localeCompare(bName);
     });
 
-    if (isArchived) {
-      grid.innerHTML = "";
-      if (archivedSec) archivedSec.classList.add("hidden");
-      if (archived.length === 0) {
-        grid.innerHTML = `<p class="empty-state">No archived leagues.</p>`;
-      } else {
-        grid.innerHTML = archived.map(f => _franchiseCardHTML(f)).join("");
-        _wireCardEvents(grid);
-      }
-      return;
-    }
-
     if (filtered.length === 0) {
-      grid.innerHTML = `<p class="empty-state">No leagues match this filter.</p>`;
+      grid.innerHTML = `<p class="empty-state">${showArchived ? "No archived leagues." : "No leagues match this filter."}</p>`;
     } else {
-      grid.innerHTML = filtered.map(f => _franchiseCardHTML(f)).join("");
+      grid.innerHTML = filtered.map(f => _franchiseCardHTML(f, showArchived)).join("");
       _wireCardEvents(grid);
     }
 
-    // Archived accordion
-    if (archived.length > 0) {
+    // Archived accordion — only show when NOT in archived filter mode
+    if (!showArchived && archived.length > 0) {
       if (archivedSec) archivedSec.classList.remove("hidden");
       if (archivedCount) archivedCount.textContent = `${archived.length}`;
       if (archivedGrid) {

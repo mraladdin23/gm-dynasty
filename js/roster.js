@@ -1,22 +1,24 @@
 // ─────────────────────────────────────────────────────────
 //  Dynasty Locker Room — Roster View
-//  Shows all team rosters for a league, live from Sleeper API.
-//  Includes player photos, positions, team affiliations.
-//  No salary data needed — works with any league type.
+//  - Starters + bench combined, grouped by position,
+//    ordered by Sleeper rank within each position group
+//  - IR and Taxi Squad shown separately
+//  - Click any player to open player card modal
 // ─────────────────────────────────────────────────────────
 
 const DLRRoster = (() => {
 
-  let _leagueId  = null;
-  let _platform  = "sleeper";
-  let _rosterData = null;   // { teams: [...], league, rosterSlots }
-  let _players    = {};     // Sleeper player lookup cache
+  let _leagueId   = null;
+  let _platform   = "sleeper";
+  let _rosterData = null;
+  let _players    = {};
   let _initToken  = 0;
-  let _filter     = "all";  // "all" | rosterId
+  let _filter     = "all";
 
+  const POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DEF"];
   const POS_COLOR = {
-    QB: "#b89ffe", RB: "#18e07a", WR: "#00d4ff",
-    TE: "#ffc94d", K: "#9ca3af", DEF: "#9ca3af"
+    QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
+    TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af"
   };
 
   // ── Init ─────────────────────────────────────────────────
@@ -34,7 +36,7 @@ const DLRRoster = (() => {
     if (_platform !== "sleeper") {
       el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
         <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
-        <div style="font-weight:600;">Rosters coming for MFL soon</div>
+        <div style="font-weight:600;">MFL rosters coming soon</div>
       </div>`;
       return;
     }
@@ -58,15 +60,17 @@ const DLRRoster = (() => {
 
   // ── Load data ─────────────────────────────────────────────
   async function _loadData(leagueId, token) {
+    const el = document.getElementById("dtab-roster");
+
+    // Load player DB first (may already be cached)
+    _players = await _getPlayers(el, token);
+    if (token !== _initToken) return;
+
     const [league, rosters, users] = await Promise.all([
       SleeperAPI.getLeague(leagueId),
       SleeperAPI.getRosters(leagueId),
       SleeperAPI.getLeagueUsers(leagueId)
     ]);
-    if (token !== _initToken) return;
-
-    // Load player database from cache
-    _players = await _getPlayers();
     if (token !== _initToken) return;
 
     const userMap = {};
@@ -75,38 +79,31 @@ const DLRRoster = (() => {
     const teams = (rosters || []).map(r => {
       const u = userMap[r.owner_id] || {};
       return {
-        roster_id:  r.roster_id,
-        owner_id:   r.owner_id,
-        teamName:   u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
-        username:   u.username || "",
-        avatar:     u.avatar || null,
-        players:    r.players || [],
-        starters:   r.starters || [],
-        reserve:    r.reserve || [],   // IR
-        taxi:       r.taxi || [],
-        wins:       r.settings?.wins   || 0,
-        losses:     r.settings?.losses || 0,
-        fpts:       (r.settings?.fpts  || 0) + (r.settings?.fpts_decimal || 0) / 100,
+        roster_id: r.roster_id,
+        owner_id:  r.owner_id,
+        teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
+        username:  u.username || "",
+        avatar:    u.avatar || null,
+        players:   r.players  || [],
+        reserve:   r.reserve  || [],
+        taxi:      r.taxi     || [],
+        wins:      r.settings?.wins   || 0,
+        losses:    r.settings?.losses || 0,
+        fpts:      (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100,
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    _rosterData = {
-      teams,
-      league,
-      rosterSlots: league.roster_positions || []
-    };
-
+    _rosterData = { teams, league };
     _render();
   }
 
-  async function _getPlayers() {
+  async function _getPlayers(el, token) {
     try {
       const cached = localStorage.getItem("dlr_players");
       if (cached) {
         const p = JSON.parse(cached);
         if (Object.keys(p).length > 100) return p;
       }
-      const el = document.getElementById("dtab-roster");
       if (el) el.innerHTML = _loadingHTML("Downloading player database…");
       const res  = await fetch("https://api.sleeper.app/v1/players/nfl");
       const data = await res.json();
@@ -121,11 +118,10 @@ const DLRRoster = (() => {
     if (!el || !_rosterData) return;
     const { teams } = _rosterData;
 
-    // Team selector
     const opts = [
       `<option value="all">All Teams (${teams.length})</option>`,
       ...teams.map(t =>
-        `<option value="${t.roster_id}" ${t.roster_id === _filter ? "selected" : ""}>${_esc(t.teamName)}</option>`
+        `<option value="${t.roster_id}" ${String(t.roster_id) === String(_filter) ? "selected" : ""}>${_esc(t.teamName)}</option>`
       )
     ].join("");
 
@@ -143,48 +139,79 @@ const DLRRoster = (() => {
   }
 
   function setFilter(val) {
-    _filter = isNaN(val) ? val : parseInt(val);
+    _filter = val === "all" ? "all" : parseInt(val);
     _applyFilter();
-    // Update select
-    const sel = document.querySelector(".roster-team-select");
-    if (sel) sel.value = val;
   }
 
   function _applyFilter() {
     document.querySelectorAll(".roster-team-card").forEach(card => {
       const rid = parseInt(card.dataset.rosterId);
-      const show = _filter === "all" || _filter === rid || _filter === String(rid);
+      const show = _filter === "all" || _filter === rid;
       card.style.display = show ? "" : "none";
     });
   }
 
+  // ── Team card ─────────────────────────────────────────────
   function _teamCardHTML(team) {
     const initial = (team.teamName || "?")[0].toUpperCase();
     const avatar  = team.avatar
       ? `<img src="https://sleepercdn.com/avatars/thumbs/${team.avatar}" class="roster-avatar" onerror="this.style.display='none'">`
       : `<div class="roster-avatar-placeholder">${initial}</div>`;
 
-    // Split players into starters, bench, IR, taxi
-    const starterSet = new Set(team.starters);
+    // Main roster = players minus reserve and taxi
     const reserveSet = new Set(team.reserve);
     const taxiSet    = new Set(team.taxi);
-    const bench      = team.players.filter(id =>
-      !starterSet.has(id) && !reserveSet.has(id) && !taxiSet.has(id)
-    );
+    const mainRoster = team.players.filter(id => !reserveSet.has(id) && !taxiSet.has(id));
 
-    const starterRows = team.starters
-      .filter(id => id && id !== "0")
-      .map(id => _playerRow(id, "starter"))
-      .join("");
-    const benchRows = bench
-      .map(id => _playerRow(id, "bench"))
-      .join("");
-    const irRows = team.reserve
-      .map(id => _playerRow(id, "ir"))
-      .join("");
-    const taxiRows = team.taxi
-      .map(id => _playerRow(id, "taxi"))
-      .join("");
+    // Group main roster by position, sorted by Sleeper rank within group
+    const byPos = {};
+    POS_ORDER.forEach(p => { byPos[p] = []; });
+    byPos["—"] = [];
+
+    mainRoster.forEach(id => {
+      const p   = _players[id] || {};
+      const pos = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
+      const grp = POS_ORDER.includes(pos) ? pos : "—";
+      byPos[grp].push({ id, player: p, rank: p.search_rank || p.rank || 9999 });
+    });
+
+    // Sort each group by rank
+    Object.values(byPos).forEach(arr => arr.sort((a, b) => a.rank - b.rank));
+
+    // Build position group sections
+    let rosterHTML = "";
+    for (const pos of [...POS_ORDER, "—"]) {
+      const group = byPos[pos];
+      if (!group.length) continue;
+      rosterHTML += `
+        <div class="roster-pos-group">
+          <div class="roster-pos-header" style="color:${POS_COLOR[pos] || "var(--color-text-dim)"}">
+            ${pos}
+            <span class="roster-pos-count">${group.length}</span>
+          </div>
+          ${group.map(({ id }) => _playerRowHTML(id)).join("")}
+        </div>`;
+    }
+
+    // IR
+    let irHTML = "";
+    if (team.reserve.length) {
+      irHTML = `
+        <div class="roster-special-section">
+          <div class="roster-special-label">🏥 Injured Reserve</div>
+          ${team.reserve.map(id => _playerRowHTML(id, "ir")).join("")}
+        </div>`;
+    }
+
+    // Taxi
+    let taxiHTML = "";
+    if (team.taxi.length) {
+      taxiHTML = `
+        <div class="roster-special-section">
+          <div class="roster-special-label">🚕 Taxi Squad</div>
+          ${team.taxi.map(id => _playerRowHTML(id, "taxi")).join("")}
+        </div>`;
+    }
 
     return `
       <div class="roster-team-card" data-roster-id="${team.roster_id}">
@@ -193,46 +220,34 @@ const DLRRoster = (() => {
             ${avatar}
             <div>
               <div class="roster-team-name">${_esc(team.teamName)}</div>
-              <div class="roster-team-record">${team.wins}–${team.losses} · ${team.fpts.toFixed(1)} PF</div>
+              <div class="roster-team-record">${team.wins}–${team.losses} · ${team.fpts.toFixed(1)} PF · ${team.players.length} players</div>
             </div>
           </div>
+          ${team.reserve.length || team.taxi.length ? `
           <div class="roster-team-counts">
-            <span class="roster-count-badge">${team.players.length} players</span>
-            ${team.reserve.length ? `<span class="roster-count-badge roster-count-badge--ir">🏥 ${team.reserve.length} IR</span>` : ""}
-            ${team.taxi.length ? `<span class="roster-count-badge roster-count-badge--taxi">🚕 ${team.taxi.length} Taxi</span>` : ""}
-          </div>
+            ${team.reserve.length ? `<span class="roster-count-badge roster-count-badge--ir">🏥 ${team.reserve.length}</span>` : ""}
+            ${team.taxi.length ? `<span class="roster-count-badge roster-count-badge--taxi">🚕 ${team.taxi.length}</span>` : ""}
+          </div>` : ""}
         </div>
-
-        ${starterRows ? `
-        <div class="roster-section-label">Starters</div>
-        <div class="roster-player-list">${starterRows}</div>` : ""}
-
-        ${benchRows ? `
-        <div class="roster-section-label">Bench</div>
-        <div class="roster-player-list">${benchRows}</div>` : ""}
-
-        ${irRows ? `
-        <div class="roster-section-label">IR 🏥</div>
-        <div class="roster-player-list">${irRows}</div>` : ""}
-
-        ${taxiRows ? `
-        <div class="roster-section-label">Taxi Squad 🚕</div>
-        <div class="roster-player-list">${taxiRows}</div>` : ""}
+        <div class="roster-body">
+          <div class="roster-positions">${rosterHTML}</div>
+          ${irHTML}${taxiHTML}
+        </div>
       </div>`;
   }
 
-  function _playerRow(playerId, slot) {
+  function _playerRowHTML(playerId, slot) {
     const p       = _players[playerId] || {};
     const name    = p.first_name ? `${p.first_name} ${p.last_name}` : playerId;
     const pos     = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
     const nflTeam = p.team || "FA";
     const color   = POS_COLOR[pos] || "#9ca3af";
-    const isIR    = slot === "ir";
-    const isTaxi  = slot === "taxi";
-    const isBench = slot === "bench";
+    const dim     = slot === "ir" || slot === "taxi";
 
     return `
-      <div class="roster-player-row ${isIR ? "roster-player-row--ir" : isTaxi ? "roster-player-row--taxi" : ""}">
+      <div class="roster-player-row ${dim ? "roster-player-row--dim" : ""}"
+        onclick="DLRPlayerCard.show('${playerId}', '${_escAttr(name)}')"
+        style="cursor:pointer;">
         <div class="roster-player-photo">
           <img src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg"
             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
@@ -240,9 +255,8 @@ const DLRRoster = (() => {
           <div class="roster-player-photo-fallback" style="display:none;color:${color};">${pos}</div>
         </div>
         <div class="roster-player-info">
-          <div class="roster-player-name ${isBench || isIR || isTaxi ? "dim" : ""}">${_esc(name)}</div>
+          <div class="roster-player-name">${_esc(name)}</div>
           <div class="roster-player-meta">
-            <span class="roster-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
             <span class="roster-nfl-team">${nflTeam}</span>
             ${p.years_exp === 0 ? '<span class="roster-rookie-badge">R</span>' : ""}
             ${p.injury_status ? `<span class="roster-injury-badge">${p.injury_status}</span>` : ""}
@@ -260,6 +274,9 @@ const DLRRoster = (() => {
   }
   function _esc(s) {
     return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function _escAttr(s) {
+    return String(s || "").replace(/'/g,"\\'").replace(/"/g,"&quot;");
   }
 
   return { init, reset, setFilter };
