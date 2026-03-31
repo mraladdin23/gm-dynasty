@@ -85,7 +85,7 @@ const Profile = (() => {
     _renderStatsRow(profile.stats || {});
     _renderPlatformsBadges(profile.platforms || {});
     _renderLeagueFilters();
-    _renderLeagues("all");
+    _renderLeagues();
   }
 
   function _renderStatsRow(stats) {
@@ -131,25 +131,35 @@ const Profile = (() => {
   }
 
   // ── Filter bar ─────────────────────────────────────────
+  // Filters are multi-select — clicking toggles them, "All" clears all
+  let _activeFilters = new Set(); // empty = show all
 
   function _renderLeagueFilters() {
-    // Collect custom labels and commish groups from meta
     const customLabels  = new Set();
     const commishGroups = new Set();
-
     Object.values(_leagueMeta).forEach(m => {
       if (m.customLabel)  customLabels.add(m.customLabel);
       if (m.commishGroup) commishGroups.add(m.commishGroup);
     });
 
-    // Build dynamic filter buttons after the static ones
     const filterBar = document.getElementById("league-filters");
     if (!filterBar) return;
 
-    // Remove any previously added dynamic filters
-    filterBar.querySelectorAll(".filter-tab--dynamic").forEach(el => el.remove());
+    // Rebuild entire filter bar so multi-select wiring is clean
+    filterBar.innerHTML = `
+      <button class="filter-tab active" data-filter="all">All</button>
+      <button class="filter-tab" data-filter="active">Active</button>
+      <button class="filter-tab" data-filter="owner">🏈 Owner</button>
+      <button class="filter-tab" data-filter="pinned">📌 Pinned</button>
+      <button class="filter-tab" data-filter="dynasty">Dynasty</button>
+      <button class="filter-tab" data-filter="redraft">Redraft</button>
+      <button class="filter-tab" data-filter="keeper">Keeper</button>
+      <button class="filter-tab" data-filter="commissioner">👑 Commish</button>
+      <div class="filter-divider"></div>
+      <button class="filter-tab" data-filter="archived">📦 Archived</button>
+    `;
 
-    // Add custom labels
+    // Add dynamic label/group filters before the divider
     customLabels.forEach(label => {
       const btn = document.createElement("button");
       btn.className = "filter-tab filter-tab--dynamic";
@@ -157,8 +167,6 @@ const Profile = (() => {
       btn.textContent = `🏷 ${label}`;
       filterBar.insertBefore(btn, filterBar.querySelector(".filter-divider"));
     });
-
-    // Add commish groups
     commishGroups.forEach(group => {
       const btn = document.createElement("button");
       btn.className = "filter-tab filter-tab--dynamic";
@@ -167,13 +175,41 @@ const Profile = (() => {
       filterBar.insertBefore(btn, filterBar.querySelector(".filter-divider"));
     });
 
-    // Wire up all filter tabs
+    // Multi-select wiring
     filterBar.querySelectorAll(".filter-tab").forEach(tab => {
       tab.addEventListener("click", () => {
-        filterBar.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        _activeFilter = tab.dataset.filter;
-        _renderLeagues(_activeFilter);
+        const f = tab.dataset.filter;
+        if (f === "all") {
+          // Clear all active filters
+          _activeFilters.clear();
+          filterBar.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
+          tab.classList.add("active");
+        } else if (f === "archived") {
+          // Archived is exclusive — clears others
+          _activeFilters.clear();
+          _activeFilters.add("archived");
+          filterBar.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
+          tab.classList.add("active");
+        } else {
+          // Toggle this filter
+          filterBar.querySelector('[data-filter="all"]')?.classList.remove("active");
+          filterBar.querySelector('[data-filter="archived"]')?.classList.remove("active");
+          _activeFilters.delete("archived");
+
+          if (_activeFilters.has(f)) {
+            _activeFilters.delete(f);
+            tab.classList.remove("active");
+          } else {
+            _activeFilters.add(f);
+            tab.classList.add("active");
+          }
+
+          // If nothing selected, reset to "All"
+          if (_activeFilters.size === 0) {
+            filterBar.querySelector('[data-filter="all"]')?.classList.add("active");
+          }
+        }
+        _renderLeagues();
       });
     });
   }
@@ -210,7 +246,7 @@ const Profile = (() => {
     return franchises;
   }
 
-  function _renderLeagues(filter) {
+  function _renderLeagues() {
     const grid         = document.getElementById("leagues-grid");
     const archivedSec  = document.getElementById("archived-section");
     const archivedGrid = document.getElementById("archived-grid");
@@ -253,8 +289,9 @@ const Profile = (() => {
       }
     });
 
-    // Apply filter
-    const filtered = _applyFranchiseFilter(active, filter);
+    // Apply multi-select filters
+    const isArchived = _activeFilters.has("archived");
+    const filtered = isArchived ? [] : _applyFranchiseFilter(active);
 
     // Sort: pinned first, then by latest season desc
     filtered.sort((a, b) => {
@@ -264,7 +301,7 @@ const Profile = (() => {
       return (_allLeagues[b.latestKey]?.season || "0").localeCompare(_allLeagues[a.latestKey]?.season || "0");
     });
 
-    if (filter === "archived") {
+    if (isArchived) {
       grid.innerHTML = "";
       if (archivedSec) archivedSec.classList.add("hidden");
       if (archived.length === 0) {
@@ -296,21 +333,34 @@ const Profile = (() => {
     }
   }
 
-  function _applyFranchiseFilter(franchises, filter) {
-    if (filter === "all" || filter === "archived") return franchises;
+  function _applyFranchiseFilter(franchises) {
+    if (_activeFilters.size === 0) return franchises;
     return franchises.filter(f => {
-      const latest = _allLeagues[f.latestKey];
-      const meta   = _leagueMeta[f.latestKey] || {};
-      if (filter === "active")        return latest?.season === CURRENT_SEASON;
-      if (filter === "pinned")        return meta.pinned;
-      if (filter === "dynasty")       return latest?.leagueType === "dynasty";
-      if (filter === "redraft")       return latest?.leagueType === "redraft";
-      if (filter === "keeper")        return latest?.leagueType === "keeper";
-      if (filter === "commissioner")  return f.seasons.some(s => s.league.isCommissioner);
-      if (filter.startsWith("label:")) return meta.customLabel === filter.slice(6);
-      if (filter.startsWith("group:")) return meta.commishGroup === filter.slice(6);
-      return true;
+      // Franchise passes if it matches ALL active filters
+      return [..._activeFilters].every(filter => _franchiseMatchesFilter(f, filter));
     });
+  }
+
+  function _franchiseMatchesFilter(f, filter) {
+    const latest = _allLeagues[f.latestKey];
+    const meta   = _leagueMeta[f.latestKey] || {};
+    // Determine the most recent season in the data
+    const allSeasons = Object.values(_allLeagues).map(l => l.season).filter(Boolean);
+    const newestSeason = allSeasons.length ? allSeasons.reduce((a, b) => a > b ? a : b) : CURRENT_SEASON;
+
+    switch(filter) {
+      case "active":       return f.seasons.some(s => s.league.season === newestSeason);
+      case "owner":        return f.seasons.some(s => s.league.wins > 0 || s.league.losses > 0 || s.league.ties > 0 || (s.league.pointsFor > 0));
+      case "pinned":       return !!meta.pinned;
+      case "dynasty":      return latest?.leagueType === "dynasty";
+      case "redraft":      return latest?.leagueType === "redraft";
+      case "keeper":       return latest?.leagueType === "keeper";
+      case "commissioner": return f.seasons.some(s => s.league.isCommissioner);
+      default:
+        if (filter.startsWith("label:")) return meta.customLabel === filter.slice(6);
+        if (filter.startsWith("group:")) return meta.commishGroup === filter.slice(6);
+        return true;
+    }
   }
 
   // ── Franchise card HTML ────────────────────────────────
@@ -592,10 +642,11 @@ const Profile = (() => {
   function _renderDetailTab(tab, leagueKey, league) {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
-
     if (tab === "overview")   _renderOverview(el, leagueKey, league);
     if (tab === "history")    _renderHistory(el, leagueKey, league);
-    if (tab === "standings")  _renderStandings(el, leagueKey, league);
+    if (tab === "standings")  DLRStandings.init(league.leagueId, league);
+    if (tab === "matchups")   DLRStandings.initMatchups();
+    if (tab === "playoffs")   DLRStandings.initPlayoffs();
     if (tab === "chat")       _renderChat(el, leagueKey, league);
   }
 
