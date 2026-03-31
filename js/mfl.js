@@ -122,23 +122,56 @@ const MFLAPI = (() => {
     return allLeagues;
   }
 
-  // Find the user's franchise ID within a league by matching their username
+  // Find the user's franchise ID within a league
+  // MFL franchise objects have: id, name, owner_name, owners (object with owner details)
   async function findMyFranchise(leagueId, year, mflUsername) {
     try {
       const url     = `${MFL_API_HOST}/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
       const proxied = MFL_PROXY_URL + encodeURIComponent(url);
       const res     = await fetch(proxied);
       if (!res.ok) return null;
-      const data    = await res.json();
+      const data       = await res.json();
       const franchises = data?.league?.franchises?.franchise;
       if (!franchises) return null;
       const arr = Array.isArray(franchises) ? franchises : [franchises];
-      // Match by owner name (case-insensitive)
-      const me = arr.find(f =>
-        (f.owner_name || f.owners || "").toLowerCase().includes(mflUsername.toLowerCase())
+
+      // Log all franchises so we can see what names MFL is returning
+      console.log(`[MFL] League ${leagueId} (${year}) franchises:`,
+        arr.map(f => ({
+          id:         f.id,
+          name:       f.name,
+          owner_name: f.owner_name,
+          owners:     f.owners
+        }))
       );
-      return me ? { franchiseId: me.id, teamName: me.name, isCommissioner: false } : null;
-    } catch(e) { return null; }
+
+      const search = mflUsername.toLowerCase();
+
+      // Try multiple match strategies in order of specificity
+      const me = arr.find(f => {
+        const ownerName  = (f.owner_name || "").toLowerCase();
+        const teamName   = (f.name       || "").toLowerCase();
+        // Also check nested owners object which may have username field
+        const ownerObj   = f.owners?.owner;
+        const ownerArr   = ownerObj ? (Array.isArray(ownerObj) ? ownerObj : [ownerObj]) : [];
+        const ownerNames = ownerArr.map(o => (o.name || o.username || "").toLowerCase());
+
+        return ownerName.includes(search)
+          || teamName.includes(search)
+          || ownerNames.some(n => n.includes(search));
+      });
+
+      if (!me) {
+        console.warn(`[MFL] No franchise matched "${mflUsername}" in league ${leagueId}. ` +
+          `Try one of the owner names shown above.`);
+        return null;
+      }
+
+      return { franchiseId: me.id, teamName: me.name };
+    } catch(e) {
+      console.warn(`[MFL] findMyFranchise error:`, e.message);
+      return null;
+    }
   }
 
   // ── Get league details ─────────────────────────────────

@@ -184,22 +184,38 @@ const SleeperAPI = (() => {
     if (!sleeperUser) throw new Error(`Sleeper user "${sleeperUsername}" not found.`);
     const userId = sleeperUser.user_id;
 
-    // Try current year first, fall back to prior year
-    let startingLeagues = await getUserLeagues(userId, "nfl", currentYear.toString());
-    const mostRecentSeason = startingLeagues.length
-      ? currentYear.toString()
-      : (currentYear - 1).toString();
-    if (!startingLeagues.length) {
-      startingLeagues = await getUserLeagues(userId, "nfl", mostRecentSeason);
+    // Fetch leagues across multiple years — some leagues aren't renewed each season
+    // so their chains never get started if we only look at the most recent year
+    const yearsToFetch = [
+      currentYear.toString(),
+      (currentYear - 1).toString(),
+      (currentYear - 2).toString(),
+      (currentYear - 3).toString(),
+      (currentYear - 4).toString(),
+    ];
+
+    // Collect all unique league IDs the user appears in across all years
+    const allStartingLeagueIds = new Set();
+    let mostRecentSeason = (currentYear - 1).toString();
+
+    for (const year of yearsToFetch) {
+      const yearLeagues = await getUserLeagues(userId, "nfl", year);
+      if (yearLeagues.length && year > mostRecentSeason) {
+        mostRecentSeason = year;
+      }
+      yearLeagues.forEach(l => allStartingLeagueIds.add(l.league_id));
     }
 
     const leaguesMap    = {};
     const seenLeagueIds = new Set();
 
-    for (const league of startingLeagues) {
+    for (const startLeagueId of allStartingLeagueIds) {
       // Walk prev_league_id chain oldest → newest
-      const lineage     = await getLeagueLineage(league.league_id);
+      const lineage     = await getLeagueLineage(startLeagueId);
       const franchiseId = lineage[0]; // oldest = franchise anchor
+
+      // Mark all IDs in this chain as seen so we don't re-process from another year
+      lineage.forEach(id => allStartingLeagueIds.delete(id));
 
       for (const leagueId of lineage) {
         if (seenLeagueIds.has(leagueId)) continue;
@@ -216,8 +232,6 @@ const SleeperAPI = (() => {
 
           const me     = leagueUsers.find(u => u.user_id === userId);
           const isComm = me?.is_owner === true;
-
-          // Find my roster — commissioners may not have one
           const myRoster = rosters.find(r => r.owner_id === userId);
 
           // Skip if not a member AND not the commissioner
@@ -226,9 +240,9 @@ const SleeperAPI = (() => {
           const season = leagueData.season || currentYear.toString();
           const status = leagueData.status;
 
-          const wins   = myRoster?.settings?.wins   || 0;
-          const losses = myRoster?.settings?.losses || 0;
-          const ties   = myRoster?.settings?.ties   || 0;
+          const wins       = myRoster?.settings?.wins   || 0;
+          const losses     = myRoster?.settings?.losses || 0;
+          const ties       = myRoster?.settings?.ties   || 0;
           const ptsFor     = (myRoster?.settings?.fpts         || 0) + (myRoster?.settings?.fpts_decimal         || 0) / 100;
           const ptsAgainst = (myRoster?.settings?.fpts_against || 0) + (myRoster?.settings?.fpts_against_decimal || 0) / 100;
 
@@ -244,26 +258,26 @@ const SleeperAPI = (() => {
 
           const key = `sleeper_${leagueId}`;
           leaguesMap[key] = {
-            platform:       "sleeper",
+            platform:         "sleeper",
             leagueId,
             franchiseId,
-            leagueName:     leagueData.name,
+            leagueName:       leagueData.name,
             season,
             status,
-            mostRecentSeason, // used for active/archived split
-            leagueType:     _mapLeagueType(leagueData.settings?.type),
-            totalTeams:     leagueData.total_rosters || 12,
-            teamName:       me?.metadata?.team_name || me?.display_name || (isComm ? "Commissioner" : "My Team"),
-            isCommissioner: isComm,
+            mostRecentSeason,
+            leagueType:       _mapLeagueType(leagueData.settings?.type),
+            totalTeams:       leagueData.total_rosters || 12,
+            teamName:         me?.metadata?.team_name || me?.display_name || (isComm ? "Commissioner" : "My Team"),
+            isCommissioner:   isComm,
             wins,
             losses,
             ties,
-            pointsFor:      ptsFor,
-            pointsAgainst:  ptsAgainst,
-            standing:       rank,
-            playoffFinish:  finish,
-            isChampion:     finish === 1,
-            playoffResult:  _finishLabel(finish)
+            pointsFor:        ptsFor,
+            pointsAgainst:    ptsAgainst,
+            standing:         rank,
+            playoffFinish:    finish,
+            isChampion:       finish === 1,
+            playoffResult:    _finishLabel(finish)
           };
         } catch (err) {
           console.warn(`[Sleeper] Skipping ${leagueId}:`, err.message);
