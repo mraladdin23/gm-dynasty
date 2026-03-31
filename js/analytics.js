@@ -15,13 +15,11 @@ const DLRAnalytics = (() => {
   let _myRosterId = null; // current user's roster id
 
   const TABS = [
-    { id:"points",    label:"📈 Points",        fn: _renderPoints    },
-    { id:"standings", label:"📊 Standings",      fn: _renderStandingsMove },
-    { id:"power",     label:"🏆 Power Rankings", fn: _renderPower     },
-    { id:"luck",      label:"🍀 Luck Index",      fn: _renderLuck      },
-    { id:"trades",    label:"🔄 Trade Map",       fn: _renderTrades    },
-    { id:"draft",     label:"📋 Draft Recap",     fn: _renderDraftRecap },
-    { id:"waivers",   label:"💎 Waivers",         fn: _renderWaivers   },
+    { id:"power",    label:"🏆 Power Rankings", fn: _renderPower      },
+    { id:"luck",     label:"🍀 Luck Index",      fn: _renderLuck       },
+    { id:"trades",   label:"🔄 Trade Map",        fn: _renderTrades     },
+    { id:"draft",    label:"📋 Draft Recap",      fn: _renderDraftRecap },
+    { id:"waivers",  label:"💎 Waivers",          fn: _renderWaivers    },
   ];
 
   const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d" };
