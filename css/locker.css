@@ -1859,3 +1859,218 @@ select option { background: var(--color-bg-2); }
   border: 1px solid rgba(239,68,68,.3);
 }
 
+
+/* ── Roster position groups ───────────────────────────── */
+.roster-body { padding: var(--space-3) var(--space-3) var(--space-2); }
+.roster-positions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.roster-pos-group {}
+.roster-pos-header {
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.roster-pos-count {
+  font-size: .65rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  padding: 0 5px;
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+.roster-special-section {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+.roster-special-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.roster-player-row--dim { opacity: .6; }
+
+/* ── Player Card Modal ────────────────────────────────── */
+.pc-modal-box {
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pc-header {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  position: relative;
+}
+
+.pc-photo-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 80px;
+  height: 80px;
+}
+.pc-photo-wrap img {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--color-bg-3);
+}
+.pc-pos-badge {
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  font-size: .65rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  letter-spacing: .06em;
+}
+
+.pc-identity { flex: 1; min-width: 0; }
+.pc-name {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+  margin-bottom: var(--space-1);
+}
+.pc-team {
+  font-size: .82rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+.pc-bio {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  line-height: 1.5;
+}
+.pc-owner {
+  font-size: .75rem;
+  color: var(--color-gold);
+  margin-top: var(--space-2);
+  font-weight: 600;
+}
+
+.pc-year-tabs {
+  display: flex;
+  gap: 2px;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-3);
+  overflow-x: auto;
+}
+.pc-year-btn {
+  padding: var(--space-1) var(--space-3);
+  font-size: .82rem;
+  font-family: var(--font-body);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.pc-year-btn--active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-color: var(--color-gold);
+  font-weight: 700;
+}
+
+.pc-season-summary { padding: var(--space-4) var(--space-5) var(--space-3); }
+.pc-stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pc-stat-box {
+  text-align: center;
+  background: var(--color-bg-3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-width: 52px;
+}
+.pc-stat-val {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.pc-stat-lbl {
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}
+
+.pc-game-log-wrap {
+  padding: 0 var(--space-5) var(--space-5);
+  flex: 1;
+  overflow-y: auto;
+}
+.pc-log-title {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.pc-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+.pc-log-table thead th {
+  text-align: left;
+  padding: var(--space-2) var(--space-2);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-3);
+}
+.pc-log-table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+}
+.pc-log-table tbody tr:hover { background: var(--color-surface); }
+.pc-log-table tbody td {
+  padding: var(--space-2) var(--space-2);
+  vertical-align: middle;
+}
+.pc-log-table tbody td:first-child { color: var(--color-text-dim); font-size: .75rem; }
+.pc-log-table tbody td:last-child  { color: var(--color-text-muted); font-size: .72rem; }
+
+.pc-loading { color: var(--color-text-dim); font-size: .85rem; padding: var(--space-3) 0; }
+.pc-no-weekly {
+  color: var(--color-text-dim);
+  font-size: .82rem;
+  padding: var(--space-4) 0;
+  text-align: center;
+}
+.pc-error { color: var(--color-red); font-size: .82rem; padding: var(--space-4) 0; }
+
