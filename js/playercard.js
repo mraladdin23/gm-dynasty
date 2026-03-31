@@ -26,18 +26,19 @@ const DLRPlayerCard = (() => {
 
     _buildModal();
 
-    // Ensure player cache has full bio fields — check version
+    // Refresh player cache if needed (to get full bio fields)
+    // Version "2" = includes age, height, weight, college, birth_date
     const cacheVer = localStorage.getItem("dlr_players_ver");
     if (cacheVer !== "2") {
-      // Silently refresh player cache to get bio fields
       try {
-        const r = await fetch("https://api.sleeper.app/v1/players/nfl");
+        const r    = await fetch("https://api.sleeper.app/v1/players/nfl");
         const data = await r.json();
         localStorage.setItem("dlr_players", JSON.stringify(data));
         localStorage.setItem("dlr_players_ver", "2");
-      } catch(e) { /* use cached data */ }
+      } catch(e) { /* keep old cache */ }
     }
 
+    // Populate header AFTER cache refresh
     _populateHeader(playerId, playerName);
     await _loadYear(_year);
   }

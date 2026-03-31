@@ -2281,3 +2281,57 @@ select option { background: var(--color-bg-2); }
   color: var(--color-text-dim);
 }
 
+
+/* ── League pagination ────────────────────────────────── */
+.leagues-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-4) 0 var(--space-2);
+}
+.page-btn {
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: .82rem;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.page-btn:hover:not(:disabled) {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.page-btn:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.page-info {
+  font-size: .82rem;
+  color: var(--color-text-dim);
+  min-width: 80px;
+  text-align: center;
+}
+
+/* ── League jump dropdown ─────────────────────────────── */
+.league-search-bar {
+  margin-bottom: var(--space-3);
+}
+.league-jump-select {
+  width: 100%;
+  max-width: 320px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: .82rem;
+  cursor: pointer;
+  outline: none;
+}
+.league-jump-select:focus { border-color: var(--color-gold); }
+

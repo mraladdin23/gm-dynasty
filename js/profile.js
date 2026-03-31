@@ -7,10 +7,17 @@
 const Profile = (() => {
 
   const CURRENT_SEASON = new Date().getFullYear().toString();
+  const PAGE_SIZE      = 6;
+
   let _activeFilter    = "all";
-  let _allLeagues      = {};   // { leagueKey: leagueData }
-  let _leagueMeta      = {};   // { leagueKey: { pinned, archived, customLabel, commishGroup } }
+  let _activeFilters   = new Set();
+  let _allLeagues      = {};
+  let _leagueMeta      = {};
   let _currentUsername = null;
+  let _currentPage     = 0;
+  let _archivedPage    = 0;
+  let _filteredCache   = [];
+  let _archivedCache   = [];
 
   // ── Platform linking ───────────────────────────────────
 
@@ -137,11 +144,21 @@ const Profile = (() => {
     const container = document.getElementById("career-summary-section");
     if (!container) return;
 
-    const leagues = Object.values(_allLeagues);
-    if (!leagues.length) { container.style.display = "none"; return; }
+    // Only count leagues where user actually has a team (wins OR losses OR points)
+    // Excludes commissioner-only leagues where user has no roster
+    const allLeagues   = Object.values(_allLeagues);
+    const ownerLeagues = allLeagues.filter(l =>
+      (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
+    );
+
+    if (!ownerLeagues.length) { container.style.display = "none"; return; }
     container.style.display = "";
 
-    // Wire tabs
+    // Wire tabs (clone to remove stale listeners)
+    document.querySelectorAll(".cs-tab").forEach(tab => {
+      const fresh = tab.cloneNode(true);
+      tab.parentNode.replaceChild(fresh, tab);
+    });
     document.querySelectorAll(".cs-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         document.querySelectorAll(".cs-tab").forEach(t => t.classList.remove("active"));
@@ -151,9 +168,34 @@ const Profile = (() => {
       });
     });
 
-    _renderCSOverall(leagues, profile.stats || {});
-    _renderCSAnnual(leagues);
-    _renderCSType(leagues);
+    // Recompute stats from owner leagues only
+    const w   = ownerLeagues.reduce((s, l) => s + (l.wins   || 0), 0);
+    const lo  = ownerLeagues.reduce((s, l) => s + (l.losses || 0), 0);
+    const champs   = ownerLeagues.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+    const runners  = ownerLeagues.filter(l => l.playoffFinish === 2).length;
+    const thirds   = ownerLeagues.filter(l => l.playoffFinish === 3).length;
+    const playoffs = ownerLeagues.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
+    const tot = w + lo;
+    const winPct = tot > 0 ? ((w / tot) * 100).toFixed(1) : "—";
+
+    // Dynasty score from corrected data
+    const seasons = new Set(ownerLeagues.map(l => l.season).filter(Boolean)).size;
+    const dscore  = Math.round(
+      (tot > 0 ? w / tot : 0) * 100 +
+      champs  * 20 + runners * 10 + thirds * 5 +
+      playoffs * 2 + seasons * 2
+    );
+
+    const computedStats = {
+      totalWins: w, totalLosses: lo, winPct,
+      championships: champs, runnerUps: runners, thirdPlace: thirds,
+      playoffAppearances: playoffs, leaguesPlayed: ownerLeagues.length,
+      dynastyScore: dscore
+    };
+
+    _renderCSOverall(ownerLeagues, computedStats);
+    _renderCSAnnual(ownerLeagues);
+    _renderCSType(ownerLeagues);
   }
 
   function _renderCSOverall(leagues, stats) {
@@ -284,7 +326,6 @@ const Profile = (() => {
 
   // ── Filter bar ─────────────────────────────────────────
   // Filters are multi-select — clicking toggles them, "All" clears all
-  let _activeFilters = new Set(); // empty = show all
 
   function _renderLeagueFilters() {
     const customLabels  = new Set();
@@ -457,22 +498,95 @@ const Profile = (() => {
 
     if (filtered.length === 0) {
       grid.innerHTML = `<p class="empty-state">No leagues match this filter.</p>`;
+      _hidePagination();
     } else {
-      grid.innerHTML = filtered.map(f => _franchiseCardHTML(f, archived.includes(f))).join("");
-      _wireCardEvents(grid);
+      _filteredCache  = filtered;
+      _archivedCache  = wantArchived ? filtered : archived;
+      _currentPage    = 0;
+      _archivedPage   = 0;
+      _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
+      _updateJumpDropdown([..._filteredCache, ...(_archivedCache || [])]);
     }
 
-    // Archived accordion — hide when archived filter is active (already shown in main grid)
+    // Archived accordion
     if (!wantArchived && archived.length > 0) {
       if (archivedSec) archivedSec.classList.remove("hidden");
       if (archivedCount) archivedCount.textContent = `${archived.length}`;
-      if (archivedGrid) {
-        archivedGrid.innerHTML = archived.map(f => _franchiseCardHTML(f, true)).join("");
-        _wireCardEvents(archivedGrid);
-      }
+      _archivedCache = archived;
+      _archivedPage  = 0;
+      _renderPage(archivedGrid, _archivedCache, _archivedPage, "archived-pagination", "arch-page-info", true);
     } else {
       if (archivedSec) archivedSec.classList.add("hidden");
     }
+  }
+
+  function _renderPage(gridEl, items, page, paginationId, infoId, isArchived) {
+    if (!gridEl) return;
+    const total    = items.length;
+    const pages    = Math.ceil(total / PAGE_SIZE);
+    const start    = page * PAGE_SIZE;
+    const slice    = items.slice(start, start + PAGE_SIZE);
+
+    gridEl.innerHTML = slice.map(f => _franchiseCardHTML(f, isArchived)).join("");
+    _wireCardEvents(gridEl);
+
+    const pag    = document.getElementById(paginationId);
+    const info   = document.getElementById(infoId);
+    const prev   = pag?.querySelector("[id$='-prev']") || document.getElementById("page-prev");
+    const next   = pag?.querySelector("[id$='-next']") || document.getElementById("page-next");
+
+    if (total <= PAGE_SIZE) {
+      if (pag) pag.style.display = "none";
+    } else {
+      if (pag) pag.style.display = "flex";
+      if (info) info.textContent = `${start + 1}–${Math.min(start + PAGE_SIZE, total)} of ${total}`;
+      if (prev) prev.disabled = page === 0;
+      if (next) next.disabled = page >= pages - 1;
+    }
+  }
+
+  function _hidePagination() {
+    document.getElementById("leagues-pagination").style.display  = "none";
+    document.getElementById("archived-pagination").style.display = "none";
+  }
+
+  function changePage(delta, isArchived = false) {
+    if (isArchived) {
+      _archivedPage = Math.max(0, _archivedPage + delta);
+      const grid = document.getElementById("archived-grid");
+      _renderPage(grid, _archivedCache, _archivedPage, "archived-pagination", "arch-page-info", true);
+    } else {
+      _currentPage = Math.max(0, _currentPage + delta);
+      const grid = document.getElementById("leagues-grid");
+      _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
+    }
+  }
+
+  function _updateJumpDropdown(allFranchises) {
+    const sel = document.getElementById("league-jump-select");
+    const bar = document.getElementById("league-search-bar");
+    if (!sel) return;
+
+    // Build flat list of all leagues sorted alphabetically
+    const all = [];
+    allFranchises.forEach(f => {
+      const league = _allLeagues[f.latestKey];
+      if (league) all.push({ key: f.latestKey, name: league.leagueName, season: league.season });
+    });
+    all.sort((a, b) => a.name.localeCompare(b.name));
+
+    sel.innerHTML = `<option value="">Jump to league…</option>` +
+      all.map(l => `<option value="${l.key}">${_escHtml(l.name)} (${l.season})</option>`).join("");
+
+    if (bar) bar.style.display = all.length > PAGE_SIZE ? "" : "none";
+  }
+
+  function jumpToLeague(leagueKey) {
+    if (!leagueKey) return;
+    openLeagueDetail(leagueKey);
+    // Reset select
+    const sel = document.getElementById("league-jump-select");
+    if (sel) sel.value = "";
   }
 
   function _applyFranchiseFilter(franchises, filterSet) {
@@ -853,6 +967,8 @@ const Profile = (() => {
   function _renderDetailTab(tab, leagueKey, league) {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
+    // Always set the league context so matchups/playoffs work independently
+    DLRStandings.setLeague(league.leagueId, league.platform);
     if (tab === "overview")  _renderOverview(el, leagueKey, league);
     if (tab === "standings") DLRStandings.init(league.leagueId, league.platform);
     if (tab === "matchups")  DLRStandings.initMatchups();
@@ -1039,7 +1155,9 @@ const Profile = (() => {
     closeLeagueDetail,
     switchDetailSeason,
     openLeagueChat,
-    closeLeagueChat
+    closeLeagueChat,
+    changePage,
+    jumpToLeague
   };
 
 })();

@@ -25,7 +25,15 @@ const DLRStandings = (() => {
     _initToken++;
   }
 
-  // ── Init ────────────────────────────────────────────────
+  // Called when any tab in this league opens — sets context without loading data
+  function setLeague(leagueId, platform) {
+    if (_leagueId !== leagueId) {
+      // Different league — reset state
+      reset();
+    }
+    _leagueId = leagueId;
+    _platform = platform || "sleeper";
+  }
   async function init(leagueId, platform) {
     reset();
     _leagueId  = leagueId;
@@ -50,8 +58,9 @@ const DLRStandings = (() => {
 
     try {
       await _loadData(leagueId, token);
-      if (token !== _initToken) return; // stale
-      await _loadHistory(leagueId, token);
+      if (token !== _initToken) return;
+      // Load history non-blocking — doesn't affect standings render
+      _loadHistory(leagueId, token).catch(() => {});
     } catch(e) {
       if (token !== _initToken) return;
       const el2 = document.getElementById("dtab-standings");
@@ -534,6 +543,7 @@ const DLRStandings = (() => {
   return {
     init,
     reset,
+    setLeague,
     refresh,
     initMatchups,
     loadMatchupsWeek,
