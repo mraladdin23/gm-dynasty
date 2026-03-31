@@ -7,7 +7,7 @@
 const Profile = (() => {
 
   const CURRENT_SEASON = new Date().getFullYear().toString();
-  const PAGE_SIZE      = 6;
+  const PAGE_SIZE      = 10;
 
   let _activeFilter    = "all";
   let _activeFilters   = new Set();
@@ -201,42 +201,42 @@ const Profile = (() => {
   function _renderCSOverall(leagues, stats) {
     const el = document.getElementById("cs-overall");
     if (!el) return;
-    const totalGames = (stats.totalWins || 0) + (stats.totalLosses || 0);
-    const winPct = totalGames > 0 ? ((stats.totalWins / totalGames) * 100).toFixed(1) : "—";
 
     el.innerHTML = `
       <div class="cs-stats-grid">
-        <div class="cs-stat">
-          <div class="cs-stat-val">${stats.totalWins || 0}–${stats.totalLosses || 0}</div>
-          <div class="cs-stat-lbl">All-Time Record</div>
-        </div>
-        <div class="cs-stat">
-          <div class="cs-stat-val">${winPct}%</div>
-          <div class="cs-stat-lbl">Win Rate</div>
-        </div>
-        <div class="cs-stat">
-          <div class="cs-stat-val" style="color:var(--color-gold)">${stats.championships || 0}</div>
-          <div class="cs-stat-lbl">🏆 Championships</div>
-        </div>
-        <div class="cs-stat">
-          <div class="cs-stat-val">${stats.runnerUps || 0}</div>
-          <div class="cs-stat-lbl">🥈 Runner-Ups</div>
-        </div>
-        <div class="cs-stat">
-          <div class="cs-stat-val">${stats.thirdPlace || 0}</div>
-          <div class="cs-stat-lbl">🥉 3rd Place</div>
-        </div>
-        <div class="cs-stat">
-          <div class="cs-stat-val">${stats.playoffAppearances || 0}</div>
-          <div class="cs-stat-lbl">Playoff Apps</div>
-        </div>
         <div class="cs-stat">
           <div class="cs-stat-val">${stats.leaguesPlayed || leagues.length}</div>
           <div class="cs-stat-lbl">Seasons</div>
         </div>
         <div class="cs-stat">
+          <div class="cs-stat-val">${stats.totalWins || 0}–${stats.totalLosses || 0}</div>
+          <div class="cs-stat-lbl">All-Time Record</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.winPct || "—"}%</div>
+          <div class="cs-stat-lbl">Win Rate</div>
+        </div>
+        <div class="cs-stat">
           <div class="cs-stat-val" style="color:var(--color-gold)">${stats.dynastyScore || 0}</div>
           <div class="cs-stat-lbl">Dynasty Score</div>
+        </div>
+      </div>
+      <div class="cs-stats-grid" style="margin-top:var(--space-3);">
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.playoffAppearances || 0}</div>
+          <div class="cs-stat-lbl">Playoff Apps</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val" style="color:var(--color-gold)">🏆 ${stats.championships || 0}</div>
+          <div class="cs-stat-lbl">Championships</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">🥈 ${stats.runnerUps || 0}</div>
+          <div class="cs-stat-lbl">Runner-Ups</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">🥉 ${stats.thirdPlace || 0}</div>
+          <div class="cs-stat-lbl">3rd Place</div>
         </div>
       </div>`;
   }
@@ -567,9 +567,12 @@ const Profile = (() => {
     const bar = document.getElementById("league-search-bar");
     if (!sel) return;
 
-    // Build flat list of all leagues sorted alphabetically
-    const all = [];
+    // Deduplicate by latestKey, then build one entry per franchise
+    const seen = new Set();
+    const all  = [];
     allFranchises.forEach(f => {
+      if (seen.has(f.latestKey)) return;
+      seen.add(f.latestKey);
       const league = _allLeagues[f.latestKey];
       if (league) all.push({ key: f.latestKey, name: league.leagueName, season: league.season });
     });
@@ -578,7 +581,7 @@ const Profile = (() => {
     sel.innerHTML = `<option value="">Jump to league…</option>` +
       all.map(l => `<option value="${l.key}">${_escHtml(l.name)} (${l.season})</option>`).join("");
 
-    if (bar) bar.style.display = all.length > PAGE_SIZE ? "" : "none";
+    if (bar) bar.style.display = all.length > 0 ? "" : "none";
   }
 
   function jumpToLeague(leagueKey) {
@@ -620,110 +623,98 @@ const Profile = (() => {
     }
   }
 
-  // ── Franchise card HTML ────────────────────────────────
+  // ── Franchise card HTML — compact horizontal row ──────────
 
   function _franchiseCardHTML(franchise, isArchived = false) {
-    const key      = franchise.latestKey;
-    const league   = _allLeagues[key];
-    const meta     = _leagueMeta[key] || {};
-    const seasons  = franchise.seasons;
+    const key     = franchise.latestKey;
+    const league  = _allLeagues[key];
+    const meta    = _leagueMeta[key] || {};
+    const seasons = franchise.seasons;
 
     if (!league) return "";
 
-    // Aggregate career stats across all seasons of this franchise
     const totalWins   = seasons.reduce((s, x) => s + (x.league.wins   || 0), 0);
     const totalLosses = seasons.reduce((s, x) => s + (x.league.losses || 0), 0);
     const titles      = seasons.filter(x => x.league.playoffFinish === 1 || x.league.isChampion).length;
     const runnerUps   = seasons.filter(x => x.league.playoffFinish === 2).length;
+    const thirds      = seasons.filter(x => x.league.playoffFinish === 3).length;
     const isCommish   = seasons.some(x => x.league.isCommissioner);
 
-    const pinned      = meta.pinned       ? "league-card--pinned"   : "";
-    const archivedCls = isArchived        ? "league-card--archived" : "";
-    const champCls    = titles > 0        ? "league-card--champion" : "";
-    const pinnedBadge = meta.pinned       ? `<span class="league-pin-badge">📌</span>` : "";
-    const label       = meta.customLabel  ? `<span class="league-tag league-tag--label">🏷 ${_escHtml(meta.customLabel)}</span>` : "";
-    const group       = meta.commishGroup ? `<span class="league-tag league-tag--group">⚡ ${_escHtml(meta.commishGroup)}</span>` : "";
-    const commishBadge = isCommish        ? `<span class="league-tag league-tag--commish">👑 Commish</span>` : "";
+    // Current season record
+    const currentSeason = seasons.find(s => s.league.season === league.season);
+    const cW  = currentSeason?.league.wins   || 0;
+    const cL  = currentSeason?.league.losses || 0;
+    const cPF = currentSeason?.league.pointsFor ? parseFloat(currentSeason.league.pointsFor).toFixed(0) : "—";
 
-    // Season pills — show each season, highlight current
-    const seasonPills = seasons.slice(0, 6).map(s => {
-      const isCurrent = s.league.season === CURRENT_SEASON;
-      const finish    = s.league.playoffFinish;
-      const icon      = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
-      return `<span class="season-pill ${isCurrent ? "season-pill--current" : ""}" 
-        data-key="${s.key}" title="${s.league.season}: ${s.league.wins}W–${s.league.losses}L${icon ? " "+icon : ""}">
-        ${s.league.season}${icon}
-      </span>`;
-    }).join("");
+    // Playoff finish icon for current season
+    const finish     = league.playoffFinish;
+    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish && finish <= 7 ? "🏅" : "");
 
-    const moreSeasons = seasons.length > 6 ? `<span class="season-pill season-pill--more">+${seasons.length - 6}</span>` : "";
+    // Tags
+    const tags = [];
+    if (isCommish)        tags.push(`<span class="lrow-tag lrow-tag--commish">👑</span>`);
+    if (meta.pinned)      tags.push(`<span class="lrow-tag">📌</span>`);
+    if (titles > 0)       tags.push(`<span class="lrow-tag lrow-tag--gold">🏆 ${titles}</span>`);
+    if (runnerUps > 0)    tags.push(`<span class="lrow-tag">🥈 ${runnerUps}</span>`);
+    if (thirds > 0)       tags.push(`<span class="lrow-tag">🥉 ${thirds}</span>`);
+    if (meta.customLabel) tags.push(`<span class="lrow-tag">🏷 ${_escHtml(meta.customLabel)}</span>`);
+
+    const typeBadge = `<span class="lrow-type lrow-type--${league.leagueType || "redraft"}">${league.leagueType || "redraft"}</span>`;
+    const platBadge = `<span class="lrow-plat lrow-plat--${league.platform}">${(league.platform||"").toUpperCase()}</span>`;
 
     return `
-      <div class="league-card ${pinned} ${archivedCls} ${champCls}" data-key="${key}">
-        <div class="league-card-header">
-          <span class="league-platform-tag league-platform-tag--${league.platform}">${(league.platform||"").toUpperCase()}</span>
-          ${pinnedBadge}
-          ${titles > 0 ? `<span class="champion-badge">🏆 ×${titles}</span>` : ""}
-          <button class="league-options-btn" data-key="${key}" title="Options">⋯</button>
+      <div class="league-row ${isArchived ? "league-row--archived" : ""} ${titles > 0 ? "league-row--champion" : ""}" data-key="${key}">
+        <div class="lrow-left">
+          ${platBadge}
+          ${typeBadge}
         </div>
-        <div class="league-card-name">${_escHtml(league.leagueName)}</div>
-        <div class="league-card-team">${_escHtml(league.teamName || "")}</div>
-        <div class="league-tags-row">
-          ${commishBadge}${label}${group}
-          <span class="league-tag league-tag--type">${league.leagueType || "redraft"}</span>
-          <span class="league-tag" style="background:var(--color-surface);color:var(--color-text-dim);">${seasons.length} seasons</span>
+        <div class="lrow-name-col">
+          <div class="lrow-name">${_escHtml(league.leagueName)}</div>
+          <div class="lrow-team">${_escHtml(league.teamName || "")}</div>
         </div>
-        <div class="league-card-record">
-          <span class="record-wins">${totalWins}W</span>
-          <span class="record-sep">–</span>
-          <span class="record-losses">${totalLosses}L</span>
-          <span class="record-rank"> all-time</span>
-          ${runnerUps > 0 ? `<span class="record-rank"> · 🥈×${runnerUps}</span>` : ""}
+        <div class="lrow-season-col">
+          <div class="lrow-record">${cW}–${cL}</div>
+          <div class="lrow-season-label">${league.season}${finishIcon ? " " + finishIcon : ""}</div>
         </div>
-        <div class="season-pills-row">
-          ${seasonPills}${moreSeasons}
+        <div class="lrow-alltime-col">
+          <div class="lrow-record">${totalWins}–${totalLosses}</div>
+          <div class="lrow-season-label">all-time · ${seasons.length} seas.</div>
         </div>
-        <div class="league-card-footer">
-          <button class="league-chat-btn" data-key="${key}" title="League Chat">💬 Chat</button>
+        <div class="lrow-tags">
+          ${tags.join("")}
         </div>
-      </div>
-    `;
-  }
-
-  // Keep old _leagueCardHTML for detail panel use
-  function _leagueCardHTML(key, league, meta, isArchived) {
-    return _franchiseCardHTML({ latestKey: key, seasons: [{ key, league, meta }] }, isArchived);
+        <div class="lrow-actions">
+          <button class="lrow-chat-btn" data-key="${key}" title="Chat">💬</button>
+          <button class="lrow-options-btn league-options-btn" data-key="${key}" title="Options">⋯</button>
+        </div>
+      </div>`;
   }
 
   function _wireCardEvents(container) {
-    container.querySelectorAll(".league-card").forEach(card => {
-      const key = card.dataset.key;
+    container.querySelectorAll(".league-row").forEach(row => {
+      const key = row.dataset.key;
 
-      // Click card body → open detail panel
-      card.addEventListener("click", e => {
-        if (e.target.closest(".league-options-btn") || e.target.closest(".league-chat-btn")) return;
+      row.addEventListener("click", e => {
+        if (e.target.closest(".lrow-options-btn") || e.target.closest(".lrow-chat-btn")) return;
         openLeagueDetail(key);
       });
 
       // Drag to reorder
-      card.draggable = true;
-      card.addEventListener("dragstart", e => LeagueGroups.onLeagueDragStart(e, key));
-      card.addEventListener("dragend",   e => LeagueGroups.onLeagueDragEnd(e));
-      card.addEventListener("dragover",  e => LeagueGroups.onLeagueDragOver(e));
-      card.addEventListener("dragleave", e => LeagueGroups.onLeagueDragLeave(e));
-      card.addEventListener("drop",      e => LeagueGroups.onLeagueDrop(e, key));
+      row.draggable = true;
+      row.addEventListener("dragstart", e => LeagueGroups.onLeagueDragStart(e, key));
+      row.addEventListener("dragend",   e => LeagueGroups.onLeagueDragEnd(e));
+      row.addEventListener("dragover",  e => LeagueGroups.onLeagueDragOver(e));
+      row.addEventListener("dragleave", e => LeagueGroups.onLeagueDragLeave(e));
+      row.addEventListener("drop",      e => LeagueGroups.onLeagueDrop(e, key));
 
-      // Chat button
-      card.querySelector(".league-chat-btn")?.addEventListener("click", e => {
+      row.querySelector(".lrow-chat-btn")?.addEventListener("click", e => {
         e.stopPropagation();
         openLeagueChat(key, _allLeagues[key]?.leagueName);
       });
-    });
 
-    container.querySelectorAll(".league-options-btn").forEach(btn => {
-      btn.addEventListener("click", e => {
+      row.querySelector(".lrow-options-btn")?.addEventListener("click", e => {
         e.stopPropagation();
-        openLeagueLabelModal(btn.dataset.key);
+        openLeagueLabelModal(key);
       });
     });
   }
@@ -960,6 +951,7 @@ const Profile = (() => {
     DLRStandings.reset();
     DLRRoster.reset();
     DLRDraft.reset();
+    DLRAnalytics.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
   }
@@ -975,6 +967,7 @@ const Profile = (() => {
     if (tab === "playoffs")  DLRStandings.initPlayoffs();
     if (tab === "roster")    DLRRoster.init(league.leagueId, league.platform);
     if (tab === "draft")     DLRDraft.init(league.leagueId, league.platform);
+    if (tab === "analytics") DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
     if (tab === "chat")      _renderChat(el, leagueKey, league);
   }
 
