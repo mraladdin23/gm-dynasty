@@ -948,6 +948,8 @@ const Profile = (() => {
     DLRRoster.reset();
     DLRDraft.reset();
     DLRAnalytics.reset();
+    DLRRules.reset();
+    DLRFreeAgents.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
   }
@@ -957,14 +959,16 @@ const Profile = (() => {
     if (!el) return;
     // Always set the league context so matchups/playoffs work independently
     DLRStandings.setLeague(league.leagueId, league.platform);
-    if (tab === "overview")  _renderOverview(el, leagueKey, league);
-    if (tab === "standings") DLRStandings.init(league.leagueId, league.platform);
-    if (tab === "matchups")  DLRStandings.initMatchups();
-    if (tab === "playoffs")  DLRStandings.initPlayoffs();
-    if (tab === "roster")    DLRRoster.init(league.leagueId, league.platform);
-    if (tab === "draft")     DLRDraft.init(league.leagueId, league.platform);
-    if (tab === "analytics") DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
-    if (tab === "chat")      _renderChat(el, leagueKey, league);
+    if (tab === "overview")    _renderOverview(el, leagueKey, league);
+    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform);
+    if (tab === "matchups")    DLRStandings.initMatchups();
+    if (tab === "playoffs")    DLRStandings.initPlayoffs();
+    if (tab === "roster")      DLRRoster.init(league.leagueId, league.platform);
+    if (tab === "freeagents")  DLRFreeAgents.init(league.leagueId);
+    if (tab === "draft")       DLRDraft.init(league.leagueId, league.platform);
+    if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
+    if (tab === "rules")       DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
+    if (tab === "chat")        _renderChat(el, leagueKey, league);
   }
 
   function _renderOverview(el, leagueKey, league) {

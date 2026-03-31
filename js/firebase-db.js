@@ -262,6 +262,15 @@ const GMDB = (() => {
     return snap.exists() ? snap.val() : null;
   }
 
+  async function getLeagueRules(leagueKey) {
+    try { return await _restGet(`gmd/leagueRules/${leagueKey}`); }
+    catch(e) { return null; }
+  }
+
+  async function saveLeagueRules(leagueKey, data) {
+    await _restPut(`gmd/leagueRules/${leagueKey}`, data);
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
@@ -283,7 +292,8 @@ const GMDB = (() => {
     addReaction,
     updateRivalry,
     getRivalry,
-    // REST helpers exposed for modules that need direct path access
+    getLeagueRules,
+    saveLeagueRules,
     _restGet,
     _restPut
   };
