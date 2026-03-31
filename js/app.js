@@ -232,6 +232,14 @@ document.querySelectorAll(".nav-link").forEach(link => {
   });
 });
 
+// ── Player report button ───────────────────────────────────
+document.getElementById("player-report-btn")?.addEventListener("click", () => {
+  const profile = Auth.getCurrentProfile();
+  if (!profile) return;
+  const sleeperUserId = profile.platforms?.sleeper?.userId || null;
+  DLRPlayerReport.open(profile.leagues || {}, sleeperUserId);
+});
+
 // ── Edit profile modal ─────────────────────────────────────
 document.getElementById("edit-profile-btn")?.addEventListener("click", () => {
   const profile = Auth.getCurrentProfile();
