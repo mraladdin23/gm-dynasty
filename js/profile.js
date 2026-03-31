@@ -86,6 +86,7 @@ const Profile = (() => {
     _renderPlatformsBadges(profile.platforms || {});
     _renderLeagueFilters();
     _renderLeagues();
+    _renderCareerSummary(profile);
   }
 
   function _renderStatsRow(stats) {
@@ -128,6 +129,157 @@ const Profile = (() => {
         <span class="platform-badge-user">${_platformUser(platform, data)}</span>
       </div>
     `).join("");
+  }
+
+  // ── Career Summary ──────────────────────────────────────
+
+  function _renderCareerSummary(profile) {
+    const container = document.getElementById("career-summary-section");
+    if (!container) return;
+
+    const leagues = Object.values(_allLeagues);
+    if (!leagues.length) { container.style.display = "none"; return; }
+    container.style.display = "";
+
+    // Wire tabs
+    document.querySelectorAll(".cs-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".cs-tab").forEach(t => t.classList.remove("active"));
+        document.querySelectorAll(".cs-panel").forEach(p => p.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById(`cs-${tab.dataset.cstab}`)?.classList.add("active");
+      });
+    });
+
+    _renderCSOverall(leagues, profile.stats || {});
+    _renderCSAnnual(leagues);
+    _renderCSType(leagues);
+  }
+
+  function _renderCSOverall(leagues, stats) {
+    const el = document.getElementById("cs-overall");
+    if (!el) return;
+    const totalGames = (stats.totalWins || 0) + (stats.totalLosses || 0);
+    const winPct = totalGames > 0 ? ((stats.totalWins / totalGames) * 100).toFixed(1) : "—";
+
+    el.innerHTML = `
+      <div class="cs-stats-grid">
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.totalWins || 0}–${stats.totalLosses || 0}</div>
+          <div class="cs-stat-lbl">All-Time Record</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">${winPct}%</div>
+          <div class="cs-stat-lbl">Win Rate</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val" style="color:var(--color-gold)">${stats.championships || 0}</div>
+          <div class="cs-stat-lbl">🏆 Championships</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.runnerUps || 0}</div>
+          <div class="cs-stat-lbl">🥈 Runner-Ups</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.thirdPlace || 0}</div>
+          <div class="cs-stat-lbl">🥉 3rd Place</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.playoffAppearances || 0}</div>
+          <div class="cs-stat-lbl">Playoff Apps</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val">${stats.leaguesPlayed || leagues.length}</div>
+          <div class="cs-stat-lbl">Seasons</div>
+        </div>
+        <div class="cs-stat">
+          <div class="cs-stat-val" style="color:var(--color-gold)">${stats.dynastyScore || 0}</div>
+          <div class="cs-stat-lbl">Dynasty Score</div>
+        </div>
+      </div>`;
+  }
+
+  function _renderCSAnnual(leagues) {
+    const el = document.getElementById("cs-annual");
+    if (!el) return;
+
+    // Group by season
+    const bySeason = {};
+    leagues.forEach(l => {
+      const s = l.season || "Unknown";
+      if (!bySeason[s]) bySeason[s] = [];
+      bySeason[s].push(l);
+    });
+
+    const seasons = Object.keys(bySeason).sort((a, b) => b.localeCompare(a));
+
+    el.innerHTML = `
+      <div class="cs-table-wrap">
+        <table class="cs-table">
+          <thead>
+            <tr><th>Season</th><th>Leagues</th><th>W–L</th><th>Win%</th><th>Titles</th><th>Playoffs</th></tr>
+          </thead>
+          <tbody>
+            ${seasons.map(s => {
+              const rows = bySeason[s];
+              const w    = rows.reduce((sum, l) => sum + (l.wins   || 0), 0);
+              const lo   = rows.reduce((sum, l) => sum + (l.losses || 0), 0);
+              const tot  = w + lo;
+              const pct  = tot > 0 ? ((w / tot) * 100).toFixed(0) + "%" : "—";
+              const titles = rows.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+              const playoffs = rows.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
+              return `<tr>
+                <td class="cs-season">${s}</td>
+                <td class="dim">${rows.length}</td>
+                <td><span class="cs-record">${w}–${lo}</span></td>
+                <td class="dim">${pct}</td>
+                <td>${titles > 0 ? `<span style="color:var(--color-gold)">🏆 ×${titles}</span>` : "—"}</td>
+                <td class="dim">${playoffs > 0 ? `${playoffs}/${rows.length}` : "—"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function _renderCSType(leagues) {
+    const el = document.getElementById("cs-type");
+    if (!el) return;
+
+    const types = ["dynasty", "redraft", "keeper"];
+    const byType = {};
+    types.forEach(t => { byType[t] = leagues.filter(l => l.leagueType === t); });
+    byType["other"] = leagues.filter(l => !types.includes(l.leagueType));
+
+    const rows = [...types, "other"].map(type => {
+      const rows = byType[type];
+      if (!rows.length) return "";
+      const w   = rows.reduce((s, l) => s + (l.wins   || 0), 0);
+      const lo  = rows.reduce((s, l) => s + (l.losses || 0), 0);
+      const tot = w + lo;
+      const pct = tot > 0 ? ((w / tot) * 100).toFixed(0) + "%" : "—";
+      const titles  = rows.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+      const playoffs = rows.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
+      const label = type.charAt(0).toUpperCase() + type.slice(1);
+      return `<tr>
+        <td class="cs-season" style="text-transform:capitalize;">${label}</td>
+        <td class="dim">${rows.length}</td>
+        <td><span class="cs-record">${w}–${lo}</span></td>
+        <td class="dim">${pct}</td>
+        <td>${titles > 0 ? `<span style="color:var(--color-gold)">🏆 ×${titles}</span>` : "—"}</td>
+        <td class="dim">${playoffs > 0 ? `${playoffs}/${rows.length}` : "—"}</td>
+      </tr>`;
+    }).filter(Boolean).join("");
+
+    el.innerHTML = `
+      <div class="cs-table-wrap">
+        <table class="cs-table">
+          <thead>
+            <tr><th>Type</th><th>Seasons</th><th>W–L</th><th>Win%</th><th>Titles</th><th>Playoffs</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
   }
 
   // ── Filter bar ─────────────────────────────────────────
@@ -180,22 +332,12 @@ const Profile = (() => {
       tab.addEventListener("click", () => {
         const f = tab.dataset.filter;
         if (f === "all") {
-          // Clear all active filters
           _activeFilters.clear();
-          filterBar.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
-          tab.classList.add("active");
-        } else if (f === "archived") {
-          // Archived is exclusive — clears others
-          _activeFilters.clear();
-          _activeFilters.add("archived");
           filterBar.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
           tab.classList.add("active");
         } else {
-          // Toggle this filter
+          // Toggle this filter — archived now combinable with others
           filterBar.querySelector('[data-filter="all"]')?.classList.remove("active");
-          filterBar.querySelector('[data-filter="archived"]')?.classList.remove("active");
-          _activeFilters.delete("archived");
-
           if (_activeFilters.has(f)) {
             _activeFilters.delete(f);
             tab.classList.remove("active");
@@ -203,8 +345,6 @@ const Profile = (() => {
             _activeFilters.add(f);
             tab.classList.add("active");
           }
-
-          // If nothing selected, reset to "All"
           if (_activeFilters.size === 0) {
             filterBar.querySelector('[data-filter="all"]')?.classList.add("active");
           }
@@ -289,9 +429,21 @@ const Profile = (() => {
       }
     });
 
-    // Apply multi-select filters
-    const showArchived = _activeFilters.has("archived");
-    const filtered = showArchived ? archived : _applyFranchiseFilter(active);
+    const wantArchived  = _activeFilters.has("archived");
+    const otherFilters  = new Set([..._activeFilters].filter(f => f !== "archived"));
+
+    // Pool to filter from: if archived selected, include archived; if not, only active
+    // If BOTH archived and other filters selected, search across both pools
+    let pool = [];
+    if (wantArchived && otherFilters.size === 0) {
+      pool = archived; // only archived
+    } else if (wantArchived && otherFilters.size > 0) {
+      pool = [...active, ...archived]; // both pools
+    } else {
+      pool = active; // default: active only
+    }
+
+    const filtered = _applyFranchiseFilter(pool, otherFilters);
 
     // Sort: pinned first, then alphabetical
     filtered.sort((a, b) => {
@@ -304,14 +456,14 @@ const Profile = (() => {
     });
 
     if (filtered.length === 0) {
-      grid.innerHTML = `<p class="empty-state">${showArchived ? "No archived leagues." : "No leagues match this filter."}</p>`;
+      grid.innerHTML = `<p class="empty-state">No leagues match this filter.</p>`;
     } else {
-      grid.innerHTML = filtered.map(f => _franchiseCardHTML(f, showArchived)).join("");
+      grid.innerHTML = filtered.map(f => _franchiseCardHTML(f, archived.includes(f))).join("");
       _wireCardEvents(grid);
     }
 
-    // Archived accordion — only show when NOT in archived filter mode
-    if (!showArchived && archived.length > 0) {
+    // Archived accordion — hide when archived filter is active (already shown in main grid)
+    if (!wantArchived && archived.length > 0) {
       if (archivedSec) archivedSec.classList.remove("hidden");
       if (archivedCount) archivedCount.textContent = `${archived.length}`;
       if (archivedGrid) {
@@ -323,12 +475,13 @@ const Profile = (() => {
     }
   }
 
-  function _applyFranchiseFilter(franchises) {
-    if (_activeFilters.size === 0) return franchises;
-    return franchises.filter(f => {
-      // Franchise passes if it matches ALL active filters
-      return [..._activeFilters].every(filter => _franchiseMatchesFilter(f, filter));
-    });
+  function _applyFranchiseFilter(franchises, filterSet) {
+    const fs = filterSet || _activeFilters;
+    const active = new Set([...fs].filter(f => f !== "archived"));
+    if (active.size === 0) return franchises;
+    return franchises.filter(f =>
+      [...active].every(filter => _franchiseMatchesFilter(f, filter))
+    );
   }
 
   function _franchiseMatchesFilter(f, filter) {
@@ -692,6 +845,7 @@ const Profile = (() => {
     DLRChat.unsubscribe();
     DLRStandings.reset();
     DLRRoster.reset();
+    DLRDraft.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
   }
@@ -704,6 +858,7 @@ const Profile = (() => {
     if (tab === "matchups")  DLRStandings.initMatchups();
     if (tab === "playoffs")  DLRStandings.initPlayoffs();
     if (tab === "roster")    DLRRoster.init(league.leagueId, league.platform);
+    if (tab === "draft")     DLRDraft.init(league.leagueId, league.platform);
     if (tab === "chat")      _renderChat(el, leagueKey, league);
   }
 

@@ -25,6 +25,19 @@ const DLRPlayerCard = (() => {
     _year      = new Date().getFullYear();
 
     _buildModal();
+
+    // Ensure player cache has full bio fields — check version
+    const cacheVer = localStorage.getItem("dlr_players_ver");
+    if (cacheVer !== "2") {
+      // Silently refresh player cache to get bio fields
+      try {
+        const r = await fetch("https://api.sleeper.app/v1/players/nfl");
+        const data = await r.json();
+        localStorage.setItem("dlr_players", JSON.stringify(data));
+        localStorage.setItem("dlr_players_ver", "2");
+      } catch(e) { /* use cached data */ }
+    }
+
     _populateHeader(playerId, playerName);
     await _loadYear(_year);
   }
@@ -75,7 +88,6 @@ const DLRPlayerCard = (() => {
 
   // ── Populate header ───────────────────────────────────────
   function _populateHeader(playerId, playerName) {
-    // Get player data from cached dlr_players
     let allPlayers = {};
     try { allPlayers = JSON.parse(localStorage.getItem("dlr_players") || "{}"); } catch(e) {}
 
@@ -85,13 +97,14 @@ const DLRPlayerCard = (() => {
     const team   = p.team || "FA";
     const color  = POS_COLOR[pos] || "#9ca3af";
 
-    // Photo
+    console.log("[PlayerCard] player data:", { playerId, pos, team, age: p.age, height: p.height, weight: p.weight, college: p.college, years_exp: p.years_exp, status: p.status });
+
     const photoEl = document.getElementById("pc-photo");
     if (playerId && photoEl) {
       photoEl.src = `https://sleepercdn.com/content/nfl/players/${playerId}.jpg`;
+      photoEl.onerror = () => { photoEl.style.display = "none"; };
     }
 
-    // Position badge
     const posEl = document.getElementById("pc-pos-badge");
     if (posEl) {
       posEl.textContent      = pos;
@@ -101,18 +114,34 @@ const DLRPlayerCard = (() => {
     }
 
     document.getElementById("pc-name").textContent = name;
-    document.getElementById("pc-team").textContent = team;
 
-    // Bio line
+    // Team + position line
+    const teamEl = document.getElementById("pc-team");
+    if (teamEl) teamEl.textContent = `${team} · ${pos}`;
+
+    // Rich bio — check all possible fields
     const bio = [];
-    if (p.age)        bio.push(`Age ${p.age}`);
-    if (p.height)     bio.push(_fmtHeight(p.height));
-    if (p.weight)     bio.push(`${p.weight} lbs`);
-    if (p.college)    bio.push(p.college);
-    if (p.years_exp != null) bio.push(`Yr ${p.years_exp + 1}`);
-    if (p.status && p.status !== "Active") bio.push(`⚠️ ${p.status}`);
-    if (p.injury_status) bio.push(`🏥 ${p.injury_status}`);
-    document.getElementById("pc-bio").textContent = bio.join(" · ");
+    const age = p.age || (p.birth_date ? _calcAge(p.birth_date) : null);
+    if (age)              bio.push(`Age ${age}`);
+    if (p.height)         bio.push(_fmtHeight(p.height));
+    if (p.weight)         bio.push(`${p.weight} lbs`);
+    if (p.college)        bio.push(p.college);
+    if (p.years_exp === 0) bio.push("Rookie");
+    else if (p.years_exp != null) bio.push(`Yr ${p.years_exp + 1}`);
+    if (p.depth_chart_order === 1) bio.push("Starter");
+    if (p.search_rank && p.search_rank < 500) bio.push(`#${p.search_rank} overall`);
+
+    const statusBio = [];
+    if (p.status && p.status !== "Active") statusBio.push(`⚠️ ${p.status}`);
+    if (p.injury_status) statusBio.push(`🏥 ${p.injury_status}`);
+    if (p.practice_description) statusBio.push(p.practice_description);
+
+    const bioEl = document.getElementById("pc-bio");
+    if (bioEl) {
+      bioEl.innerHTML = bio.length
+        ? `<div>${bio.join(" · ")}</div>${statusBio.length ? `<div style="margin-top:4px;color:var(--color-red);font-size:.78rem;">${statusBio.join(" · ")}</div>` : ""}`
+        : (statusBio.length ? statusBio.join(" · ") : "");
+    }
 
     // Year tabs
     const tabsEl = document.getElementById("pc-year-tabs");
@@ -268,6 +297,15 @@ const DLRPlayerCard = (() => {
   function _showNoStats(sumEl, logEl, year) {
     if (sumEl) sumEl.innerHTML = "";
     if (logEl) logEl.innerHTML = `<div class="pc-no-weekly">No stats available${year ? ` for ${year}` : ""}.</div>`;
+  }
+
+  function _calcAge(birthDate) {
+    if (!birthDate) return null;
+    const [y, m, d] = birthDate.split("-").map(Number);
+    const today = new Date();
+    let age = today.getFullYear() - y;
+    if (today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d)) age--;
+    return age;
   }
 
   function _fmtHeight(inches) {
