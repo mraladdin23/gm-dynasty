@@ -7,38 +7,66 @@
 const DLRStandings = (() => {
 
   let _leagueId   = null;
-  let _leagueData = null;  // { teams, league, week }
-  let _matchCache = {};    // week → matchups array
-  let _historyLeagues = []; // [{ leagueId, season, current }]
-  let _viewingId  = null;  // null = current season
+  let _platform   = "sleeper";
+  let _leagueData = null;
+  let _matchCache = {};
+  let _historyLeagues = [];
+  let _viewingId  = null;
+  let _initToken  = 0; // increment on each init to cancel stale async ops
+
+  // ── Reset (call when closing or switching leagues) ───────
+  function reset() {
+    _leagueId    = null;
+    _platform    = "sleeper";
+    _leagueData  = null;
+    _matchCache  = {};
+    _historyLeagues = [];
+    _viewingId   = null;
+    _initToken++;
+  }
 
   // ── Init ────────────────────────────────────────────────
-  async function init(leagueId, leagueRecord) {
-    _leagueId   = leagueId;
-    _leagueData = null;
-    _matchCache = {};
-    _historyLeagues = [];
-    _viewingId  = null;
+  async function init(leagueId, platform) {
+    reset();
+    _leagueId  = leagueId;
+    _platform  = platform || "sleeper";
+    const token = ++_initToken;
 
     const el = document.getElementById("dtab-standings");
     if (!el) return;
     el.innerHTML = _loadingHTML("Loading standings…");
 
+    // MFL standings not yet supported via API — show placeholder
+    if (_platform === "mfl") {
+      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
+        <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
+        <div style="font-weight:600;margin-bottom:var(--space-2);">MFL standings coming soon</div>
+        <div style="font-size:.85rem;color:var(--color-text-dim);">
+          View full standings on <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${leagueId}" target="_blank" style="color:var(--color-gold);">MyFantasyLeague.com</a>
+        </div>
+      </div>`;
+      return;
+    }
+
     try {
-      await _loadData(leagueId);
-      await _loadHistory(leagueId);
+      await _loadData(leagueId, token);
+      if (token !== _initToken) return; // stale
+      await _loadHistory(leagueId, token);
     } catch(e) {
-      el.innerHTML = _errorHTML("Could not load standings: " + e.message);
+      if (token !== _initToken) return;
+      const el2 = document.getElementById("dtab-standings");
+      if (el2) el2.innerHTML = _errorHTML("Could not load standings: " + e.message);
     }
   }
 
-  // ── Load season data ─────────────────────────────────────
-  async function _loadData(leagueId) {
+  async function _loadData(leagueId, token) {
     const [league, rosters, users] = await Promise.all([
       SleeperAPI.getLeague(leagueId),
       SleeperAPI.getRosters(leagueId),
       SleeperAPI.getLeagueUsers(leagueId)
     ]);
+    if (token !== undefined && token !== _initToken) return;
+    if (!league) throw new Error("League not found.");
 
     const week = league.settings?.leg || league.settings?.week || 1;
     const userMap = {};
@@ -68,19 +96,19 @@ const DLRStandings = (() => {
     _renderStandings();
   }
 
-  // ── Load season history via prev_league_id ────────────────
-  async function _loadHistory(currentLeagueId) {
+  async function _loadHistory(currentLeagueId, token) {
     _historyLeagues = [];
     try {
       const chain = await SleeperAPI.getLeagueLineage(currentLeagueId);
-      // Build season list newest first
       for (const id of [...chain].reverse()) {
+        if (token !== undefined && token !== _initToken) return;
         const l = await SleeperAPI.getLeague(id);
         if (l) _historyLeagues.push({ leagueId: id, season: l.season, current: id === currentLeagueId });
       }
     } catch(e) {
       _historyLeagues = [{ leagueId: currentLeagueId, season: _leagueData?.league?.season, current: true }];
     }
+    if (token !== undefined && token !== _initToken) return;
     _renderSeasonBar();
   }
 
@@ -193,10 +221,26 @@ const DLRStandings = (() => {
   // ── Matchups ──────────────────────────────────────────────
   async function initMatchups() {
     const el = document.getElementById("dtab-matchups");
-    if (!el || !_leagueData) {
-      // Load data first if not yet loaded
-      if (!_leagueData && _leagueId) await _loadData(_leagueId);
+    if (!el) return;
+
+    if (_platform === "mfl") {
+      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
+        MFL matchups not yet available. <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${_leagueId}" target="_blank" style="color:var(--color-gold);">View on MFL →</a>
+      </div>`;
+      return;
     }
+
+    // Wait for standings data if it hasn't loaded yet
+    if (!_leagueData) {
+      el.innerHTML = _loadingHTML("Loading matchups…");
+      if (_leagueId) {
+        try { await _loadData(_leagueId); } catch(e) { el.innerHTML = _errorHTML(e.message); return; }
+      } else {
+        el.innerHTML = _errorHTML("No league selected.");
+        return;
+      }
+    }
+
     _renderMatchupsShell();
     loadMatchupsWeek(_leagueData?.week || 1);
   }
@@ -369,7 +413,17 @@ const DLRStandings = (() => {
     const el = document.getElementById("dtab-playoffs");
     if (!el) return;
 
-    if (!_leagueData && _leagueId) await _loadData(_leagueId);
+    if (_platform === "mfl") {
+      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
+        MFL playoff bracket not yet available. <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${_leagueId}" target="_blank" style="color:var(--color-gold);">View on MFL →</a>
+      </div>`;
+      return;
+    }
+
+    if (!_leagueData && _leagueId) {
+      el.innerHTML = _loadingHTML("Loading…");
+      try { await _loadData(_leagueId); } catch(e) { el.innerHTML = _errorHTML(e.message); return; }
+    }
 
     const status = _leagueData?.league?.status || "";
     const isPostseason = status === "post_season" || status === "complete";
@@ -513,6 +567,7 @@ const DLRStandings = (() => {
 
   return {
     init,
+    reset,
     refresh,
     switchSeason,
     initMatchups,
