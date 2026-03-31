@@ -226,6 +226,12 @@
             <button class="page-btn" id="page-prev" onclick="Profile.changePage(-1)">← Prev</button>
             <span class="page-info" id="page-info"></span>
             <button class="page-btn" id="page-next" onclick="Profile.changePage(1)">Next →</button>
+            <select class="page-size-select" onchange="Profile.setPageSize(parseInt(this.value))" id="page-size-select">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="25">25</option>
+              <option value="0">All</option>
+            </select>
           </div>
 
           <!-- Archived leagues (collapsed by default) -->
@@ -389,9 +395,9 @@
           <input type="text" id="label-custom-input" placeholder="e.g. Main League, Work League..." maxlength="30" />
         </div>
         <div class="form-group">
-          <label>Commissioner Group Name</label>
+          <label>Commissioner Group / Tournament</label>
           <input type="text" id="label-commish-input" placeholder="e.g. The Inner Circle, Degens..." maxlength="30" />
-          <span class="field-hint">Creates a shared group tag visible to all members of this league.</span>
+          <span class="field-hint">Organize leagues into a commissioner group — great for running cross-league tournaments. Group results and standings can be tracked together once leagues share a group tag. All members of this league will see the group name.</span>
         </div>
         <div class="label-options">
           <label class="label-checkbox">
@@ -424,14 +430,16 @@
       <button class="modal-close" id="league-detail-close">✕</button>
     </div>
     <div class="league-detail-tabs">
-      <button class="detail-tab active" data-dtab="overview">Overview</button>
-      <button class="detail-tab" data-dtab="standings">Standings</button>
-      <button class="detail-tab" data-dtab="matchups">Matchups</button>
-      <button class="detail-tab" data-dtab="playoffs">Playoffs</button>
-      <button class="detail-tab" data-dtab="roster">Rosters</button>
-      <button class="detail-tab" data-dtab="draft">Draft</button>
-      <button class="detail-tab" data-dtab="analytics">Analytics</button>
-      <button class="detail-tab" data-dtab="chat">Chat</button>
+      <select class="detail-tab-select" id="detail-tab-select" onchange="Profile.onDetailTabChange(this.value)">
+        <option value="overview">Overview</option>
+        <option value="standings">Standings</option>
+        <option value="matchups">Matchups</option>
+        <option value="playoffs">Playoffs</option>
+        <option value="roster">Rosters</option>
+        <option value="draft">Draft</option>
+        <option value="analytics">Analytics</option>
+        <option value="chat">Chat</option>
+      </select>
     </div>
     <div class="league-detail-body">
       <div id="dtab-overview"   class="detail-tab-content active"></div>

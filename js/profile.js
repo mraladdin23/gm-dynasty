@@ -7,7 +7,8 @@
 const Profile = (() => {
 
   const CURRENT_SEASON = new Date().getFullYear().toString();
-  const PAGE_SIZE      = 10;
+  const PAGE_SIZE_DEFAULT = 5;
+  let   PAGE_SIZE         = PAGE_SIZE_DEFAULT;
 
   let _activeFilter    = "all";
   let _activeFilters   = new Set();
@@ -562,6 +563,18 @@ const Profile = (() => {
     }
   }
 
+  function setPageSize(n) {
+    PAGE_SIZE    = n === 0 ? 9999 : n;
+    _currentPage = 0;
+    _archivedPage = 0;
+    const grid = document.getElementById("leagues-grid");
+    _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
+    const archGrid = document.getElementById("archived-grid");
+    if (archGrid && _archivedCache.length) {
+      _renderPage(archGrid, _archivedCache, _archivedPage, "archived-pagination", "arch-page-info", true);
+    }
+  }
+
   function _updateJumpDropdown(allFranchises) {
     const sel = document.getElementById("league-jump-select");
     const bar = document.getElementById("league-search-bar");
@@ -850,16 +863,13 @@ const Profile = (() => {
     const league = _allLeagues[leagueKey];
     if (!league) return;
 
-    // Find all seasons of this franchise for the season selector
-    const franchiseId = league.franchiseId || league.leagueId;
+    const franchiseId      = league.franchiseId || league.leagueId;
     const franchiseSeasons = Object.entries(_allLeagues)
       .filter(([, l]) => (l.franchiseId || l.leagueId) === franchiseId)
       .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
 
     _detailLeagueKey = leagueKey;
     _detailLeague    = league;
-
-    // Reset DLRStandings fully so no state bleeds between cards
     DLRStandings.reset();
 
     // Header
@@ -870,7 +880,7 @@ const Profile = (() => {
       ${league.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
 
-    // Season selector in header (shared across all tabs)
+    // Season pills
     const seasonSel = document.getElementById("detail-season-selector");
     if (seasonSel) {
       if (franchiseSeasons.length > 1) {
@@ -884,32 +894,24 @@ const Profile = (() => {
       }
     }
 
+    // Reset dropdown to overview
+    const sel = document.getElementById("detail-tab-select");
+    if (sel) sel.value = "overview";
+
     // Show panel
     document.getElementById("league-detail-panel").classList.remove("hidden");
     document.getElementById("league-detail-backdrop").classList.remove("hidden");
 
-    // Re-wire tab clicks (clone to remove stale listeners)
-    document.querySelectorAll(".detail-tab").forEach(tab => {
-      const fresh = tab.cloneNode(true);
-      tab.parentNode.replaceChild(fresh, tab);
-    });
-    document.querySelectorAll(".detail-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        document.querySelectorAll(".detail-tab").forEach(t => t.classList.remove("active"));
-        document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
-        tab.classList.add("active");
-        const name = tab.dataset.dtab;
-        document.getElementById(`dtab-${name}`)?.classList.add("active");
-        _renderDetailTab(name, _detailLeagueKey, _detailLeague);
-      });
-    });
-
-    // Reset to overview tab
-    document.querySelectorAll(".detail-tab").forEach(t => t.classList.remove("active"));
+    // Show overview content
     document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
-    document.querySelector('[data-dtab="overview"]')?.classList.add("active");
     document.getElementById("dtab-overview")?.classList.add("active");
     _renderDetailTab("overview", leagueKey, league);
+  }
+
+  function onDetailTabChange(tabName) {
+    document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
+    document.getElementById(`dtab-${tabName}`)?.classList.add("active");
+    _renderDetailTab(tabName, _detailLeagueKey, _detailLeague);
   }
 
   function switchDetailSeason(newKey) {
@@ -919,28 +921,22 @@ const Profile = (() => {
     _detailLeagueKey = newKey;
     _detailLeague    = newLeague;
 
-    // Update active pill in header
     document.querySelectorAll("#detail-season-selector .season-pill").forEach(p => {
       p.classList.toggle("season-pill--current", p.dataset.key === newKey);
     });
 
-    // Update meta line
     document.getElementById("detail-league-meta").innerHTML = `
       <span class="league-platform-tag league-platform-tag--${newLeague.platform}">${(newLeague.platform||"").toUpperCase()}</span>
       <span style="color:var(--color-text-dim);font-size:.82rem;">${newLeague.leagueType} · ${newLeague.totalTeams} teams</span>
       ${newLeague.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
 
-    // Reset standings module state (new league/season)
     DLRStandings.reset();
 
-    // Re-render whichever tab is currently active in the panel
-    const activeTab = document.querySelector(".detail-tab.active")?.dataset.dtab || "overview";
-
-    // Clear tab content divs
+    // Re-render current dropdown-selected tab
+    const activeTab = document.getElementById("detail-tab-select")?.value || "overview";
     document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
     document.getElementById(`dtab-${activeTab}`)?.classList.add("active");
-
     _renderDetailTab(activeTab, newKey, newLeague);
   }
 
@@ -1146,10 +1142,12 @@ const Profile = (() => {
     initArchivedToggle,
     openLeagueDetail,
     closeLeagueDetail,
+    onDetailTabChange,
     switchDetailSeason,
     openLeagueChat,
     closeLeagueChat,
     changePage,
+    setPageSize,
     jumpToLeague
   };
 
