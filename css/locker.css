@@ -2074,3 +2074,210 @@ select option { background: var(--color-bg-2); }
 }
 .pc-error { color: var(--color-red); font-size: .82rem; padding: var(--space-4) 0; }
 
+
+/* ── Career Summary Section ───────────────────────────── */
+.career-summary-section { margin-top: var(--space-6); }
+.career-summary-tabs {
+  display: flex;
+  gap: 3px;
+}
+.cs-tab {
+  padding: var(--space-1) var(--space-3);
+  font-size: .78rem;
+  font-family: var(--font-body);
+  font-weight: 600;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.cs-tab.active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-color: var(--color-gold);
+}
+.cs-panel { display: none; padding: var(--space-4) 0; }
+.cs-panel.active { display: block; }
+
+.cs-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+@media (max-width: 600px) {
+  .cs-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.cs-stat {
+  background: var(--color-bg-3);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-2);
+  text-align: center;
+}
+.cs-stat-val {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--color-text);
+  letter-spacing: .04em;
+}
+.cs-stat-lbl {
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-top: var(--space-1);
+}
+
+.cs-table-wrap { overflow-x: auto; }
+.cs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .85rem;
+}
+.cs-table thead th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  border-bottom: 1px solid var(--color-border);
+}
+.cs-table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+  transition: background var(--transition);
+}
+.cs-table tbody tr:hover { background: var(--color-surface); }
+.cs-table tbody td {
+  padding: var(--space-3) var(--space-3);
+  vertical-align: middle;
+}
+.cs-season { font-family: var(--font-display); font-weight: 700; color: var(--color-gold); }
+.cs-record { font-family: var(--font-display); font-weight: 700; }
+.dim { color: var(--color-text-muted); }
+
+
+/* ── Draft Board ──────────────────────────────────────── */
+.draft-header-bar { margin-bottom: var(--space-4); }
+.draft-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: .82rem;
+  flex-wrap: wrap;
+}
+.draft-type-label {
+  font-family: var(--font-display);
+  font-size: .85rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.draft-status { font-weight: 600; }
+
+.draft-board-scroll {
+  overflow-x: auto;
+  padding-bottom: var(--space-3);
+}
+.draft-board {
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.draft-round {}
+.draft-round-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.draft-picks-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: var(--space-2);
+}
+
+.draft-pick {
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-2);
+  border: 1px solid var(--color-border);
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color var(--transition), background var(--transition);
+}
+.draft-pick--filled {
+  background: var(--color-surface);
+  cursor: pointer;
+}
+.draft-pick--filled:hover {
+  border-color: var(--color-gold);
+  background: rgba(240,180,41,.05);
+}
+.draft-pick--empty {
+  background: var(--color-bg-3);
+  opacity: .6;
+}
+
+.draft-pick-num {
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+}
+.draft-pick-player { flex: 1; }
+.draft-pick-name {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.2;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.draft-pick-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: 2px;
+}
+.draft-pos-badge {
+  font-size: .6rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.draft-pick-nfl {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+}
+.draft-pick-team {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+.draft-pick-owner {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  margin-top: auto;
+}
+.draft-empty {
+  padding: var(--space-10) var(--space-4);
+  text-align: center;
+  color: var(--color-text-dim);
+}
+

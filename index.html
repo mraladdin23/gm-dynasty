@@ -224,10 +224,19 @@
           </div>
         </div>
 
-        <!-- Trophy shelf placeholder -->
-        <div class="trophy-shelf-placeholder">
-          <h3 class="section-title">Trophy Shelf</h3>
-          <p class="empty-state coming-soon">🏆 Trophy display coming in Phase 2</p>
+        <!-- Career Summary -->
+        <div class="career-summary-section" id="career-summary-section">
+          <div class="leagues-header">
+            <h3 class="section-title">Career Summary</h3>
+            <div class="career-summary-tabs" id="career-summary-tabs">
+              <button class="cs-tab active" data-cstab="overall">Overall</button>
+              <button class="cs-tab" data-cstab="annual">By Year</button>
+              <button class="cs-tab" data-cstab="type">By Type</button>
+            </div>
+          </div>
+          <div id="cs-overall" class="cs-panel active"></div>
+          <div id="cs-annual"  class="cs-panel"></div>
+          <div id="cs-type"    class="cs-panel"></div>
         </div>
 
       </div>
@@ -400,6 +409,7 @@
       <button class="detail-tab" data-dtab="matchups">Matchups</button>
       <button class="detail-tab" data-dtab="playoffs">Playoffs</button>
       <button class="detail-tab" data-dtab="roster">Rosters</button>
+      <button class="detail-tab" data-dtab="draft">Draft</button>
       <button class="detail-tab" data-dtab="chat">Chat</button>
     </div>
     <div class="league-detail-body">
@@ -408,6 +418,7 @@
       <div id="dtab-matchups"  class="detail-tab-content"></div>
       <div id="dtab-playoffs"  class="detail-tab-content"></div>
       <div id="dtab-roster"    class="detail-tab-content"></div>
+      <div id="dtab-draft"     class="detail-tab-content"></div>
       <div id="dtab-chat"      class="detail-tab-content">
         <div id="chat-panel-body" class="chat-panel-body"></div>
       </div>
@@ -429,6 +440,7 @@
   <script src="js/chat.js"></script>
   <script src="js/standings.js"></script>
   <script src="js/roster.js"></script>
+  <script src="js/draft.js"></script>
   <script src="js/playercard.js"></script>
   <script src="js/profile.js"></script>
   <script src="js/app.js"></script>
