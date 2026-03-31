@@ -199,6 +199,7 @@
           <div class="league-filters" id="league-filters">
             <button class="filter-tab active" data-filter="all">All</button>
             <button class="filter-tab" data-filter="active">Active</button>
+            <button class="filter-tab" data-filter="owner">🏈 Owner</button>
             <button class="filter-tab" data-filter="pinned">📌 Pinned</button>
             <button class="filter-tab" data-filter="dynasty">Dynasty</button>
             <button class="filter-tab" data-filter="redraft">Redraft</button>
@@ -208,9 +209,23 @@
             <button class="filter-tab" data-filter="archived">📦 Archived</button>
           </div>
 
+          <!-- League search dropdown -->
+          <div class="league-search-bar" id="league-search-bar" style="display:none;">
+            <select class="league-jump-select" id="league-jump-select" onchange="Profile.jumpToLeague(this.value)">
+              <option value="">Jump to league…</option>
+            </select>
+          </div>
+
           <!-- Active leagues grid -->
           <div class="leagues-grid" id="leagues-grid">
             <p class="empty-state">No leagues loaded yet.</p>
+          </div>
+
+          <!-- Pagination -->
+          <div class="leagues-pagination" id="leagues-pagination" style="display:none;">
+            <button class="page-btn" id="page-prev" onclick="Profile.changePage(-1)">← Prev</button>
+            <span class="page-info" id="page-info"></span>
+            <button class="page-btn" id="page-next" onclick="Profile.changePage(1)">Next →</button>
           </div>
 
           <!-- Archived leagues (collapsed by default) -->
@@ -221,6 +236,11 @@
               <span class="archived-chevron">▼</span>
             </button>
             <div class="leagues-grid archived-grid hidden" id="archived-grid"></div>
+            <div class="leagues-pagination" id="archived-pagination" style="display:none;">
+              <button class="page-btn" id="arch-prev" onclick="Profile.changePage(-1, true)">← Prev</button>
+              <span class="page-info" id="arch-page-info"></span>
+              <button class="page-btn" id="arch-next" onclick="Profile.changePage(1, true)">Next →</button>
+            </div>
           </div>
         </div>
 
