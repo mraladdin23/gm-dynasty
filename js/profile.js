@@ -669,21 +669,32 @@ const Profile = (() => {
   function switchDetailSeason(newKey) {
     const newLeague = _allLeagues[newKey];
     if (!newLeague) return;
-    // Update active pill
+
+    _detailLeagueKey = newKey;
+    _detailLeague    = newLeague;
+
+    // Update active pill in header
     document.querySelectorAll("#detail-season-selector .season-pill").forEach(p => {
       p.classList.toggle("season-pill--current", p.dataset.key === newKey);
     });
-    // Update header season info
+
+    // Update meta line
     document.getElementById("detail-league-meta").innerHTML = `
       <span class="league-platform-tag league-platform-tag--${newLeague.platform}">${(newLeague.platform||"").toUpperCase()}</span>
       <span style="color:var(--color-text-dim);font-size:.82rem;">${newLeague.leagueType} · ${newLeague.totalTeams} teams</span>
       ${newLeague.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
-    _detailLeagueKey = newKey;
-    _detailLeague    = newLeague;
-    // Re-render current active tab for the new season
-    const activeTab = document.querySelector(".detail-tab.active")?.dataset.dtab || "overview";
+
+    // Reset standings module state (new league/season)
     DLRStandings.reset();
+
+    // Re-render whichever tab is currently active in the panel
+    const activeTab = document.querySelector(".detail-tab.active")?.dataset.dtab || "overview";
+
+    // Clear tab content divs
+    document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
+    document.getElementById(`dtab-${activeTab}`)?.classList.add("active");
+
     _renderDetailTab(activeTab, newKey, newLeague);
   }
 
@@ -692,6 +703,7 @@ const Profile = (() => {
     document.getElementById("league-detail-backdrop")?.classList.add("hidden");
     DLRChat.unsubscribe();
     DLRStandings.reset();
+    DLRRoster.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
   }
@@ -699,12 +711,12 @@ const Profile = (() => {
   function _renderDetailTab(tab, leagueKey, league) {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
-    if (tab === "overview")   _renderOverview(el, leagueKey, league);
-    if (tab === "history")    _renderHistory(el, leagueKey, league);
-    if (tab === "standings")  DLRStandings.init(league.leagueId, league.platform);
-    if (tab === "matchups")   DLRStandings.initMatchups();
-    if (tab === "playoffs")   DLRStandings.initPlayoffs();
-    if (tab === "chat")       _renderChat(el, leagueKey, league);
+    if (tab === "overview")  _renderOverview(el, leagueKey, league);
+    if (tab === "standings") DLRStandings.init(league.leagueId, league.platform);
+    if (tab === "matchups")  DLRStandings.initMatchups();
+    if (tab === "playoffs")  DLRStandings.initPlayoffs();
+    if (tab === "roster")    DLRRoster.init(league.leagueId, league.platform);
+    if (tab === "chat")      _renderChat(el, leagueKey, league);
   }
 
   function _renderOverview(el, leagueKey, league) {
