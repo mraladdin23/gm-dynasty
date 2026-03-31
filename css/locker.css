@@ -1629,3 +1629,233 @@ select option { background: var(--color-bg-2); }
 }
 .overview-section-title:first-child { margin-top: 0; }
 
+
+/* ── Bracket vertical redesign ─────────────────────────── */
+.bracket-wrap { padding: var(--space-2) 0; }
+
+.bracket-section {
+  margin-bottom: var(--space-4);
+}
+.bracket-section-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.bracket-section-games {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+.bracket-match {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.bracket-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  font-size: .85rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.bracket-slot:last-of-type { border-bottom: none; }
+.bracket-slot--win  { background: rgba(34,197,94,.1); }
+.bracket-slot--lose { opacity: .5; }
+.bracket-team { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bracket-check { color: var(--color-green); font-weight: 700; margin-left: var(--space-2); }
+.bracket-tbd {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+
+.bracket-finals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.bracket-finals-game {}
+.bracket-finals-label {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+}
+.bracket-finals-label.place-5 { color: var(--color-text-muted); }
+
+
+/* ── Roster view ──────────────────────────────────────── */
+.roster-toolbar {
+  margin-bottom: var(--space-4);
+}
+.roster-team-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: .88rem;
+  outline: none;
+  cursor: pointer;
+}
+.roster-team-select:focus { border-color: var(--color-gold); }
+
+.roster-team-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+}
+
+.roster-team-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-3);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.roster-team-identity { display: flex; align-items: center; gap: var(--space-3); }
+.roster-avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.roster-avatar-placeholder {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .85rem; font-weight: 700;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.roster-team-name {
+  font-family: var(--font-display);
+  font-size: .95rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.roster-team-record {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}
+.roster-team-counts { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.roster-count-badge {
+  font-size: .72rem;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+.roster-count-badge--ir   { color: var(--color-red);  border-color: rgba(239,68,68,.3); }
+.roster-count-badge--taxi { color: var(--color-gold); border-color: var(--color-gold-dim); }
+
+.roster-section-label {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  border-top: 1px solid var(--color-border);
+  margin-top: 2px;
+}
+.roster-section-label:first-of-type { border-top: none; }
+
+.roster-player-list { padding: 0 var(--space-2) var(--space-2); }
+
+.roster-player-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
+}
+.roster-player-row:hover { background: var(--color-bg-3); }
+.roster-player-row--ir   { opacity: .7; }
+.roster-player-row--taxi { opacity: .65; }
+
+.roster-player-photo {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-bg-3);
+  flex-shrink: 0;
+  position: relative;
+}
+.roster-player-photo img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+.roster-player-photo-fallback {
+  width: 100%; height: 100%;
+  align-items: center; justify-content: center;
+  font-size: .72rem; font-weight: 700;
+}
+
+.roster-player-info { flex: 1; min-width: 0; }
+.roster-player-name {
+  font-size: .88rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-player-name.dim { color: var(--color-text-muted); }
+.roster-player-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 2px;
+}
+.roster-pos-badge {
+  font-size: .65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 99px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.roster-nfl-team {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+}
+.roster-rookie-badge {
+  font-size: .65rem;
+  font-weight: 700;
+  background: var(--color-gold);
+  color: #0a0e1a;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.roster-injury-badge {
+  font-size: .65rem;
+  font-weight: 600;
+  background: rgba(239,68,68,.15);
+  color: var(--color-red);
+  padding: 1px 5px;
+  border-radius: 99px;
+  border: 1px solid rgba(239,68,68,.3);
+}
+

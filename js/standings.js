@@ -108,36 +108,6 @@ const DLRStandings = (() => {
     } catch(e) {
       _historyLeagues = [{ leagueId: currentLeagueId, season: _leagueData?.league?.season, current: true }];
     }
-    if (token !== undefined && token !== _initToken) return;
-    _renderSeasonBar();
-  }
-
-  // ── Season bar ────────────────────────────────────────────
-  function _renderSeasonBar() {
-    const bar = document.getElementById("dtab-standings-seasonbar");
-    if (!bar) return;
-    if (_historyLeagues.length <= 1) { bar.style.display = "none"; return; }
-    const viewId = _viewingId || _leagueId;
-    bar.style.display = "";
-    bar.innerHTML = `
-      <div class="season-bar-label">Season</div>
-      <div class="season-bar-pills">
-        ${_historyLeagues.map(h => `
-          <button class="season-pill ${h.leagueId === viewId ? "season-pill--current" : ""}"
-            onclick="DLRStandings.switchSeason('${h.leagueId}')">
-            ${h.season}${h.current ? " ★" : ""}
-          </button>`).join("")}
-      </div>`;
-  }
-
-  async function switchSeason(leagueId) {
-    if (!leagueId || leagueId === "0") return;
-    _viewingId  = leagueId;
-    _matchCache = {};
-    _renderSeasonBar();
-    const el = document.getElementById("dtab-standings");
-    if (el) el.innerHTML = _loadingHTML("Loading season…");
-    await _loadData(leagueId);
   }
 
   // ── Render standings table ────────────────────────────────
@@ -153,7 +123,6 @@ const DLRStandings = (() => {
     const fmt = n => (n || 0) % 1 === 0 ? (n || 0).toFixed(0) : (n || 0).toFixed(2);
 
     el.innerHTML = `
-      <div id="dtab-standings-seasonbar" style="display:none;margin-bottom:12px;"></div>
       <div class="standings-meta">
         <span>${league.name || "League"} · Week ${week} · Top ${playoffSpots} make playoffs</span>
         <button class="btn-refresh" onclick="DLRStandings.refresh()">↻ Refresh</button>
@@ -206,16 +175,13 @@ const DLRStandings = (() => {
         <span class="legend-dot" style="background:var(--color-gold)"></span>Playoff spot
         <span class="legend-dot" style="background:var(--color-gold-dim);margin-left:8px;"></span>Bubble
       </div>`;
-
-    _renderSeasonBar();
   }
 
   async function refresh() {
-    const id = _viewingId || _leagueId;
-    if (!id) return;
+    if (!_leagueId) return;
     const el = document.getElementById("dtab-standings");
     if (el) el.innerHTML = _loadingHTML("Refreshing…");
-    await _loadData(id);
+    await _loadData(_leagueId);
   }
 
   // ── Matchups ──────────────────────────────────────────────
@@ -473,13 +439,18 @@ const DLRStandings = (() => {
 
       function bracketMatch(m) {
         const decided = m.w != null;
-        const t1win = decided && m.w === m.t1;
-        const t2win = decided && m.w === m.t2;
+        const t1win   = decided && m.w === m.t1;
+        const t2win   = decided && m.w === m.t2;
         return `<div class="bracket-match">
-          <div class="bracket-slot ${t1win ? "bracket-slot--win" : t2win ? "bracket-slot--lose" : ""}">${matchLabel(m.t1)}</div>
-          <div class="bracket-vs">vs</div>
-          <div class="bracket-slot ${t2win ? "bracket-slot--win" : t1win ? "bracket-slot--lose" : ""}">${matchLabel(m.t2)}</div>
-          <div class="bracket-result">${decided ? `Winner: <span class="bracket-winner">${matchLabel(m.w)}</span>` : "In progress"}</div>
+          <div class="bracket-slot ${t1win ? "bracket-slot--win" : t2win ? "bracket-slot--lose" : ""}">
+            <span class="bracket-team">${matchLabel(m.t1)}</span>
+            ${t1win ? '<span class="bracket-check">✓</span>' : ""}
+          </div>
+          <div class="bracket-slot ${t2win ? "bracket-slot--win" : t1win ? "bracket-slot--lose" : ""}">
+            <span class="bracket-team">${matchLabel(m.t2)}</span>
+            ${t2win ? '<span class="bracket-check">✓</span>' : ""}
+          </div>
+          ${!decided ? '<div class="bracket-tbd">In progress</div>' : ""}
         </div>`;
       }
 
@@ -494,37 +465,16 @@ const DLRStandings = (() => {
       const rounds   = Object.keys(byRound).map(Number).sort((a, b) => a - b);
       const maxRound = rounds.length ? Math.max(...rounds) : 1;
 
+      // Vertical layout: each round is a section, games stacked within
       const cols = rounds.map(r => {
-        const isSemis = r === maxRound;
-        const label   = isSemis ? "Semifinals" : "First Round";
-        const sublabel = isSemis ? "Semifinal" : "First Round";
-        const regHTML = (byRound[r] || []).map(m => `
-          <div class="bracket-match-group">
-            <div class="bracket-match-sublabel">${sublabel}</div>
-            ${bracketMatch(m)}
-          </div>`).join("");
-        const fifthHTML = isSemis && fifthGame ? `
-          <div class="bracket-match-group">
-            <div class="bracket-match-sublabel place-5">5th Place</div>
-            ${bracketMatch(fifthGame)}
-          </div>` : "";
-        return `<div class="bracket-round">
-          <div class="bracket-round-label">${label}</div>
-          ${regHTML}${fifthHTML}
+        const isSemis  = r === maxRound;
+        const label    = r === 1 ? "First Round" : isSemis ? "Semifinals" : `Round ${r}`;
+        const games    = (byRound[r] || []).map(m => bracketMatch(m)).join("");
+        return `<div class="bracket-section">
+          <div class="bracket-section-label">${label}</div>
+          <div class="bracket-section-games">${games}</div>
         </div>`;
       }).join("");
-
-      const finalCol = `<div class="bracket-round">
-        <div class="bracket-round-label">🏆 Championship</div>
-        ${champGame ? `<div class="bracket-match-group">
-          <div class="bracket-match-sublabel">🏆 Championship</div>
-          ${bracketMatch(champGame)}
-        </div>` : ""}
-        ${thirdGame ? `<div class="bracket-match-group">
-          <div class="bracket-match-sublabel place-3">🥉 3rd Place</div>
-          ${bracketMatch(thirdGame)}
-        </div>` : ""}
-      </div>`;
 
       // Consolation draft order
       const playoffSpots = _leagueData?.league?.settings?.playoff_teams || 6;
@@ -545,8 +495,24 @@ const DLRStandings = (() => {
 
       el.innerHTML = `
         <div class="bracket-wrap">
-          <div class="bracket-title">🏆 Playoff Bracket</div>
-          <div class="bracket-container">${cols}${finalCol}</div>
+          ${cols}
+          <div class="bracket-finals">
+            ${champGame ? `
+            <div class="bracket-finals-game">
+              <div class="bracket-finals-label">🏆 Championship</div>
+              ${bracketMatch(champGame)}
+            </div>` : ""}
+            ${thirdGame ? `
+            <div class="bracket-finals-game">
+              <div class="bracket-finals-label">🥉 3rd Place</div>
+              ${bracketMatch(thirdGame)}
+            </div>` : ""}
+            ${fifthGame ? `
+            <div class="bracket-finals-game">
+              <div class="bracket-finals-label place-5">5th Place</div>
+              ${bracketMatch(fifthGame)}
+            </div>` : ""}
+          </div>
           ${draftHTML}
         </div>`;
     } catch(e) {
@@ -569,7 +535,6 @@ const DLRStandings = (() => {
     init,
     reset,
     refresh,
-    switchSeason,
     initMatchups,
     loadMatchupsWeek,
     initPlayoffs
