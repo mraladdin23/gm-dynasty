@@ -19,7 +19,7 @@ const DLRAuction = (() => {
   let _rosterData   = [];
   let _auctions     = [];
   let _players      = {};
-  let _settings     = { pauseStart: 0, pauseEnd: 8, maxNoms: 2, bidDuration: 8 };
+  let _settings     = { pauseStart: 0, pauseEnd: 8, maxNoms: 2, bidDuration: 8, maxRosterSize: 30 };
   let _initToken    = 0;
   let _unsubFn      = null;
   let _timerInterval = null;
@@ -82,11 +82,23 @@ const DLRAuction = (() => {
             taxi:       r.taxi     || [],
             wins:       r.settings?.wins   || 0,
             losses:     r.settings?.losses || 0,
+            // FAAB = waiver budget remaining from Sleeper (in dollars, not millions)
             faab:       r.settings?.waiver_budget_used != null
-                          ? Math.max(0, 1000 - (r.settings.waiver_budget_used || 0))
+                          ? Math.max(0, (r.settings.waiver_budget || 1000) - (r.settings.waiver_budget_used || 0)) * 1_000_000
                           : null
           };
         });
+
+        // Also pull remaining cap from DLRSalaryCap if the module has data
+        if (typeof DLRSalaryCap !== "undefined") {
+          const capData = DLRSalaryCap.getCapData?.();
+          if (capData) {
+            _rosterData.forEach(team => {
+              const remaining = capData[team.username]?.remaining;
+              if (remaining != null) team.remainingCap = remaining;
+            });
+          }
+        }
       } catch(e) {}
     }
     if (token !== _initToken) return;
@@ -487,36 +499,128 @@ const DLRAuction = (() => {
   function _renderTeams(el) {
     const now    = Date.now();
     const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+    const maxRoster = _settings.maxRosterSize || 30;
 
     el.innerHTML = `
+      <div style="margin-bottom:var(--space-3);font-size:.8rem;color:var(--color-text-dim)">
+        Max roster size: <strong>${maxRoster}</strong> (active + IR, excl. taxi).
+        ${_isCommish ? `<button class="btn-secondary btn-sm" style="margin-left:var(--space-2);font-size:.72rem" onclick="DLRAuction.editRosterSize()">Edit</button>` : ""}
+      </div>
       <div class="auc-teams-list">
         ${_rosterData.map(team => {
+          // Active + IR (not taxi) counts toward roster limit
+          const mainCount  = (team.players||[]).length - (team.taxi||[]).length;
+          const openSpots  = Math.max(0, maxRoster - mainCount);
+          const isMe       = team.roster_id === _myRosterId;
+
           const activeNoms = active.filter(a => a.nominatedBy === team.roster_id);
           const activeBids = active.filter(a => {
             const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
             return bids.some(b => b.rosterId === team.roster_id);
           });
-          const committed = activeBids.reduce((sum, a) => {
+          const committed  = activeBids.reduce((sum, a) => {
             const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
             const mine = bids.filter(b => b.rosterId === team.roster_id);
             return sum + (mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0);
           }, 0);
 
-          const rosterSpots = team.players.length + team.reserve.length + team.taxi.length;
-          const isMe = team.roster_id === _myRosterId;
+          // FAAB = remaining cap from salary module (passed in via _rosterData.remainingCap)
+          // or waiver_budget if available from Sleeper
+          const faab      = team.remainingCap ?? (team.faab != null ? team.faab * 1_000_000 : null);
+          const available = faab != null ? faab - committed : null;
 
           return `
-            <div class="auc-team-row ${isMe ? "auc-team-row--mine" : ""}">
-              <div class="auc-team-name">${_esc(team.teamName)} ${isMe ? "<span class='dim'>(you)</span>" : ""}</div>
-              <div class="auc-team-stats">
-                ${team.faab != null ? `<span class="auc-stat-pill">💰 ${_fmtSal(team.faab * 1_000_000)} FAAB</span>` : ""}
-                <span class="auc-stat-pill">👥 ${rosterSpots} players</span>
-                <span class="auc-stat-pill">🏷 ${activeNoms.length} nom${activeNoms.length !== 1 ? "s" : ""}</span>
-                ${activeBids.length ? `<span class="auc-stat-pill">🔥 ${activeBids.length} bid${activeBids.length !== 1 ? "s" : ""} · ${_fmtSal(committed)} committed</span>` : ""}
+            <div class="auc-team-row ${isMe ? "auc-team-row--mine" : ""}"
+              onclick="DLRAuction.toggleTeamDetail(${team.roster_id})" style="cursor:pointer">
+              <div class="auc-team-header-row">
+                <div class="auc-team-name">${_esc(team.teamName)} ${isMe ? `<span class="dim" style="font-size:.72rem">(you)</span>` : ""}</div>
+                <div style="font-size:.72rem;color:var(--color-text-dim)">${team.wins}–${team.losses}</div>
               </div>
+              <div class="auc-team-stats">
+                <span class="auc-stat-pill ${openSpots === 0 ? "auc-stat-pill--full" : ""}">
+                  👥 ${mainCount}/${maxRoster} · <strong>${openSpots} open</strong>
+                </span>
+                ${faab != null ? `<span class="auc-stat-pill">💰 ${_fmtSal(faab)} cap</span>` : ""}
+                ${committed ? `<span class="auc-stat-pill auc-stat-pill--warn">🔥 ${_fmtSal(committed)} committed</span>` : ""}
+                ${available != null && committed ? `<span class="auc-stat-pill">✓ ${_fmtSal(available)} left</span>` : ""}
+                ${activeNoms.length ? `<span class="auc-stat-pill">🏷 ${activeNoms.length} nom${activeNoms.length!==1?"s":""}</span>` : ""}
+                ${activeBids.length ? `<span class="auc-stat-pill">⬆ ${activeBids.length} bid${activeBids.length!==1?"s":""}</span>` : ""}
+              </div>
+              <div id="team-detail-${team.roster_id}" style="display:none;margin-top:var(--space-3)"></div>
             </div>`;
         }).join("")}
       </div>`;
+  }
+
+  function toggleTeamDetail(rosterId) {
+    const el = document.getElementById(`team-detail-${rosterId}`);
+    if (!el) return;
+    const isOpen = el.style.display !== "none";
+    // Close all others
+    document.querySelectorAll("[id^='team-detail-']").forEach(d => { d.style.display = "none"; });
+    if (isOpen) return;
+
+    const team = _rosterData.find(r => r.roster_id === rosterId);
+    if (!team) return;
+
+    const now    = Date.now();
+    const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+    const sm     = _getSalaryMapForTeam(team.username);
+    const bids   = active.filter(a => {
+      const bs = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+      return bs.some(b => b.rosterId === rosterId);
+    });
+
+    const renderPlayer = (pid, slot) => {
+      const p    = _players[pid] || {};
+      const name = p.first_name ? `${p.first_name} ${p.last_name}` : pid;
+      const pos  = (p.fantasy_positions?.[0]||p.position||"?").toUpperCase();
+      const sal  = sm[pid]?.salary || 0;
+      const clr  = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+      const slotLabel = slot === "ir" ? " · IR" : slot === "taxi" ? " · Taxi" : "";
+      return `<div style="display:flex;align-items:center;gap:var(--space-2);padding:3px 0;font-size:.78rem">
+        <span style="font-size:.6rem;padding:1px 4px;border-radius:3px;border:1px solid;background:${clr}22;color:${clr};border-color:${clr}55">${pos}</span>
+        <span style="flex:1">${_esc(name)}${slotLabel}</span>
+        ${sal ? `<span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(sal)}</span>` : ""}
+      </div>`;
+    };
+
+    const bidItems = bids.map(a => {
+      const p    = _players[a.playerId] || {};
+      const name = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
+      const bs   = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+      const mine = bs.filter(b => b.rosterId === rosterId);
+      const myMax = mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0;
+      return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:.78rem;padding:3px 0">
+        <span>${_esc(name)}</span>
+        <span style="font-family:var(--font-display);font-weight:700;color:var(--color-red)">${_fmtSal(myMax)} max</span>
+      </div>`;
+    }).join("");
+
+    el.style.display = "";
+    el.innerHTML = `
+      <div style="border-top:1px solid var(--color-border);padding-top:var(--space-3);margin-top:var(--space-2)">
+        ${bids.length ? `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Active Bids</div>${bidItems}` : ""}
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-dim);margin-top:var(--space-2);margin-bottom:var(--space-2)">Roster</div>
+        ${(team.players||[]).filter(pid => !(team.taxi||[]).includes(pid) && !(team.reserve||[]).includes(pid)).map(pid => renderPlayer(pid, "main")).join("")}
+        ${(team.reserve||[]).length ? (team.reserve.map(pid => renderPlayer(pid, "ir")).join("")) : ""}
+        ${(team.taxi||[]).length ? (team.taxi.map(pid => renderPlayer(pid, "taxi")).join("")) : ""}
+      </div>`;
+  }
+
+  function _getSalaryMapForTeam(username) {
+    const entries = (_salaryData[username]?.players || []);
+    const m = {};
+    entries.forEach(e => { if (e.playerId) m[e.playerId] = e; });
+    return m;
+  }
+
+  function editRosterSize() {
+    const size = prompt("Max roster size (active + IR, not counting taxi):", _settings.maxRosterSize || 30);
+    if (!size) return;
+    _settings.maxRosterSize = parseInt(size) || 30;
+    _settingsRef().update({ maxRosterSize: _settings.maxRosterSize });
+    _renderView();
   }
 
   // ── History ───────────────────────────────────────────────
@@ -578,16 +682,22 @@ const DLRAuction = (() => {
           <input type="number" id="auc-s-maxnoms" value="${s.maxNoms || 2}" min="1" max="10"/>
           <span class="field-hint">How many players a team can have actively nominated at once.</span>
         </div>
+        <div class="form-group">
+          <label>Max Roster Size (Active + IR, excl. Taxi)</label>
+          <input type="number" id="auc-s-rostersize" value="${s.maxRosterSize || 30}" min="1" max="60"/>
+          <span class="field-hint">Used to calculate open roster spots per team in the Teams view.</span>
+        </div>
         <button class="btn-primary" onclick="DLRAuction.saveSettings()" style="margin-top:var(--space-4)">Save Settings</button>
       </div>`;
   }
 
   async function saveSettings() {
     const settings = {
-      bidDuration: parseInt(document.getElementById("auc-s-duration")?.value) || 8,
-      pauseStart:  parseInt(document.getElementById("auc-s-pstart")?.value)   ?? 0,
-      pauseEnd:    parseInt(document.getElementById("auc-s-pend")?.value)     ?? 8,
-      maxNoms:     parseInt(document.getElementById("auc-s-maxnoms")?.value)  || 2
+      bidDuration:   parseInt(document.getElementById("auc-s-duration")?.value)    || 8,
+      pauseStart:    parseInt(document.getElementById("auc-s-pstart")?.value)      ?? 0,
+      pauseEnd:      parseInt(document.getElementById("auc-s-pend")?.value)        ?? 8,
+      maxNoms:       parseInt(document.getElementById("auc-s-maxnoms")?.value)     || 2,
+      maxRosterSize: parseInt(document.getElementById("auc-s-rostersize")?.value)  || 30
     };
     const btn = document.querySelector(".auc-settings-form .btn-primary");
     if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
@@ -660,7 +770,8 @@ const DLRAuction = (() => {
     init, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
     placeBid, claimAuction, cancelAuction,
-    saveSettings, renderFloatingBadge
+    saveSettings, renderFloatingBadge,
+    toggleTeamDetail, editRosterSize
   };
 
 })();

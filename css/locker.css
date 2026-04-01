@@ -4025,3 +4025,18 @@ select option { background: var(--color-bg-2); }
 }
 .auc-float-btn:hover { opacity: .85; }
 
+
+/* ── Auction v2 fixes ─────────────────────────────────── */
+.auc-fa-row .btn-primary,
+.auc-fa-row .btn-secondary {
+  font-size: .72rem !important;
+  padding: 3px 10px !important;
+  flex-shrink: 0;
+}
+.auc-team-header-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.auc-stat-pill--full { color: var(--color-red) !important; border-color: rgba(239,68,68,.3); }
+.auc-stat-pill--warn { color: var(--color-gold); border-color: var(--color-gold-dim); }
+

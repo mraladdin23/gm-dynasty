@@ -601,7 +601,7 @@ const DLRSalaryCap = (() => {
             <button class="btn-secondary" onclick="document.getElementById('sal-file-input').click()">Choose File</button>
           </div>
           <textarea id="sal-bulk-csv" class="sal-bulk-textarea"
-            placeholder="Or paste CSV here: player_id,username,salary,years,holdout&#10;1234,teamuser,5000000,2,false"
+            placeholder="Or paste CSV here (no username needed — matched by player_id):&#10;player_id,player_name,nfl_team,fantasy_team,salary,years,holdout&#10;4984,Justin Jefferson,MIN,My Team,39000000,2,false"
             rows="8"></textarea>
         </div>
 
@@ -628,13 +628,18 @@ const DLRSalaryCap = (() => {
   }
 
   function _buildCSVTemplate() {
-    const rows = ["player_id,player_name,username,team_name,salary,years,holdout"];
+    // team_name is for reference only — import matches by player_id
+    const rows = ["player_id,player_name,nfl_team,fantasy_team,salary,years,holdout"];
+    const salMap = _getSalaryMap();
     (_rosterData||[]).forEach(team => {
+      const sm = salMap[team.username] || {};
       [...team.players, ...team.reserve, ...team.taxi].forEach(pid => {
-        const sm     = _getTeamSalaryMap()[team.username] || {};
-        const entry  = sm[pid] || {};
-        const name   = _playerName(pid);
-        rows.push(`${pid},"${name}",${team.username},"${team.teamName}",${entry.salary||0},${entry.years||1},${entry.holdout?"true":"false"}`);
+        const p     = _players[pid] || {};
+        const name  = p.first_name ? `${p.first_name} ${p.last_name}` : pid;
+        const nfl   = p.team || "FA";
+        const entry = sm[pid] || {};
+        // Quote names with commas; keep salary as plain integer
+        rows.push(`${pid},"${name}",${nfl},"${team.teamName}",${entry.salary||0},${entry.years||1},${entry.holdout?"true":"false"}`);
       });
     });
     return rows.join("\n");
@@ -677,40 +682,41 @@ const DLRSalaryCap = (() => {
     const lines = ta.value.trim().split("\n").filter(Boolean);
     const header = lines[0].toLowerCase().split(",").map(s => s.trim().replace(/"/g,""));
     const pidIdx  = header.findIndex(h => h.includes("player_id") || h === "id");
-    const userIdx = header.findIndex(h => h.includes("username") || h.includes("user"));
     const salIdx  = header.findIndex(h => h.includes("salary") || h.includes("sal"));
     const yrsIdx  = header.findIndex(h => h.includes("year") || h.includes("yr"));
     const hoIdx   = header.findIndex(h => h.includes("holdout") || h.includes("hold"));
+    // username column is optional — we find owner by player_id lookup in roster data
 
     if (pidIdx < 0 || salIdx < 0) {
       if (status) status.textContent = "CSV must have player_id and salary columns.";
       return;
     }
 
-    // Parse rows
+    // Build a player→team lookup map for fast matching
+    const pidToUsername = {};
+    (_rosterData||[]).forEach(team => {
+      [...team.players, ...team.reserve, ...team.taxi].forEach(pid => {
+        pidToUsername[pid] = team.username;
+      });
+    });
+
+    // Parse rows — match by player_id, ignore username column
     const updates = [];
     const errors  = [];
     lines.slice(1).forEach((line, i) => {
       const cols = _parseCSVLine(line);
       const pid  = cols[pidIdx]?.replace(/"/g,"").trim();
-      const user = userIdx >= 0 ? cols[userIdx]?.replace(/"/g,"").toLowerCase().trim() : null;
-      const sal  = parseFloat(cols[salIdx]?.replace(/"/g,"") || "0");
+      const sal  = parseFloat((cols[salIdx]||"").replace(/["$,\s]/g,"") || "0");
       const yrs  = yrsIdx >= 0 ? parseInt(cols[yrsIdx]?.replace(/"/g,"") || "1") : 1;
       const ho   = hoIdx  >= 0 ? cols[hoIdx]?.toLowerCase().includes("true") : false;
 
-      if (!pid || isNaN(sal)) { errors.push(`Row ${i+2}: invalid pid or salary`); return; }
+      if (!pid || isNaN(sal)) { errors.push(`Row ${i+2}: invalid player_id or salary`); return; }
 
-      // Find which team owns this player
-      let ownerUsername = user;
-      if (!ownerUsername) {
-        const ownerTeam = (_rosterData||[]).find(t =>
-          t.players.includes(pid) || t.reserve.includes(pid) || t.taxi.includes(pid)
-        );
-        ownerUsername = ownerTeam?.username || null;
-      }
-      if (!ownerUsername) { errors.push(`Row ${i+2}: could not find owner for player ${pid}`); return; }
+      // Find owner by player_id in loaded rosters
+      const ownerUsername = pidToUsername[pid] || null;
+      if (!ownerUsername) { errors.push(`Row ${i+2}: player ${pid} not found on any roster (import active season first)`); return; }
 
-      updates.push({ pid, username: ownerUsername, salary: sal, years: yrs, holdout: ho });
+      updates.push({ pid, username: ownerUsername, salary: sal, years: yrs || 1, holdout: ho });
     });
 
     // Show preview
@@ -787,11 +793,25 @@ const DLRSalaryCap = (() => {
   function _esc(s)     { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function _escAttr(s) { return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
 
+  // ── Expose cap data to auction module ────────────────────
+  function getCapData() {
+    if (!_settings || !_rosterData) return null;
+    const salaryMap = _getSalaryMap();
+    const result = {};
+    (_rosterData || []).forEach(team => {
+      const spent     = _calcCapSpent(team, salaryMap);
+      const remaining = _settings.cap - spent;
+      result[team.username] = { spent, remaining, cap: _settings.cap };
+    });
+    return result;
+  }
+
   return {
     init, reset, setView,
     openEditModal, savePlayerSalary,
     saveSettings,
-    downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave
+    downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
+    getCapData
   };
 
 })();
