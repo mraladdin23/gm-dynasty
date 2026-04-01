@@ -210,17 +210,8 @@ const DLRFreeAgents = (() => {
       (r.taxi||[]).forEach(id => rostered.add(id));
     });
 
-    // Get player database
-    let players = {};
-    try { players = JSON.parse(localStorage.getItem("dlr_players") || "{}"); } catch(e) {}
-    if (Object.keys(players).length < 100) {
-      if (el) el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Downloading player database…</span></div>`;
-      const r = await fetch("https://api.sleeper.app/v1/players/nfl");
-      if (r.ok) {
-        players = await r.json();
-        try { localStorage.setItem("dlr_players", JSON.stringify(players)); } catch(e) {}
-      }
-    }
+    // Get player database via IndexedDB-backed module
+    const players = await DLRPlayers.load();
     if (token !== _initToken) return;
 
     // Fetch prior year PPR stats
@@ -228,15 +219,14 @@ const DLRFreeAgents = (() => {
     let priorStats  = {};
     try {
       const cacheKey = `dlr_stats_${priorYear}`;
-      let cached = null;
-      try { cached = JSON.parse(localStorage.getItem(cacheKey) || "null"); } catch(e) {}
+      let cached = await DLRIDB.get(cacheKey).catch(() => null);
       if (!cached) {
         const r = await fetch(
           `https://api.sleeper.app/v1/stats/nfl/regular/${priorYear}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K`
         );
         if (r.ok) {
           cached = await r.json();
-          try { localStorage.setItem(cacheKey, JSON.stringify(cached)); } catch(e) {}
+          try { await DLRIDB.set(cacheKey, cached); } catch(e) {}
         }
       }
       priorStats = cached || {};

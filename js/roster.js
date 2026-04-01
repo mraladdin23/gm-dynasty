@@ -99,20 +99,14 @@ const DLRRoster = (() => {
 
   async function _getPlayers(el, token) {
     try {
-      const cached = localStorage.getItem("dlr_players");
-      if (cached) {
-        const p = JSON.parse(cached);
-        if (Object.keys(p).length > 100) return p;
-      }
-      if (el) el.innerHTML = _loadingHTML("Downloading player database…");
-      const res  = await fetch("https://api.sleeper.app/v1/players/nfl");
-      const data = await res.json();
-      try {
-        localStorage.setItem("dlr_players", JSON.stringify(data));
-        localStorage.setItem("dlr_players_ver", "3"); // marks cache as having full bio fields
-      } catch(e) {}
-      return data;
-    } catch(e) { return {}; }
+      // Use DLRPlayers module (IndexedDB-backed, no quota issues)
+      if (el) el.innerHTML = _loadingHTML("Loading player database…");
+      const players = await DLRPlayers.load();
+      return players;
+    } catch(e) {
+      console.warn("[Roster] Player load failed:", e.message);
+      return {};
+    }
   }
 
   // ── Render ────────────────────────────────────────────────

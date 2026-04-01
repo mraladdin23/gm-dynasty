@@ -15,6 +15,7 @@ const Profile = (() => {
   let _allLeagues      = {};
   let _leagueMeta      = {};
   let _currentUsername = null;
+  let _currentProfile  = null;
   let _currentPage     = 0;
   let _archivedPage    = 0;
   let _filteredCache   = [];
@@ -59,8 +60,7 @@ const Profile = (() => {
 
   async function loadLeagueMeta(username) {
     try {
-      const data = await GMDB._restGet(`gmd/users/${username.toLowerCase()}/leagueMeta`);
-      _leagueMeta = data || {};
+      _leagueMeta = await GMDB.getLeagueMeta(username);
       const groups = Object.values(_leagueMeta).filter(m => m?.commishGroup).map(m => m.commishGroup);
       const labels = Object.values(_leagueMeta).filter(m => m?.customLabel).map(m => m.customLabel);
       console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries, groups: [${groups.join(", ")}], labels: [${labels.join(", ")}]`);
@@ -72,10 +72,7 @@ const Profile = (() => {
 
   async function saveLeagueMeta(username, leagueKey, meta) {
     _leagueMeta[leagueKey] = { ...(_leagueMeta[leagueKey] || {}), ...meta };
-    await GMDB._restPut(
-      `gmd/users/${username.toLowerCase()}/leagueMeta/${leagueKey}`,
-      _leagueMeta[leagueKey]
-    );
+    await GMDB.saveLeagueMetaEntry(username, leagueKey, _leagueMeta[leagueKey]);
   }
 
   // ── Main locker render ─────────────────────────────────
@@ -83,6 +80,7 @@ const Profile = (() => {
   async function renderLocker(profile) {
     if (!profile) return;
     _currentUsername = profile.username;
+    _currentProfile  = profile;
     _allLeagues      = profile.leagues || {};
 
     await loadLeagueMeta(profile.username);
@@ -101,11 +99,101 @@ const Profile = (() => {
       document.getElementById("locker-tagline").textContent = profile.bio;
     }
 
+    // ── Avatar / profile photo ──────────────────────────────
+    _renderAvatar(profile);
+
+    // ── Team logo / jersey in header background ─────────────
+    _renderTeamBranding(profile.favoriteNflTeam || "");
+
     _renderStatsRow(profile.stats || {});
     _renderPlatformsBadges(profile.platforms || {});
     _renderLeagueFilters();
     _renderLeagues();
     _renderCareerSummary(profile);
+  }
+
+  function _renderAvatar(profile) {
+    const el = document.getElementById("locker-avatar");
+    if (!el) return;
+    const initEl = document.getElementById("locker-avatar-initials");
+
+    if (profile.avatarUrl) {
+      el.style.backgroundImage = `url(${profile.avatarUrl})`;
+      el.style.backgroundSize  = "cover";
+      el.style.backgroundPosition = "center";
+      if (initEl) initEl.style.display = "none";
+    } else if (profile.platforms?.sleeper?.avatar) {
+      // Use Sleeper avatar
+      const src = `https://sleepercdn.com/avatars/thumbs/${profile.platforms.sleeper.avatar}`;
+      el.style.backgroundImage = `url(${src})`;
+      el.style.backgroundSize  = "cover";
+      el.style.backgroundPosition = "center";
+      if (initEl) initEl.style.display = "none";
+    } else {
+      el.style.backgroundImage = "";
+      if (initEl) {
+        initEl.style.display = "";
+        initEl.textContent   = (profile.username || "?")[0].toUpperCase();
+      }
+    }
+
+    // Make avatar clickable to upload photo
+    el.title   = "Click to change profile photo";
+    el.style.cursor = "pointer";
+    el.onclick = () => _openPhotoUpload();
+  }
+
+  function _renderTeamBranding(teamAbbr) {
+    const header = document.querySelector(".locker-header");
+    if (!header) return;
+
+    // Remove old branding
+    header.querySelector(".locker-team-logo")?.remove();
+
+    if (!teamAbbr) return;
+
+    // Use ESPN's CDN for team logos (high quality SVG/PNG)
+    const logoUrl = `https://a.espncdn.com/i/teamlogos/nfl/500/${teamAbbr.toLowerCase()}.png`;
+
+    const logoEl = document.createElement("div");
+    logoEl.className = "locker-team-logo";
+    logoEl.innerHTML = `
+      <img src="${logoUrl}"
+        alt="${teamAbbr}"
+        onerror="this.parentElement.style.display='none'"
+        loading="lazy" />`;
+    header.appendChild(logoEl);
+  }
+
+  function _openPhotoUpload() {
+    const input = document.createElement("input");
+    input.type   = "file";
+    input.accept = "image/*";
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 500_000) {
+        showToast("Image must be under 500KB. Try a smaller photo.", "error");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        const dataUrl = ev.target.result;
+        try {
+          await GMD.child(`users/${_currentUsername}/avatarUrl`).set(dataUrl);
+          // Update in-memory profile
+          if (_currentProfile) _currentProfile.avatarUrl = dataUrl;
+          _renderAvatar(_currentProfile || { avatarUrl: dataUrl, username: _currentUsername });
+          showToast("Profile photo updated ✓");
+        } catch(err) {
+          console.error("[Avatar] Save failed:", err);
+          showToast("Failed to save photo — try a smaller image", "error");
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
   }
 
   function _renderStatsRow(stats) {
@@ -536,11 +624,24 @@ const Profile = (() => {
     const franchiseList = Object.values(franchises);
 
     // Determine active season using the 1/15 rule:
-    // Before Jan 15 → last year's season is "active"
-    // After Jan 15  → this year's season is "active"
-    const activeSeason = typeof getActiveSeason === "function"
+    // After Jan 15 → look for current-year leagues as "active"
+    // Before Jan 15 → look for prior-year leagues as "active"
+    // BUT if no leagues exist for that year in stored data, fall back
+    // to the most recent season actually present in the data
+    const ruleSeason = typeof getActiveSeason === "function"
       ? getActiveSeason()
-      : CURRENT_SEASON;
+      : String(new Date().getFullYear() - 1);
+
+    // Check if any leagues exist for the rule season
+    const hasRuleSeasonLeagues = franchiseList.some(f =>
+      f.seasons.some(s => s.league.season === ruleSeason)
+    );
+
+    // If no leagues yet for the rule season, use the most recent season in data
+    const activeSeason = hasRuleSeasonLeagues
+      ? ruleSeason
+      : (Object.values(_allLeagues).map(l => l.season).filter(Boolean)
+          .sort((a, b) => b.localeCompare(a))[0] || ruleSeason);
 
     // For each franchise, determine if active or archived
     const active   = [];
@@ -709,8 +810,13 @@ const Profile = (() => {
 
     switch(filter) {
       case "active": {
-        const activeSeason = typeof getActiveSeason === "function" ? getActiveSeason() : CURRENT_SEASON;
-        return f.seasons.some(s => s.league.season === activeSeason);
+        const ruleSeason = typeof getActiveSeason === "function" ? getActiveSeason() : CURRENT_SEASON;
+        // If no leagues exist for the rule season, fall back to latest season in data
+        const hasRuleSeason = Object.values(_allLeagues).some(l => l.season === ruleSeason);
+        const checkSeason   = hasRuleSeason
+          ? ruleSeason
+          : (Object.values(_allLeagues).map(l => l.season).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || ruleSeason);
+        return f.seasons.some(s => s.league.season === checkSeason);
       }
       case "owner":        return f.seasons.some(s => s.league.wins > 0 || s.league.losses > 0 || s.league.ties > 0 || (s.league.pointsFor > 0));
       case "pinned":       return !!meta.pinned;
@@ -897,9 +1003,16 @@ const Profile = (() => {
       "visibility/profile": document.getElementById("edit-visibility").value
     };
     await GMDB.updateUser(username, updates);
-    // Update displayed tagline immediately
+    // Update displayed elements immediately
     if (updates.bio) {
       document.getElementById("locker-tagline").textContent = updates.bio;
+    }
+    // Re-render team logo watermark
+    _renderTeamBranding(updates.favoriteNflTeam || "");
+    // Update in-memory profile
+    if (_currentProfile) {
+      _currentProfile.bio             = updates.bio;
+      _currentProfile.favoriteNflTeam = updates.favoriteNflTeam;
     }
     closeEditProfileModal();
   }
@@ -1051,6 +1164,7 @@ const Profile = (() => {
     DLRRules.reset();
     DLRFreeAgents.reset();
     DLRSalaryCap.reset();
+    DLRAuction.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
   }
@@ -1065,11 +1179,31 @@ const Profile = (() => {
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster")      DLRRoster.init(league.leagueId, league.platform);
-    if (tab === "salary")      DLRSalaryCap.init(league.leagueId, leagueKey, league.isCommissioner);
+    if (tab === "salary") {
+      const effectiveType = (_leagueMeta[leagueKey]?.leagueTypeOverride) || league.leagueType || "";
+      if (effectiveType === "salary") {
+        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner);
+      } else {
+        const el = document.getElementById("dtab-salary");
+        if (el) el.innerHTML = `<div style="padding:var(--space-8);text-align:center;color:var(--color-text-dim)">
+          <div style="font-size:2rem;margin-bottom:var(--space-3)">💰</div>
+          <div style="font-weight:600;margin-bottom:var(--space-2);color:var(--color-text)">Salary Cap Not Enabled</div>
+          <div style="font-size:.85rem">Open league options (⋯) and set League Type to "Salary Cap" to enable this tab.</div>
+        </div>`;
+      }
+    }
     if (tab === "freeagents")  DLRFreeAgents.init(league.leagueId);
     if (tab === "draft")       DLRDraft.init(league.leagueId, league.platform);
     if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
-    if (tab === "rules")       DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
+    if (tab === "auction") {
+      DLRAuction.init(
+        leagueKey,
+        league.leagueId,
+        league.isCommissioner,
+        league.myRosterId || null,
+        league.teamName   || "My Team"
+      );
+    }
     if (tab === "chat")        _renderChat(el, leagueKey, league);
   }
 

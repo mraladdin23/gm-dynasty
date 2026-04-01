@@ -269,6 +269,7 @@ const SleeperAPI = (() => {
             totalTeams:       leagueData.total_rosters || 12,
             teamName:         me?.metadata?.team_name || me?.display_name || (isComm ? "Commissioner" : "My Team"),
             isCommissioner:   isComm,
+            myRosterId:       myRoster?.roster_id || null,
             wins,
             losses,
             ties,
