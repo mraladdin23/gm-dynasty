@@ -142,20 +142,33 @@ const Profile = (() => {
   // ── Career Summary ──────────────────────────────────────
 
   function _renderCareerSummary(profile) {
-    const container = document.getElementById("career-summary-section");
-    if (!container) return;
-
-    // Only count leagues where user actually has a team (wins OR losses OR points)
-    // Excludes commissioner-only leagues where user has no roster
+    // Career summary is now a modal — just precompute the data
     const allLeagues   = Object.values(_allLeagues);
     const ownerLeagues = allLeagues.filter(l =>
       (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
     );
+    if (!ownerLeagues.length) return;
 
-    if (!ownerLeagues.length) { container.style.display = "none"; return; }
-    container.style.display = "";
+    // Store for modal use
+    _careerLeagues = ownerLeagues;
 
-    // Wire tabs (clone to remove stale listeners)
+    // Wire Career Summary button
+    document.getElementById("career-summary-btn")?.addEventListener("click", () => {
+      _openCareerSummaryModal();
+    });
+  }
+
+  let _careerLeagues = [];
+
+  function _openCareerSummaryModal() {
+    const leagues = _careerLeagues;
+    if (!leagues.length) return;
+
+    const modal = document.getElementById("career-summary-modal");
+    if (!modal) return;
+    modal.classList.remove("hidden");
+
+    // Wire tabs (fresh each open)
     document.querySelectorAll(".cs-tab").forEach(tab => {
       const fresh = tab.cloneNode(true);
       tab.parentNode.replaceChild(fresh, tab);
@@ -169,34 +182,30 @@ const Profile = (() => {
       });
     });
 
-    // Recompute stats from owner leagues only
-    const w   = ownerLeagues.reduce((s, l) => s + (l.wins   || 0), 0);
-    const lo  = ownerLeagues.reduce((s, l) => s + (l.losses || 0), 0);
-    const champs   = ownerLeagues.filter(l => l.playoffFinish === 1 || l.isChampion).length;
-    const runners  = ownerLeagues.filter(l => l.playoffFinish === 2).length;
-    const thirds   = ownerLeagues.filter(l => l.playoffFinish === 3).length;
-    const playoffs = ownerLeagues.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
-    const tot = w + lo;
-    const winPct = tot > 0 ? ((w / tot) * 100).toFixed(1) : "—";
+    // Recompute stats
+    const w        = leagues.reduce((s, l) => s + (l.wins   || 0), 0);
+    const lo       = leagues.reduce((s, l) => s + (l.losses || 0), 0);
+    const champs   = leagues.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+    const runners  = leagues.filter(l => l.playoffFinish === 2).length;
+    const thirds   = leagues.filter(l => l.playoffFinish === 3).length;
+    const playoffs = leagues.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
+    const tot      = w + lo;
+    const winPct   = tot > 0 ? ((w / tot) * 100).toFixed(1) : "—";
+    const seasons  = new Set(leagues.map(l => l.season).filter(Boolean)).size;
+    const dscore   = Math.round((tot > 0 ? w / tot : 0) * 100 + champs * 20 + runners * 10 + thirds * 5 + playoffs * 2 + seasons * 2);
 
-    // Dynasty score from corrected data
-    const seasons = new Set(ownerLeagues.map(l => l.season).filter(Boolean)).size;
-    const dscore  = Math.round(
-      (tot > 0 ? w / tot : 0) * 100 +
-      champs  * 20 + runners * 10 + thirds * 5 +
-      playoffs * 2 + seasons * 2
-    );
+    const stats = { totalWins: w, totalLosses: lo, winPct, championships: champs, runnerUps: runners, thirdPlace: thirds, playoffAppearances: playoffs, leaguesPlayed: leagues.length, dynastyScore: dscore };
 
-    const computedStats = {
-      totalWins: w, totalLosses: lo, winPct,
-      championships: champs, runnerUps: runners, thirdPlace: thirds,
-      playoffAppearances: playoffs, leaguesPlayed: ownerLeagues.length,
-      dynastyScore: dscore
-    };
+    _renderCSOverall(leagues, stats);
+    _renderCSAnnual(leagues);
+    _renderCSType(leagues);
+    _renderCSMatrix(leagues);
 
-    _renderCSOverall(ownerLeagues, computedStats);
-    _renderCSAnnual(ownerLeagues);
-    _renderCSType(ownerLeagues);
+    // Reset to overall tab
+    document.querySelectorAll(".cs-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".cs-panel").forEach(p => p.classList.remove("active"));
+    document.querySelector('[data-cstab="overall"]')?.classList.add("active");
+    document.getElementById("cs-overall")?.classList.add("active");
   }
 
   function _renderCSOverall(leagues, stats) {
@@ -321,6 +330,69 @@ const Profile = (() => {
             <tr><th>Type</th><th>Seasons</th><th>W–L</th><th>Win%</th><th>Titles</th><th>Playoffs</th></tr>
           </thead>
           <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function _renderCSMatrix(leagues) {
+    const el = document.getElementById("cs-matrix");
+    if (!el) return;
+
+    const types   = ["dynasty","redraft","keeper","other"];
+    const seasons = [...new Set(leagues.map(l => l.season).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+    const typeLeagues = (t) => leagues.filter(l => t === "other" ? !["dynasty","redraft","keeper"].includes(l.leagueType) : l.leagueType === t);
+
+    // Only include types that have data
+    const activeTypes = types.filter(t => typeLeagues(t).length > 0);
+
+    function cell(rows) {
+      if (!rows.length) return `<td class="cs-matrix-empty">—</td>`;
+      const w   = rows.reduce((s, l) => s + (l.wins   || 0), 0);
+      const lo  = rows.reduce((s, l) => s + (l.losses || 0), 0);
+      const tot = w + lo;
+      const pct = tot > 0 ? ((w / tot) * 100).toFixed(0) : "0";
+      const titles = rows.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+      return `<td class="cs-matrix-cell">
+        <span class="cs-mx-record">${w}–${lo}</span>
+        <span class="cs-mx-pct">${pct}%</span>
+        ${titles > 0 ? `<span class="cs-mx-title">🏆</span>` : ""}
+      </td>`;
+    }
+
+    el.innerHTML = `
+      <div class="cs-table-wrap">
+        <table class="cs-table cs-matrix-table">
+          <thead>
+            <tr>
+              <th>Season</th>
+              ${activeTypes.map(t => `<th style="text-transform:capitalize">${t}</th>`).join("")}
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${seasons.map(s => {
+              const seasonLeagues = leagues.filter(l => l.season === s);
+              const w  = seasonLeagues.reduce((sum, l) => sum + (l.wins   || 0), 0);
+              const lo = seasonLeagues.reduce((sum, l) => sum + (l.losses || 0), 0);
+              const tot = w + lo;
+              const pct = tot > 0 ? ((w / tot) * 100).toFixed(0) : "0";
+              return `<tr>
+                <td class="cs-season">${s}</td>
+                ${activeTypes.map(t => cell(seasonLeagues.filter(l => t === "other" ? !["dynasty","redraft","keeper"].includes(l.leagueType) : l.leagueType === t))).join("")}
+                <td class="cs-matrix-cell cs-matrix-total">
+                  <span class="cs-mx-record">${w}–${lo}</span>
+                  <span class="cs-mx-pct">${pct}%</span>
+                </td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--color-border)">
+              <td class="cs-season">All-time</td>
+              ${activeTypes.map(t => cell(typeLeagues(t))).join("")}
+              ${cell(leagues)}
+            </tr>
+          </tfoot>
         </table>
       </div>`;
   }
@@ -665,12 +737,13 @@ const Profile = (() => {
 
     // Tags
     const tags = [];
-    if (isCommish)        tags.push(`<span class="lrow-tag lrow-tag--commish">👑</span>`);
-    if (meta.pinned)      tags.push(`<span class="lrow-tag">📌</span>`);
-    if (titles > 0)       tags.push(`<span class="lrow-tag lrow-tag--gold">🏆 ${titles}</span>`);
-    if (runnerUps > 0)    tags.push(`<span class="lrow-tag">🥈 ${runnerUps}</span>`);
-    if (thirds > 0)       tags.push(`<span class="lrow-tag">🥉 ${thirds}</span>`);
-    if (meta.customLabel) tags.push(`<span class="lrow-tag">🏷 ${_escHtml(meta.customLabel)}</span>`);
+    if (isCommish)         tags.push(`<span class="lrow-tag lrow-tag--commish">👑</span>`);
+    if (meta.pinned)       tags.push(`<span class="lrow-tag">📌</span>`);
+    if (titles > 0)        tags.push(`<span class="lrow-tag lrow-tag--gold">🏆 ${titles}</span>`);
+    if (runnerUps > 0)     tags.push(`<span class="lrow-tag">🥈 ${runnerUps}</span>`);
+    if (thirds > 0)        tags.push(`<span class="lrow-tag">🥉 ${thirds}</span>`);
+    if (meta.customLabel)  tags.push(`<span class="lrow-tag lrow-tag--label">🏷 ${_escHtml(meta.customLabel)}</span>`);
+    if (meta.commishGroup) tags.push(`<span class="lrow-tag lrow-tag--group">⚡ ${_escHtml(meta.commishGroup)}</span>`);
 
     const typeBadge = `<span class="lrow-type lrow-type--${league.leagueType || "redraft"}">${league.leagueType || "redraft"}</span>`;
     const platBadge = `<span class="lrow-plat lrow-plat--${league.platform}">${(league.platform||"").toUpperCase()}</span>`;
@@ -682,19 +755,18 @@ const Profile = (() => {
           ${typeBadge}
         </div>
         <div class="lrow-name-col">
-          <div class="lrow-name">${_escHtml(league.leagueName)}</div>
+          <div class="lrow-name">
+            ${_escHtml(league.leagueName)}
+            <span class="lrow-cur-record">${cW}–${cL}${finishIcon ? " " + finishIcon : ""}</span>
+          </div>
           <div class="lrow-team">${_escHtml(league.teamName || "")}</div>
-        </div>
-        <div class="lrow-season-col">
-          <div class="lrow-record">${cW}–${cL}</div>
-          <div class="lrow-season-label">${league.season}${finishIcon ? " " + finishIcon : ""}</div>
-        </div>
-        <div class="lrow-alltime-col">
-          <div class="lrow-record">${totalWins}–${totalLosses}</div>
-          <div class="lrow-season-label">all-time · ${seasons.length} seas.</div>
         </div>
         <div class="lrow-tags">
           ${tags.join("")}
+        </div>
+        <div class="lrow-alltime-col">
+          <div class="lrow-record">${totalWins}–${totalLosses}</div>
+          <div class="lrow-season-label">all-time${seasons.length > 1 ? ` · ${seasons.length} seas.` : ""}</div>
         </div>
         <div class="lrow-actions">
           <button class="lrow-chat-btn" data-key="${key}" title="Chat">💬</button>
@@ -1148,6 +1220,7 @@ const Profile = (() => {
     closeLeagueDetail,
     onDetailTabChange,
     switchDetailSeason,
+    openCareerSummary: _openCareerSummaryModal,
     openLeagueChat,
     closeLeagueChat,
     changePage,

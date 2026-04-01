@@ -23,6 +23,7 @@ const DLRPlayerReport = (() => {
   function open(allLeagues, sleeperUserId) {
     _allLeagues     = allLeagues || {};
     _sleeperUserId  = sleeperUserId || null;
+    _built          = false; // always rebuild so season filter is fresh
 
     const panel = document.getElementById("player-report-panel");
     if (!panel) return;
@@ -30,10 +31,7 @@ const DLRPlayerReport = (() => {
     document.getElementById("player-report-backdrop")?.classList.remove("hidden");
     _isOpen = true;
 
-    if (!_built) {
-      _built = true;
-      _buildReport();
-    }
+    _buildReport();
   }
 
   function close() {
@@ -70,9 +68,13 @@ const DLRPlayerReport = (() => {
         }
       } catch(e) {}
 
-      // Get owner leagues only
+      // Get owner leagues — current season ONLY for player report
+      const currentYear = new Date().getFullYear().toString();
       const ownerLeagues = Object.entries(_allLeagues)
-        .filter(([, l]) => (l.wins||0) > 0 || (l.losses||0) > 0 || (l.pointsFor||0) > 0)
+        .filter(([, l]) =>
+          l.season === currentYear &&
+          ((l.wins||0) > 0 || (l.losses||0) > 0 || (l.pointsFor||0) > 0)
+        )
         .map(([key, l]) => ({ key, ...l }));
 
       if (!ownerLeagues.length) {
