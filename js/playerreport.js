@@ -53,25 +53,20 @@ const DLRPlayerReport = (() => {
     body.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Scanning your leagues…</span></div>`;
 
     try {
-      // Get player database
-      let players = {};
-      try {
-        const cached = localStorage.getItem("dlr_players");
-        if (cached) players = JSON.parse(cached);
-        if (Object.keys(players).length < 100) {
-          body.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Downloading player database…</span></div>`;
-          const r = await fetch("https://api.sleeper.app/v1/players/nfl");
-          if (r.ok) {
-            players = await r.json();
-            try { localStorage.setItem("dlr_players", JSON.stringify(players)); } catch(e) {}
-          }
-        }
-      } catch(e) {}
-
-      // Use 1/15 rule to determine which season's rosters to show
-      const activeSeason = typeof getActiveSeason === "function"
+      // Get player database via IndexedDB-backed module
+      body.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading player database…</span></div>`;
+      const players = await DLRPlayers.load();
+      // Use 1/15 rule for season, but fall back to latest season in stored data
+      // if no leagues exist for the rule-season year yet
+      const ruleSeason = typeof getActiveSeason === "function"
         ? getActiveSeason()
         : String(new Date().getFullYear() - 1);
+
+      const hasRuleSeason = Object.values(_allLeagues).some(l => l.season === ruleSeason);
+      const activeSeason  = hasRuleSeason
+        ? ruleSeason
+        : (Object.values(_allLeagues).map(l => l.season).filter(Boolean)
+            .sort((a, b) => b.localeCompare(a))[0] || ruleSeason);
 
       // Get all Sleeper leagues from the active season
       const ownerLeagues = Object.entries(_allLeagues)

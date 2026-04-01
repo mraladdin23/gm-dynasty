@@ -271,6 +271,44 @@ const GMDB = (() => {
     await _restPut(`gmd/leagueRules/${leagueKey}`, data);
   }
 
+  // ── League meta (pins, labels, groups) — uses SDK ref for auth ──
+  async function getLeagueMeta(username) {
+    try {
+      const snap = await GMD.child(`users/${username.toLowerCase()}/leagueMeta`).once("value");
+      return snap.val() || {};
+    } catch(e) {
+      console.error("[GMDB] getLeagueMeta failed:", e.message);
+      return {};
+    }
+  }
+
+  async function saveLeagueMetaEntry(username, leagueKey, meta) {
+    await GMD.child(`users/${username.toLowerCase()}/leagueMeta/${leagueKey}`).set(meta);
+  }
+
+  // ── Salary cap data — uses SDK ref for auth ──────────────
+  async function getSalarySettings(leagueKey) {
+    try {
+      const snap = await GMD.child(`salaryCap/${leagueKey}/settings`).once("value");
+      return snap.val() || null;
+    } catch(e) { return null; }
+  }
+
+  async function saveSalarySettings(leagueKey, settings) {
+    await GMD.child(`salaryCap/${leagueKey}/settings`).set(settings);
+  }
+
+  async function getSalaryRosters(leagueKey) {
+    try {
+      const snap = await GMD.child(`salaryCap/${leagueKey}/rosters`).once("value");
+      return snap.val() || {};
+    } catch(e) { return {}; }
+  }
+
+  async function saveSalaryRosters(leagueKey, rosters) {
+    await GMD.child(`salaryCap/${leagueKey}/rosters`).set(rosters);
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
@@ -294,6 +332,12 @@ const GMDB = (() => {
     getRivalry,
     getLeagueRules,
     saveLeagueRules,
+    getLeagueMeta,
+    saveLeagueMetaEntry,
+    getSalarySettings,
+    saveSalarySettings,
+    getSalaryRosters,
+    saveSalaryRosters,
     _restGet,
     _restPut
   };
