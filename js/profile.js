@@ -403,10 +403,14 @@ const Profile = (() => {
   function _renderLeagueFilters() {
     const customLabels  = new Set();
     const commishGroups = new Set();
+
+    // Read ALL leagueMeta entries — not just latestKey
     Object.values(_leagueMeta).forEach(m => {
-      if (m.customLabel)  customLabels.add(m.customLabel);
-      if (m.commishGroup) commishGroups.add(m.commishGroup);
+      if (m && m.customLabel  && m.customLabel.trim())  customLabels.add(m.customLabel.trim());
+      if (m && m.commishGroup && m.commishGroup.trim()) commishGroups.add(m.commishGroup.trim());
     });
+
+    console.log("[DLR] leagueMeta entries:", Object.keys(_leagueMeta).length, "labels:", [...customLabels], "groups:", [...commishGroups]);
 
     const filterBar = document.getElementById("league-filters");
     if (!filterBar) return;
