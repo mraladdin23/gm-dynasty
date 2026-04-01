@@ -1,16 +1,16 @@
 // ─────────────────────────────────────────────────────────
 //  Dynasty Locker Room — Player Card Modal
-//  Click any player in Roster or Draft tab to open.
-//  Shows: photo, position, team, bio, season stats, game log.
+//  Bio data comes from the bulk dlr_players cache
+//  (height is "6'4\"", weight is "220", age is integer)
 // ─────────────────────────────────────────────────────────
 
 const DLRPlayerCard = (() => {
 
   let _playerId  = null;
-  let _year      = new Date().getFullYear();
+  let _year      = 2025;
   let _weekCache = {};
 
-  const YEARS     = [2022, 2023, 2024, 2025].filter(y => y <= new Date().getFullYear());
+  const YEARS     = [2022, 2023, 2024, 2025];
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
     TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af"
@@ -21,14 +21,12 @@ const DLRPlayerCard = (() => {
     if (!playerId && !playerName) return;
     _playerId  = playerId || null;
     _weekCache = {};
-    _year      = new Date().getFullYear();
+    _year      = 2025;
 
     _buildModal();
 
-    // Resolve player data — try cache first, then individual endpoint
-    const playerData = await _resolvePlayer(playerId, playerName);
-    _renderHeader(playerData, playerId, playerName);
-
+    const p = _getPlayerFromCache(playerId);
+    _renderHeader(p, playerId, playerName);
     await _loadYear(_year);
   }
 
@@ -36,42 +34,13 @@ const DLRPlayerCard = (() => {
     document.getElementById("dlr-player-card-modal")?.remove();
   }
 
-  // ── Resolve player bio data ───────────────────────────────
-  async function _resolvePlayer(playerId, fallbackName) {
+  // ── Get player from bulk cache — no per-player API call needed ──
+  function _getPlayerFromCache(playerId) {
     if (!playerId) return {};
-
-    let cache = {};
-    try { cache = JSON.parse(localStorage.getItem("dlr_players") || "{}"); } catch(e) {}
-    const cached = cache[playerId] || {};
-
-    // Check if we have meaningful bio fields — be strict
-    const hasRichBio = (
-      (cached.height && cached.height > 0) ||
-      (cached.weight && cached.weight > 0) ||
-      cached.college ||
-      (cached.birth_date && cached.birth_date.length > 4)
-    );
-
-    // Check if this player entry was individually fetched (marked with _fetched flag)
-    const wasFetched = !!cached._fetched;
-
-    if (hasRichBio || wasFetched) return cached;
-
-    // Always fetch individual player endpoint for reliable bio
     try {
-      const r = await fetch(`https://api.sleeper.app/v1/players/nfl/${playerId}`);
-      if (r.ok) {
-        const fresh = await r.json();
-        if (fresh && (fresh.first_name || fresh.player_id)) {
-          const merged = { ...cached, ...fresh, _fetched: true };
-          cache[playerId] = merged;
-          try { localStorage.setItem("dlr_players", JSON.stringify(cache)); } catch(e) {}
-          return merged;
-        }
-      }
-    } catch(e) { /* fall back to cached */ }
-
-    return { ...cached, _fetched: true };
+      const cache = JSON.parse(localStorage.getItem("dlr_players") || "{}");
+      return cache[playerId] || {};
+    } catch(e) { return {}; }
   }
 
   // ── Build modal DOM ───────────────────────────────────────
@@ -92,7 +61,6 @@ const DLRPlayerCard = (() => {
             <div id="pc-name"  class="pc-name"></div>
             <div id="pc-team"  class="pc-team"></div>
             <div id="pc-bio"   class="pc-bio"></div>
-            <div id="pc-owner" class="pc-owner"></div>
           </div>
           <button class="modal-close" onclick="DLRPlayerCard.close()">✕</button>
         </div>
@@ -106,7 +74,7 @@ const DLRPlayerCard = (() => {
     modal.addEventListener("click", e => { if (e.target === modal) close(); });
   }
 
-  // ── Render header with resolved player data ───────────────
+  // ── Render header ─────────────────────────────────────────
   function _renderHeader(p, playerId, fallbackName) {
     const name  = p.first_name ? `${p.first_name} ${p.last_name}` : (fallbackName || "Unknown");
     const pos   = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
@@ -128,18 +96,23 @@ const DLRPlayerCard = (() => {
       posEl.style.border     = `1px solid ${color}66`;
     }
 
-    // Name and team/pos
-    const nameEl = document.getElementById("pc-name");
-    if (nameEl) nameEl.textContent = name;
+    document.getElementById("pc-name").textContent = name;
+    document.getElementById("pc-team").textContent = `${team} · ${pos}`;
 
-    const teamEl = document.getElementById("pc-team");
-    if (teamEl) teamEl.textContent = `${team} · ${pos}`;
-
-    // Bio
+    // Bio — height is stored as "6'4\"" string, weight as "220" string
     const bio = [];
-    const age = p.age != null ? p.age : (p.birth_date ? _calcAge(p.birth_date) : null);
-    if (age != null)       bio.push(`Age ${age}`);
-    if (p.height)          bio.push(_fmtHeight(parseInt(p.height)));
+    if (p.age != null)      bio.push(`Age ${p.age}`);
+    else if (p.birth_date)  bio.push(`Age ${_calcAge(p.birth_date)}`);
+    // Height: may be "6'2\"" string or numeric inches
+    if (p.height) {
+      const hStr = String(p.height);
+      if (hStr.includes("'")) {
+        bio.push(hStr.replace(/\\"/g, '"')); // already formatted
+      } else {
+        const inches = parseInt(hStr);
+        if (inches > 0) bio.push(`${Math.floor(inches/12)}'${inches%12}"`);
+      }
+    }
     if (p.weight)          bio.push(`${p.weight} lbs`);
     if (p.college)         bio.push(p.college);
     if (p.years_exp === 0) bio.push("Rookie");
@@ -152,10 +125,10 @@ const DLRPlayerCard = (() => {
 
     const bioEl = document.getElementById("pc-bio");
     if (bioEl) {
-      const bioLine    = bio.length    ? `<div>${bio.join(" · ")}</div>`    : "";
-      const alertLine  = alerts.length ? `<div style="color:var(--color-red);font-size:.75rem;margin-top:3px;">${alerts.join(" · ")}</div>` : "";
-      const placeholder = (!bio.length && !alerts.length) ? `<div style="color:var(--color-text-dim);font-size:.78rem;">Bio not available</div>` : "";
-      bioEl.innerHTML = bioLine + alertLine + placeholder;
+      bioEl.innerHTML =
+        (bio.length    ? `<div>${bio.join(" · ")}</div>` : "") +
+        (alerts.length ? `<div style="color:var(--color-red);font-size:.75rem;margin-top:3px;">${alerts.join(" · ")}</div>` : "") +
+        (!bio.length && !alerts.length ? `<div style="color:var(--color-text-dim);font-size:.78rem;">Bio not available</div>` : "");
     }
 
     // Year tabs
@@ -189,7 +162,7 @@ const DLRPlayerCard = (() => {
     logEl.innerHTML = "";
 
     try {
-      // Season totals
+      // Season totals from bulk stats cache
       const bulkKey = `dlr_stats_${year}`;
       let bulkData  = null;
       try { bulkData = JSON.parse(localStorage.getItem(bulkKey) || "null"); } catch(e) {}
@@ -203,7 +176,7 @@ const DLRPlayerCard = (() => {
         }
       }
 
-      const st  = bulkData?.[_playerId] || null;
+      const st = bulkData?.[_playerId] || null;
 
       // Weekly game log
       let weeklyArr = _weekCache[year] || null;
@@ -249,8 +222,8 @@ const DLRPlayerCard = (() => {
       ].filter(Boolean).filter(([, v]) => v != null && v !== 0);
 
       sumEl.innerHTML = statItems.length
-        ? `<div class="pc-stats-grid">${statItems.map(([l, v]) => `
-            <div class="pc-stat-box">
+        ? `<div class="pc-stats-grid">${statItems.map(([l, v]) =>
+            `<div class="pc-stat-box">
               <div class="pc-stat-val">${v}</div>
               <div class="pc-stat-lbl">${l}</div>
             </div>`).join("")}</div>`
@@ -258,11 +231,11 @@ const DLRPlayerCard = (() => {
 
       // Game log
       if (!weeklyArr?.length) {
-        logEl.innerHTML = `<div class="pc-no-weekly">Season totals shown above. No weekly breakdown available.</div>`;
+        logEl.innerHTML = `<div class="pc-no-weekly">Season totals above. No weekly breakdown available.</div>`;
         return;
       }
 
-      const weeks = [...weeklyArr].sort((a, b) => (a.week || 0) - (b.week || 0));
+      const weeks = [...weeklyArr].sort((a, b) => (a.week||0) - (b.week||0));
       logEl.innerHTML = `
         <div class="pc-log-title">Game Log</div>
         <table class="pc-log-table">
@@ -281,7 +254,7 @@ const DLRPlayerCard = (() => {
               if (w.rush_att) bits.push(w.rush_att + " car");
               if (w.rush_yd)  bits.push(Math.round(w.rush_yd) + " Ru");
               if (w.rush_td)  bits.push(w.rush_td + " RTD");
-              if (w.rec)      bits.push(w.rec + "/" + Math.round(w.rec_yd || 0) + " Re");
+              if (w.rec)      bits.push(w.rec + "/" + Math.round(w.rec_yd||0) + " Re");
               if (w.rec_td)   bits.push(w.rec_td + " ReTD");
               return `<tr>
                 <td>Wk ${w.week}</td>
@@ -302,7 +275,6 @@ const DLRPlayerCard = (() => {
     if (logEl) logEl.innerHTML = `<div class="pc-no-weekly">No stats available${year ? ` for ${year}` : ""}.</div>`;
   }
 
-  // ── Helpers ────────────────────────────────────────────
   function _calcAge(birthDate) {
     if (!birthDate) return null;
     try {
@@ -312,13 +284,6 @@ const DLRPlayerCard = (() => {
       if (today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d)) age--;
       return age;
     } catch(e) { return null; }
-  }
-
-  function _fmtHeight(inches) {
-    if (!inches || isNaN(inches)) return "";
-    const ft  = Math.floor(inches / 12);
-    const rem = inches % 12;
-    return `${ft}'${rem}"`;
   }
 
   return { show, close, setYear };

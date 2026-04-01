@@ -20,7 +20,8 @@ const MFLAPI = (() => {
   // ── Configuration ──────────────────────────────────────
   // Your deployed Cloudflare Worker URL (see /functions/mfl-proxy.js)
   // Set this after deploying the worker.
-  const MFL_PROXY_URL = "https://corsproxy.io/?";
+  // corsproxy.io started returning 403 — use allorigins instead
+  const MFL_PROXY_URL = "https://api.allorigins.win/raw?url=";
 
   const MFL_API_HOST  = "https://api.myfantasyleague.com";
 

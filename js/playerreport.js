@@ -68,17 +68,23 @@ const DLRPlayerReport = (() => {
         }
       } catch(e) {}
 
-      // Get owner leagues — current season ONLY for player report
-      const currentYear = new Date().getFullYear().toString();
+      // Find the most recent season actually in the user's data
+      const allSeasons = Object.values(_allLeagues)
+        .map(l => l.season)
+        .filter(Boolean)
+        .sort((a, b) => b.localeCompare(a));
+      const latestSeason = allSeasons[0] || String(new Date().getFullYear());
+
+      // Get owner leagues from the latest season only
       const ownerLeagues = Object.entries(_allLeagues)
         .filter(([, l]) =>
-          l.season === currentYear &&
+          l.season === latestSeason &&
           ((l.wins||0) > 0 || (l.losses||0) > 0 || (l.pointsFor||0) > 0)
         )
         .map(([key, l]) => ({ key, ...l }));
 
       if (!ownerLeagues.length) {
-        body.innerHTML = `<div class="pr-empty">No owner leagues found. Import your leagues first.</div>`;
+        body.innerHTML = `<div class="pr-empty">No ${latestSeason} owner leagues found. Make sure your Sleeper leagues are imported and you have a roster in them.</div>`;
         return;
       }
 
