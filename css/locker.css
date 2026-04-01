@@ -3112,3 +3112,349 @@ select option { background: var(--color-bg-2); }
   border-color: var(--color-gold);
 }
 
+
+/* ── Platform filter buttons ─────────────────────────── */
+.filter-tab--plat {
+  font-weight: 700;
+}
+.filter-tab--plat[data-filter="platform:sleeper"] { color: #7abaff; border-color: rgba(90,158,255,.3); }
+.filter-tab--plat[data-filter="platform:sleeper"].active { background: rgba(90,158,255,.9); color: #fff; }
+.filter-tab--plat[data-filter="platform:mfl"]     { color: #4ade80; border-color: rgba(34,197,94,.3); }
+.filter-tab--plat[data-filter="platform:mfl"].active { background: rgba(34,197,94,.8); color: #0a0e1a; }
+
+
+/* ── Salary Cap ───────────────────────────────────────── */
+.sal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+.sal-view-tabs { display: flex; gap: 3px; flex-wrap: wrap; }
+.sal-tab {
+  padding: var(--space-1) var(--space-3);
+  font-size: .78rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.sal-tab--active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-color: var(--color-gold);
+}
+.sal-cap-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.sal-cap-label { font-size: .65rem; color: var(--color-text-dim); text-transform: uppercase; letter-spacing: .06em; }
+.sal-cap-val   { font-family: var(--font-display); font-size: .95rem; font-weight: 700; color: var(--color-gold); }
+
+/* Team card */
+.sal-team-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+}
+.sal-team-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-3);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.sal-team-name { font-family: var(--font-display); font-size: .92rem; font-weight: 700; }
+.sal-team-record { font-size: .72rem; color: var(--color-text-dim); }
+.sal-cap-summary { flex: 1; min-width: 160px; }
+.sal-cap-bar-wrap {
+  height: 6px;
+  background: var(--color-bg-3);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.sal-cap-bar-fill { height: 100%; border-radius: 99px; transition: width .4s; }
+.sal-cap-numbers { display: flex; gap: var(--space-3); font-size: .72rem; flex-wrap: wrap; }
+
+/* Player rows */
+.sal-player-list { padding: var(--space-2); }
+.sal-pos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: .65rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: var(--space-1) var(--space-2) var(--space-1);
+  color: var(--color-text-dim);
+}
+.sal-pos-total { font-weight: 700; }
+.sal-section-divider {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-text-dim);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-2);
+}
+.sal-player-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
+}
+.sal-player-row:hover { background: var(--color-bg-3); }
+.sal-player-row--holdout { border-left: 2px solid var(--color-red); }
+
+.sal-player-photo {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-bg-3);
+  flex-shrink: 0;
+}
+.sal-player-photo img { width: 100%; height: 100%; object-fit: cover; }
+.sal-pos-badge {
+  font-size: .6rem;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.sal-player-name {
+  flex: 1;
+  font-size: .82rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.sal-holdout-badge {
+  font-size: .62rem;
+  color: var(--color-red);
+  background: rgba(239,68,68,.1);
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+.sal-slot-badge {
+  font-size: .62rem;
+  color: var(--color-text-dim);
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+.sal-slot-badge--taxi { color: var(--color-gold); border-color: var(--color-gold-dim); }
+.sal-salary-col { text-align: right; flex-shrink: 0; }
+.sal-salary { font-family: var(--font-display); font-size: .82rem; font-weight: 700; }
+.sal-years  { font-size: .65rem; color: var(--color-text-dim); }
+.sal-edit-btn {
+  font-size: .75rem;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+.sal-edit-btn:hover { border-color: var(--color-gold); color: var(--color-gold); }
+
+/* Top Paid */
+.sal-toppaid-list { display: flex; flex-direction: column; gap: 3px; }
+.sal-toppaid-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.sal-toppaid-row:hover { background: var(--color-surface); }
+.sal-tp-rank { font-size: .72rem; color: var(--color-text-dim); width: 20px; text-align: right; flex-shrink: 0; }
+.sal-tp-photo {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-bg-3);
+  flex-shrink: 0;
+}
+.sal-tp-photo img { width: 100%; height: 100%; object-fit: cover; }
+.sal-tp-info { flex: 1; min-width: 0; }
+.sal-tp-team { font-size: .72rem; }
+.sal-tp-bar-wrap {
+  width: 80px;
+  height: 4px;
+  background: var(--color-bg-3);
+  border-radius: 99px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.sal-tp-bar { height: 100%; border-radius: 99px; }
+
+/* Cap Room */
+.sal-caproom-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.sal-caproom-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.sal-cr-name { width: 120px; font-size: .82rem; font-weight: 600; flex-shrink: 0; }
+.sal-cr-bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: var(--color-bg-3);
+  border-radius: 99px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.sal-cr-bar { height: 100%; border-radius: 99px; transition: width .4s; }
+.sal-cr-numbers { font-size: .75rem; flex-shrink: 0; }
+.sal-cr-avail { font-family: var(--font-display); font-size: .82rem; font-weight: 700; flex-shrink: 0; width: 56px; text-align: right; }
+.sal-cap-legend { font-size: .72rem; color: var(--color-text-dim); margin-top: var(--space-4); text-align: center; }
+
+/* Settings */
+.sal-settings-form { max-width: 420px; }
+.field-hint-inline { font-size: .72rem; color: var(--color-text-dim); font-weight: 400; }
+.sal-empty { padding: var(--space-8); text-align: center; color: var(--color-text-dim); font-size: .88rem; }
+
+
+/* ── Salary Cap Module ────────────────────────────────── */
+.sal-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4,1fr);
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+@media (max-width:500px) { .sal-summary-grid { grid-template-columns: repeat(2,1fr); } }
+.sal-summary-stat {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-2);
+  text-align: center;
+}
+.sal-summary-val {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+}
+.sal-summary-lbl {
+  font-size: .62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}
+
+.sal-tabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+.sal-tab {
+  padding: var(--space-1) var(--space-3);
+  font-size: .78rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.sal-tab--active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-color: var(--color-gold);
+}
+
+/* Cap space rows */
+.sal-team-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.sal-team-row--over { background: rgba(239,68,68,.05); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-2); }
+.sal-team-name { width: 140px; font-size: .82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.sal-cap-bar-wrap { flex: 1; background: var(--color-bg-3); border-radius: 99px; height: 6px; overflow: hidden; }
+.sal-cap-bar-fill { height: 100%; border-radius: 99px; transition: width .4s; }
+.sal-cap-numbers { display: flex; align-items: center; gap: var(--space-2); font-size: .78rem; flex-shrink: 0; }
+.sal-over-badge { background: rgba(239,68,68,.15); color: var(--color-red); font-size: .62rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(239,68,68,.3); }
+.sal-avail { color: var(--color-green); font-size: .72rem; }
+
+/* Top paid */
+.sal-toppaid-list { display: flex; flex-direction: column; gap: 2px; }
+.sal-toppaid-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.sal-toppaid-row:hover { background: var(--color-surface); }
+.sal-tp-rank { width: 22px; text-align: right; font-size: .72rem; color: var(--color-text-dim); flex-shrink: 0; }
+.sal-tp-pos { font-size: .6rem; font-weight: 800; padding: 1px 4px; border-radius: 3px; border: 1px solid; flex-shrink: 0; }
+.sal-tp-info { flex: 1; min-width: 0; }
+.sal-tp-name { font-size: .85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sal-tp-team { font-size: .68rem; }
+.sal-tp-bar-wrap { flex: 1; max-width: 80px; background: var(--color-bg-3); border-radius: 99px; height: 4px; overflow: hidden; }
+.sal-tp-bar { height: 100%; border-radius: 99px; }
+.sal-tp-salary { font-family: var(--font-display); font-size: .88rem; font-weight: 700; flex-shrink: 0; min-width: 52px; text-align: right; }
+
+/* Roster cards */
+.sal-roster-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); margin-bottom: var(--space-3); overflow: hidden; }
+.sal-roster-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4); background: var(--color-bg-3); border-bottom: 1px solid var(--color-border); gap: var(--space-3); }
+.sal-roster-teamname { font-weight: 700; font-size: .88rem; font-family: var(--font-display); }
+.sal-roster-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.sal-roster-row--dim { opacity: .6; }
+.sal-pos-dot { font-size: .6rem; font-weight: 800; padding: 1px 4px; border-radius: 3px; border: 1px solid; flex-shrink: 0; }
+.sal-roster-name { flex: 1; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sal-roster-slot { font-size: .68rem; min-width: 32px; }
+.sal-roster-salary { font-family: var(--font-display); font-size: .82rem; font-weight: 700; min-width: 52px; text-align: right; }
+
+/* Edit */
+.sal-edit-info { font-size: .78rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
+.sal-edit-team { margin-bottom: var(--space-4); }
+.sal-edit-teamname { font-family: var(--font-display); font-weight: 700; font-size: .88rem; margin-bottom: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); }
+.sal-edit-row { display: flex; align-items: center; justify-content: space-between; padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); gap: var(--space-3); }
+.sal-edit-name { flex: 1; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sal-edit-input { width: 72px; padding: 3px 6px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text); font-family: var(--font-mono); font-size: .82rem; outline: none; }
+.sal-edit-input:focus { border-color: var(--color-gold); }
+
+.sal-empty { padding: var(--space-8) var(--space-4); text-align: center; color: var(--color-text-dim); }
+

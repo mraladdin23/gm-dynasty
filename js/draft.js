@@ -26,6 +26,7 @@ const DLRDraft = (() => {
     _platform  = platform || "sleeper";
     _draftData = null;
     _viewingId = null;
+    _seasons   = [];
     _initToken++;
     const token = _initToken;
 
@@ -43,8 +44,7 @@ const DLRDraft = (() => {
     el.innerHTML = _loadingHTML("Loading draft board…");
 
     try {
-      // Load seasons chain non-blocking
-      _loadSeasons(leagueId, token);
+      // No season selector in the draft tab — just load current league's draft
       await _loadDraft(leagueId, token);
     } catch(e) {
       if (token !== _initToken) return;
@@ -252,7 +252,6 @@ const DLRDraft = (() => {
 
     el.innerHTML = `
       <div class="draft-header-bar">
-        <div id="draft-season-bar" style="display:none;margin-bottom:var(--space-3);"></div>
         <div class="draft-meta">
           <span class="draft-type-label">${draftTypeLabel}</span>
           <span class="draft-status" style="color:${statusColor}">● ${statusLabel}</span>
@@ -262,9 +261,6 @@ const DLRDraft = (() => {
       <div class="draft-board-scroll">
         <div class="draft-board">${boardHTML}</div>
       </div>`;
-
-    // Season bar may be ready by now
-    _renderSeasonBar();
   }
 
   // ── Helpers ────────────────────────────────────────────

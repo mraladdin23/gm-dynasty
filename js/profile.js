@@ -61,7 +61,11 @@ const Profile = (() => {
     try {
       const data = await GMDB._restGet(`gmd/users/${username.toLowerCase()}/leagueMeta`);
       _leagueMeta = data || {};
-    } catch (_) {
+      const groups = Object.values(_leagueMeta).filter(m => m?.commishGroup).map(m => m.commishGroup);
+      const labels = Object.values(_leagueMeta).filter(m => m?.customLabel).map(m => m.customLabel);
+      console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries, groups: [${groups.join(", ")}], labels: [${labels.join(", ")}]`);
+    } catch (err) {
+      console.error("[DLR] loadLeagueMeta FAILED:", err.message);
       _leagueMeta = {};
     }
   }
@@ -410,23 +414,32 @@ const Profile = (() => {
   function _renderLeagueFilters() {
     const customLabels  = new Set();
     const commishGroups = new Set();
+    const platforms     = new Set();
 
     Object.values(_leagueMeta).forEach(m => {
       if (m && m.customLabel  && m.customLabel.trim())  customLabels.add(m.customLabel.trim());
       if (m && m.commishGroup && m.commishGroup.trim()) commishGroups.add(m.commishGroup.trim());
     });
 
+    // Detect which platforms the user has leagues on
+    Object.values(_allLeagues).forEach(l => {
+      if (l.platform) platforms.add(l.platform);
+    });
+
     console.log("[DLR filters] meta keys:", Object.keys(_leagueMeta).length,
-      "labels:", [...customLabels], "groups:", [...commishGroups]);
+      "labels:", [...customLabels], "groups:", [...commishGroups], "platforms:", [...platforms]);
 
     const filterBar = document.getElementById("league-filters");
     if (!filterBar) return;
 
     const groupBtns = [...commishGroups].map(g =>
-      `<button class="filter-tab filter-tab--group" data-filter="group:${g}">⚡ ${_escHtml(g)}</button>`
+      `<button class="filter-tab filter-tab--group" data-filter="group:${_escHtml(g)}">⚡ ${_escHtml(g)}</button>`
     ).join("");
     const labelBtns = [...customLabels].map(l =>
-      `<button class="filter-tab filter-tab--label" data-filter="label:${l}">🏷 ${_escHtml(l)}</button>`
+      `<button class="filter-tab filter-tab--label" data-filter="label:${_escHtml(l)}">🏷 ${_escHtml(l)}</button>`
+    ).join("");
+    const platBtns = [...platforms].map(p =>
+      `<button class="filter-tab filter-tab--plat" data-filter="platform:${p}">${p === "sleeper" ? "🟣 Sleeper" : p === "mfl" ? "🟢 MFL" : p.toUpperCase()}</button>`
     ).join("");
 
     filterBar.innerHTML = `
@@ -438,6 +451,7 @@ const Profile = (() => {
       <button class="filter-tab" data-filter="redraft">Redraft</button>
       <button class="filter-tab" data-filter="keeper">Keeper</button>
       <button class="filter-tab" data-filter="commissioner">👑 Commish</button>
+      ${platforms.size > 1 ? platBtns : ""}
       ${commishGroups.size > 0 ? `<span class="filter-section-label">Groups</span>${groupBtns}` : ""}
       ${customLabels.size  > 0 ? `<span class="filter-section-label">Labels</span>${labelBtns}` : ""}
       <div class="filter-divider"></div>
@@ -705,8 +719,9 @@ const Profile = (() => {
       case "keeper":       return latest?.leagueType === "keeper";
       case "commissioner": return f.seasons.some(s => s.league.isCommissioner);
       default:
-        if (filter.startsWith("label:")) return meta.customLabel === filter.slice(6);
-        if (filter.startsWith("group:")) return meta.commishGroup === filter.slice(6);
+        if (filter.startsWith("label:"))    return meta.customLabel === filter.slice(6);
+        if (filter.startsWith("group:"))    return meta.commishGroup === filter.slice(6);
+        if (filter.startsWith("platform:")) return latest?.platform === filter.slice(9);
         return true;
     }
   }
@@ -1035,6 +1050,7 @@ const Profile = (() => {
     DLRAnalytics.reset();
     DLRRules.reset();
     DLRFreeAgents.reset();
+    DLRSalaryCap.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
   }
@@ -1049,6 +1065,7 @@ const Profile = (() => {
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster")      DLRRoster.init(league.leagueId, league.platform);
+    if (tab === "salary")      DLRSalaryCap.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "freeagents")  DLRFreeAgents.init(league.leagueId);
     if (tab === "draft")       DLRDraft.init(league.leagueId, league.platform);
     if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);

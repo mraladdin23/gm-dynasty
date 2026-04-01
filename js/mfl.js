@@ -283,7 +283,7 @@ const MFLAPI = (() => {
     // Step 2: Build list of league+year pairs to process
     const toProcess = []; // [{ leagueId, leagueName, year }]
 
-    // If user provided known league IDs, search those across years
+    // If user provided known league IDs, search those across all years
     if (knownLeagueIds.length) {
       const currentYear = new Date().getFullYear();
       const years = [currentYear, currentYear-1, currentYear-2, currentYear-3, currentYear-4].map(String);
@@ -292,8 +292,8 @@ const MFLAPI = (() => {
           try {
             const data = await getLeague(leagueId, year);
             if (data) {
+              // Don't break — collect ALL years for this league ID
               toProcess.push({ leagueId, leagueName: data.name || `League ${leagueId}`, year });
-              break; // found this league in this year, move to next
             }
           } catch(e) {}
         }

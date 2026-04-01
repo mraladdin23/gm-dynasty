@@ -28,7 +28,10 @@ const DLRPlayerCard = (() => {
     // Check cache version — forces refresh if bio fields were missing
     const cacheVer = localStorage.getItem("dlr_players_ver");
     if (cacheVer !== "3") {
-      // Refresh silently — version 3 guarantees full bio fields
+      // Show loading in bio area while fetching
+      const bioEl = document.getElementById("pc-bio");
+      if (bioEl) bioEl.innerHTML = `<div style="color:var(--color-text-dim);font-size:.78rem;">Loading bio…</div>`;
+
       try {
         const r = await fetch("https://api.sleeper.app/v1/players/nfl");
         if (r.ok) {

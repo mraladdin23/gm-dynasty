@@ -107,7 +107,10 @@ const DLRRoster = (() => {
       if (el) el.innerHTML = _loadingHTML("Downloading player database…");
       const res  = await fetch("https://api.sleeper.app/v1/players/nfl");
       const data = await res.json();
-      try { localStorage.setItem("dlr_players", JSON.stringify(data)); } catch(e) {}
+      try {
+        localStorage.setItem("dlr_players", JSON.stringify(data));
+        localStorage.setItem("dlr_players_ver", "3"); // marks cache as having full bio fields
+      } catch(e) {}
       return data;
     } catch(e) { return {}; }
   }
