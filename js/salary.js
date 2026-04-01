@@ -16,6 +16,7 @@
 const DLRSalaryCap = (() => {
 
   let _leagueKey  = null;
+  let _storageKey = null;  // franchiseId or leagueKey — stable across seasons
   let _leagueId   = null;
   let _isCommish  = false;
   let _settings   = null;
@@ -51,10 +52,13 @@ const DLRSalaryCap = (() => {
   }
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueKey, leagueId, isCommish) {
+  async function init(leagueKey, leagueId, isCommish, franchiseId) {
     _leagueKey  = leagueKey;
     _leagueId   = leagueId;
     _isCommish  = !!isCommish;
+    // Use franchiseId as storage key so salary data persists across seasons
+    // franchiseId is stable (oldest leagueId in chain), leagueKey changes each year
+    _storageKey = franchiseId || leagueKey;
     _settings   = null;
     _salaryData = null;
     _rosterData = null;
@@ -68,8 +72,8 @@ const DLRSalaryCap = (() => {
 
     try {
       [_settings, _salaryData] = await Promise.all([
-        _loadSettings(leagueKey),
-        _loadSalaryData(leagueKey)
+        _loadSettings(_storageKey),
+        _loadSalaryData(_storageKey)
       ]);
       if (token !== _initToken) return;
 
@@ -137,12 +141,12 @@ const DLRSalaryCap = (() => {
   }
 
   async function _saveSettings(settings) {
-    await GMDB.saveSalarySettings(_leagueKey, settings);
+    await GMDB.saveSalarySettings(_storageKey, settings);
     _settings = settings;
   }
 
   async function _saveSalaryData() {
-    await GMDB.saveSalaryRosters(_leagueKey, _salaryData);
+    await GMDB.saveSalaryRosters(_storageKey, _salaryData);
   }
 
   // ── Main render ───────────────────────────────────────────
@@ -642,7 +646,7 @@ const DLRSalaryCap = (() => {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href     = url;
-    a.download = `salary_template_${_leagueKey}.csv`;
+    a.download = `salary_template_${_storageKey || _leagueKey}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }

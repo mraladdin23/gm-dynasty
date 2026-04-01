@@ -41,19 +41,56 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, email, password, leagueIds = []) {
-    if (!email?.trim()) throw new Error("Enter your MFL username.");
-    const result = await MFLAPI.importUserLeagues(email.trim(), password?.trim() || "", leagueIds);
-    if (Object.keys(result.leagues).length === 0) {
-      throw new Error("No MFL leagues found. Add your league IDs (from the MFL URL) to the League IDs field.");
+  async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
+    if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
+    const mflUsername = emailOrUsername.trim().split("@")[0]; // strip @domain if email entered
+
+    const rawResults = await MFLAPI.importUserLeagues(mflUsername, leagueIds);
+    if (!rawResults.length) {
+      throw new Error("No MFL leagues found. Make sure your league IDs are entered correctly.");
     }
+
+    // Convert flat results array → leaguesMap object expected by GMDB.saveLeagues
+    const leaguesMap = {};
+    for (const r of rawResults) {
+      const key = `mfl_${r.year}_${r.leagueId}`;
+      leaguesMap[key] = {
+        platform:       "mfl",
+        leagueId:       String(r.leagueId),
+        franchiseId:    `mfl__${r.leagueId}`,   // stable anchor across seasons
+        leagueName:     r.leagueName || `League ${r.leagueId}`,
+        season:         String(r.year),
+        leagueType:     _detectMFLLeagueType(r.leagueName || ""),
+        totalTeams:     r.totalTeams || 12,
+        teamName:       r.teamName  || "My Team",
+        isCommissioner: r.isCommissioner || false,
+        myRosterId:     r.franchiseId || null,
+        wins:           r.wins    || 0,
+        losses:         r.losses  || 0,
+        ties:           r.ties    || 0,
+        pointsFor:      r.ptsFor  || 0,
+        pointsAgainst:  r.ptsAgainst || 0,
+        standing:       r.rank    || null,
+        playoffFinish:  r.playoffFinish || null,
+        isChampion:     r.playoffFinish === 1,
+        playoffResult:  null
+      };
+    }
+
     await GMDB.linkPlatform(gmdUsername, "mfl", {
-      mflEmail:    email.trim(),
-      mflUsername: result.mflUsername
+      mflUsername,
+      linked: true
     });
-    await GMDB.saveLeagues(gmdUsername, result.leagues);
+    await GMDB.saveLeagues(gmdUsername, leaguesMap);
     await GMDB.recomputeStats(gmdUsername);
-    return result;
+    return { leagues: leaguesMap, mflUsername };
+  }
+
+  function _detectMFLLeagueType(name) {
+    const n = name.toLowerCase();
+    if (n.includes("dynasty")) return "dynasty";
+    if (n.includes("keeper"))  return "keeper";
+    return "redraft";
   }
 
   // ── League meta (pins, labels, archive) ───────────────
@@ -1183,9 +1220,15 @@ const Profile = (() => {
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster")      DLRRoster.init(league.leagueId, league.platform);
     if (tab === "salary") {
-      const effectiveType = (_leagueMeta[leagueKey]?.leagueTypeOverride) || league.leagueType || "";
+      // Check override on current key OR any season's meta in the same franchise
+      const franchise = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+      const effectiveType = (franchise?.seasons || []).reduce((found, s) => {
+        return found || _leagueMeta[s.key]?.leagueTypeOverride;
+      }, null) || league.leagueType || "";
+
       if (effectiveType === "salary") {
-        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner);
+        const franchiseId = franchise?.franchiseId || leagueKey;
+        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId);
       } else {
         const el = document.getElementById("dtab-salary");
         if (el) el.innerHTML = `<div style="padding:var(--space-8);text-align:center;color:var(--color-text-dim)">
@@ -1198,6 +1241,7 @@ const Profile = (() => {
     if (tab === "freeagents")  DLRFreeAgents.init(league.leagueId);
     if (tab === "draft")       DLRDraft.init(league.leagueId, league.platform);
     if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
+    if (tab === "rules")       DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
       DLRAuction.init(
         leagueKey,
