@@ -44,15 +44,25 @@ const DLRStandings = (() => {
     if (!el) return;
     el.innerHTML = _loadingHTML("Loading standings…");
 
-    // MFL standings not yet supported via API — show placeholder
+    // MFL standings via Cloudflare Worker
     if (_platform === "mfl") {
-      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
-        <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
-        <div style="font-weight:600;margin-bottom:var(--space-2);">MFL standings coming soon</div>
-        <div style="font-size:.85rem;color:var(--color-text-dim);">
-          View full standings on <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${leagueId}" target="_blank" style="color:var(--color-gold);">MyFantasyLeague.com</a>
-        </div>
-      </div>`;
+      try {
+        // Extract year from leagueId context — stored leagues have season field
+        const season = new Date().getFullYear().toString();
+        const [leagueData, standings] = await Promise.all([
+          MFLAPI.getLeague(leagueId, season),
+          MFLAPI.getStandings(leagueId, season)
+        ]);
+        if (token !== _initToken) return;
+        _renderMFLStandings(el, leagueData, standings, leagueId, season);
+      } catch(e) {
+        el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
+          <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
+          <div style="font-weight:600;margin-bottom:var(--space-2);">Could not load MFL standings</div>
+          <div style="font-size:.85rem;color:var(--color-text-dim);">${e.message}<br>
+          View on <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${leagueId}" target="_blank" style="color:var(--color-gold);">MyFantasyLeague.com</a></div>
+        </div>`;
+      }
       return;
     }
 
@@ -277,17 +287,8 @@ const DLRStandings = (() => {
     const rosterMap = {};
     (_leagueData.teams || []).forEach(t => { rosterMap[t.roster_id] = t; });
 
-    // Get players from cache or fetch
-    let players = {};
-    try {
-      const raw = localStorage.getItem("dlr_players");
-      if (raw) players = JSON.parse(raw);
-      if (!Object.keys(players).length) {
-        const r = await fetch("https://api.sleeper.app/v1/players/nfl");
-        players = await r.json();
-        try { localStorage.setItem("dlr_players", JSON.stringify(players)); } catch(e) {}
-      }
-    } catch(e) {}
+    // Get players from IndexedDB-backed cache
+    const players = DLRPlayers.all();
 
     const pName = id => { const p = players[id]; return p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : id; };
     const rosterSlots = _leagueData.league?.roster_positions || [];
@@ -530,6 +531,58 @@ const DLRStandings = (() => {
   }
 
   // ── Helpers ────────────────────────────────────────────
+  function _renderMFLStandings(el, leagueData, standings, leagueId, season) {
+    if (!standings.length) {
+      el.innerHTML = `<div class="empty-state">No standings data available.</div>`;
+      return;
+    }
+    const franchises = leagueData?.franchises?.franchise || [];
+    const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
+    const teamName = (fid) => franchiseArr.find(f => f.id === fid)?.name || `Team ${fid}`;
+
+    const totalTeams = standings.length;
+    const playoffSpots = leagueData?.settings?.playoffTeams
+      ? parseInt(leagueData.settings.playoffTeams)
+      : Math.floor(totalTeams / 2);
+
+    el.innerHTML = `
+      <div class="standings-meta">
+        <span>${leagueData?.name || "MFL League"} · ${season}</span>
+        <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
+          style="font-size:.75rem;color:var(--color-gold);">View on MFL ↗</a>
+      </div>
+      <div class="standings-table-wrap">
+        <table class="standings-table">
+          <thead><tr>
+            <th>#</th><th class="team-col">Team</th><th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>
+          </tr></thead>
+          <tbody>
+            ${standings.map((s, i) => {
+              const rank    = i + 1;
+              const inPO    = rank <= playoffSpots;
+              const bubble  = rank === playoffSpots;
+              const name    = teamName(s.franchiseId);
+              return `<tr class="${inPO ? "standings-row--playoff" : ""}"
+                style="${inPO ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}` : "border-left:3px solid transparent"}">
+                <td class="standings-rank">${rank}</td>
+                <td class="team-col">
+                  <div class="standings-team-cell">
+                    <div class="st-av">${name[0]?.toUpperCase() || "?"}</div>
+                    <div>
+                      <div class="standings-team-name">${_esc(name)}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
+                <td>${s.ptsFor?.toFixed(1) || "—"}</td>
+                <td class="dim">${s.ptsAgainst?.toFixed(1) || "—"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
   function _loadingHTML(msg) {
     return `<div class="detail-loading"><div class="spinner"></div><span>${msg}</span></div>`;
   }

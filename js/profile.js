@@ -689,9 +689,10 @@ const Profile = (() => {
 
     franchiseList.forEach(f => {
       const meta = _leagueMeta[f.latestKey] || {};
-      // Active = has a season matching the active season year
-      // OR manually pinned (always show in active)
-      const hasActiveSeason = f.seasons.some(s => s.league.season === activeSeason);
+      // Active = latest season of THIS franchise matches the active season
+      // (using latestKey which is the newest season)
+      const latestLeagueSeason = _allLeagues[f.latestKey]?.season;
+      const hasActiveSeason = latestLeagueSeason === activeSeason;
       const isArchived = meta.archived || !hasActiveSeason;
 
       if (isArchived) {

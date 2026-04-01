@@ -34,10 +34,13 @@ const DLRRoster = (() => {
     if (!el) return;
 
     if (_platform !== "sleeper") {
-      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
-        <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
-        <div style="font-weight:600;">MFL rosters coming soon</div>
-      </div>`;
+      el.innerHTML = _loadingHTML("Loading MFL rosters…");
+      try {
+        await _loadMFLData(leagueId, token);
+      } catch(e) {
+        if (token !== _initToken) return;
+        el.innerHTML = _errorHTML("Could not load MFL rosters: " + e.message);
+      }
       return;
     }
 
@@ -263,6 +266,83 @@ const DLRRoster = (() => {
   }
 
   // ── Helpers ────────────────────────────────────────────
+  async function _loadMFLData(leagueId, token) {
+    const el = document.getElementById("dtab-roster");
+    const season = new Date().getFullYear().toString();
+
+    _players = await DLRPlayers.load();
+    if (token !== _initToken) return;
+
+    const [leagueData, standings, rosters] = await Promise.all([
+      MFLAPI.getLeague(leagueId, season),
+      MFLAPI.getStandings(leagueId, season),
+      MFLAPI.getRosters(leagueId, season)
+    ]);
+    if (token !== _initToken) return;
+
+    const franchises = leagueData?.franchises?.franchise || [];
+    const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
+
+    const standingsMap = {};
+    (standings || []).forEach(s => { standingsMap[s.franchiseId] = s; });
+
+    // MFL rosters: { franchise: [{ id, player: [...] }] }
+    const rosterFranchises = rosters?.franchise ? (Array.isArray(rosters.franchise) ? rosters.franchise : [rosters.franchise]) : [];
+    const rosterMap = {};
+    rosterFranchises.forEach(f => {
+      const players = f.player ? (Array.isArray(f.player) ? f.player : [f.player]) : [];
+      rosterMap[f.id] = players;
+    });
+
+    const teams = franchiseArr.map(f => {
+      const s = standingsMap[f.id] || {};
+      const mflPlayers = rosterMap[f.id] || [];
+
+      // Map MFL players to display format
+      // MFL player IDs are numeric and don't match Sleeper IDs
+      // We show position, name as-is from MFL
+      const mainRoster = mflPlayers.filter(p => p.status !== "IR" && p.status !== "TAXI");
+      const irRoster   = mflPlayers.filter(p => p.status === "IR");
+      const taxiRoster = mflPlayers.filter(p => p.status === "TAXI");
+
+      return {
+        roster_id:   f.id,
+        owner_id:    f.id,
+        teamName:    f.name || `Team ${f.id}`,
+        username:    (f.owner_name || f.id).toLowerCase(),
+        avatar:      null,
+        mflPlayers:  mflPlayers,   // raw MFL players
+        players:     mainRoster.map(p => `mfl_${p.id}`),
+        reserve:     irRoster.map(p => `mfl_${p.id}`),
+        taxi:        taxiRoster.map(p => `mfl_${p.id}`),
+        wins:        s.wins   || 0,
+        losses:      s.losses || 0,
+        fpts:        s.ptsFor || 0
+      };
+    }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
+
+    // Build a local player lookup from MFL data
+    const mflPlayerLookup = {};
+    teams.forEach(t => {
+      (t.mflPlayers || []).forEach(p => {
+        mflPlayerLookup[`mfl_${p.id}`] = {
+          first_name: p.name?.split(", ")[1] || p.name || "",
+          last_name:  p.name?.split(", ")[0] || "",
+          position:   p.position || "?",
+          fantasy_positions: [p.position || "?"],
+          team:       p.team || "FA",
+          search_rank: 9999
+        };
+      });
+    });
+
+    // Merge into _players
+    Object.assign(_players, mflPlayerLookup);
+
+    _rosterData = { teams, league: leagueData };
+    _render();
+  }
+
   function _loadingHTML(msg) {
     return `<div class="detail-loading"><div class="spinner"></div><span>${msg}</span></div>`;
   }
