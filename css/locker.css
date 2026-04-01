@@ -3460,22 +3460,20 @@ select option { background: var(--color-bg-2); }
 
 
 /* ── Team logo in header ─────────────────────────────── */
-.locker-header { position: relative; overflow: hidden; }
+.locker-header { position: relative; }
 .locker-team-logo {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 160px;
-  height: 160px;
+  width: 180px;
+  height: 180px;
   opacity: .07;
   pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 0;
 }
-.locker-header > * { position: relative; z-index: 1; }
 .locker-team-logo img {
   width: 100%;
   height: 100%;
@@ -3483,7 +3481,7 @@ select option { background: var(--color-bg-2); }
   filter: saturate(0.3) brightness(1.4);
 }
 @media (prefers-color-scheme: dark) {
-  .locker-team-logo { opacity: .1; }
+  .locker-team-logo { opacity: .09; }
   .locker-team-logo img { filter: saturate(0.2) brightness(2.5); }
 }
 
