@@ -25,6 +25,28 @@ const DLRPlayerCard = (() => {
 
     _buildModal();
 
+    // Check cache version — forces refresh if bio fields were missing
+    const cacheVer = localStorage.getItem("dlr_players_ver");
+    if (cacheVer !== "3") {
+      // Refresh silently — version 3 guarantees full bio fields
+      try {
+        const r = await fetch("https://api.sleeper.app/v1/players/nfl");
+        if (r.ok) {
+          const data = await r.json();
+          if (Object.keys(data).length > 1000) {
+            try {
+              localStorage.setItem("dlr_players", JSON.stringify(data));
+              localStorage.setItem("dlr_players_ver", "3");
+            } catch(e) {
+              console.warn("[DLR] Cache write failed (storage full?):", e.message);
+            }
+          }
+        }
+      } catch(e) {
+        console.warn("[DLR] Player cache refresh failed:", e.message);
+      }
+    }
+
     const p = _getPlayerFromCache(playerId);
     _renderHeader(p, playerId, playerName);
     await _loadYear(_year);

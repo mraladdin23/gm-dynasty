@@ -83,6 +83,13 @@ const Profile = (() => {
 
     await loadLeagueMeta(profile.username);
 
+    // Apply any stored type overrides to in-memory league data
+    Object.entries(_leagueMeta).forEach(([key, meta]) => {
+      if (meta?.leagueTypeOverride && _allLeagues[key]) {
+        _allLeagues[key].leagueType = meta.leagueTypeOverride;
+      }
+    });
+
     document.getElementById("locker-display-name").textContent = profile.username;
     document.getElementById("nav-username").textContent = "@" + profile.username;
 
@@ -404,18 +411,24 @@ const Profile = (() => {
     const customLabels  = new Set();
     const commishGroups = new Set();
 
-    // Read ALL leagueMeta entries — not just latestKey
     Object.values(_leagueMeta).forEach(m => {
       if (m && m.customLabel  && m.customLabel.trim())  customLabels.add(m.customLabel.trim());
       if (m && m.commishGroup && m.commishGroup.trim()) commishGroups.add(m.commishGroup.trim());
     });
 
-    console.log("[DLR] leagueMeta entries:", Object.keys(_leagueMeta).length, "labels:", [...customLabels], "groups:", [...commishGroups]);
+    console.log("[DLR filters] meta keys:", Object.keys(_leagueMeta).length,
+      "labels:", [...customLabels], "groups:", [...commishGroups]);
 
     const filterBar = document.getElementById("league-filters");
     if (!filterBar) return;
 
-    // Rebuild entire filter bar so multi-select wiring is clean
+    const groupBtns = [...commishGroups].map(g =>
+      `<button class="filter-tab filter-tab--group" data-filter="group:${g}">⚡ ${_escHtml(g)}</button>`
+    ).join("");
+    const labelBtns = [...customLabels].map(l =>
+      `<button class="filter-tab filter-tab--label" data-filter="label:${l}">🏷 ${_escHtml(l)}</button>`
+    ).join("");
+
     filterBar.innerHTML = `
       <button class="filter-tab active" data-filter="all">All</button>
       <button class="filter-tab" data-filter="active">Active</button>
@@ -425,25 +438,11 @@ const Profile = (() => {
       <button class="filter-tab" data-filter="redraft">Redraft</button>
       <button class="filter-tab" data-filter="keeper">Keeper</button>
       <button class="filter-tab" data-filter="commissioner">👑 Commish</button>
+      ${commishGroups.size > 0 ? `<span class="filter-section-label">Groups</span>${groupBtns}` : ""}
+      ${customLabels.size  > 0 ? `<span class="filter-section-label">Labels</span>${labelBtns}` : ""}
       <div class="filter-divider"></div>
       <button class="filter-tab" data-filter="archived">📦 Archived</button>
     `;
-
-    // Add dynamic label/group filters before the divider
-    customLabels.forEach(label => {
-      const btn = document.createElement("button");
-      btn.className = "filter-tab filter-tab--dynamic";
-      btn.dataset.filter = `label:${label}`;
-      btn.textContent = `🏷 ${label}`;
-      filterBar.insertBefore(btn, filterBar.querySelector(".filter-divider"));
-    });
-    commishGroups.forEach(group => {
-      const btn = document.createElement("button");
-      btn.className = "filter-tab filter-tab--dynamic";
-      btn.dataset.filter = `group:${group}`;
-      btn.textContent = `⚡ ${group}`;
-      filterBar.insertBefore(btn, filterBar.querySelector(".filter-divider"));
-    });
 
     // Multi-select wiring
     filterBar.querySelectorAll(".filter-tab").forEach(tab => {
@@ -522,11 +521,11 @@ const Profile = (() => {
     const franchises = _buildFranchises();
     const franchiseList = Object.values(franchises);
 
-    // Determine the most recent season present in the data
-    // (may be 2025 even though calendar year is 2026 if no leagues started yet)
-    const allSeasons = Object.values(_allLeagues).map(l => l.season).filter(Boolean);
-    const newestSeason = allSeasons.length
-      ? allSeasons.reduce((a, b) => a > b ? a : b)
+    // Determine active season using the 1/15 rule:
+    // Before Jan 15 → last year's season is "active"
+    // After Jan 15  → this year's season is "active"
+    const activeSeason = typeof getActiveSeason === "function"
+      ? getActiveSeason()
       : CURRENT_SEASON;
 
     // For each franchise, determine if active or archived
@@ -534,11 +533,11 @@ const Profile = (() => {
     const archived = [];
 
     franchiseList.forEach(f => {
-      const latestLeague = _allLeagues[f.latestKey];
-      const meta         = _leagueMeta[f.latestKey] || {};
-      // Active = has a season matching the newest season in the data
-      const hasCurrentSeason = f.seasons.some(s => s.league.season === newestSeason);
-      const isArchived = meta.archived || !hasCurrentSeason;
+      const meta = _leagueMeta[f.latestKey] || {};
+      // Active = has a season matching the active season year
+      // OR manually pinned (always show in active)
+      const hasActiveSeason = f.seasons.some(s => s.league.season === activeSeason);
+      const isArchived = meta.archived || !hasActiveSeason;
 
       if (isArchived) {
         archived.push(f);
@@ -693,12 +692,12 @@ const Profile = (() => {
   function _franchiseMatchesFilter(f, filter) {
     const latest = _allLeagues[f.latestKey];
     const meta   = _leagueMeta[f.latestKey] || {};
-    // Determine the most recent season in the data
-    const allSeasons = Object.values(_allLeagues).map(l => l.season).filter(Boolean);
-    const newestSeason = allSeasons.length ? allSeasons.reduce((a, b) => a > b ? a : b) : CURRENT_SEASON;
 
     switch(filter) {
-      case "active":       return f.seasons.some(s => s.league.season === newestSeason);
+      case "active": {
+        const activeSeason = typeof getActiveSeason === "function" ? getActiveSeason() : CURRENT_SEASON;
+        return f.seasons.some(s => s.league.season === activeSeason);
+      }
       case "owner":        return f.seasons.some(s => s.league.wins > 0 || s.league.losses > 0 || s.league.ties > 0 || (s.league.pointsFor > 0));
       case "pinned":       return !!meta.pinned;
       case "dynasty":      return latest?.leagueType === "dynasty";
@@ -818,19 +817,29 @@ const Profile = (() => {
     document.getElementById("label-league-name").textContent = league.leagueName;
     document.getElementById("label-custom-input").value  = meta.customLabel  || "";
     document.getElementById("label-commish-input").value = meta.commishGroup || "";
-    document.getElementById("label-pin-check").checked   = !!meta.pinned;
+    document.getElementById("label-pin-check").checked     = !!meta.pinned;
     document.getElementById("label-archive-check").checked = !!meta.archived;
 
+    // Type override — show current effective type
+    const typeEl = document.getElementById("label-type-override");
+    if (typeEl) typeEl.value = meta.leagueTypeOverride || "";
+
     document.getElementById("label-modal-save").onclick = async () => {
+      const typeOverride = document.getElementById("label-type-override")?.value || "";
       await saveLeagueMeta(_currentUsername, leagueKey, {
-        customLabel:  document.getElementById("label-custom-input").value.trim(),
-        commishGroup: document.getElementById("label-commish-input").value.trim(),
-        pinned:       document.getElementById("label-pin-check").checked,
-        archived:     document.getElementById("label-archive-check").checked
+        customLabel:       document.getElementById("label-custom-input").value.trim(),
+        commishGroup:      document.getElementById("label-commish-input").value.trim(),
+        pinned:            document.getElementById("label-pin-check").checked,
+        archived:          document.getElementById("label-archive-check").checked,
+        leagueTypeOverride: typeOverride || null
       });
+      // Apply override to in-memory league data immediately
+      if (typeOverride && _allLeagues[leagueKey]) {
+        _allLeagues[leagueKey].leagueType = typeOverride;
+      }
       closeLabelModal();
       _renderLeagueFilters();
-      _renderLeagues(_activeFilter);
+      _renderLeagues();
       showToast("League updated ✓");
     };
 

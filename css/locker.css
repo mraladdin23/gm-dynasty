@@ -3081,3 +3081,34 @@ select option { background: var(--color-bg-2); }
 .cs-mx-pct    { font-size: .68rem; color: var(--color-text-dim); display: block; }
 .cs-mx-title  { font-size: .75rem; }
 
+
+/* ── Filter section labels ────────────────────────────── */
+.filter-section-label {
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding: 0 var(--space-1);
+  display: flex;
+  align-items: center;
+}
+.filter-tab--group {
+  color: #a78bfa;
+  border-color: rgba(167,139,250,.35);
+}
+.filter-tab--group.active {
+  background: #a78bfa;
+  color: #0a0e1a;
+  border-color: #a78bfa;
+}
+.filter-tab--label {
+  color: var(--color-gold);
+  border-color: var(--color-gold-dim);
+}
+.filter-tab--label.active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-color: var(--color-gold);
+}
+

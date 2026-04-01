@@ -68,24 +68,30 @@ const DLRPlayerReport = (() => {
         }
       } catch(e) {}
 
-      // Find the most recent season actually in the user's data
-      const allSeasons = Object.values(_allLeagues)
-        .map(l => l.season)
-        .filter(Boolean)
-        .sort((a, b) => b.localeCompare(a));
-      const latestSeason = allSeasons[0] || String(new Date().getFullYear());
+      // Use 1/15 rule to determine which season's rosters to show
+      const activeSeason = typeof getActiveSeason === "function"
+        ? getActiveSeason()
+        : String(new Date().getFullYear() - 1);
 
-      // Get owner leagues from the latest season only
+      // Get all Sleeper leagues from the active season
       const ownerLeagues = Object.entries(_allLeagues)
-        .filter(([, l]) =>
-          l.season === latestSeason &&
-          ((l.wins||0) > 0 || (l.losses||0) > 0 || (l.pointsFor||0) > 0)
-        )
+        .filter(([, l]) => l.platform === "sleeper" && l.leagueId && l.season === activeSeason)
         .map(([key, l]) => ({ key, ...l }));
 
       if (!ownerLeagues.length) {
-        body.innerHTML = `<div class="pr-empty">No ${latestSeason} owner leagues found. Make sure your Sleeper leagues are imported and you have a roster in them.</div>`;
-        return;
+        // Fallback: use most recent season available in stored data
+        const allSeasons = Object.values(_allLeagues)
+          .map(l => l.season).filter(Boolean)
+          .sort((a, b) => b.localeCompare(a));
+        const fallbackSeason = allSeasons[0];
+        const fallback = Object.entries(_allLeagues)
+          .filter(([, l]) => l.platform === "sleeper" && l.leagueId && l.season === fallbackSeason)
+          .map(([key, l]) => ({ key, ...l }));
+        if (!fallback.length) {
+          body.innerHTML = `<div class="pr-empty">No Sleeper leagues found. Import your Sleeper account first.</div>`;
+          return;
+        }
+        ownerLeagues.push(...fallback);
       }
 
       body.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading rosters for ${ownerLeagues.length} leagues…</span></div>`;

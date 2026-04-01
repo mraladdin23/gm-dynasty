@@ -381,10 +381,17 @@ const MFLAPI = (() => {
   }
 
   function _detectLeagueType(leagueData, name = "") {
-    const keeperType = leagueData?.keeperType || leagueData?.keeper_type || "";
     const lname = (name || leagueData?.name || "").toLowerCase();
-    if (keeperType === "unlimited" || lname.includes("dynasty")) return "dynasty";
-    if (keeperType || lname.includes("keeper"))                   return "keeper";
+
+    // Name-based (most reliable)
+    if (lname.includes("dynasty"))       return "dynasty";
+    if (lname.includes("keeper"))        return "keeper";
+
+    // MFL keeperType field — values vary: "unlimited", "1", "5", "no", "0", ""
+    const kt = String(leagueData?.keeperType || "").toLowerCase().trim();
+    if (kt === "unlimited")              return "dynasty";
+    if (kt && kt !== "0" && kt !== "no" && kt !== "" && kt !== "false") return "keeper";
+
     return "redraft";
   }
 
