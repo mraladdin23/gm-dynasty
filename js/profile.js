@@ -152,7 +152,7 @@ const Profile = (() => {
 
     if (!teamAbbr) return;
 
-    // Use ESPN's CDN for team logos (high quality SVG/PNG)
+    // ESPN CDN for team logos
     const logoUrl = `https://a.espncdn.com/i/teamlogos/nfl/500/${teamAbbr.toLowerCase()}.png`;
 
     const logoEl = document.createElement("div");
@@ -162,7 +162,10 @@ const Profile = (() => {
         alt="${teamAbbr}"
         onerror="this.parentElement.style.display='none'"
         loading="lazy" />`;
-    header.appendChild(logoEl);
+
+    // Insert as FIRST child so it's behind other header content in paint order
+    // (absolute positioned so it doesn't affect layout)
+    header.insertBefore(logoEl, header.firstChild);
   }
 
   function _openPhotoUpload() {

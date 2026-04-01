@@ -18,24 +18,37 @@
 const MFLAPI = (() => {
 
   // ── Configuration ──────────────────────────────────────
-  // Your deployed Cloudflare Worker URL (see /functions/mfl-proxy.js)
-  // Set this after deploying the worker.
-  // corsproxy.io started returning 403 — use allorigins instead
-  const MFL_PROXY_URL = "https://api.allorigins.win/raw?url=";
+  // CORS proxy chain — tries each in order until one works
+  const MFL_PROXIES = [
+    "https://corsproxy.io/?",
+    "https://api.allorigins.win/raw?url=",
+    "https://proxy.cors.sh/",
+    "https://thingproxy.freeboard.io/fetch/",
+  ];
 
   const MFL_API_HOST  = "https://api.myfantasyleague.com";
 
-  // ── Proxy fetch ────────────────────────────────────────
-  // All MFL requests go through the proxy to bypass CORS block.
+  // ── Proxy fetch with fallback chain ──────────────────────
   async function _proxyFetch(url, options = {}) {
-    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res = await fetch(proxied, options);
-    if (!res.ok) {
-      if (res.status === 429) throw new Error("MFL rate limit hit — please wait a moment and try again.");
-      if (res.status === 404) return null;
-      throw new Error(`MFL API error ${res.status}`);
+    let lastErr = null;
+    for (const proxy of MFL_PROXIES) {
+      try {
+        const proxied = proxy + encodeURIComponent(url);
+        const res = await fetch(proxied, { ...options, signal: AbortSignal.timeout(12_000) });
+        if (res.status === 429) throw new Error("MFL rate limit hit — please wait a moment and try again.");
+        if (res.status === 404) return null;
+        if (res.status === 403 || res.status === 408 || !res.ok) {
+          lastErr = new Error(`Proxy ${proxy} returned ${res.status}`);
+          continue; // try next proxy
+        }
+        return res;
+      } catch(e) {
+        lastErr = e;
+        if (e.message.includes("rate limit")) throw e; // don't retry rate limits
+        // continue to next proxy
+      }
     }
-    return res.json();
+    throw new Error(`All MFL proxies failed. Last error: ${lastErr?.message}`);
   }
 
   // ── Login → get auth cookie ────────────────────────────
@@ -51,9 +64,8 @@ const MFLAPI = (() => {
     const year = new Date().getFullYear();
     const url  = `${MFL_API_HOST}/${year}/login?USERNAME=${encodeURIComponent(email)}&PASSWORD=${encodeURIComponent(password)}&XML=1`;
 
-    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res = await fetch(proxied);
-    if (!res.ok) throw new Error(`MFL login failed: ${res.status}`);
+    const res = await _proxyFetch(url);
+    if (!res) throw new Error("MFL login failed: no response");
 
     // MFL login returns XML even with JSON=1 flag omitted
     const text = await res.text();
@@ -95,10 +107,10 @@ const MFLAPI = (() => {
       try {
         // leagueSearch is public — no auth needed
         const url     = `${MFL_API_HOST}/${year}/export?TYPE=leagueSearch&SEARCH=${encodeURIComponent(mflUsername)}&JSON=1`;
-        const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-        const res     = await fetch(proxied);
-        if (!res.ok) continue;
-        const data    = await res.json();
+        const res     = await _proxyFetch(url).catch(() => null);
+        if (!res) continue;
+        const data    = await res.json().catch(() => null);
+        if (!data) continue;
         console.log(`[MFL] leagueSearch ${year}:`, JSON.stringify(data).slice(0, 300));
 
         const leagues = data?.leagues?.league;
@@ -128,10 +140,10 @@ const MFLAPI = (() => {
   async function findMyFranchise(leagueId, year, mflUsername) {
     try {
       const url     = `${MFL_API_HOST}/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
-      const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-      const res     = await fetch(proxied);
-      if (!res.ok) return null;
-      const data       = await res.json();
+      const res     = await _proxyFetch(url).catch(() => null);
+      if (!res) return null;
+      const data       = await res.json().catch(() => null);
+      if (!data) return null;
       const franchises = data?.league?.franchises?.franchise;
       if (!franchises) return null;
       const arr = Array.isArray(franchises) ? franchises : [franchises];
@@ -179,20 +191,18 @@ const MFLAPI = (() => {
   async function getLeague(leagueId, year, cookieValue = null) {
     const auth = cookieValue ? `&MFL_USER_ID=${cookieValue}` : "";
     const url  = `${MFL_API_HOST}/${year}/export?TYPE=league&L=${leagueId}&JSON=1${auth}`;
-    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res  = await fetch(proxied);
-    if (!res.ok) return null;
-    const data = await res.json();
+    const res  = await _proxyFetch(url).catch(() => null);
+    if (!res) return null;
+    const data = await res.json().catch(() => null);
     return data?.league || null;
   }
 
   async function getStandings(leagueId, year, cookieValue = null) {
     const auth = cookieValue ? `&MFL_USER_ID=${cookieValue}` : "";
     const url  = `${MFL_API_HOST}/${year}/export?TYPE=leagueStandings&L=${leagueId}&JSON=1${auth}`;
-    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res  = await fetch(proxied);
-    if (!res.ok) return [];
-    const data = await res.json();
+    const res  = await _proxyFetch(url).catch(() => null);
+    if (!res) return [];
+    const data = await res.json().catch(() => null);
     const standings = data?.leagueStandings?.franchise;
     if (!standings) return [];
     const arr = Array.isArray(standings) ? standings : [standings];
@@ -210,10 +220,9 @@ const MFLAPI = (() => {
   async function getPlayoffResults(leagueId, year, cookieValue = null) {
     const auth = cookieValue ? `&MFL_USER_ID=${cookieValue}` : "";
     const url  = `${MFL_API_HOST}/${year}/export?TYPE=playoffResults&L=${leagueId}&JSON=1${auth}`;
-    const proxied = MFL_PROXY_URL + encodeURIComponent(url);
-    const res  = await fetch(proxied);
-    if (!res.ok) return null;
-    const data = await res.json();
+    const res  = await _proxyFetch(url).catch(() => null);
+    if (!res) return null;
+    const data = await res.json().catch(() => null);
     return data?.playoffResults || null;
   }
 
