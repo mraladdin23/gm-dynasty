@@ -323,3 +323,16 @@ const SleeperAPI = (() => {
   };
 
 })();
+
+// ── Season utility (exported for use across modules) ──────
+// After Jan 15 of the new year, the current active season is
+// the new year. Before Jan 15, the active season is last year.
+function getActiveSeason() {
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-based
+  const day   = now.getDate();
+  // After Jan 15: current year is active season
+  if (month > 1 || (month === 1 && day >= 15)) return year.toString();
+  return (year - 1).toString();
+}
