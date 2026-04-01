@@ -123,11 +123,12 @@ const DLRDraft = (() => {
                || drafts.find(d => d.type !== "startup")
                || drafts[drafts.length - 1];
 
-    // Fetch picks + roster/user data in parallel
-    const [picks, rosters, users] = await Promise.all([
+    // Fetch picks + roster/user data + traded picks in parallel
+    const [picks, rosters, users, tradedPicks] = await Promise.all([
       _fetchPicks(draft.draft_id),
       SleeperAPI.getRosters(leagueId),
-      SleeperAPI.getLeagueUsers(leagueId)
+      SleeperAPI.getLeagueUsers(leagueId),
+      _fetchTradedPicks(leagueId)
     ]);
     if (token !== _initToken) return;
 
@@ -145,11 +146,10 @@ const DLRDraft = (() => {
       };
     });
 
-    // Get players from cache
-    let players = {};
-    try { players = JSON.parse(localStorage.getItem("dlr_players") || "{}"); } catch(e) {}
+    // Get players from IndexedDB-backed cache
+    const players = DLRPlayers.all();
 
-    _draftData = { draft, picks, rosterMap, players };
+    _draftData = { draft, picks, rosterMap, players, tradedPicks: tradedPicks || [] };
     if (token !== _initToken) return;
     _render(el);
   }
@@ -157,6 +157,13 @@ const DLRDraft = (() => {
   async function _fetchDrafts(leagueId) {
     try {
       const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+      return r.ok ? await r.json() : [];
+    } catch(e) { return []; }
+  }
+
+  async function _fetchTradedPicks(leagueId) {
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/traded_picks`);
       return r.ok ? await r.json() : [];
     } catch(e) { return []; }
   }
@@ -171,12 +178,12 @@ const DLRDraft = (() => {
   // ── Render board ──────────────────────────────────────────
   function _render(el) {
     if (!el || !_draftData) return;
-    const { draft, picks, rosterMap, players } = _draftData;
+    const { draft, picks, rosterMap, players, tradedPicks } = _draftData;
 
     const rounds  = draft.settings?.rounds || 4;
     const teams   = draft.settings?.teams  || 12;
     const isSnake = draft.type === "snake";
-    const draftStatus = draft.status; // "pre_draft" | "drafting" | "complete"
+    const draftStatus = draft.status;
 
     // Build pick lookup: "round-pick" → pick data
     const pickMap = {};
@@ -185,7 +192,7 @@ const DLRDraft = (() => {
       pickMap[key] = p;
     });
 
-    // Build slot owner map from draft.slot_to_roster_id
+    // Build slot owner map from original slot_to_roster_id
     const slotOwners = {};
     if (draft.slot_to_roster_id) {
       Object.entries(draft.slot_to_roster_id).forEach(([slot, rosterId]) => {
@@ -195,6 +202,28 @@ const DLRDraft = (() => {
           slotOwners[`${r}-${pick}`] = rosterId;
         }
       });
+    }
+
+    // Apply traded picks — most recent trade for a given round/slot wins
+    // Sleeper traded_picks: [{ season, round, roster_id (current owner), previous_owner_id, owner_id }]
+    if (tradedPicks && tradedPicks.length) {
+      // Sort by transaction order isn't available, but we can build the final state
+      // by processing all trades: owner_id = current owner, roster_id = original slot owner
+      const tradeMap = {}; // "round-originalSlot" → current_owner_roster_id
+      tradedPicks.forEach(tp => {
+        // tp.round = round number, tp.roster_id = original slot owner, tp.owner_id = current owner
+        if (!tp.round || !tp.roster_id) return;
+        // Find original slot for this roster
+        const originalSlot = Object.entries(draft.slot_to_roster_id || {})
+          .find(([, rid]) => String(rid) === String(tp.roster_id))?.[0];
+        if (!originalSlot) return;
+        const isReversed = isSnake && tp.round % 2 === 0;
+        const pickSlot   = isReversed ? String(teams + 1 - Number(originalSlot)) : originalSlot;
+        const key        = `${tp.round}-${pickSlot}`;
+        tradeMap[key]    = tp.owner_id; // current owner after trade
+      });
+      // Apply overrides to slotOwners
+      Object.assign(slotOwners, tradeMap);
     }
 
     const draftTypeLabel = isSnake ? "🐍 Snake Draft" : "📋 Linear Draft";
@@ -239,11 +268,20 @@ const DLRDraft = (() => {
               <div class="draft-pick-team">${_esc(pickerRoster?.teamName || "")}</div>
             </div>`;
         } else {
-          // Empty pick
+          // Empty pick — show current owner (may differ from original after trades)
+          const originalSlot = isSnake && r % 2 === 0 ? (teams + 1 - pickSlot) : pickSlot;
+          const originalRosterId = draft.slot_to_roster_id?.[String(originalSlot)];
+          const currentRosterId  = slotOwners[key];
+          const isTraded = currentRosterId && String(currentRosterId) !== String(originalRosterId);
+          const ownerName = currentRosterId ? (rosterMap[currentRosterId]?.teamName || `#${currentRosterId}`) : "";
+
           boardHTML += `
-            <div class="draft-pick draft-pick--empty">
+            <div class="draft-pick draft-pick--empty ${isTraded ? "draft-pick--traded" : ""}">
               <div class="draft-pick-num">${isSnake ? overallNum : `${r}.${String(pickSlot).padStart(2,"0")}`}</div>
-              <div class="draft-pick-owner">${_esc(ownerRoster?.teamName || "")}</div>
+              <div class="draft-pick-owner">
+                ${_esc(ownerName)}
+                ${isTraded ? `<span class="draft-traded-badge">traded</span>` : ""}
+              </div>
             </div>`;
         }
       }

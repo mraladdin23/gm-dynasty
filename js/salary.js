@@ -220,6 +220,8 @@ const DLRSalaryCap = (() => {
     });
     return map;
   }
+  // Alias used by CSV template and getCapData
+  const _getSalaryMap = _getTeamSalaryMap;
 
   function _calcCapSpent(team, salaryMap) {
     const sm   = salaryMap[team.username] || {};
@@ -735,8 +737,9 @@ const DLRSalaryCap = (() => {
             </div>`).join("")}
           ${updates.length > 10 ? `<div class="dim" style="font-size:.75rem;padding:var(--space-1) 0">…and ${updates.length-10} more</div>` : ""}
         </div>
-        <button class="btn-primary" style="margin-top:var(--space-3)" onclick="DLRSalaryCap.confirmBulkSave()">
-          Confirm & Save All ${updates.length} Players
+        <button id="sal-confirm-btn" class="btn-primary" style="margin-top:var(--space-3)"
+          onclick="DLRSalaryCap.confirmBulkSave()">
+          ✓ Confirm & Save All ${updates.length} Players
         </button>`;
       window._pendingBulkUpdates = updates;
     }
@@ -748,7 +751,7 @@ const DLRSalaryCap = (() => {
     const updates = window._pendingBulkUpdates || [];
     if (!updates.length) return;
 
-    const btn = document.querySelector(".sal-bulk-preview-list ~ .btn-primary, #sal-bulk-preview .btn-primary");
+    const btn = document.getElementById("sal-confirm-btn");
     if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
     // Apply updates to _salaryData
@@ -806,12 +809,16 @@ const DLRSalaryCap = (() => {
     return result;
   }
 
+  function getTeamSalaryEntries(username) {
+    return (_salaryData[username]?.players || []);
+  }
+
   return {
     init, reset, setView,
     openEditModal, savePlayerSalary,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
-    getCapData
+    getCapData, getTeamSalaryEntries
   };
 
 })();
