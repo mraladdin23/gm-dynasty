@@ -175,6 +175,7 @@
             <div class="locker-stats-row" id="locker-stats-row"></div>
           </div>
           <div class="locker-header-actions">
+            <button class="btn-secondary btn-sm" id="career-summary-btn" title="Career Summary">📊 Career Stats</button>
             <button class="btn-secondary btn-sm" id="player-report-btn" title="Cross-League Player Report">📋 My Players</button>
             <button class="btn-secondary btn-sm" id="edit-profile-btn">✏ Edit Profile</button>
             <button class="btn-secondary btn-sm" id="manage-leagues-btn">⚙ Manage Leagues</button>
@@ -251,21 +252,28 @@
           </div>
         </div>
 
-        <!-- Career Summary -->
-        <div class="career-summary-section" id="career-summary-section">
-          <div class="leagues-header">
-            <h3 class="section-title">Career Summary</h3>
-            <div class="career-summary-tabs" id="career-summary-tabs">
-              <button class="cs-tab active" data-cstab="overall">Overall</button>
-              <button class="cs-tab" data-cstab="annual">By Year</button>
-              <button class="cs-tab" data-cstab="type">By Type</button>
-            </div>
+      </div>
+    </div>
+
+    <!-- Career Summary Modal -->
+    <div id="career-summary-modal" class="modal-overlay hidden">
+      <div class="modal-box modal-box--wide">
+        <div class="modal-header">
+          <h3>Career Summary</h3>
+          <button class="modal-close" onclick="document.getElementById('career-summary-modal').classList.add('hidden')">✕</button>
+        </div>
+        <div class="modal-body" style="padding:var(--space-5);">
+          <div class="career-summary-tabs" id="career-summary-tabs" style="margin-bottom:var(--space-4);">
+            <button class="cs-tab active" data-cstab="overall">Overall</button>
+            <button class="cs-tab" data-cstab="annual">By Year</button>
+            <button class="cs-tab" data-cstab="type">By Type</button>
+            <button class="cs-tab" data-cstab="matrix">Year × Type</button>
           </div>
           <div id="cs-overall" class="cs-panel active"></div>
           <div id="cs-annual"  class="cs-panel"></div>
           <div id="cs-type"    class="cs-panel"></div>
+          <div id="cs-matrix"  class="cs-panel"></div>
         </div>
-
       </div>
     </div>
 

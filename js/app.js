@@ -232,6 +232,11 @@ document.querySelectorAll(".nav-link").forEach(link => {
   });
 });
 
+// ── Career summary modal ───────────────────────────────────
+document.getElementById("career-summary-btn")?.addEventListener("click", () => {
+  Profile.openCareerSummary();
+});
+
 // ── Player report button ───────────────────────────────────
 document.getElementById("player-report-btn")?.addEventListener("click", () => {
   const profile = Auth.getCurrentProfile();
