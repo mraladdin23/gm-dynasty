@@ -4040,3 +4040,38 @@ select option { background: var(--color-bg-2); }
 .auc-stat-pill--full { color: var(--color-red) !important; border-color: rgba(239,68,68,.3); }
 .auc-stat-pill--warn { color: var(--color-gold); border-color: var(--color-gold-dim); }
 
+
+/* ── FA Nominate button ───────────────────────────────── */
+.fa-nom-btn {
+  font-size: .7rem !important;
+  padding: 3px 8px !important;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.fa-player-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+/* ── Draft traded picks ──────────────────────────────── */
+.draft-pick--traded {
+  border-color: var(--color-gold-dim) !important;
+  background: rgba(240,180,41,.04) !important;
+}
+.draft-traded-badge {
+  display: inline-block;
+  font-size: .55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-gold);
+  background: rgba(240,180,41,.12);
+  border: 1px solid rgba(240,180,41,.3);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+

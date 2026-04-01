@@ -158,9 +158,14 @@ const DLRRules = (() => {
 // ══════════════════════════════════════════════════════════
 const DLRFreeAgents = (() => {
 
-  let _leagueId  = null;
+  let _leagueId      = null;
+  let _leagueKey     = null;
+  let _auctionEnabled = false;
+  let _auctionIncludePicks = false;
+  let _myRosterId    = null;
+  let _myTeamName    = "My Team";
   let _initToken = 0;
-  let _sortMode  = "adp";    // "adp" | "pts"
+  let _sortMode  = "adp";
   let _posFilter = "ALL";
   let _cachedData = null;
 
@@ -170,8 +175,13 @@ const DLRFreeAgents = (() => {
   };
   const SKILL_POS = ["QB","RB","WR","TE"];
 
-  async function init(leagueId) {
-    _leagueId   = leagueId;
+  async function init(leagueId, leagueKey, auctionEnabled, auctionIncludePicks, myRosterId, myTeamName) {
+    _leagueId           = leagueId;
+    _leagueKey          = leagueKey || null;
+    _auctionEnabled     = !!auctionEnabled;
+    _auctionIncludePicks= !!auctionIncludePicks;
+    _myRosterId         = myRosterId || null;
+    _myTeamName         = myTeamName || "My Team";
     _cachedData = null;
     _sortMode   = "adp";
     _posFilter  = "ALL";
@@ -295,6 +305,11 @@ const DLRFreeAgents = (() => {
           const color = POS_COLOR[p.pos] || "#9ca3af";
           const pts   = p.pts ? p.pts.toFixed(0) : "—";
           const rank  = p.rank < 9999 ? `#${p.rank}` : "—";
+          const nomBtn = _auctionEnabled
+            ? `<button class="fa-nom-btn btn-primary btn-sm"
+                onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
+                title="Nominate for auction">🏷 Nominate</button>`
+            : "";
           return `
             <div class="fa-player-row" onclick="DLRPlayerCard.show('${p.pid}', '${_escAttr(p.name)}')">
               <div class="fa-rank">${i + 1}</div>
@@ -315,6 +330,7 @@ const DLRFreeAgents = (() => {
                 <div class="fa-stat-val">${_sortMode === "pts" ? rank : pts}</div>
                 <div class="fa-stat-lbl">${_sortMode === "pts" ? "ADP" : "PPR pts"}</div>
               </div>
+              ${nomBtn}
             </div>`;
         }).join("") : `<div class="fa-empty">No free agents found.</div>`}
       </div>`;

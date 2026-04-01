@@ -13,6 +13,7 @@ const DLRAuction = (() => {
   // ── State ──────────────────────────────────────────────────
   let _leagueKey    = null;
   let _leagueId     = null;
+  let _platform     = "sleeper";
   let _isCommish    = false;
   let _myRosterId   = null;
   let _myTeamName   = "My Team";
@@ -33,9 +34,10 @@ const DLRAuction = (() => {
   const _settingsRef = () => GMD.child(`auctions/${_leagueKey}/settings`);
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName) {
+  async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform) {
     _leagueKey   = leagueKey;
     _leagueId    = leagueId;
+    _platform    = platform || "sleeper";
     _isCommish   = !!isCommish;
     _myRosterId  = myRosterId;
     _myTeamName  = myTeamName || "My Team";
@@ -62,8 +64,8 @@ const DLRAuction = (() => {
       if (snap.val()) _settings = { ..._settings, ...snap.val() };
     } catch(e) {}
 
-    // Load roster/team data
-    if (_leagueId) {
+    // Load roster/team data — Sleeper only (MFL uses different IDs)
+    if (_leagueId && _platform === "sleeper") {
       try {
         const [rosters, users] = await Promise.all([
           SleeperAPI.getRosters(_leagueId),
@@ -238,7 +240,6 @@ const DLRAuction = (() => {
           <button class="auc-tab ${_viewMode==="live"      ? "auc-tab--active":""}" onclick="DLRAuction.setView('live')">
             Live ${live.length > 0 ? `<span class="auc-badge">${live.length}</span>` : ""}
           </button>
-          <button class="auc-tab ${_viewMode==="fa"        ? "auc-tab--active":""}" onclick="DLRAuction.setView('fa')">Free Agents</button>
           <button class="auc-tab ${_viewMode==="teams"     ? "auc-tab--active":""}" onclick="DLRAuction.setView('teams')">Teams</button>
           <button class="auc-tab ${_viewMode==="history"   ? "auc-tab--active":""}" onclick="DLRAuction.setView('history')">History</button>
           ${_isCommish ? `<button class="auc-tab ${_viewMode==="settings" ? "auc-tab--active":""}" onclick="DLRAuction.setView('settings')">⚙ Settings</button>` : ""}
@@ -508,8 +509,8 @@ const DLRAuction = (() => {
       </div>
       <div class="auc-teams-list">
         ${_rosterData.map(team => {
-          // Active + IR (not taxi) counts toward roster limit
-          const mainCount  = (team.players||[]).length - (team.taxi||[]).length;
+          // Active roster = players array minus reserve (IR) minus taxi
+          const mainCount  = Math.max(0, (team.players||[]).length - (team.reserve||[]).length - (team.taxi||[]).length);
           const openSpots  = Math.max(0, maxRoster - mainCount);
           const isMe       = team.roster_id === _myRosterId;
 
@@ -609,10 +610,16 @@ const DLRAuction = (() => {
   }
 
   function _getSalaryMapForTeam(username) {
-    const entries = (_salaryData[username]?.players || []);
-    const m = {};
-    entries.forEach(e => { if (e.playerId) m[e.playerId] = e; });
-    return m;
+    // Pull salary data from DLRSalaryCap module if available
+    try {
+      const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getTeamSalaryEntries?.(username) : null;
+      if (capData) {
+        const m = {};
+        capData.forEach(e => { if (e.playerId) m[e.playerId] = e; });
+        return m;
+      }
+    } catch(e) {}
+    return {};
   }
 
   function editRosterSize() {
@@ -683,9 +690,9 @@ const DLRAuction = (() => {
           <span class="field-hint">How many players a team can have actively nominated at once.</span>
         </div>
         <div class="form-group">
-          <label>Max Roster Size (Active + IR, excl. Taxi)</label>
+          <label>Max Active Roster Size (excl. IR and Taxi)</label>
           <input type="number" id="auc-s-rostersize" value="${s.maxRosterSize || 30}" min="1" max="60"/>
-          <span class="field-hint">Used to calculate open roster spots per team in the Teams view.</span>
+          <span class="field-hint">Active roster only — IR and taxi slots don't count toward this limit.</span>
         </div>
         <button class="btn-primary" onclick="DLRAuction.saveSettings()" style="margin-top:var(--space-4)">Save Settings</button>
       </div>`;

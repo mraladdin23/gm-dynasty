@@ -107,9 +107,18 @@ const Profile = (() => {
     }
   }
 
-  async function saveLeagueMeta(username, leagueKey, meta) {
-    _leagueMeta[leagueKey] = { ...(_leagueMeta[leagueKey] || {}), ...meta };
-    await GMDB.saveLeagueMetaEntry(username, leagueKey, _leagueMeta[leagueKey]);
+  async function saveLeagueMeta(username, leagueKey, updates) {
+    // Merge with existing, then remove null/empty string values to keep Firebase clean
+    const existing = _leagueMeta[leagueKey] || {};
+    const merged   = { ...existing, ...updates };
+    // Remove explicitly-null or empty-string values (but keep false/0)
+    Object.keys(merged).forEach(k => {
+      if (merged[k] === null || merged[k] === undefined || merged[k] === "") {
+        delete merged[k];
+      }
+    });
+    _leagueMeta[leagueKey] = merged;
+    await GMDB.saveLeagueMetaEntry(username, leagueKey, merged);
   }
 
   // ── Main locker render ─────────────────────────────────
@@ -981,6 +990,8 @@ const Profile = (() => {
     document.getElementById("label-commish-input").value = meta.commishGroup || "";
     document.getElementById("label-pin-check").checked     = !!meta.pinned;
     document.getElementById("label-archive-check").checked = !!meta.archived;
+    document.getElementById("label-auction-check").checked = !!meta.auctionEnabled;
+    document.getElementById("label-picks-check").checked   = !!meta.auctionIncludePicks;
 
     // Type override — show current effective type
     const typeEl = document.getElementById("label-type-override");
@@ -989,12 +1000,16 @@ const Profile = (() => {
     document.getElementById("label-modal-save").onclick = async () => {
       const typeOverride = document.getElementById("label-type-override")?.value || "";
       await saveLeagueMeta(_currentUsername, leagueKey, {
-        customLabel:       document.getElementById("label-custom-input").value.trim(),
-        commishGroup:      document.getElementById("label-commish-input").value.trim(),
-        pinned:            document.getElementById("label-pin-check").checked,
-        archived:          document.getElementById("label-archive-check").checked,
-        leagueTypeOverride: typeOverride || null
+        customLabel:          document.getElementById("label-custom-input").value.trim(),
+        commishGroup:         document.getElementById("label-commish-input").value.trim(),
+        pinned:               document.getElementById("label-pin-check").checked,
+        archived:             document.getElementById("label-archive-check").checked,
+        auctionEnabled:       document.getElementById("label-auction-check").checked,
+        auctionIncludePicks:  document.getElementById("label-picks-check").checked,
+        leagueTypeOverride:   typeOverride || null
       });
+      // Force re-read from Firebase so filters reflect latest groups/labels
+      await loadLeagueMeta(_currentUsername);
       // Apply override to in-memory league data immediately
       if (typeOverride && _allLeagues[leagueKey]) {
         _allLeagues[leagueKey].leagueType = typeOverride;
@@ -1002,6 +1017,8 @@ const Profile = (() => {
       closeLabelModal();
       _renderLeagueFilters();
       _renderLeagues();
+      // Rebuild tab dropdown if this league is currently open
+      if (_detailLeagueKey === leagueKey) _buildDetailTabs(leagueKey);
       showToast("League updated ✓");
     };
 
@@ -1148,7 +1165,8 @@ const Profile = (() => {
       }
     }
 
-    // Reset dropdown to overview
+    // Reset dropdown to overview and rebuild tabs for this league
+    _buildDetailTabs(leagueKey);
     const sel = document.getElementById("detail-tab-select");
     if (sel) sel.value = "overview";
 
@@ -1166,6 +1184,54 @@ const Profile = (() => {
     document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
     document.getElementById(`dtab-${tabName}`)?.classList.add("active");
     _renderDetailTab(tabName, _detailLeagueKey, _detailLeague);
+  }
+
+  // Build the tab dropdown based on league type and settings
+  function _buildDetailTabs(leagueKey) {
+    const sel = document.getElementById("detail-tab-select");
+    if (!sel) return;
+    const meta = _leagueMeta[leagueKey] || {};
+    const league = _allLeagues[leagueKey] || _detailLeague || {};
+
+    // Find franchise-level type override (any season)
+    const franchise = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+    const effectiveType = (franchise?.seasons || []).reduce((found, s) =>
+      found || _leagueMeta[s.key]?.leagueTypeOverride, null
+    ) || league.leagueType || "";
+
+    const isSalary    = effectiveType === "salary";
+    const auctionOn   = meta.auctionEnabled || isSalary; // salary cap always has auction
+
+    const tabs = [
+      { val: "overview",   label: "Overview" },
+      { val: "standings",  label: "Standings" },
+      { val: "matchups",   label: "Matchups" },
+      { val: "playoffs",   label: "Playoffs" },
+      // Roster tab label changes based on league type
+      { val: "roster",     label: isSalary ? "Roster & Salaries" : "Rosters" },
+      { val: "freeagents", label: "Free Agents" },
+      { val: "draft",      label: "Draft" },
+      { val: "analytics",  label: "Analytics" },
+      { val: "rules",      label: "Rules" },
+      { val: "chat",       label: "Chat" },
+    ];
+
+    // Conditionally inject Auction tab after Free Agents
+    if (auctionOn) {
+      tabs.splice(tabs.findIndex(t => t.val === "freeagents") + 1, 0,
+        { val: "auction", label: isSalary ? "Auction / FAAB" : "FAAB Auction" }
+      );
+    }
+
+    const currentVal = sel.value;
+    sel.innerHTML = tabs.map(t =>
+      `<option value="${t.val}">${t.label}</option>`
+    ).join("");
+
+    // Restore current selection if still valid
+    if ([...sel.options].some(o => o.value === currentVal)) {
+      sel.value = currentVal;
+    }
   }
 
   function switchDetailSeason(newKey) {
@@ -1219,27 +1285,35 @@ const Profile = (() => {
     if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform);
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
-    if (tab === "roster")      DLRRoster.init(league.leagueId, league.platform);
-    if (tab === "salary") {
-      // Check override on current key OR any season's meta in the same franchise
-      const franchise = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
-      const effectiveType = (franchise?.seasons || []).reduce((found, s) => {
-        return found || _leagueMeta[s.key]?.leagueTypeOverride;
-      }, null) || league.leagueType || "";
-
-      if (effectiveType === "salary") {
-        const franchiseId = franchise?.franchiseId || leagueKey;
-        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId);
+    if (tab === "roster") {
+      // For salary cap leagues, roster tab shows salary cap view
+      const franchise2 = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+      const effectiveType2 = (franchise2?.seasons || []).reduce((found, s) =>
+        found || _leagueMeta[s.key]?.leagueTypeOverride, null
+      ) || league.leagueType || "";
+      if (effectiveType2 === "salary") {
+        const franchiseId2 = franchise2?.franchiseId || leagueKey;
+        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2);
       } else {
-        const el = document.getElementById("dtab-salary");
-        if (el) el.innerHTML = `<div style="padding:var(--space-8);text-align:center;color:var(--color-text-dim)">
-          <div style="font-size:2rem;margin-bottom:var(--space-3)">💰</div>
-          <div style="font-weight:600;margin-bottom:var(--space-2);color:var(--color-text)">Salary Cap Not Enabled</div>
-          <div style="font-size:.85rem">Open league options (⋯) and set League Type to "Salary Cap" to enable this tab.</div>
-        </div>`;
+        DLRRoster.init(league.leagueId, league.platform);
       }
     }
-    if (tab === "freeagents")  DLRFreeAgents.init(league.leagueId);
+    if (tab === "salary") {
+      // Legacy path — redirect to roster tab
+      const sel = document.getElementById("detail-tab-select");
+      if (sel) { sel.value = "roster"; onDetailTabChange("roster"); }
+    }
+    if (tab === "freeagents") {
+      const meta2 = _leagueMeta[leagueKey] || {};
+      const franchise3 = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+      const isSalary3 = (franchise3?.seasons || []).reduce((f, s) =>
+        f || _leagueMeta[s.key]?.leagueTypeOverride, null) === "salary"
+        || league.leagueType === "salary";
+      const auctionOn = meta2.auctionEnabled || isSalary3;
+      const incPicks  = meta2.auctionIncludePicks || false;
+      DLRFreeAgents.init(league.leagueId, leagueKey, auctionOn, incPicks,
+        league.myRosterId || null, league.teamName || "My Team");
+    }
     if (tab === "draft")       DLRDraft.init(league.leagueId, league.platform);
     if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
     if (tab === "rules")       DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
@@ -1249,7 +1323,8 @@ const Profile = (() => {
         league.leagueId,
         league.isCommissioner,
         league.myRosterId || null,
-        league.teamName   || "My Team"
+        league.teamName   || "My Team",
+        league.platform   || "sleeper"
       );
     }
     if (tab === "chat")        _renderChat(el, leagueKey, league);
