@@ -212,11 +212,14 @@
             <button class="filter-tab" data-filter="archived">📦 Archived</button>
           </div>
 
-          <!-- League search dropdown -->
-          <div class="league-search-bar" id="league-search-bar" style="display:none;">
-            <select class="league-jump-select" id="league-jump-select" onchange="Profile.jumpToLeague(this.value)">
-              <option value="">Jump to league…</option>
-            </select>
+          <!-- League search + group pills row -->
+          <div class="league-tools-row">
+            <div class="league-search-bar" id="league-search-bar" style="display:none;">
+              <select class="league-jump-select" id="league-jump-select" onchange="Profile.jumpToLeague(this.value)">
+                <option value="">Jump to league…</option>
+              </select>
+            </div>
+            <div class="league-group-pills" id="league-group-pills"></div>
           </div>
 
           <!-- Active leagues grid -->

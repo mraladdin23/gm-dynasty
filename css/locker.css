@@ -4042,17 +4042,15 @@ select option { background: var(--color-bg-2); }
 
 
 /* ── FA Nominate button ───────────────────────────────── */
-.fa-nom-btn {
-  font-size: .7rem !important;
-  padding: 3px 8px !important;
+.fa-nom-btn.btn-primary {
+  font-size: .68rem !important;
+  padding: 2px 8px !important;
+  height: 24px !important;
+  line-height: 1 !important;
   flex-shrink: 0;
   margin-left: auto;
-}
-.fa-player-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
+  white-space: nowrap;
+  border-radius: var(--radius-sm) !important;
 }
 
 /* ── Draft traded picks ──────────────────────────────── */
@@ -4073,5 +4071,56 @@ select option { background: var(--color-bg-2); }
   padding: 1px 4px;
   margin-left: 3px;
   vertical-align: middle;
+}
+
+
+/* ── League tools row (jump + group pills) ───────────── */
+.league-tools-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.league-group-pills {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.group-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  font-size: .75rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.group-pill:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.group-pill--active {
+  background: var(--color-gold);
+  border-color: var(--color-gold);
+  color: #0a0e1a;
+}
+.group-pill--label {
+  border-color: var(--color-purple-dim, rgba(184,159,254,.3));
+  color: var(--color-purple, #b89ffe);
+}
+.group-pill--label:hover,
+.group-pill--label.group-pill--active {
+  background: #b89ffe;
+  border-color: #b89ffe;
+  color: #0a0e1a;
 }
 
