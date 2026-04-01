@@ -122,27 +122,27 @@ const DLRSalaryCap = (() => {
     _initToken++;
   }
 
-  // ── Firebase ──────────────────────────────────────────────
+  // ── Firebase — all use SDK refs to avoid 401 auth issues ──
   async function _loadSettings(leagueKey) {
     try {
-      const data = await GMDB._restGet(`gmd/salaryCap/${leagueKey}/settings`);
+      const data = await GMDB.getSalarySettings(leagueKey);
       return { ...DEFAULT_SETTINGS, ...(data || {}) };
     } catch(e) { return { ...DEFAULT_SETTINGS }; }
   }
 
   async function _loadSalaryData(leagueKey) {
     try {
-      return await GMDB._restGet(`gmd/salaryCap/${leagueKey}/rosters`) || {};
+      return await GMDB.getSalaryRosters(leagueKey) || {};
     } catch(e) { return {}; }
   }
 
   async function _saveSettings(settings) {
-    await GMDB._restPut(`gmd/salaryCap/${_leagueKey}/settings`, settings);
+    await GMDB.saveSalarySettings(_leagueKey, settings);
     _settings = settings;
   }
 
   async function _saveSalaryData() {
-    await GMDB._restPut(`gmd/salaryCap/${_leagueKey}/rosters`, _salaryData);
+    await GMDB.saveSalaryRosters(_leagueKey, _salaryData);
   }
 
   // ── Main render ───────────────────────────────────────────

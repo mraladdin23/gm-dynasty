@@ -342,7 +342,7 @@ const MFLAPI = (() => {
         leaguesMap[key] = {
           platform:       "mfl",
           leagueId,
-          franchiseId:    _mflFranchiseId(leagueData.name || leagueName),
+          franchiseId:    `mfl__${leagueId}`,   // stable across years — same ID every season
           leagueName:     leagueData.name || leagueName,
           season:         year,
           leagueType,
