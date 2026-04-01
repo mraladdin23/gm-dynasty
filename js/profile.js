@@ -595,6 +595,33 @@ const Profile = (() => {
       <button class="filter-tab" data-filter="archived">📦 Archived</button>
     `;
 
+    // Also render group + label pills in the tools row (next to jump dropdown)
+    const pillsEl = document.getElementById("league-group-pills");
+    if (pillsEl) {
+      const allPills = [...commishGroups].map(g =>
+        `<button class="group-pill" data-filter="group:${_escHtml(g)}">⚡ ${_escHtml(g)}</button>`
+      ).concat([...customLabels].map(l =>
+        `<button class="group-pill group-pill--label" data-filter="label:${_escHtml(l)}">🏷 ${_escHtml(l)}</button>`
+      ));
+      pillsEl.innerHTML = allPills.join("");
+      pillsEl.querySelectorAll(".group-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+          const f = pill.dataset.filter;
+          // Toggle this filter
+          if (_activeFilters.has(f)) {
+            _activeFilters.delete(f);
+            pill.classList.remove("group-pill--active");
+          } else {
+            _activeFilters.add(f);
+            pill.classList.add("group-pill--active");
+          }
+          _currentPage = 0;
+          _renderLeagues();
+        });
+      });
+      pillsEl.style.display = allPills.length ? "" : "none";
+    }
+
     // Multi-select wiring
     filterBar.querySelectorAll(".filter-tab").forEach(tab => {
       tab.addEventListener("click", () => {
@@ -998,28 +1025,35 @@ const Profile = (() => {
     if (typeEl) typeEl.value = meta.leagueTypeOverride || "";
 
     document.getElementById("label-modal-save").onclick = async () => {
+      const saveBtn = document.getElementById("label-modal-save");
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
       const typeOverride = document.getElementById("label-type-override")?.value || "";
-      await saveLeagueMeta(_currentUsername, leagueKey, {
-        customLabel:          document.getElementById("label-custom-input").value.trim(),
-        commishGroup:         document.getElementById("label-commish-input").value.trim(),
-        pinned:               document.getElementById("label-pin-check").checked,
-        archived:             document.getElementById("label-archive-check").checked,
-        auctionEnabled:       document.getElementById("label-auction-check").checked,
-        auctionIncludePicks:  document.getElementById("label-picks-check").checked,
-        leagueTypeOverride:   typeOverride || null
-      });
-      // Force re-read from Firebase so filters reflect latest groups/labels
-      await loadLeagueMeta(_currentUsername);
-      // Apply override to in-memory league data immediately
-      if (typeOverride && _allLeagues[leagueKey]) {
-        _allLeagues[leagueKey].leagueType = typeOverride;
+      try {
+        await saveLeagueMeta(_currentUsername, leagueKey, {
+          customLabel:          document.getElementById("label-custom-input").value.trim(),
+          commishGroup:         document.getElementById("label-commish-input").value.trim(),
+          pinned:               document.getElementById("label-pin-check").checked,
+          archived:             document.getElementById("label-archive-check").checked,
+          auctionEnabled:       document.getElementById("label-auction-check").checked,
+          auctionIncludePicks:  document.getElementById("label-picks-check").checked,
+          leagueTypeOverride:   typeOverride || null
+        });
+        // Force re-read from Firebase so filters reflect latest groups/labels
+        await loadLeagueMeta(_currentUsername);
+        // Apply override to in-memory league data immediately
+        if (typeOverride && _allLeagues[leagueKey]) {
+          _allLeagues[leagueKey].leagueType = typeOverride;
+        }
+        closeLabelModal();
+        _renderLeagueFilters();
+        _renderLeagues();
+        if (_detailLeagueKey === leagueKey) _buildDetailTabs(leagueKey);
+        showToast("League updated ✓");
+      } catch(err) {
+        console.error("[DLR] saveLeagueMeta failed:", err);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
+        showToast("Save failed: " + err.message, "error");
       }
-      closeLabelModal();
-      _renderLeagueFilters();
-      _renderLeagues();
-      // Rebuild tab dropdown if this league is currently open
-      if (_detailLeagueKey === leagueKey) _buildDetailTabs(leagueKey);
-      showToast("League updated ✓");
     };
 
     document.getElementById("league-label-modal").classList.remove("hidden");
@@ -1286,12 +1320,15 @@ const Profile = (() => {
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster") {
-      // For salary cap leagues, roster tab shows salary cap view
+      // For salary cap leagues, roster tab shows salary cap view (in dtab-salary)
       const franchise2 = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
       const effectiveType2 = (franchise2?.seasons || []).reduce((found, s) =>
         found || _leagueMeta[s.key]?.leagueTypeOverride, null
       ) || league.leagueType || "";
       if (effectiveType2 === "salary") {
+        // Swap active div to dtab-salary so salary cap module renders correctly
+        document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
+        document.getElementById("dtab-salary")?.classList.add("active");
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
         DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2);
       } else {
