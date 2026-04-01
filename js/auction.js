@@ -80,16 +80,30 @@ const DLRAuction = (() => {
 
     if (token !== _initToken) return;
 
+    // Render initial empty state immediately (don't wait for Firebase)
+    _auctions = [];
+    _render();
+
     // Subscribe to live auction updates
     _unsubFn?.();
     _unsubFn = null;
     const handleUpdate = (snap) => {
       if (token !== _initToken) return;
       const data = snap.val() || {};
-      _auctions  = Object.values(data);
+      _auctions  = Object.values(data).filter(Boolean);
       _render();
     };
-    _listRef().on("value", handleUpdate);
+    const handleError = (err) => {
+      console.error("[Auction] Firebase subscription error:", err);
+      const el = document.getElementById("dtab-auction");
+      if (el) el.innerHTML = `
+        <div style="padding:var(--space-6);text-align:center;color:var(--color-text-dim)">
+          <div style="font-size:1.5rem;margin-bottom:var(--space-3)">⚠️</div>
+          <div>Could not connect to auction board: ${err.message || err}</div>
+          <div style="font-size:.82rem;margin-top:var(--space-2)">Check Firebase rules for <code>gmd/auctions/</code></div>
+        </div>`;
+    };
+    _listRef().on("value", handleUpdate, handleError);
     _unsubFn = () => _listRef().off("value", handleUpdate);
 
     // Tick timers every 30 seconds to keep countdowns fresh
