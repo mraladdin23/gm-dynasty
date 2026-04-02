@@ -118,10 +118,6 @@ const DLRPlayerCard = (() => {
           <div class="pc-header-actions">
             <button id="pc-watch-btn" class="pc-watch-btn" onclick="DLRPlayerCard.toggleWatch()"
               title="Add to watchlist">☆</button>
-            <button id="pc-nominate-btn" class="pc-nominate-btn btn-primary btn-sm"
-              style="display:none"
-              onclick="DLRPlayerCard.nominateFromCard()"
-              title="Nominate for auction">🏷 Nominate</button>
             <button class="modal-close" onclick="DLRPlayerCard.close()">✕</button>
           </div>
         </div>

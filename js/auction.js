@@ -8,7 +8,7 @@
 const DLRAuction = (() => {
 
   // ── Constants ─────────────────────────────────────────────
-  const MIN_BID     = 100_000;   // $100K floor
+  // MIN_BID and MIN_INC are dynamic functions defined after _settings below
 
   // ── State ──────────────────────────────────────────────────
   let _leagueKey    = null;
@@ -20,7 +20,13 @@ const DLRAuction = (() => {
   let _rosterData   = [];
   let _auctions     = [];
   let _players      = {};
-  let _settings     = { pauseStart: 0, pauseEnd: 8, maxNoms: 2, bidDuration: 8, maxRosterSize: 30 };
+  const DEFAULT_MIN_BID  = 100_000;   // $100K floor
+  const DEFAULT_MIN_INC  = 100_000;   // $100K minimum increment
+  let _settings = { pauseStart:0, pauseEnd:8, maxNoms:2, bidDuration:8, maxRosterSize:30, minBid:100_000, minIncrement:100_000 };
+
+  // Dynamic getters so settings changes take effect immediately
+  const MIN_BID = () => _settings.minBid     || DEFAULT_MIN_BID;
+  const MIN_INC = () => _settings.minIncrement || DEFAULT_MIN_INC;
   let _initToken    = 0;
   let _unsubFn      = null;
   let _timerInterval = null;
@@ -63,17 +69,36 @@ const DLRAuction = (() => {
         _rosterData = (rosters||[]).map(r => {
           const u = userMap[r.owner_id] || {};
           return {
-            roster_id: r.roster_id,
-            username:  (u.username||"").toLowerCase(),
-            teamName:  u.metadata?.team_name || u.display_name || `Team ${r.roster_id}`,
-            players:   r.players  || [],
-            reserve:   r.reserve  || [],
-            taxi:      r.taxi     || [],
-            wins:      r.settings?.wins   || 0,
-            losses:    r.settings?.losses || 0
+            roster_id:  r.roster_id,
+            username:   (u.username||"").toLowerCase(),
+            teamName:   u.metadata?.team_name || u.display_name || `Team ${r.roster_id}`,
+            players:    r.players  || [],
+            reserve:    r.reserve  || [],
+            taxi:       r.taxi     || [],
+            wins:       r.settings?.wins   || 0,
+            losses:     r.settings?.losses || 0,
+            co_owners:  r.co_owners || []
           };
         });
+
+        // Co-owner: if _myRosterId not matched by primary owner, check co_owners
+        if (!_myRosterId) {
+          const currentUid = typeof Auth !== "undefined" ? Auth.getCurrentProfile()?.uid : null;
+          if (currentUid) {
+            const coRoster = rosters.find(r => (r.co_owners||[]).includes(currentUid));
+            if (coRoster) _myRosterId = coRoster.roster_id;
+          }
+        }
       } catch(e) { console.warn("[Auction] preInit roster load failed:", e.message); }
+
+      // Pull cap data from salary module if available
+      const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
+      if (capData) {
+        _rosterData.forEach(t => {
+          const d = capData[t.username];
+          if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
+        });
+      }
     }
 
     // Subscribe to live auctions for nom count
@@ -142,12 +167,28 @@ const DLRAuction = (() => {
             taxi:       r.taxi     || [],
             wins:       r.settings?.wins   || 0,
             losses:     r.settings?.losses || 0,
+            co_owners:  r.co_owners || [],
             // FAAB = waiver budget remaining from Sleeper (in dollars, not millions)
             faab:       r.settings?.waiver_budget_used != null
                           ? Math.max(0, (r.settings.waiver_budget || 1000) - (r.settings.waiver_budget_used || 0)) * 1_000_000
                           : null
           };
         });
+
+        // Co-owner detection: if _myRosterId not set by profile, check Sleeper co_owners
+        if (!_myRosterId) {
+          const currentUser = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+          const currentUid  = currentUser?.uid || null;
+          if (currentUid) {
+            const coOwnerRoster = rosters.find(r =>
+              (r.co_owners || []).includes(currentUid)
+            );
+            if (coOwnerRoster) {
+              _myRosterId = coOwnerRoster.roster_id;
+              console.log(`[Auction] Co-owner detected: roster ${_myRosterId}`);
+            }
+          }
+        }
 
         // Also pull remaining cap from DLRSalaryCap if the module has data
         if (typeof DLRSalaryCap !== "undefined") {
@@ -242,7 +283,7 @@ const DLRAuction = (() => {
   // ── Proxy bid computation ─────────────────────────────────
   function _computeLeader(a) {
     const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-    if (!bids.length) return { rosterId: null, displayBid: MIN_BID };
+    if (!bids.length) return { rosterId: null, displayBid: MIN_BID() };
     const maxByRoster = {};
     bids.forEach(b => {
       if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
@@ -257,13 +298,13 @@ const DLRAuction = (() => {
       const firstBid = [...bids]
         .filter(b => b.rosterId === sorted[0].rosterId)
         .sort((a, b) => a.timestamp - b.timestamp)[0];
-      return { rosterId: sorted[0].rosterId, displayBid: firstBid?.maxBid ?? MIN_BID };
+      return { rosterId: sorted[0].rosterId, displayBid: firstBid?.maxBid ?? MIN_BID() };
     }
 
     // Proxy: winner pays $1 increment above second-highest max
     return {
       rosterId:   sorted[0].rosterId,
-      displayBid: Math.min(sorted[0].maxBid, sorted[1].maxBid + MIN_BID)
+      displayBid: Math.min(sorted[0].maxBid, sorted[1].maxBid + MIN_INC())
     };
   }
 
@@ -361,7 +402,7 @@ const DLRAuction = (() => {
 
     const maxNoms = _settings.maxNoms || 2;
     const myNoms  = _myActiveNoms();
-    const canNom  = myNoms < maxNoms;
+    const canNom  = canNominate(); // uses cap check too
 
     el.innerHTML = `
       <div class="auc-toolbar">
@@ -395,7 +436,7 @@ const DLRAuction = (() => {
     document.querySelectorAll(".auc-tab").forEach(t =>
       t.classList.toggle("auc-tab--active", (t.getAttribute("onclick")||"").includes(`'${mode}'`))
     );
-    _renderView(live, ended, _myActiveNoms() < (_settings.maxNoms || 2));
+    _renderView(live, ended, canNominate());
   }
 
   function _renderView(live, ended, canNom) {
@@ -470,7 +511,7 @@ const DLRAuction = (() => {
         <div class="auc-actions">
           <div class="auc-bid-row-form">
             <input type="number" id="bid-${a.id}" class="auc-bid-input"
-              value="${myBid || ""}" placeholder="Max bid" step="100000" min="${MIN_BID}"/>
+              value="${myBid || ""}" placeholder="Max bid" step="${MIN_INC()}" min="${MIN_BID()}"/>
             <button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">
               ${myBid > 0 ? "Update" : "Bid"}
             </button>
@@ -533,7 +574,7 @@ const DLRAuction = (() => {
         </div>
         <div class="dim" style="font-size:.78rem">${filtered.length} available</div>
       </div>
-      ${!canNom ? `<div class="auc-nom-limit">⚠️ You've reached the max of ${_settings.maxNoms} active nominations.</div>` : ""}
+      ${!canNom ? `<div class="auc-nom-limit">⚠️ ${_myActiveNoms() >= (_settings.maxNoms||2) ? `Max ${_settings.maxNoms||2} active nominations reached.` : "Insufficient cap space to nominate."}</div>` : ""}
       <div class="auc-fa-list">
         ${filtered.slice(0, 60).map((p, i) => {
           const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[p.pos] || "#9ca3af";
@@ -550,7 +591,7 @@ const DLRAuction = (() => {
                 ? `<span class="auc-already-nom">Active bid</span>`
                 : canNom
                   ? `<button class="btn-primary btn-sm" onclick="DLRAuction.openNominate('${p.pid}','${_escA(p.name)}','${p.pos}','${p.team}')">Nominate</button>`
-                  : `<button class="btn-secondary btn-sm" disabled>Max noms</button>`
+                  : `<button class="btn-secondary btn-sm" disabled title="${_myActiveNoms() >= (_settings.maxNoms||2) ? "Max nominations reached" : "Insufficient cap"}">🚫</button>`
               }
             </div>`;
         }).join("")}
@@ -606,7 +647,7 @@ const DLRAuction = (() => {
           ${teamSelector}
           <div class="form-group" style="margin-top:var(--space-4)">
             <label>Opening Max Bid</label>
-            <input type="number" id="auc-nom-bid" value="${MIN_BID}" step="100000" min="${MIN_BID}"/>
+            <input type="number" id="auc-nom-bid" value="${MIN_BID()}" step="${MIN_INC()}" min="${MIN_BID()}"/>
             <span class="field-hint">Your proxy max — you only pay $1 more than the next highest bid.</span>
           </div>
         </div>
@@ -621,7 +662,7 @@ const DLRAuction = (() => {
   }
 
   async function submitNomination(pid, playerName) {
-    const maxBid     = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID;
+    const maxBid     = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID();
     const nomRosterId = parseInt(document.getElementById("auc-nom-team")?.value) || _myRosterId;
     const nomTeam    = _rosterData.find(r => r.roster_id === nomRosterId);
     const nomName    = nomTeam?.teamName || `Team ${nomRosterId}`;
@@ -925,6 +966,16 @@ const DLRAuction = (() => {
           <span class="field-hint">How many players a team can have actively nominated at once.</span>
         </div>
         <div class="form-group">
+          <label>Minimum Opening Bid ($)</label>
+          <input type="number" id="auc-s-minbid" value="${s.minBid || 100000}" min="0" step="100000"/>
+          <span class="field-hint">Minimum allowed opening bid when nominating a player.</span>
+        </div>
+        <div class="form-group">
+          <label>Minimum Bid Increment ($)</label>
+          <input type="number" id="auc-s-mininc" value="${s.minIncrement || 100000}" min="0" step="100000"/>
+          <span class="field-hint">New bids must exceed the current proxy price by at least this amount.</span>
+        </div>
+        <div class="form-group">
           <label>Max Active Roster Size (excl. IR and Taxi)</label>
           <input type="number" id="auc-s-rostersize" value="${s.maxRosterSize || 30}" min="1" max="60"/>
           <span class="field-hint">Active roster only — IR and taxi slots don't count toward this limit.</span>
@@ -945,7 +996,9 @@ const DLRAuction = (() => {
       pauseStart:    parseInt(document.getElementById("auc-s-pstart")?.value)      ?? 0,
       pauseEnd:      parseInt(document.getElementById("auc-s-pend")?.value)        ?? 8,
       maxNoms:       parseInt(document.getElementById("auc-s-maxnoms")?.value)     || 2,
-      maxRosterSize: parseInt(document.getElementById("auc-s-rostersize")?.value)  || 30
+      maxRosterSize: parseInt(document.getElementById("auc-s-rostersize")?.value)  || 30,
+      minBid:        parseInt(document.getElementById("auc-s-minbid")?.value)      || 100000,
+      minIncrement:  parseInt(document.getElementById("auc-s-mininc")?.value)      || 100000
     };
     const btn = document.querySelector(".auc-settings-form .btn-primary");
     if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
@@ -963,17 +1016,18 @@ const DLRAuction = (() => {
   async function placeBid(auctionId, playerName) {
     const input  = document.getElementById(`bid-${auctionId}`);
     const maxBid = parseInt(input?.value) || 0;
-    if (maxBid < MIN_BID) { showToast(`Minimum bid is ${_fmtSal(MIN_BID)}`, "error"); return; }
+    if (maxBid < MIN_BID()) { showToast(`Minimum bid is ${_fmtSal(MIN_BID())}`, "error"); return; }
 
     // Validate against current proxy leader
     const auction = _auctions.find(a => a.id === auctionId);
     if (auction) {
       const leader = _computeLeader(auction);
       const myCurrentMax = _myMaxBid(auction);
-      // Must beat the current display price if not already leading
-      if (leader.rosterId && leader.rosterId !== _myRosterId) {
-        if (maxBid <= leader.displayBid) {
-          showToast(`Bid must exceed current price of ${_fmtSal(leader.displayBid)}`, "error");
+      // Must beat the current display price by at least MIN_INC if not already leading
+      if (leader.rosterId && Number(leader.rosterId) !== Number(_myRosterId)) {
+        const minRequired = leader.displayBid + MIN_INC();
+        if (maxBid < minRequired) {
+          showToast(`Bid must be at least ${_fmtSal(minRequired)} (current ${_fmtSal(leader.displayBid)} + ${_fmtSal(MIN_INC())} increment)`, "error");
           return;
         }
       }
@@ -1080,7 +1134,17 @@ const DLRAuction = (() => {
   // Can the current user nominate? (for FA button check)
   function canNominate() {
     if (!_leagueKey) return false;
-    return _myActiveNoms() < (_settings.maxNoms || 2);
+    if (_myActiveNoms() >= (_settings.maxNoms || 2)) return false;
+    // Check cap — must have at least minBid available after committed
+    const now    = Date.now();
+    const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+    const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+    if (myTeam) {
+      const cap       = myTeam.remainingCap ?? myTeam.faab ?? null;
+      const committed = _getCommitted(active, _myRosterId);
+      if (cap !== null && (cap - committed) < MIN_BID()) return false;
+    }
+    return true;
   }
 
   return {

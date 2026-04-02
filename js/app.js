@@ -266,12 +266,16 @@ const DLRNav = {
   },
   go(view) {
     this.close();
-    document.querySelectorAll(".nav-link,.nav-drawer-item[data-view]").forEach(l => l.classList.remove("active"));
+    // Trigger the same nav-link handler by finding the link
+    const link = document.querySelector(`.nav-link[data-view="${view}"]`);
+    if (link) { link.click(); return; }
+    // Fallback if link not visible (mobile)
+    document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
     document.querySelectorAll(".app-view").forEach(v => v.classList.remove("active"));
     document.querySelectorAll(`[data-view="${view}"]`).forEach(l => l.classList.add("active"));
     document.getElementById(`view-${view}`)?.classList.add("active");
     AppState.currentView = view;
-    if (view === "hallway") DLRHallway.init();
+    if (view === "hallway")  DLRHallway.init();
     if (view === "trophies") DLRTrophyRoom.init();
   }
 };
@@ -509,20 +513,41 @@ function _startGlobalAucMonitor(profile) {
 }
 
 function _updateGlobalAucPill(liveByLeague) {
-  const totalLive  = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
-  const pillHTML   = totalLive === 0 ? "" : `
-    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
-      🏷 ${totalLive} Live${totalLive !== 1 ? "" : ""}
-      <span class="global-auc-pill-dot"></span>
-    </button>`;
-  const mobile  = document.getElementById("global-auc-pill");
-  const desktop = document.getElementById("global-auc-pill-desktop");
-  if (mobile)  mobile.innerHTML  = pillHTML;
-  if (desktop) desktop.innerHTML = totalLive === 0 ? "" : `
-    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
-      🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
-      <span class="global-auc-pill-dot"></span>
-    </button>`;
+  const totalLive = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
+  const pill = document.getElementById("global-auc-pill");
+  if (pill) {
+    pill.innerHTML = totalLive === 0 ? "" : `
+      <button class="global-auc-pill" onclick="_openGlobalAucModal()">
+        🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
+        <span class="global-auc-pill-dot"></span>
+      </button>`;
+  }
+
+  // Also populate mobile drawer
+  const drawerSection = document.getElementById("drawer-auc-section");
+  const drawerList    = document.getElementById("drawer-auc-list");
+  if (drawerSection && drawerList) {
+    if (totalLive === 0) {
+      drawerSection.style.display = "none";
+    } else {
+      drawerSection.style.display = "";
+      drawerList.innerHTML = Object.entries(liveByLeague).flatMap(([leagueKey, { league, live }]) =>
+        live.map(a => {
+          const bids    = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+          const topBid  = bids.length ? Math.max(...bids.map(b => b.maxBid)) : 0;
+          const mins    = Math.max(0, Math.floor((a.expiresAt - Date.now()) / 60000));
+          const timeStr = mins > 60 ? `${Math.floor(mins/60)}h` : `${mins}m`;
+          return `<div class="nav-drawer-item" onclick="DLRNav.close();Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},350)">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(a.playerName||"Player")}</div>
+              <div style="font-size:.7rem;color:var(--color-text-dim)">${_escHtml(league.leagueName||leagueKey)} · ${timeStr}</div>
+            </div>
+            <span style="font-family:var(--font-display);font-weight:700;color:var(--color-green);font-size:.82rem;flex-shrink:0">$${(topBid/1e6).toFixed(1)}M</span>
+          </div>`;
+        })
+      ).join("");
+    }
+  }
 }
 
 function _openGlobalAucModal() {

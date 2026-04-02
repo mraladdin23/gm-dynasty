@@ -3624,24 +3624,24 @@ select option { background: var(--color-bg-2); }
 }
 
 .auc-card {
-  background: var(--color-surface);
+  background: var(--color-bg-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  margin-bottom: var(--space-4);
-  overflow: hidden;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
 }
 .auc-card--winning {
   border-color: var(--color-green);
-  box-shadow: 0 0 0 1px var(--color-green);
+  background: linear-gradient(135deg, var(--color-bg-2), rgba(24,224,122,.04));
 }
 .auc-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-3);
-  border-bottom: 1px solid var(--color-border);
-  gap: var(--space-4);
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  background: none;
+  border-bottom: none;
+  padding: 0;
 }
 .auc-player-info {
   display: flex;
@@ -3688,11 +3688,11 @@ select option { background: var(--color-bg-2); }
 .auc-bid-row--mine { background: rgba(24,224,122,.08); color: var(--color-green); }
 
 .auc-bid-actions {
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--color-border);
+  padding: var(--space-2) 0 0 0;
+  border-top: none;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 .auc-bid-form { display: flex; gap: var(--space-2); align-items: center; }
@@ -4087,11 +4087,11 @@ select option { background: var(--color-bg-2); }
 
 /* ── Trophy room ─────────────────────────────────────── */
 .tr-trophy-shelf { display:flex; gap:var(--space-3); flex-wrap:wrap; }
-.tr-trophy-card { background:var(--color-bg-2); border:1px solid var(--color-border); border-radius:var(--radius); padding:var(--space-4) var(--space-3); text-align:center; width:140px; flex-shrink:0; height:140px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-1); overflow:hidden; transition:transform var(--transition); }
+.tr-trophy-card { background:var(--color-bg-2); border:1px solid var(--color-border); border-radius:var(--radius); padding:var(--space-4) var(--space-3); text-align:center; width:148px; min-height:165px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-1); transition:transform var(--transition); }
 .tr-trophy-card:hover { transform:translateY(-2px); }
-.tr-trophy-icon { font-size:2rem; line-height:1; }
+.tr-trophy-icon { font-size:2.2rem; line-height:1; }
 .tr-trophy-season { font-family:var(--font-display); font-size:1rem; font-weight:800; }
-.tr-trophy-league { font-size:.72rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%; display:block; }
+.tr-trophy-league { font-size:.72rem; font-weight:600; white-space:normal; word-break:break-word; max-width:130px; line-height:1.3; }
 .tr-trophy-rec { font-size:.68rem; }
 .tr-trophy-team { font-size:.62rem; }
 .tr-year-row { display:flex; gap:var(--space-4); align-items:flex-start; padding:var(--space-3) 0; border-bottom:1px solid var(--color-border); }
@@ -4181,13 +4181,7 @@ select option { background: var(--color-bg-2); }
   border-radius: var(--radius-lg);
 }
 
-/* ── Auction: compact card ───────────────────────────── */
-.auc-card-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
+/* auc-card-info / lead row defined above in base auction CSS */
 .auc-card-info { flex: 1; min-width: 0; }
 .auc-nom-line  { font-size: .7rem; }
 .auc-lead-row  {
@@ -4213,14 +4207,14 @@ select option { background: var(--color-bg-2); }
 }
 .auc-teams-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
 }
 .auc-team-card {
   background: var(--color-bg-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: var(--space-4);
+  padding: var(--space-3);
   transition: border-color var(--transition);
 }
 .auc-team-card:hover { border-color: var(--color-border-light); }
@@ -4232,65 +4226,66 @@ select option { background: var(--color-bg-2); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
   gap: var(--space-2);
 }
 .auc-team-card-name {
   font-weight: 700;
-  font-size: .88rem;
+  font-size: .82rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
 }
 .auc-you-badge {
-  font-size: .62rem;
+  font-size: .58rem;
   font-weight: 700;
   background: var(--color-gold);
   color: #0a0e1a;
   border-radius: 99px;
-  padding: 1px 7px;
+  padding: 1px 6px;
   flex-shrink: 0;
 }
 .auc-team-stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  gap: 4px;
+  margin-bottom: var(--space-2);
 }
 .auc-tstat { text-align: center; }
 .auc-tstat-lbl {
-  font-size: .6rem;
+  font-size: .55rem;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .04em;
   color: var(--color-text-dim);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
+  line-height: 1.2;
 }
 .auc-tstat-val {
   font-family: var(--font-display);
-  font-size: .95rem;
+  font-size: .85rem;
   font-weight: 800;
+  line-height: 1.2;
 }
 .auc-team-winning {
-  font-size: .75rem;
+  font-size: .7rem;
   color: var(--color-text-dim);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .auc-team-bar-bg {
-  height: 4px;
+  height: 3px;
   background: var(--color-surface);
   border-radius: 99px;
   overflow: hidden;
-  margin-top: var(--space-2);
+  margin-top: var(--space-1);
 }
 .auc-team-bar-fill {
   height: 100%;
   background: var(--color-gold);
   border-radius: 99px;
-  transition: width .4s ease;
 }
 
 /* ── Global auction pill — desktop (full label) ──────── */
@@ -4398,5 +4393,138 @@ select option { background: var(--color-bg-2); }
 
   /* Show global auc pill next to avatar */
   #global-auc-pill { display: flex; align-items: center; }
+}
+
+
+/* ── FINAL MOBILE FIXES ──────────────────────────────── */
+@media (max-width: 640px) {
+
+  /* League section — no overflow */
+  .leagues-section { overflow-x: hidden; width: 100%; max-width: 100vw; }
+  .leagues-grid { width: 100%; overflow-x: hidden; }
+  .league-row {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    min-height: 44px;
+    padding: var(--space-2) var(--space-2);
+    gap: var(--space-1);
+  }
+  .lrow-left  { width: 34px; flex-shrink: 0; }
+  .lrow-name-col { flex: 1; min-width: 0; overflow: hidden; }
+  .lrow-name  { font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lrow-team  { font-size: .6rem; }
+  .lrow-season-col { width: 42px; flex-shrink: 0; }
+  .lrow-record { font-size: .72rem; }
+  .lrow-season-label { font-size: .54rem; }
+  .lrow-alltime-col, .lrow-tags { display: none !important; }
+  .lrow-actions { gap: 2px; flex-shrink: 0; }
+  .lrow-chat-btn, .lrow-options-btn { font-size: .6rem; padding: 2px 4px; }
+
+  /* Filter bar — force contained scroll */
+  .league-filters {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    box-sizing: border-box;
+  }
+
+  /* League tools row */
+  .league-tools-row {
+    width: 100%;
+    overflow-x: hidden;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .league-jump-select { max-width: 100%; width: 100%; }
+
+  /* Locker header — compact single row, no actions shown (in drawer) */
+  .locker-header {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+    flex-wrap: nowrap;
+    border-radius: var(--radius);
+  }
+  .locker-header-top { flex: 1; min-width: 0; gap: var(--space-2); }
+  .locker-avatar { width: 34px; height: 34px; }
+  #locker-avatar-initials { font-size: .78rem; }
+  .locker-identity { min-width: 0; flex: 1; }
+  .locker-identity h2 { font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .locker-tagline, .locker-stats-row, .platforms-summary { display: none !important; }
+  .locker-header-actions { display: none !important; }
+
+  /* Global auc pill — inline next to avatar */
+  #global-auc-pill { flex-shrink: 0; }
+  .global-auc-pill { font-size: .65rem !important; padding: 3px 7px !important; }
+  .global-auc-pill::before { display: none; }
+
+  /* Trophy shelf — horizontal scroll */
+  .tr-trophy-shelf { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 4px; }
+  .tr-trophy-shelf::-webkit-scrollbar { display: none; }
+
+  /* Auction teams grid — 2 cols on mobile */
+  .auc-teams-grid { grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
+  .auc-tstat-val { font-size: .75rem; }
+  .auc-tstat-lbl { font-size: .5rem; }
+}
+
+
+/* ── Nav identity strip (mobile only) ───────────────── */
+.nav-identity {
+  display: none; /* hidden on desktop */
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  margin: 0 var(--space-2);
+}
+.nav-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-bg-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--color-gold);
+  flex-shrink: 0;
+}
+.nav-id-info { min-width: 0; flex: 1; }
+.nav-id-name {
+  font-size: .72rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.nav-id-stats {
+  font-size: .6rem;
+  color: var(--color-text-dim);
+  line-height: 1.2;
+}
+
+@media (max-width: 640px) {
+  /* Show identity in nav on mobile */
+  .nav-identity { display: flex; }
+  /* Hide desktop elements */
+  .nav-title { display: none; }
+  .nav-user  { display: none; }
+  .nav-links { display: none !important; }
+  /* Nav brand just the logo */
+  .nav-logo { font-size: 1rem; }
+  /* Keep nav compact */
+  .top-nav { gap: 0; padding: 0 var(--space-2); }
+  /* Pill in nav is compact */
+  #global-auc-pill .global-auc-pill {
+    font-size: .6rem !important;
+    padding: 3px 6px !important;
+    animation: none;
+  }
 }
 

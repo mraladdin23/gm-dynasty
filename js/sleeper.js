@@ -232,7 +232,10 @@ const SleeperAPI = (() => {
 
           const me     = leagueUsers.find(u => u.user_id === userId);
           const isComm = me?.is_owner === true;
-          const myRoster = rosters.find(r => r.owner_id === userId);
+          // Primary owner match OR co-owner match
+          const myRoster = rosters.find(r => r.owner_id === userId)
+                        || rosters.find(r => (r.co_owners||[]).includes(userId));
+          const isCoOwner = !rosters.find(r => r.owner_id === userId) && !!myRoster;
 
           // Skip if not a member AND not the commissioner
           if (!myRoster && !isComm) continue;
@@ -267,8 +270,18 @@ const SleeperAPI = (() => {
             mostRecentSeason,
             leagueType:       _mapLeagueType(leagueData.settings?.type),
             totalTeams:       leagueData.total_rosters || 12,
-            teamName:         me?.metadata?.team_name || me?.display_name || (isComm ? "Commissioner" : "My Team"),
+            // For co-owners, get team name from the primary owner's user record
+            teamName: (() => {
+              if (me?.metadata?.team_name) return me.metadata.team_name;
+              if (me?.display_name) return me.display_name;
+              if (isCoOwner) {
+                const primaryUser = leagueUsers.find(u => u.user_id === myRoster?.owner_id);
+                return primaryUser?.metadata?.team_name || primaryUser?.display_name || "My Team";
+              }
+              return isComm ? "Commissioner" : "My Team";
+            })(),
             isCommissioner:   isComm,
+            isCoOwner:        isCoOwner || false,
             myRosterId:       myRoster?.roster_id || null,
             wins,
             losses,
