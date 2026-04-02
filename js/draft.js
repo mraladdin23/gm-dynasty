@@ -219,7 +219,29 @@ const DLRDraft = (() => {
 
     const draftTypeLabel = isSnake ? "🐍 Snake Draft" : "📋 Linear Draft";
     const statusColor = { complete:"var(--color-green)", drafting:"var(--color-gold)", pre_draft:"var(--color-text-dim)" }[draftStatus] || "var(--color-text-dim)";
-    const statusLabel = { complete:"Complete", drafting:"In Progress", pre_draft:"Not Started" }[draftStatus] || draftStatus;
+    const statusLabel = { complete:"✅ Complete", drafting:"🔴 Live", pre_draft:"📅 Upcoming" }[draftStatus] || draftStatus;
+
+    // For pre-draft with no slot order set yet — show a clear placeholder
+    const hasSlotOrder = draft.slot_to_roster_id && Object.keys(draft.slot_to_roster_id).length > 0;
+    if (draftStatus === "pre_draft" && !hasSlotOrder) {
+      if (el) el.innerHTML = `
+        <div class="draft-header-bar">
+          <div class="draft-meta">
+            <span class="draft-type-label">${draftTypeLabel}</span>
+            <span class="draft-status" style="color:${statusColor}">● ${statusLabel}</span>
+            <span class="dim">${rounds} rounds · ${teams} teams</span>
+          </div>
+        </div>
+        <div class="draft-empty">
+          <div style="font-size:2.5rem;margin-bottom:var(--space-3)">📅</div>
+          <div style="font-weight:700;margin-bottom:var(--space-2)">Draft order not yet assigned</div>
+          <div style="color:var(--color-text-dim);font-size:.88rem">
+            The draft is scheduled but pick order hasn't been set yet.<br>
+            Check back once the commissioner sets the draft order.
+          </div>
+        </div>`;
+      return;
+    }
 
     let boardHTML = "";
     for (let r = 1; r <= rounds; r++) {

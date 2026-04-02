@@ -45,7 +45,7 @@ const Profile = (() => {
     if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
     const mflUsername = emailOrUsername.trim().split("@")[0];
 
-    // If no league IDs given, search MFL by username across recent years
+    // Search by username across recent years if no league IDs given
     let ids = leagueIds.filter(Boolean);
     if (!ids.length) {
       const currentYear = new Date().getFullYear();
@@ -53,17 +53,31 @@ const Profile = (() => {
       const found = new Set();
       for (const year of years) {
         try {
-          const results = await MFLAPI.searchLeagues(mflUsername, String(year));
-          results.forEach(l => { if (l.leagueId) found.add(String(l.leagueId)); });
+          const results = await MFLAPI.searchUserLeagues(mflUsername, String(year));
+          if (Array.isArray(results)) {
+            results.forEach(l => {
+              const lid = l.leagueId || l.id || l.league_id;
+              if (lid) found.add(String(lid));
+            });
+          }
         } catch(e) { console.warn(`[MFL] search ${year}:`, e.message); }
       }
       ids = [...found];
-      if (!ids.length) throw new Error(`No MFL leagues found for username "${mflUsername}". Check your username or add league IDs manually.`);
+      if (!ids.length) {
+        throw new Error(
+          `No MFL leagues found for username "${mflUsername}".\n` +
+          `• Check your exact MFL username (case-sensitive on some searches)\n` +
+          `• Or paste league IDs directly (found in your MFL league URL)`
+        );
+      }
     }
 
     const rawResults = await MFLAPI.importUserLeagues(mflUsername, ids);
     if (!rawResults.length) {
-      throw new Error("No MFL leagues found. Make sure your username matches what's shown on MFL.");
+      throw new Error(
+        `Found league IDs but couldn't match your team in them.\n` +
+        `Make sure your MFL username matches what's shown on your team page.`
+      );
     }
 
     const leaguesMap = {};
@@ -77,15 +91,15 @@ const Profile = (() => {
         season:         String(r.year),
         leagueType:     _detectMFLLeagueType(r.leagueName || ""),
         totalTeams:     r.totalTeams || 12,
-        teamName:       r.teamName  || "My Team",
+        teamName:       r.teamName   || "My Team",
         isCommissioner: r.isCommissioner || false,
         myRosterId:     r.franchiseId || null,
-        wins:           r.wins    || 0,
-        losses:         r.losses  || 0,
-        ties:           r.ties    || 0,
-        pointsFor:      r.ptsFor  || 0,
-        pointsAgainst:  r.ptsAgainst || 0,
-        standing:       r.rank    || null,
+        wins:           r.wins        || 0,
+        losses:         r.losses      || 0,
+        ties:           r.ties        || 0,
+        pointsFor:      r.ptsFor      || 0,
+        pointsAgainst:  r.ptsAgainst  || 0,
+        standing:       r.rank        || null,
         playoffFinish:  r.playoffFinish || null,
         isChampion:     r.playoffFinish === 1,
         playoffResult:  null
@@ -98,6 +112,48 @@ const Profile = (() => {
     return { leagues: leaguesMap, mflUsername };
   }
 
+  // ── Link Yahoo ────────────────────────────────────────────
+  async function linkYahoo(gmdUsername) {
+    if (!gmdUsername) throw new Error("Not logged in.");
+
+    // Fetch leagues from worker (tokens are stored server-side in KV)
+    const yahooLeagues = await YahooAPI.getLeagues();
+    if (!yahooLeagues.length) {
+      throw new Error("No Yahoo leagues found. Make sure you completed the Yahoo authorization.");
+    }
+
+    const leaguesMap = {};
+    for (const l of yahooLeagues) {
+      const key = `yahoo_${l.season}_${l.leagueId}`;
+      leaguesMap[key] = {
+        platform:      "yahoo",
+        leagueId:      String(l.leagueId),
+        franchiseId:   `yahoo__${l.leagueId}`,
+        leagueName:    l.leagueName || `League ${l.leagueId}`,
+        season:        String(l.season || new Date().getFullYear()),
+        leagueType:    _detectLeagueType(l.leagueName || ""),
+        totalTeams:    l.numTeams || 12,
+        teamName:      "",
+        isCommissioner: false,
+        myRosterId:    null,
+        wins:          0, losses: 0, ties: 0,
+        pointsFor: 0, pointsAgainst: 0
+      };
+    }
+
+    await GMDB.linkPlatform(gmdUsername, "yahoo", { linked: true });
+    await GMDB.saveLeagues(gmdUsername, leaguesMap);
+    await GMDB.recomputeStats(gmdUsername);
+    return { leagues: leaguesMap };
+  }
+
+  function _detectLeagueType(name) {
+    const n = name.toLowerCase();
+    if (n.includes("dynasty")) return "dynasty";
+    if (n.includes("keeper"))  return "keeper";
+    return "redraft";
+  }
+
   function _detectMFLLeagueType(name) {
     const n = name.toLowerCase();
     if (n.includes("dynasty")) return "dynasty";
@@ -107,32 +163,49 @@ const Profile = (() => {
 
   // ── League meta (pins, labels, archive) ───────────────
 
+  // ── League meta: localStorage-first, Firebase backup ─────
+  const _metaLSKey = () => `dlr_leagueMeta_${_currentUsername || "anon"}`;
+
   async function loadLeagueMeta(username) {
     try {
-      _leagueMeta = await GMDB.getLeagueMeta(username);
+      // Always load localStorage first (instant, no auth needed)
+      const lsRaw = localStorage.getItem(`dlr_leagueMeta_${username.toLowerCase()}`);
+      const lsData = lsRaw ? JSON.parse(lsRaw) : {};
+
+      // Also fetch Firebase (may have data from other devices)
+      const fbData = await GMDB.getLeagueMeta(username).catch(() => ({}));
+
+      // Merge: Firebase wins for any key it has, localStorage fills gaps
+      _leagueMeta = { ...lsData, ...fbData };
+
+      // Write merged result back to localStorage
+      try { localStorage.setItem(`dlr_leagueMeta_${username.toLowerCase()}`, JSON.stringify(_leagueMeta)); } catch(e) {}
+
       const groups = Object.values(_leagueMeta).filter(m => m?.commishGroup).map(m => m.commishGroup);
       const labels = Object.values(_leagueMeta).filter(m => m?.customLabel).map(m => m.customLabel);
-      console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries`);
-      console.log("[DLR] leagueMeta raw:", JSON.stringify(_leagueMeta).slice(0, 500));
-      console.log("[DLR] groups found:", groups, "labels found:", labels);
-    } catch (err) {
+      console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries | groups: [${groups}] | labels: [${labels}]`);
+    } catch(err) {
       console.error("[DLR] loadLeagueMeta FAILED:", err.message);
       _leagueMeta = {};
     }
   }
 
   async function saveLeagueMeta(username, leagueKey, updates) {
-    // Merge with existing, then remove null/empty string values to keep Firebase clean
     const existing = _leagueMeta[leagueKey] || {};
     const merged   = { ...existing, ...updates };
-    // Remove explicitly-null or empty-string values (but keep false/0)
+    // Remove null/empty-string but keep false/0
     Object.keys(merged).forEach(k => {
-      if (merged[k] === null || merged[k] === undefined || merged[k] === "") {
-        delete merged[k];
-      }
+      if (merged[k] === null || merged[k] === undefined || merged[k] === "") delete merged[k];
     });
     _leagueMeta[leagueKey] = merged;
-    await GMDB.saveLeagueMetaEntry(username, leagueKey, merged);
+
+    // 1. Save to localStorage immediately (always works, no auth needed)
+    try { localStorage.setItem(`dlr_leagueMeta_${username.toLowerCase()}`, JSON.stringify(_leagueMeta)); } catch(e) {}
+
+    // 2. Also save to Firebase (best-effort, may fail silently)
+    try { await GMDB.saveLeagueMetaEntry(username, leagueKey, merged); } catch(e) {
+      console.warn("[DLR] Firebase meta save failed (localStorage backup saved):", e.message);
+    }
   }
 
   // ── Main locker render ─────────────────────────────────
@@ -1072,6 +1145,7 @@ const Profile = (() => {
         _allLeagues[leagueKey].leagueType = typeOverride;
       }
       closeLabelModal();
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
       _renderLeagueFilters();
       _renderLeagues();
       if (_detailLeagueKey === leagueKey) _buildDetailTabs(leagueKey);
@@ -1556,6 +1630,7 @@ const Profile = (() => {
   return {
     linkSleeper,
     linkMFL,
+    linkYahoo,
     renderLocker,
     renderLeaguePreview,
     openEditProfileModal,
