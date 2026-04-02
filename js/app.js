@@ -514,16 +514,27 @@ function _startGlobalAucMonitor(profile) {
 
 function _updateGlobalAucPill(liveByLeague) {
   const totalLive = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
-  const pill = document.getElementById("global-auc-pill");
-  if (pill) {
-    pill.innerHTML = totalLive === 0 ? "" : `
-      <button class="global-auc-pill" onclick="_openGlobalAucModal()">
-        🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
-        <span class="global-auc-pill-dot"></span>
-      </button>`;
-  }
 
-  // Also populate mobile drawer
+  const mobilePillHTML = totalLive === 0 ? "" : `
+    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
+      🏷 ${totalLive}<span class="global-auc-pill-dot"></span>
+    </button>`;
+
+  const desktopPillHTML = totalLive === 0 ? "" : `
+    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
+      🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
+      <span class="global-auc-pill-dot"></span>
+    </button>`;
+
+  // Mobile: inside nav-identity strip
+  const mobile = document.getElementById("global-auc-pill");
+  if (mobile) mobile.innerHTML = mobilePillHTML;
+
+  // Desktop: in locker-header-actions
+  const desktop = document.getElementById("global-auc-pill-desktop");
+  if (desktop) desktop.innerHTML = desktopPillHTML;
+
+  // Drawer live auctions section
   const drawerSection = document.getElementById("drawer-auc-section");
   const drawerList    = document.getElementById("drawer-auc-list");
   if (drawerSection && drawerList) {
