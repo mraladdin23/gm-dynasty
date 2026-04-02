@@ -249,7 +249,55 @@ document.getElementById("onboarding-skip-btn")?.addEventListener("click", async 
   AppState.showApp(profile);
 });
 
-// ── App nav ────────────────────────────────────────────────
+// ── Mobile nav drawer ─────────────────────────────────────
+const DLRNav = {
+  toggle() {
+    const drawer  = document.getElementById("nav-drawer");
+    const back    = document.getElementById("nav-drawer-backdrop");
+    const open    = drawer.classList.contains("nav-drawer--open");
+    drawer.classList.toggle("nav-drawer--open", !open);
+    back.classList.toggle("hidden", open);
+    document.getElementById("nav-hamburger").classList.toggle("nav-hamburger--open", !open);
+  },
+  close() {
+    document.getElementById("nav-drawer")?.classList.remove("nav-drawer--open");
+    document.getElementById("nav-drawer-backdrop")?.classList.add("hidden");
+    document.getElementById("nav-hamburger")?.classList.remove("nav-hamburger--open");
+  },
+  go(view) {
+    this.close();
+    document.querySelectorAll(".nav-link,.nav-drawer-item[data-view]").forEach(l => l.classList.remove("active"));
+    document.querySelectorAll(".app-view").forEach(v => v.classList.remove("active"));
+    document.querySelectorAll(`[data-view="${view}"]`).forEach(l => l.classList.add("active"));
+    document.getElementById(`view-${view}`)?.classList.add("active");
+    AppState.currentView = view;
+    if (view === "hallway") DLRHallway.init();
+    if (view === "trophies") DLRTrophyRoom.init();
+  }
+};
+
+// Wire drawer quick action buttons
+document.getElementById("drawer-career-btn")?.addEventListener("click", e => {
+  e.preventDefault(); DLRNav.close(); Profile.openCareerSummary();
+});
+document.getElementById("drawer-players-btn")?.addEventListener("click", e => {
+  e.preventDefault(); DLRNav.close();
+  const profile = Auth.getCurrentProfile();
+  if (profile) DLRPlayerReport.open(profile.leagues||{}, profile.platforms?.sleeper?.userId);
+});
+document.getElementById("drawer-edit-btn")?.addEventListener("click", e => {
+  e.preventDefault(); DLRNav.close();
+  const profile = Auth.getCurrentProfile();
+  if (profile) Profile.openEditProfileModal(profile);
+});
+document.getElementById("drawer-leagues-btn")?.addEventListener("click", e => {
+  e.preventDefault(); DLRNav.close(); Profile.openManageLeagues?.();
+});
+document.getElementById("drawer-logout-btn")?.addEventListener("click", e => {
+  e.preventDefault(); DLRNav.close(); Auth.signOut?.();
+});
+
+
 document.querySelectorAll(".nav-link").forEach(link => {
   link.addEventListener("click", e => {
     e.preventDefault();
@@ -461,18 +509,16 @@ function _startGlobalAucMonitor(profile) {
 }
 
 function _updateGlobalAucPill(liveByLeague) {
-  const pill = document.getElementById("global-auc-pill");
-  if (!pill) return;
-
-  const totalLive = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
-  const leagueCount = Object.keys(liveByLeague).length;
-
-  if (totalLive === 0) {
-    pill.innerHTML = "";
-    return;
-  }
-
-    pill.innerHTML = `
+  const totalLive  = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
+  const pillHTML   = totalLive === 0 ? "" : `
+    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
+      🏷 ${totalLive} Live${totalLive !== 1 ? "" : ""}
+      <span class="global-auc-pill-dot"></span>
+    </button>`;
+  const mobile  = document.getElementById("global-auc-pill");
+  const desktop = document.getElementById("global-auc-pill-desktop");
+  if (mobile)  mobile.innerHTML  = pillHTML;
+  if (desktop) desktop.innerHTML = totalLive === 0 ? "" : `
     <button class="global-auc-pill" onclick="_openGlobalAucModal()">
       🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
       <span class="global-auc-pill-dot"></span>
@@ -486,10 +532,13 @@ function _openGlobalAucModal() {
 
   const liveByLeague = _globalAucData;
 
-  body.innerHTML = Object.entries(liveByLeague).map(([leagueKey, { league, live }]) => `
-    <div style="margin-bottom:var(--space-5)">
-      <div style="font-weight:700;font-size:.88rem;margin-bottom:var(--space-2);color:var(--color-gold)">
+  body.innerHTML = Object.entries(liveByLeague).map(([leagueKey, { league, live }]) => {
+    const leagueClick = `Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},350);document.getElementById('global-auc-modal').classList.add('hidden')`;
+    return `
+    <div class="global-auc-league-block">
+      <div class="global-auc-league-name" onclick="${leagueClick}" style="cursor:pointer">
         ${_escHtml(league.leagueName || leagueKey)}
+        <span style="font-size:.72rem;color:var(--color-text-dim);margin-left:var(--space-2)">${live.length} active →</span>
       </div>
       ${live.map(a => {
         const timeLeft = Math.max(0, a.expiresAt - Date.now());
@@ -499,15 +548,16 @@ function _openGlobalAucModal() {
         const bids     = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
         const topBid   = bids.length ? Math.max(...bids.map(b => b.maxBid)) : 0;
         return `
-          <div class="global-auc-row" onclick="Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},400);document.getElementById('global-auc-modal').classList.add('hidden')">
+          <div class="global-auc-row" onclick="${leagueClick}">
             <div style="flex:1">
               <div style="font-weight:600;font-size:.85rem">${_escHtml(a.playerName||a.playerId)}</div>
               <div class="dim" style="font-size:.72rem">${bids.length} bid${bids.length!==1?"s":""} · ${timeStr} left</div>
             </div>
-            <div style="font-family:var(--font-display);font-weight:700;color:var(--color-green)">$${(topBid/1000000).toFixed(1)}M</div>
+            <div style="font-family:var(--font-display);font-weight:700;color:var(--color-green)">$${(topBid/1_000_000).toFixed(1)}M</div>
           </div>`;
       }).join("")}
-    </div>`).join("") || `<div class="dim">No active auctions right now.</div>`;
+    </div>`;
+  }).join("") || `<div class="dim">No active auctions right now.</div>`;
 
   modal.classList.remove("hidden");
 }

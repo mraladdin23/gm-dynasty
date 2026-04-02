@@ -59,14 +59,8 @@ const DLRPlayerCard = (() => {
   function _updateNominateBtn() {
     const btn = document.getElementById("pc-nominate-btn");
     if (!btn) return;
-    if (typeof DLRAuction === "undefined" || !DLRAuction.canNominate?.()) {
-      btn.style.display = "none";
-      return;
-    }
-    // Don't show nominate if player is already on a roster
-    const isRostered = typeof DLRAuction !== "undefined" && DLRAuction.isRostered?.(_playerId);
-    btn.style.display = (isRostered ? "none" : "");
-    btn.title = "Nominate for auction";
+    // Nominate only available in the FA tab — hide from player card
+    btn.style.display = "none";
   }
 
   const YEARS = [2022, 2023, 2024, 2025];

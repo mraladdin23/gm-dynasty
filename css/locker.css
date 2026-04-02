@@ -4150,3 +4150,253 @@ select option { background: var(--color-bg-2); }
 .ms-avatar--lg { width:56px; height:56px; font-size:1.2rem; }
 .ms-profile-header { display:flex; align-items:center; gap:var(--space-4); margin-bottom:var(--space-5); }
 
+
+/* ── Trophy Room — base styles ───────────────────────── */
+.trophy-room-container { display:flex; flex-direction:column; gap:var(--space-6); padding-top:var(--space-4); }
+.tr-header { display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); }
+.tr-title { font-family:var(--font-display); font-size:1.4rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.tr-subtitle { color:var(--color-text-muted); font-size:.85rem; margin-top:3px; }
+.tr-dynasty-score { text-align:center; background:linear-gradient(135deg,var(--color-gold-dim),rgba(240,180,41,.05)); border:1px solid var(--color-gold-dim); border-radius:var(--radius-lg); padding:var(--space-3) var(--space-5); flex-shrink:0; }
+.tr-ds-val { font-family:var(--font-display); font-size:1.8rem; font-weight:800; color:var(--color-gold); }
+.tr-ds-lbl { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:var(--color-gold); opacity:.7; margin-top:2px; }
+.tr-banner { display:grid; grid-template-columns:repeat(6,1fr); gap:var(--space-3); }
+.tr-banner-stat { background:var(--color-bg-2); border:1px solid var(--color-border); border-radius:var(--radius); padding:var(--space-4) var(--space-3); text-align:center; }
+.tr-banner-val { font-family:var(--font-display); font-size:1.4rem; font-weight:800; }
+.tr-banner-lbl { font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-dim); margin-top:var(--space-1); }
+.tr-section { display:flex; flex-direction:column; gap:var(--space-4); }
+.tr-section-title { font-family:var(--font-display); font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--color-text-dim); border-bottom:1px solid var(--color-border); padding-bottom:var(--space-2); }
+.tr-empty { padding:var(--space-10); text-align:center; color:var(--color-text-dim); font-size:.9rem; }
+.tr-empty-trophies { text-align:center; padding:var(--space-8) var(--space-4); color:var(--color-text-dim); }
+
+
+/* ── Locker header: right-justify actions ────────────── */
+.locker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+/* ── Auction: compact card ───────────────────────────── */
+.auc-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.auc-card-info { flex: 1; min-width: 0; }
+.auc-nom-line  { font-size: .7rem; }
+.auc-lead-row  {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: .82rem;
+}
+.auc-lead-label { flex-shrink: 0; }
+.auc-lead-team  { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auc-lead-team--mine { color: var(--color-gold); }
+.auc-lead-price { font-family: var(--font-display); font-weight: 800; font-size: .95rem; flex-shrink: 0; color: var(--color-green); }
+
+/* ── Auction: teams grid (SleeperBid style) ──────────── */
+.auc-teams-header {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.auc-teams-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.auc-team-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  transition: border-color var(--transition);
+}
+.auc-team-card:hover { border-color: var(--color-border-light); }
+.auc-team-card--me {
+  border-color: var(--color-gold-dim);
+  background: linear-gradient(135deg, var(--color-bg-2), rgba(240,180,41,.04));
+}
+.auc-team-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  gap: var(--space-2);
+}
+.auc-team-card-name {
+  font-weight: 700;
+  font-size: .88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.auc-you-badge {
+  font-size: .62rem;
+  font-weight: 700;
+  background: var(--color-gold);
+  color: #0a0e1a;
+  border-radius: 99px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+.auc-team-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.auc-tstat { text-align: center; }
+.auc-tstat-lbl {
+  font-size: .6rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  margin-bottom: 2px;
+}
+.auc-tstat-val {
+  font-family: var(--font-display);
+  font-size: .95rem;
+  font-weight: 800;
+}
+.auc-team-winning {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.auc-team-bar-bg {
+  height: 4px;
+  background: var(--color-surface);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: var(--space-2);
+}
+.auc-team-bar-fill {
+  height: 100%;
+  background: var(--color-gold);
+  border-radius: 99px;
+  transition: width .4s ease;
+}
+
+/* ── Global auction pill — desktop (full label) ──────── */
+#global-auc-pill .global-auc-pill::before { display: none; }
+
+
+/* ── Mobile nav drawer ───────────────────────────────── */
+.nav-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  margin-left: var(--space-2);
+}
+.nav-hamburger span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--color-text-muted);
+  border-radius: 2px;
+  transition: all .2s ease;
+}
+.nav-hamburger--open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.nav-hamburger--open span:nth-child(2) { opacity: 0; }
+.nav-hamburger--open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+.nav-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 260px;
+  background: var(--color-bg-2);
+  border-left: 1px solid var(--color-border);
+  z-index: 900;
+  transform: translateX(100%);
+  transition: transform .25s ease;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-6) 0 var(--space-4);
+  overflow-y: auto;
+}
+.nav-drawer--open { transform: translateX(0); }
+.nav-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 899;
+}
+.nav-drawer-section {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.nav-drawer-section:last-child { border-bottom: none; margin-top: auto; }
+.nav-drawer-label {
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--color-text-dim);
+  padding: 0 var(--space-5) var(--space-2);
+}
+.nav-drawer-item {
+  display: flex;
+  align-items: center;
+  padding: var(--space-3) var(--space-5);
+  font-size: .88rem;
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background var(--transition);
+  cursor: pointer;
+}
+.nav-drawer-item:hover { background: var(--color-surface); }
+.nav-drawer-item.active { color: var(--color-gold); font-weight: 700; }
+.nav-drawer-item--danger { color: var(--color-text-dim); }
+
+/* Global auction league label in modal */
+.global-auc-league-block { margin-bottom: var(--space-4); }
+.global-auc-league-name {
+  font-weight: 700;
+  font-size: .9rem;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-3);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
+}
+.global-auc-league-name:hover { background: var(--color-surface); }
+
+/* Mobile: show hamburger, hide desktop nav links */
+@media (max-width: 640px) {
+  .nav-links { display: none !important; }
+  .nav-user  { display: none; }
+  .nav-title { display: none; }
+  .nav-hamburger { display: flex; }
+  .top-nav { justify-content: space-between; }
+
+  /* Compact filter area — use a select dropdown on mobile */
+  .league-header-actions { flex-wrap: wrap; gap: var(--space-2); }
+
+  /* Locker header actions hidden on mobile (in drawer instead) */
+  .locker-header-actions { display: none !important; }
+
+  /* Show global auc pill next to avatar */
+  #global-auc-pill { display: flex; align-items: center; }
+}
+

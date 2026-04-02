@@ -438,56 +438,47 @@ const DLRAuction = (() => {
     const name    = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
     const pos     = (p.fantasy_positions?.[0] || p.position || "?").toUpperCase();
     const posClr  = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-    const nomTeam = _rosterData.find(r => r.roster_id === a.nominatedBy)?.teamName || `Team ${a.nominatedBy}`;
-    const leadTeam= leader.rosterId ? (_rosterData.find(r => r.roster_id === leader.rosterId)?.teamName || `#${leader.rosterId}`) : "No bids";
+    const nomTeam = _rosterData.find(r => Number(r.roster_id) === Number(a.nominatedBy))?.teamName || `Team ${a.nominatedBy}`;
+    const leadTeam= leader.rosterId ? (_rosterData.find(r => Number(r.roster_id) === Number(leader.rosterId))?.teamName || `#${leader.rosterId}`) : "No bids";
     const myBid   = _myMaxBid(a);
-    const winning = leader.rosterId === _myRosterId;
-
-    const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+    const winning = Number(leader.rosterId) === Number(_myRosterId);
+    const bids    = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
     const uniqueBidders = [...new Set(bids.map(b => b.rosterId))].length;
 
     return `
       <div class="auc-card ${winning ? "auc-card--winning" : ""}">
+        <!-- Compact header: pos badge + name + timer all in one row -->
         <div class="auc-card-header">
-          <div class="auc-player-row">
-            <img class="auc-photo" src="https://sleepercdn.com/content/nfl/players/thumb/${a.playerId}.jpg" onerror="this.style.display='none'" loading="lazy"/>
-            <span class="auc-pos-pill" style="background:${posClr}22;color:${posClr};border-color:${posClr}55">${pos}</span>
-            <div>
-              <div class="auc-player-name">${_esc(name)}</div>
-              <div class="dim" style="font-size:.72rem">Nom: ${_esc(nomTeam)}</div>
-            </div>
+          <span class="auc-pos-pill" style="background:${posClr}22;color:${posClr};border-color:${posClr}55">${pos}</span>
+          <div class="auc-card-info">
+            <div class="auc-player-name">${_esc(name)}</div>
+            <div class="auc-nom-line dim">Nom: ${_esc(nomTeam)}</div>
           </div>
           <div class="auc-timer ${urgent ? "auc-timer--urgent" : ""}">
             <div class="auc-time-val">${_fmtTime(left)}</div>
-            <div class="auc-time-lbl dim">${uniqueBidders} bidder${uniqueBidders !== 1 ? "s" : ""}</div>
-            <button class="auc-history-btn" onclick="event.stopPropagation();DLRAuction.showBidHistory('${a.id}')" title="Bid history">📜</button>
+            <div class="auc-time-lbl dim">${uniqueBidders} bid${uniqueBidders !== 1 ? "s" : ""}</div>
           </div>
+          <button class="auc-history-btn" onclick="event.stopPropagation();DLRAuction.showBidHistory('${a.id}')" title="Bid history">📜</button>
         </div>
+        <!-- Leader row -->
         <div class="auc-lead-row">
-          <div>
-            <div class="auc-lead-label dim">Current leader</div>
-            <div class="auc-lead-team ${winning ? "auc-lead-team--mine" : ""}">${_esc(leadTeam)}</div>
-          </div>
-          <div class="auc-lead-price">${_fmtSal(leader.displayBid)}</div>
+          <span class="auc-lead-label dim">Leader:</span>
+          <span class="auc-lead-team ${winning ? "auc-lead-team--mine" : ""}">${_esc(leadTeam)}</span>
+          <span class="auc-lead-price">${_fmtSal(leader.displayBid)}</span>
         </div>
+        <!-- Bid form -->
         <div class="auc-actions">
           <div class="auc-bid-row-form">
             <input type="number" id="bid-${a.id}" class="auc-bid-input"
-              value="${myBid || ""}" placeholder="Max bid ($)" step="100000" min="${MIN_BID}"/>
+              value="${myBid || ""}" placeholder="Max bid" step="100000" min="${MIN_BID}"/>
             <button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">
               ${myBid > 0 ? "Update" : "Bid"}
             </button>
           </div>
-          ${_myHasPassed(a) ? `
-          <span class="auc-passed-badge">✓ Passed</span>` :
-          !winning && myBid === 0 ? `
-          <button class="auc-pass-btn btn-secondary btn-sm"
-            onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')"
-            title="Pass — if all non-bidding teams pass, auction closes early">
-            Pass
-          </button>` : ""}
-          ${_isCommish ? `
-          <div class="auc-comm-btns">
+          ${_myHasPassed(a) ? `<span class="auc-passed-badge">✓ Passed</span>` :
+            !winning && myBid === 0 ? `<button class="auc-pass-btn btn-secondary btn-sm"
+              onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')" title="Pass">Pass</button>` : ""}
+          ${_isCommish ? `<div class="auc-comm-btns">
             <button class="btn-secondary btn-sm" onclick="DLRAuction.claimAuction('${a.id}','${_escA(name)}')">✓ Claim</button>
             <button class="btn-secondary btn-sm" style="color:var(--color-red)" onclick="DLRAuction.cancelAuction('${a.id}','${_escA(name)}')">✕ Cancel</button>
           </div>` : ""}
@@ -662,78 +653,117 @@ const DLRAuction = (() => {
 
   // ── Teams tab ─────────────────────────────────────────────
   function _renderTeams(el) {
-    const now    = Date.now();
-    const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
-    const maxRoster = _settings.maxRosterSize || 30;
+    const now       = Date.now();
+    const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+    const maxRoster = _settings.maxRosterSize || 25;
 
-    // Pull fresh cap data from salary module every render
+    // Pull fresh cap data
     const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
     if (capData) {
-      _rosterData.forEach(team => {
-        const d = capData[team.username];
-        if (d) {
-          team.remainingCap = d.remaining;
-          team.capSpent     = d.spent;
-          team.capTotal     = d.cap;
-        }
+      _rosterData.forEach(t => {
+        const d = capData[t.username];
+        if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
       });
     }
 
+    // Sort: my team first, then by available cap desc
+    const sorted = [..._rosterData].sort((a, b) => {
+      if (Number(a.roster_id) === Number(_myRosterId)) return -1;
+      if (Number(b.roster_id) === Number(_myRosterId)) return 1;
+      const aAvail = (a.remainingCap ?? a.faab ?? 0) - _getCommitted(active, a.roster_id);
+      const bAvail = (b.remainingCap ?? b.faab ?? 0) - _getCommitted(active, b.roster_id);
+      return bAvail - aAvail;
+    });
+
     el.innerHTML = `
-      <div style="margin-bottom:var(--space-3);font-size:.8rem;color:var(--color-text-dim)">
-        Max roster size: <strong>${maxRoster}</strong> (active + IR, excl. taxi).
-        ${_isCommish ? `<button class="btn-secondary btn-sm" style="margin-left:var(--space-2);font-size:.72rem" onclick="DLRAuction.editRosterSize()">Edit</button>` : ""}
+      <div class="auc-teams-header">
+        Max active roster: <strong>${maxRoster}</strong>
+        ${_isCommish ? `<button class="btn-secondary btn-sm" onclick="DLRAuction.editRosterSize()">Edit</button>` : ""}
       </div>
-      <div class="auc-teams-list">
-        ${_rosterData.map(team => {
-          const mainCount = Math.max(0, (team.players||[]).length - (team.reserve||[]).length - (team.taxi||[]).length);
-          const openSpots = Math.max(0, maxRoster - mainCount);
-          const isMe      = team.roster_id === _myRosterId;
+      <div class="auc-teams-grid">
+        ${sorted.map(t => {
+          const isMe      = Number(t.roster_id) === Number(_myRosterId);
+          const taxiSet   = new Set(t.taxi    || []);
+          const irSet     = new Set(t.reserve || []);
+          const active_   = (t.players||[]).filter(id => !taxiSet.has(id) && !irSet.has(id)).length;
+          const committed = _getCommitted(active, t.roster_id);
 
-          const activeNoms = active.filter(a => a.nominatedBy === team.roster_id);
-          const activeBids = active.filter(a => {
-            const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-            return bids.some(b => b.rosterId === team.roster_id);
+          // Leading auctions (winning bids)
+          const leading = active.filter(a => {
+            const l = _computeLeader(a);
+            return Number(l.rosterId) === Number(t.roster_id);
           });
-          const committed = activeBids.reduce((sum, a) => {
-            const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-            const mine = bids.filter(b => b.rosterId === team.roster_id);
-            return sum + (mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0);
-          }, 0);
+          const openSpots = Math.max(0, maxRoster - active_ - leading.length);
+          const spotsColor = openSpots === 0 ? "var(--color-red)" : openSpots <= 2 ? "var(--color-gold)" : "var(--color-text)";
 
-          // Cap: prefer salary module data, fall back to Sleeper waiver budget
-          const cap       = team.remainingCap ?? (team.faab != null ? team.faab : null);
-          const available = cap != null ? cap - committed : null;
-          const capPct    = team.capTotal > 0 ? Math.min(100, (team.capSpent||0) / team.capTotal * 100) : 0;
-          const capColor  = capPct >= 95 ? "var(--color-red)" : capPct >= 80 ? "var(--color-gold)" : "var(--color-green)";
+          // Cap
+          const baseCap   = t.remainingCap ?? t.faab ?? null;
+          const available = baseCap != null ? Math.max(0, baseCap - committed) : null;
+          const maxBase   = Math.max(...sorted.map(x => x.remainingCap ?? x.faab ?? 0), 1);
+          const barPct    = baseCap != null ? Math.round(baseCap / maxBase * 100) : 0;
+
+          // My active bids
+          const myBids = active.filter(a => {
+            const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+            return bids.some(b => Number(b.rosterId) === Number(t.roster_id));
+          });
 
           return `
-            <div class="auc-team-row ${isMe ? "auc-team-row--mine" : ""}"
-              onclick="DLRAuction.toggleTeamDetail(${team.roster_id})">
-              <div class="auc-team-header-row">
-                <div class="auc-team-name">${_esc(team.teamName)}${isMe ? ` <span class="dim" style="font-size:.7rem">(you)</span>` : ""}</div>
-                <div class="dim" style="font-size:.72rem">${team.wins}–${team.losses}</div>
+            <div class="auc-team-card ${isMe ? "auc-team-card--me" : ""}">
+              <div class="auc-team-card-header">
+                <div class="auc-team-card-name">${_esc(t.teamName)}</div>
+                ${isMe ? `<span class="auc-you-badge">You</span>` : ""}
               </div>
-              <div class="auc-team-stats">
-                <span class="auc-stat-pill ${openSpots===0?"auc-stat-pill--full":""}">
-                  👥 ${mainCount}/${maxRoster} · <strong>${openSpots} open</strong>
-                </span>
-                ${team.capTotal > 0 ? `
-                  <span class="auc-stat-pill" style="color:${capColor}">
-                    💰 ${_fmtSal(team.capSpent||0)} / ${_fmtSal(team.capTotal)} used
-                  </span>
-                  <span class="auc-stat-pill" style="color:${available!=null&&available<0?"var(--color-red)":"var(--color-green)"}">
-                    ${available!=null ? `✓ ${_fmtSal(Math.max(0,available))} avail` : `${_fmtSal(cap??0)} cap`}
-                  </span>
-                ` : cap != null ? `<span class="auc-stat-pill">💰 ${_fmtSal(cap)} cap</span>` : ""}
-                ${committed ? `<span class="auc-stat-pill auc-stat-pill--warn">🔥 ${_fmtSal(committed)} committed</span>` : ""}
-                ${activeNoms.length ? `<span class="auc-stat-pill">🏷 ${activeNoms.length} nom${activeNoms.length!==1?"s":""}</span>` : ""}
-                ${activeBids.length ? `<span class="auc-stat-pill">⬆ ${activeBids.length} bid${activeBids.length!==1?"s":""}</span>` : ""}
+              <div class="auc-team-stats-grid">
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Balance</div>
+                  <div class="auc-tstat-val" style="color:var(--color-green)">${baseCap != null ? _fmtSal(baseCap) : "—"}</div>
+                </div>
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Committed</div>
+                  <div class="auc-tstat-val" style="color:${committed > 0 ? "var(--color-gold)" : "var(--color-text-dim)"}">${_fmtSal(committed)}</div>
+                </div>
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Available</div>
+                  <div class="auc-tstat-val" style="color:var(--color-green)">${available != null ? _fmtSal(available) : "—"}</div>
+                </div>
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Active Bids</div>
+                  <div class="auc-tstat-val" style="color:${myBids.length > 0 ? "var(--color-gold)" : "var(--color-text-dim)"}">${myBids.length}</div>
+                </div>
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Winning</div>
+                  <div class="auc-tstat-val" style="color:${leading.length > 0 ? "var(--color-green)" : "var(--color-text-dim)"}">${leading.length}</div>
+                </div>
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Open Spots</div>
+                  <div class="auc-tstat-val" style="color:${spotsColor}">${openSpots}</div>
+                </div>
               </div>
-              <div id="team-detail-${team.roster_id}" style="display:none;margin-top:var(--space-3)"></div>
+              ${leading.length > 0 ? `
+              <div class="auc-team-winning">
+                Winning: ${leading.map(a => {
+                  const pp = _players[a.playerId] || {};
+                  const pname = pp.last_name || a.playerName || "?";
+                  const price = _computeLeader(a).displayBid;
+                  return `<span style="color:var(--color-green);font-weight:600">${_esc(pname)} ${_fmtSal(price)}</span>`;
+                }).join(", ")}
+              </div>` : ""}
+              ${baseCap != null ? `
+              <div class="auc-team-bar-bg">
+                <div class="auc-team-bar-fill" style="width:${barPct}%"></div>
+              </div>` : ""}
             </div>`;
         }).join("")}
       </div>`;
+  }
+
+  function _getCommitted(activeAuctions, rosterId) {
+    return activeAuctions.reduce((sum, a) => {
+      const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+      const mine = bids.filter(b => Number(b.rosterId) === Number(rosterId));
+      return sum + (mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0);
+    }, 0);
   }
 
   function toggleTeamDetail(rosterId) {
