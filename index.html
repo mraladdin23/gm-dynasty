@@ -163,7 +163,7 @@
     <nav class="top-nav">
       <div class="nav-brand">
         <span class="nav-logo">🏆</span>
-        <span class="nav-title">Dynasty Locker Room</span>
+        <span class="nav-title">DLR</span>
       </div>
       <div class="nav-links">
         <a href="#" class="nav-link active" data-view="locker">My Locker</a>
@@ -174,7 +174,31 @@
         <span id="nav-username" class="nav-username"></span>
         <button id="nav-logout-btn" class="btn-icon" title="Sign Out">⬡</button>
       </div>
+      <!-- Mobile hamburger -->
+      <button class="nav-hamburger" id="nav-hamburger" onclick="DLRNav.toggle()" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
     </nav>
+    <!-- Mobile drawer -->
+    <div class="nav-drawer" id="nav-drawer">
+      <div class="nav-drawer-section">
+        <div class="nav-drawer-label">Views</div>
+        <a href="#" class="nav-drawer-item" data-view="locker" onclick="DLRNav.go('locker')">🏠 My Locker</a>
+        <a href="#" class="nav-drawer-item" data-view="hallway" onclick="DLRNav.go('hallway')">🚪 Hallway</a>
+        <a href="#" class="nav-drawer-item" data-view="trophies" onclick="DLRNav.go('trophies')">🏆 Trophy Room</a>
+      </div>
+      <div class="nav-drawer-section">
+        <div class="nav-drawer-label">Quick Actions</div>
+        <a href="#" class="nav-drawer-item" id="drawer-career-btn">📊 Career Stats</a>
+        <a href="#" class="nav-drawer-item" id="drawer-players-btn">📋 My Players</a>
+        <a href="#" class="nav-drawer-item" id="drawer-edit-btn">✏ Edit Profile</a>
+        <a href="#" class="nav-drawer-item" id="drawer-leagues-btn">⚙ Manage Leagues</a>
+      </div>
+      <div class="nav-drawer-section">
+        <a href="#" class="nav-drawer-item nav-drawer-item--danger" id="drawer-logout-btn">⬡ Sign Out</a>
+      </div>
+    </div>
+    <div class="nav-drawer-backdrop hidden" id="nav-drawer-backdrop" onclick="DLRNav.close()"></div>
 
     <div id="view-locker" class="app-view active">
       <div class="locker-container">
@@ -190,9 +214,11 @@
               <p id="locker-tagline" class="locker-tagline">Dynasty GM</p>
               <div class="locker-stats-row" id="locker-stats-row"></div>
             </div>
+            <!-- Global auction pill visible on mobile next to avatar -->
+            <div id="global-auc-pill" class="locker-auc-pill-mobile"></div>
           </div>
           <div class="locker-header-actions">
-            <div id="global-auc-pill"></div>
+            <div id="global-auc-pill-desktop" class="global-auc-desktop"></div>
             <button class="btn-secondary btn-sm" id="career-summary-btn" title="Career Summary">📊 Career Stats</button>
             <button class="btn-secondary btn-sm" id="player-report-btn" title="Cross-League Player Report">📋 My Players</button>
             <button class="btn-secondary btn-sm" id="edit-profile-btn">✏ Edit Profile</button>
