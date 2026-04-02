@@ -194,6 +194,7 @@ const GMDB = (() => {
       thirdPlace,
       playoffAppearances: playoffs,
       leaguesPlayed:  values.length,
+      seasonsPlayed:  new Set(values.map(l => l.season).filter(Boolean)).size,
       winPct:         0,
       dynastyScore:   0
     };
@@ -290,7 +291,9 @@ const GMDB = (() => {
     const path = `users/${username.toLowerCase()}/leagueMeta/${leagueKey}`;
     console.log("[GMDB] saveLeagueMetaEntry path:", path, "| meta:", JSON.stringify(meta));
     await GMD.child(path).set(meta);
-    console.log("[GMDB] saveLeagueMetaEntry done");
+    // Immediate readback to verify write succeeded
+    const verify = await GMD.child(path).once("value");
+    console.log("[GMDB] readback:", JSON.stringify(verify.val()));
   }
 
   // ── Salary cap data — uses SDK ref for auth ──────────────

@@ -240,6 +240,9 @@ const DLRPlayerReport = (() => {
         <button class="pr-tab" onclick="DLRPlayerReport.switchTab('gems', this)">
           Available Gems <span class="pr-tab-count">${unowned.length}</span>
         </button>
+        <button class="pr-tab" onclick="DLRPlayerReport.switchTab('watchlist', this)">
+          ★ Watchlist
+        </button>
       </div>
 
       <!-- Pos filter -->
@@ -259,6 +262,11 @@ const DLRPlayerReport = (() => {
       <div id="pr-tab-gems" class="pr-player-list" style="display:none;">
         <div class="pr-gems-note">Top available players not on any of your ${totalLeagues} rosters. Sorted by ADP.</div>
         ${unowned.map((p, i) => _gemRow(p, i + 1)).join("")}
+      </div>
+
+      <!-- Watchlist (hidden) -->
+      <div id="pr-tab-watchlist" class="pr-player-list" style="display:none;">
+        <div id="pr-watchlist-body"><div class="detail-loading"><div class="spinner"></div><span>Loading watchlist…</span></div></div>
       </div>
     `;
   }
@@ -316,12 +324,57 @@ const DLRPlayerReport = (() => {
   function switchTab(tabId, btn) {
     document.querySelectorAll(".pr-tab").forEach(t => t.classList.remove("pr-tab--active"));
     btn?.classList.add("pr-tab--active");
-    document.getElementById("pr-tab-owned").style.display = tabId === "owned" ? "" : "none";
-    document.getElementById("pr-tab-gems").style.display  = tabId === "gems"  ? "" : "none";
-    // Reset pos filter to ALL
-    document.querySelectorAll(".pr-pos-btn").forEach(b => b.classList.remove("pr-pos-btn--active"));
-    document.querySelector(".pr-pos-btn")?.classList.add("pr-pos-btn--active");
-    _applyPosFilter("ALL", tabId === "gems" ? "pr-tab-gems" : "pr-tab-owned");
+    document.getElementById("pr-tab-owned").style.display     = tabId === "owned"     ? "" : "none";
+    document.getElementById("pr-tab-gems").style.display      = tabId === "gems"      ? "" : "none";
+    document.getElementById("pr-tab-watchlist").style.display = tabId === "watchlist" ? "" : "none";
+
+    if (tabId === "watchlist") {
+      _loadWatchlistTab();
+    } else {
+      // Reset pos filter to ALL
+      document.querySelectorAll(".pr-pos-btn").forEach(b => b.classList.remove("pr-pos-btn--active"));
+      document.querySelector(".pr-pos-btn")?.classList.add("pr-pos-btn--active");
+      _applyPosFilter("ALL", tabId === "gems" ? "pr-tab-gems" : "pr-tab-owned");
+    }
+  }
+
+  async function _loadWatchlistTab() {
+    const el = document.getElementById("pr-watchlist-body");
+    if (!el) return;
+    try {
+      const raw = await DLRIDB.get("dlr_watchlist").catch(() => null);
+      const wl  = raw ? JSON.parse(raw) : {};
+      const entries = Object.entries(wl);
+      if (!entries.length) {
+        el.innerHTML = `<div class="pr-gems-note">No players on your watchlist yet.<br>Click ☆ on any player card to add them.</div>`;
+        return;
+      }
+      const players = await DLRPlayers.load();
+      el.innerHTML = entries.map(([pid, info]) => {
+        const p     = players[pid] || {};
+        const name  = p.first_name ? `${p.first_name} ${p.last_name}` : (info.name || pid);
+        const pos   = (p.fantasy_positions?.[0] || p.position || info.pos || "?").toUpperCase();
+        const team  = p.team || "FA";
+        const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+        return `
+          <div class="pr-player-row" data-pos="${pos}"
+            onclick="DLRPlayerCard.show('${pid}','${_escAttr(name)}')">
+            <img class="pr-player-photo"
+              src="https://sleepercdn.com/content/nfl/players/thumb/${pid}.jpg"
+              onerror="this.style.display='none'" loading="lazy"/>
+            <span class="pr-pos-tag" style="background:${color}22;color:${color};border:1px solid ${color}55">${pos}</span>
+            <div class="pr-player-info">
+              <div class="pr-player-name">${_esc(name)}</div>
+              <div class="pr-player-meta">${team}</div>
+            </div>
+            <button class="pc-watch-btn pc-watch-btn--active"
+              onclick="event.stopPropagation();DLRPlayerCard.show('${pid}','${_escAttr(name)}')"
+              title="View player">★</button>
+          </div>`;
+      }).join("");
+    } catch(e) {
+      el.innerHTML = `<div class="pr-gems-note" style="color:var(--color-red)">Could not load watchlist: ${e.message}</div>`;
+    }
   }
 
   function filterPos(pos, btn) {

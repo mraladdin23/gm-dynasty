@@ -229,6 +229,8 @@ document.querySelectorAll(".nav-link").forEach(link => {
     link.classList.add("active");
     document.getElementById(`view-${view}`)?.classList.add("active");
     AppState.currentView = view;
+    if (view === "hallway") DLRHallway.init();
+    if (view === "trophies") DLRTrophyRoom.init();
   });
 });
 

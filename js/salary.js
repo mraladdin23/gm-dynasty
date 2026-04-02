@@ -630,17 +630,20 @@ const DLRSalaryCap = (() => {
   }
 
   function _buildCSVTemplate() {
-    // team_name is for reference only — import matches by player_id
     const rows = ["player_id,player_name,nfl_team,fantasy_team,salary,years,holdout"];
     const salMap = _getSalaryMap();
     (_rosterData||[]).forEach(team => {
-      const sm = salMap[team.username] || {};
-      [...team.players, ...team.reserve, ...team.taxi].forEach(pid => {
+      const sm  = salMap[team.username] || {};
+      // Deduplicate — Sleeper's team.players already contains IR and taxi players
+      const seen = new Set();
+      const allPids = [...(team.players||[]), ...(team.reserve||[]), ...(team.taxi||[])];
+      allPids.forEach(pid => {
+        if (seen.has(pid)) return;
+        seen.add(pid);
         const p     = _players[pid] || {};
         const name  = p.first_name ? `${p.first_name} ${p.last_name}` : pid;
         const nfl   = p.team || "FA";
         const entry = sm[pid] || {};
-        // Quote names with commas; keep salary as plain integer
         rows.push(`${pid},"${name}",${nfl},"${team.teamName}",${entry.salary||0},${entry.years||1},${entry.holdout?"true":"false"}`);
       });
     });

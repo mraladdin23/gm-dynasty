@@ -43,21 +43,36 @@ const Profile = (() => {
 
   async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
     if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
-    const mflUsername = emailOrUsername.trim().split("@")[0]; // strip @domain if email entered
+    const mflUsername = emailOrUsername.trim().split("@")[0];
 
-    const rawResults = await MFLAPI.importUserLeagues(mflUsername, leagueIds);
-    if (!rawResults.length) {
-      throw new Error("No MFL leagues found. Make sure your league IDs are entered correctly.");
+    // If no league IDs given, search MFL by username across recent years
+    let ids = leagueIds.filter(Boolean);
+    if (!ids.length) {
+      const currentYear = new Date().getFullYear();
+      const years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
+      const found = new Set();
+      for (const year of years) {
+        try {
+          const results = await MFLAPI.searchLeagues(mflUsername, String(year));
+          results.forEach(l => { if (l.leagueId) found.add(String(l.leagueId)); });
+        } catch(e) { console.warn(`[MFL] search ${year}:`, e.message); }
+      }
+      ids = [...found];
+      if (!ids.length) throw new Error(`No MFL leagues found for username "${mflUsername}". Check your username or add league IDs manually.`);
     }
 
-    // Convert flat results array → leaguesMap object expected by GMDB.saveLeagues
+    const rawResults = await MFLAPI.importUserLeagues(mflUsername, ids);
+    if (!rawResults.length) {
+      throw new Error("No MFL leagues found. Make sure your username matches what's shown on MFL.");
+    }
+
     const leaguesMap = {};
     for (const r of rawResults) {
       const key = `mfl_${r.year}_${r.leagueId}`;
       leaguesMap[key] = {
         platform:       "mfl",
         leagueId:       String(r.leagueId),
-        franchiseId:    `mfl__${r.leagueId}`,   // stable anchor across seasons
+        franchiseId:    `mfl__${r.leagueId}`,
         leagueName:     r.leagueName || `League ${r.leagueId}`,
         season:         String(r.year),
         leagueType:     _detectMFLLeagueType(r.leagueName || ""),
@@ -77,10 +92,7 @@ const Profile = (() => {
       };
     }
 
-    await GMDB.linkPlatform(gmdUsername, "mfl", {
-      mflUsername,
-      linked: true
-    });
+    await GMDB.linkPlatform(gmdUsername, "mfl", { mflUsername, linked: true });
     await GMDB.saveLeagues(gmdUsername, leaguesMap);
     await GMDB.recomputeStats(gmdUsername);
     return { leagues: leaguesMap, mflUsername };
@@ -741,17 +753,18 @@ const Profile = (() => {
     });
 
     const wantArchived  = _activeFilters.has("archived");
+    const wantAll       = _activeFilters.size === 0; // no filters = show everything
     const otherFilters  = new Set([..._activeFilters].filter(f => f !== "archived"));
 
-    // Pool to filter from: if archived selected, include archived; if not, only active
-    // If BOTH archived and other filters selected, search across both pools
     let pool = [];
-    if (wantArchived && otherFilters.size === 0) {
-      pool = archived; // only archived
+    if (wantAll) {
+      pool = [...active, ...archived]; // "All" = show everything
+    } else if (wantArchived && otherFilters.size === 0) {
+      pool = archived;
     } else if (wantArchived && otherFilters.size > 0) {
-      pool = [...active, ...archived]; // both pools
+      pool = [...active, ...archived];
     } else {
-      pool = active; // default: active only
+      pool = active;
     }
 
     const filtered = _applyFranchiseFilter(pool, otherFilters);
@@ -1033,9 +1046,11 @@ const Profile = (() => {
   }
 
   async function _saveLeagueLabelModal() {
-    const modal    = document.getElementById("league-label-modal");
+    const modal     = document.getElementById("league-label-modal");
     const leagueKey = modal?.dataset.leagueKey;
-    if (!leagueKey) { showToast("Error: no league key", "error"); return; }
+    console.log("[DLR] _saveLeagueLabelModal | leagueKey from dataset:", leagueKey, "| _currentUsername:", _currentUsername);
+    if (!leagueKey) { showToast("Error: no league key — please close and reopen the ⋯ options", "error"); return; }
+    if (!_currentUsername) { showToast("Error: not logged in", "error"); return; }
     const saveBtn  = document.getElementById("label-modal-save");
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
     const typeOverride = document.getElementById("label-type-override")?.value || "";
@@ -1325,9 +1340,9 @@ const Profile = (() => {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
     // Always set the league context so matchups/playoffs work independently
-    DLRStandings.setLeague(league.leagueId, league.platform);
+    DLRStandings.setLeague(league.leagueId, league.platform, league.season);
     if (tab === "overview")    _renderOverview(el, leagueKey, league);
-    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform);
+    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season);
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster") {
@@ -1343,7 +1358,7 @@ const Profile = (() => {
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
         DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2);
       } else {
-        DLRRoster.init(league.leagueId, league.platform);
+        DLRRoster.init(league.leagueId, league.platform, league.season);
       }
     }
     if (tab === "salary") {

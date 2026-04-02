@@ -21,12 +21,15 @@ const DLRRoster = (() => {
     TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af"
   };
 
+  let _season = null;
+
   // ── Init ─────────────────────────────────────────────────
-  async function init(leagueId, platform) {
-    _leagueId  = leagueId;
-    _platform  = platform || "sleeper";
+  async function init(leagueId, platform, season) {
+    _leagueId   = leagueId;
+    _platform   = platform || "sleeper";
+    _season     = season   || new Date().getFullYear().toString();
     _rosterData = null;
-    _filter    = "all";
+    _filter     = "all";
     _initToken++;
     const token = _initToken;
 
@@ -267,57 +270,41 @@ const DLRRoster = (() => {
 
   // ── Helpers ────────────────────────────────────────────
   async function _loadMFLData(leagueId, token) {
-    const el = document.getElementById("dtab-roster");
-    const season = new Date().getFullYear().toString();
+    const el     = document.getElementById("dtab-roster");
+    const season = _season || new Date().getFullYear().toString();
 
     _players = await DLRPlayers.load();
     if (token !== _initToken) return;
 
-    const [leagueData, standings, rosters] = await Promise.all([
-      MFLAPI.getLeague(leagueId, season),
-      MFLAPI.getStandings(leagueId, season),
-      MFLAPI.getRosters(leagueId, season)
-    ]);
+    // Single bundle fetch — contains everything
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
-    const franchises = leagueData?.franchises?.franchise || [];
-    const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
+    const bundleTeams = bundle.teams || [];
+    const standingsMap = MFLAPI.getStandingsMap(bundle);
 
-    const standingsMap = {};
-    (standings || []).forEach(s => { standingsMap[s.franchiseId] = s; });
+    const teams = bundleTeams.map(t => {
+      const s = standingsMap[t.id] || {};
+      // Get roster from bundle using helper
+      const mflPlayers = MFLAPI.getRoster(bundle, t.id);
 
-    // MFL rosters: { franchise: [{ id, player: [...] }] }
-    const rosterFranchises = rosters?.franchise ? (Array.isArray(rosters.franchise) ? rosters.franchise : [rosters.franchise]) : [];
-    const rosterMap = {};
-    rosterFranchises.forEach(f => {
-      const players = f.player ? (Array.isArray(f.player) ? f.player : [f.player]) : [];
-      rosterMap[f.id] = players;
-    });
-
-    const teams = franchiseArr.map(f => {
-      const s = standingsMap[f.id] || {};
-      const mflPlayers = rosterMap[f.id] || [];
-
-      // Map MFL players to display format
-      // MFL player IDs are numeric and don't match Sleeper IDs
-      // We show position, name as-is from MFL
       const mainRoster = mflPlayers.filter(p => p.status !== "IR" && p.status !== "TAXI");
       const irRoster   = mflPlayers.filter(p => p.status === "IR");
       const taxiRoster = mflPlayers.filter(p => p.status === "TAXI");
 
       return {
-        roster_id:   f.id,
-        owner_id:    f.id,
-        teamName:    f.name || `Team ${f.id}`,
-        username:    (f.owner_name || f.id).toLowerCase(),
-        avatar:      null,
-        mflPlayers:  mflPlayers,   // raw MFL players
-        players:     mainRoster.map(p => `mfl_${p.id}`),
-        reserve:     irRoster.map(p => `mfl_${p.id}`),
-        taxi:        taxiRoster.map(p => `mfl_${p.id}`),
-        wins:        s.wins   || 0,
-        losses:      s.losses || 0,
-        fpts:        s.ptsFor || 0
+        roster_id: t.id,
+        owner_id:  t.id,
+        teamName:  t.name || `Team ${t.id}`,
+        username:  (t.owner_name || t.ownerName || t.id).toLowerCase(),
+        avatar:    null,
+        mflPlayers,
+        players:   mainRoster.map(p => `mfl_${p.id}`),
+        reserve:   irRoster.map(p => `mfl_${p.id}`),
+        taxi:      taxiRoster.map(p => `mfl_${p.id}`),
+        wins:      s.wins   || 0,
+        losses:    s.losses || 0,
+        fpts:      s.ptsFor || 0
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
