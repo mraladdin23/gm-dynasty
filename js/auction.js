@@ -316,11 +316,13 @@ const DLRAuction = (() => {
 
   function _myActiveNoms() {
     const now = Date.now();
-    // Count auctions nominated BY my roster (or by commish on behalf of my roster)
-    return _auctions.filter(a =>
+    if (!_myRosterId) return 0;
+    const myId = Number(_myRosterId);
+    const active = _auctions.filter(a =>
       !a.cancelled && !a.processed && a.expiresAt > now &&
-      Number(a.nominatedBy) === Number(_myRosterId)
-    ).length;
+      Number(a.nominatedBy) === myId
+    );
+    return active.length;
   }
 
   function _myHasPassed(a) {
@@ -507,22 +509,19 @@ const DLRAuction = (() => {
           <span class="auc-lead-team ${winning ? "auc-lead-team--mine" : ""}">${_esc(leadTeam)}</span>
           <span class="auc-lead-price">${_fmtSal(leader.displayBid)}</span>
         </div>
-        <!-- Bid form -->
+        <!-- Single-line actions row -->
         <div class="auc-actions">
-          <div class="auc-bid-row-form">
-            <input type="number" id="bid-${a.id}" class="auc-bid-input"
-              value="${myBid || ""}" placeholder="Max bid" step="${MIN_INC()}" min="${MIN_BID()}"/>
-            <button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">
-              ${myBid > 0 ? "Update" : "Bid"}
-            </button>
-          </div>
-          ${_myHasPassed(a) ? `<span class="auc-passed-badge">✓ Passed</span>` :
-            !winning && myBid === 0 ? `<button class="auc-pass-btn btn-secondary btn-sm"
-              onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')" title="Pass">Pass</button>` : ""}
-          ${_isCommish ? `<div class="auc-comm-btns">
-            <button class="btn-secondary btn-sm" onclick="DLRAuction.claimAuction('${a.id}','${_escA(name)}')">✓ Claim</button>
-            <button class="btn-secondary btn-sm" style="color:var(--color-red)" onclick="DLRAuction.cancelAuction('${a.id}','${_escA(name)}')">✕ Cancel</button>
-          </div>` : ""}
+          <input type="number" id="bid-${a.id}" class="auc-bid-input"
+            value="${myBid || ""}" placeholder="Max bid" step="${MIN_INC()}" min="${MIN_BID()}"/>
+          <button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">${myBid > 0 ? "Update" : "Bid"}</button>
+          ${_myHasPassed(a)
+            ? `<span class="auc-passed-badge">✓ Passed</span>`
+            : !winning && myBid === 0
+              ? `<button class="auc-pass-btn btn-secondary btn-sm" onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')">Pass</button>`
+              : ""}
+          ${_isCommish ? `
+            <button class="btn-secondary btn-sm" onclick="DLRAuction.claimAuction('${a.id}','${_escA(name)}')">✓</button>
+            <button class="btn-secondary btn-sm" style="color:var(--color-red)" onclick="DLRAuction.cancelAuction('${a.id}','${_escA(name)}')">✕</button>` : ""}
         </div>
       </div>`;
   }
@@ -663,7 +662,7 @@ const DLRAuction = (() => {
 
   async function submitNomination(pid, playerName) {
     const maxBid     = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID();
-    const nomRosterId = parseInt(document.getElementById("auc-nom-team")?.value) || _myRosterId;
+    const nomRosterId = parseInt(document.getElementById("auc-nom-team")?.value) || parseInt(_myRosterId) || _myRosterId;
     const nomTeam    = _rosterData.find(r => r.roster_id === nomRosterId);
     const nomName    = nomTeam?.teamName || `Team ${nomRosterId}`;
     const btn        = document.querySelector("#auc-nom-modal .btn-primary");
@@ -698,13 +697,30 @@ const DLRAuction = (() => {
     const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
     const maxRoster = _settings.maxRosterSize || 25;
 
-    // Pull fresh cap data
+    // Pull fresh cap data from salary module (keyed by username)
     const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
-    if (capData) {
+    if (capData && Object.keys(capData).length > 0) {
       _rosterData.forEach(t => {
         const d = capData[t.username];
         if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
       });
+    }
+
+    // Fallback: load cap settings from Firebase if salary module has no data
+    if (!capData || Object.keys(capData).length === 0) {
+      const franchiseId = `mfl__${_leagueId}`;  // try both patterns
+      const salRef = GMD.child(`salaryCap/${_leagueKey}`);
+      salRef.child("settings").once("value").then(snap => {
+        const s = snap.val();
+        if (s?.capAmount) {
+          _rosterData.forEach(t => {
+            if (t.capTotal == null) t.capTotal = s.capAmount;
+          });
+          // Re-render with cap data
+          const el2 = document.getElementById("auc-content");
+          if (el2 && _viewMode === "teams") _renderTeams(el2);
+        }
+      }).catch(() => {});
     }
 
     // Sort: my team first, then by available cap desc
