@@ -9,33 +9,28 @@ const DLRPlayerCard = (() => {
   let _year      = 2025;
   let _weekCache = {};
 
-  // Watchlist stored in DLRIDB under "dlr_watchlist" key
-  const WATCH_KEY = "dlr_watchlist";
+  const WATCH_KEY = "dlr_watchlist_v2";
 
-  async function _getWatchlist() {
-    try {
-      const res = await DLRIDB.get(WATCH_KEY);
-      return res ? JSON.parse(res) : {};
-    } catch(e) { return {}; }
+  function _getWatchlist() {
+    try { return JSON.parse(localStorage.getItem(WATCH_KEY) || "{}"); } catch(e) { return {}; }
+  }
+  function _saveWatchlist(wl) {
+    try { localStorage.setItem(WATCH_KEY, JSON.stringify(wl)); } catch(e) {}
   }
 
-  async function _saveWatchlist(wl) {
-    try { await DLRIDB.set(WATCH_KEY, JSON.stringify(wl)); } catch(e) {}
-  }
-
-  async function _updateWatchBtn() {
+  function _updateWatchBtn() {
     const btn = document.getElementById("pc-watch-btn");
     if (!btn || !_playerId) return;
-    const wl      = await _getWatchlist();
+    const wl      = _getWatchlist();
     const watching = !!wl[_playerId];
     btn.textContent = watching ? "★" : "☆";
     btn.title       = watching ? "Remove from watchlist" : "Add to watchlist";
     btn.classList.toggle("pc-watch-btn--active", watching);
   }
 
-  async function toggleWatch() {
+  function toggleWatch() {
     if (!_playerId) return;
-    const wl = await _getWatchlist();
+    const wl = _getWatchlist();
     if (wl[_playerId]) {
       delete wl[_playerId];
       showToast("Removed from watchlist");
@@ -45,7 +40,7 @@ const DLRPlayerCard = (() => {
       wl[_playerId] = { name, pos: p.fantasy_positions?.[0] || p.position, addedAt: Date.now() };
       showToast("Added to watchlist ★");
     }
-    await _saveWatchlist(wl);
+    _saveWatchlist(wl);
     _updateWatchBtn();
   }
 

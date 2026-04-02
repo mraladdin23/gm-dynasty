@@ -123,14 +123,19 @@ const DLRDraft = (() => {
                || drafts.find(d => d.type !== "startup")
                || drafts[drafts.length - 1];
 
-    // Fetch picks + roster/user data + traded picks in parallel
-    const [picks, rosters, users, tradedPicks] = await Promise.all([
+    // Fetch picks + roster/user data + traded picks for this specific draft
+    // Use /v1/draft/{draft_id} for authoritative slot_to_roster_id and draft_order
+    const [freshDraft, picks, rosters, users, tradedPicks] = await Promise.all([
+      _fetchDraftById(draft.draft_id),
       _fetchPicks(draft.draft_id),
       SleeperAPI.getRosters(leagueId),
       SleeperAPI.getLeagueUsers(leagueId),
-      _fetchTradedPicks(leagueId)
+      _fetchTradedPicksForDraft(draft.draft_id)
     ]);
     if (token !== _initToken) return;
+
+    // Merge fresh draft data (slot_to_roster_id may be more up to date)
+    const draftObj = { ...draft, ...freshDraft };
 
     // Build maps
     const userMap = {}, rosterMap = {};
@@ -149,9 +154,23 @@ const DLRDraft = (() => {
     // Get players from IndexedDB-backed cache
     const players = DLRPlayers.all();
 
-    _draftData = { draft, picks, rosterMap, players, tradedPicks: tradedPicks || [] };
+    _draftData = { draft: draftObj, picks, rosterMap, players, tradedPicks: tradedPicks || [] };
     if (token !== _initToken) return;
     _render(el);
+  }
+
+  async function _fetchDraftById(draftId) {
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/draft/${draftId}`);
+      return r.ok ? await r.json() : {};
+    } catch(e) { return {}; }
+  }
+
+  async function _fetchTradedPicksForDraft(draftId) {
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/draft/${draftId}/traded_picks`);
+      return r.ok ? await r.json() : [];
+    } catch(e) { return []; }
   }
 
   async function _fetchDrafts(leagueId) {

@@ -22,8 +22,14 @@ const DLRTrophyRoom = (() => {
       return;
     }
 
-    // Only leagues where the user actually managed a team
-    const managed = all.filter(l => l.teamName || l.myRosterId);
+    // Only leagues where the user actually played (has wins/losses or a team name that isn't just "My Team")
+    // Exclude leagues where they are commish-only with no record
+    const managed = all.filter(l => {
+      const hasRecord   = (l.wins || 0) + (l.losses || 0) > 0;
+      const hasTeamName = l.teamName && l.teamName !== "My Team" && l.teamName !== "";
+      const hasRosterId = !!l.myRosterId;
+      return hasRecord || hasTeamName || hasRosterId;
+    });
 
     const champs  = managed.filter(l => l.isChampion || l.playoffFinish === 1)
                            .sort((a,b) => (b.season||"").localeCompare(a.season||""));

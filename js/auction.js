@@ -33,6 +33,64 @@ const DLRAuction = (() => {
   const _auctRef     = (id) => GMD.child(`auctions/${_leagueKey}/bids/${id}`);
   const _settingsRef = () => GMD.child(`auctions/${_leagueKey}/settings`);
 
+  // ── Pre-init: load state so canNominate/isRostered work on all tabs ──
+  async function preInit(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform) {
+    // Don't reset if already initialized for this league
+    if (_leagueKey === leagueKey && _rosterData.length) return;
+
+    _leagueKey  = leagueKey;
+    _leagueId   = leagueId;
+    _platform   = platform || "sleeper";
+    _isCommish  = !!isCommish;
+    _myRosterId = myRosterId;
+    _myTeamName = myTeamName || "My Team";
+
+    // Load settings silently
+    try {
+      const snap = await _settingsRef().once("value");
+      if (snap.val()) _settings = { ..._settings, ...snap.val() };
+    } catch(e) {}
+
+    // Load roster data for isRostered() and canNominate()
+    if (leagueId && _platform === "sleeper") {
+      try {
+        const [rosters, users] = await Promise.all([
+          SleeperAPI.getRosters(leagueId),
+          SleeperAPI.getLeagueUsers(leagueId)
+        ]);
+        const userMap = {};
+        (users||[]).forEach(u => { userMap[u.user_id] = u; });
+        _rosterData = (rosters||[]).map(r => {
+          const u = userMap[r.owner_id] || {};
+          return {
+            roster_id: r.roster_id,
+            username:  (u.username||"").toLowerCase(),
+            teamName:  u.metadata?.team_name || u.display_name || `Team ${r.roster_id}`,
+            players:   r.players  || [],
+            reserve:   r.reserve  || [],
+            taxi:      r.taxi     || [],
+            wins:      r.settings?.wins   || 0,
+            losses:    r.settings?.losses || 0
+          };
+        });
+      } catch(e) { console.warn("[Auction] preInit roster load failed:", e.message); }
+    }
+
+    // Subscribe to live auctions for nom count
+    try {
+      _unsubFn?.();
+      const onVal = snap => {
+        const d = snap.val() || {};
+        _auctions = Object.values(d).map(a => ({
+          ...a,
+          bids: Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{})
+        }));
+      };
+      _listRef().on("value", onVal);
+      _unsubFn = () => _listRef().off("value", onVal);
+    } catch(e) {}
+  }
+
   // ── Init ──────────────────────────────────────────────────
   async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform) {
     _leagueKey   = leagueKey;
@@ -217,8 +275,11 @@ const DLRAuction = (() => {
 
   function _myActiveNoms() {
     const now = Date.now();
-    return _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now
-      && a.nominatedBy === _myRosterId).length;
+    // Count auctions nominated BY my roster (or by commish on behalf of my roster)
+    return _auctions.filter(a =>
+      !a.cancelled && !a.processed && a.expiresAt > now &&
+      Number(a.nominatedBy) === Number(_myRosterId)
+    ).length;
   }
 
   function _myHasPassed(a) {
@@ -399,6 +460,7 @@ const DLRAuction = (() => {
           <div class="auc-timer ${urgent ? "auc-timer--urgent" : ""}">
             <div class="auc-time-val">${_fmtTime(left)}</div>
             <div class="auc-time-lbl dim">${uniqueBidders} bidder${uniqueBidders !== 1 ? "s" : ""}</div>
+            <button class="auc-history-btn" onclick="event.stopPropagation();DLRAuction.showBidHistory('${a.id}')" title="Bid history">📜</button>
           </div>
         </div>
         <div class="auc-lead-row">
@@ -522,6 +584,19 @@ const DLRAuction = (() => {
     modal.className = "modal-overlay";
     modal.style.zIndex = "850";
     const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+
+    // Commish can nominate on behalf of any team
+    const teamSelector = _isCommish ? `
+      <div class="form-group">
+        <label>Nominating Team</label>
+        <select id="auc-nom-team">
+          ${_rosterData.map(t =>
+            `<option value="${t.roster_id}" ${t.roster_id === _myRosterId ? "selected" : ""}>${_esc(t.teamName)}</option>`
+          ).join("")}
+        </select>
+        <span class="field-hint">As commissioner you can nominate on behalf of any team.</span>
+      </div>` : `<input type="hidden" id="auc-nom-team" value="${_myRosterId}"/>`;
+
     modal.innerHTML = `
       <div class="modal-box modal-box--sm">
         <div class="modal-header">
@@ -537,10 +612,11 @@ const DLRAuction = (() => {
               <div class="dim" style="font-size:.78rem">${nflTeam}</div>
             </div>
           </div>
+          ${teamSelector}
           <div class="form-group" style="margin-top:var(--space-4)">
             <label>Opening Max Bid</label>
             <input type="number" id="auc-nom-bid" value="${MIN_BID}" step="100000" min="${MIN_BID}"/>
-            <span class="field-hint">Your proxy max bid — you'll only pay $1 more than the next highest bid.</span>
+            <span class="field-hint">Your proxy max — you only pay $1 more than the next highest bid.</span>
           </div>
         </div>
         <div class="modal-footer">
@@ -554,22 +630,30 @@ const DLRAuction = (() => {
   }
 
   async function submitNomination(pid, playerName) {
-    const maxBid = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID;
-    const btn    = document.querySelector("#auc-nom-modal .btn-primary");
+    const maxBid     = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID;
+    const nomRosterId = parseInt(document.getElementById("auc-nom-team")?.value) || _myRosterId;
+    const nomTeam    = _rosterData.find(r => r.roster_id === nomRosterId);
+    const nomName    = nomTeam?.teamName || `Team ${nomRosterId}`;
+    const btn        = document.querySelector("#auc-nom-modal .btn-primary");
     if (btn) { btn.textContent = "Starting…"; btn.disabled = true; }
     try {
       const id  = `auc_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
       const now = Date.now();
+      // Nomination IS the opening bid — bids array starts with nominator's bid
       await _auctRef(id).set({
         id, playerId: pid, playerName,
-        nominatedBy: _myRosterId, nominatorName: _myTeamName,
-        startTime: now, expiresAt: _nextExpiry(now),
-        bids: [{ rosterId: _myRosterId, maxBid, timestamp: now }],
+        nominatedBy:    nomRosterId,
+        nominatorName:  nomName,
+        nominatedByCommish: nomRosterId !== _myRosterId ? _myRosterId : null,
+        startTime: now,
+        expiresAt: _nextExpiry(now),
+        // Nomination counts as opening bid
+        bids: [{ rosterId: nomRosterId, maxBid, timestamp: now, isNomination: true }],
         processed: false, cancelled: false
       });
       document.getElementById("auc-nom-modal")?.remove();
       setView("live");
-      showToast(`${playerName} nominated ✓`);
+      showToast(`${playerName} nominated by ${nomName} ✓`);
     } catch(e) {
       if (btn) { btn.textContent = "Start Auction"; btn.disabled = false; }
       showToast("Nomination failed: " + e.message, "error");
@@ -850,6 +934,26 @@ const DLRAuction = (() => {
     const input  = document.getElementById(`bid-${auctionId}`);
     const maxBid = parseInt(input?.value) || 0;
     if (maxBid < MIN_BID) { showToast(`Minimum bid is ${_fmtSal(MIN_BID)}`, "error"); return; }
+
+    // Validate against current proxy leader
+    const auction = _auctions.find(a => a.id === auctionId);
+    if (auction) {
+      const leader = _computeLeader(auction);
+      const myCurrentMax = _myMaxBid(auction);
+      // Must beat the current display price if not already leading
+      if (leader.rosterId && leader.rosterId !== _myRosterId) {
+        if (maxBid <= leader.displayBid) {
+          showToast(`Bid must exceed current price of ${_fmtSal(leader.displayBid)}`, "error");
+          return;
+        }
+      }
+      // Must be higher than own existing max
+      if (myCurrentMax >= maxBid) {
+        showToast(`New max must exceed your current max of ${_fmtSal(myCurrentMax)}`, "error");
+        return;
+      }
+    }
+
     try {
       await _auctRef(auctionId).transaction(cur => {
         if (!cur || cur.cancelled || cur.processed) return;
@@ -859,8 +963,51 @@ const DLRAuction = (() => {
         cur.expiresAt = _nextExpiry(Date.now());
         return cur;
       });
-      showToast(`Bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
+      showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
     } catch(e) { showToast("Bid failed: " + e.message, "error"); }
+  }
+
+  function showBidHistory(auctionId) {
+    const a = _auctions.find(x => x.id === auctionId);
+    if (!a) return;
+    const bids = [...(Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{}))];
+    bids.sort((x, y) => y.timestamp - x.timestamp);
+    const p    = _players[a.playerId] || {};
+    const name = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || "Player");
+
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+    modal.style.zIndex = "860";
+    modal.innerHTML = `
+      <div class="modal-box modal-box--sm">
+        <div class="modal-header">
+          <h3>📜 Bid History — ${_esc(name)}</h3>
+          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div class="modal-body" style="padding:var(--space-4)">
+          ${!bids.length ? `<div class="dim">No bids yet.</div>` :
+            bids.map(b => {
+              const team = _rosterData.find(r => r.roster_id === b.rosterId);
+              const tName = team?.teamName || `Team ${b.rosterId}`;
+              const time  = new Date(b.timestamp).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+              const isNom = b.isNomination;
+              return `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
+                  <div>
+                    <span style="font-weight:600">${_esc(tName)}</span>
+                    ${isNom ? `<span class="dim" style="font-size:.7rem;margin-left:4px">(nomination)</span>` : ""}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:var(--space-3)">
+                    <span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(b.maxBid)}</span>
+                    <span class="dim" style="font-size:.72rem">${time}</span>
+                  </div>
+                </div>`;
+            }).join("")
+          }
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
   }
 
   async function claimAuction(auctionId, playerName) {
@@ -907,9 +1054,9 @@ const DLRAuction = (() => {
   }
 
   return {
-    init, reset, setView, setPos, setTeamFilter,
+    init, preInit, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
-    placeBid, claimAuction, cancelAuction, passAuction, isRostered,
+    placeBid, showBidHistory, claimAuction, cancelAuction, passAuction, isRostered,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
     canNominate
