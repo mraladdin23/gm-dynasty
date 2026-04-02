@@ -8,6 +8,7 @@ const DLRStandings = (() => {
 
   let _leagueId   = null;
   let _platform   = "sleeper";
+  let _season     = null;   // actual league season year (from stored data)
   let _leagueData = null;
   let _matchCache = {};
   let _historyLeagues = [];
@@ -26,41 +27,42 @@ const DLRStandings = (() => {
   }
 
   // Called when any tab in this league opens — sets context without loading data
-  function setLeague(leagueId, platform) {
+  function setLeague(leagueId, platform, season) {
     if (_leagueId !== leagueId) {
       // Different league — reset state
       reset();
     }
     _leagueId = leagueId;
     _platform = platform || "sleeper";
+    _season   = season   || null;
   }
-  async function init(leagueId, platform) {
+  async function init(leagueId, platform, season) {
     reset();
     _leagueId  = leagueId;
     _platform  = platform || "sleeper";
+    _season    = season   || null;
     const token = ++_initToken;
 
     const el = document.getElementById("dtab-standings");
     if (!el) return;
     el.innerHTML = _loadingHTML("Loading standings…");
 
-    // MFL standings via Cloudflare Worker
+    // MFL standings via Cloudflare Worker bundle
     if (_platform === "mfl") {
       try {
-        // Extract year from leagueId context — stored leagues have season field
-        const season = new Date().getFullYear().toString();
-        const [leagueData, standings] = await Promise.all([
-          MFLAPI.getLeague(leagueId, season),
-          MFLAPI.getStandings(leagueId, season)
-        ]);
+        const season = _season || new Date().getFullYear().toString();
+        const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
         if (token !== _initToken) return;
-        _renderMFLStandings(el, leagueData, standings, leagueId, season);
+        const standings = MFLAPI.normalizeStandings(bundle);
+        _renderMFLStandings(el, bundle.league, standings, leagueId, season);
       } catch(e) {
+        if (token !== _initToken) return;
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
           <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
           <div style="font-weight:600;margin-bottom:var(--space-2);">Could not load MFL standings</div>
           <div style="font-size:.85rem;color:var(--color-text-dim);">${e.message}<br>
-          View on <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${leagueId}" target="_blank" style="color:var(--color-gold);">MyFantasyLeague.com</a></div>
+          <a href="https://www42.myfantasyleague.com/${_season||new Date().getFullYear()}/home/${leagueId}"
+            target="_blank" style="color:var(--color-gold);">View on MFL ↗</a></div>
         </div>`;
       }
       return;
@@ -209,9 +211,18 @@ const DLRStandings = (() => {
     if (!el) return;
 
     if (_platform === "mfl") {
-      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
-        MFL matchups not yet available. <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${_leagueId}" target="_blank" style="color:var(--color-gold);">View on MFL →</a>
-      </div>`;
+      el.innerHTML = _loadingHTML("Loading MFL matchups…");
+      try {
+        const season = _season || new Date().getFullYear().toString();
+        const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
+        _renderMFLMatchups(el, bundle, season);
+      } catch(e) {
+        el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
+          <div style="margin-bottom:var(--space-2)">Could not load MFL matchups: ${e.message}</div>
+          <a href="https://www42.myfantasyleague.com/${_season||new Date().getFullYear()}/home/${_leagueId}"
+            target="_blank" style="color:var(--color-gold)">View on MFL →</a>
+        </div>`;
+      }
       return;
     }
 
@@ -228,6 +239,85 @@ const DLRStandings = (() => {
 
     _renderMatchupsShell();
     loadMatchupsWeek(_leagueData?.week || 1);
+  }
+
+  function _renderMFLMatchups(el, bundle, season) {
+    const matchups = bundle?.matchups || [];
+    const teams    = bundle?.teams    || [];
+    const nameMap  = {};
+    teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+
+    // Find current/latest week
+    const weeks    = [...new Set(matchups.map(m => Number(m.week)))].sort((a,b) => b-a);
+    const curWeek  = weeks[0] || 1;
+    const weekMatchups = matchups.filter(m => Number(m.week) === curWeek);
+
+    if (!weekMatchups.length) {
+      el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
+        No matchup data yet for ${season}.<br>
+        <a href="https://www42.myfantasyleague.com/${season}/home/${_leagueId}"
+          target="_blank" style="color:var(--color-gold)">View on MFL →</a>
+      </div>`;
+      return;
+    }
+
+    // Week selector pills
+    const weekPills = weeks.slice(0, 17).reverse().map(w =>
+      `<button class="season-pill ${w === curWeek ? "season-pill--current" : ""}"
+        onclick="DLRStandings._renderMFLWeek(${w})">${w}</button>`
+    ).join("");
+
+    el.innerHTML = `
+      <div class="matchups-week-bar">
+        <span class="matchups-week-label">Week:</span>
+        <div class="matchups-week-pills" style="overflow-x:auto;flex-wrap:nowrap">${weekPills}</div>
+      </div>
+      <div id="mfl-matchups-grid" class="matchups-grid">
+        ${_mflMatchupCards(weekMatchups, nameMap)}
+      </div>`;
+
+    // Store bundle on module for week switching
+    _mflBundle = bundle;
+    _mflNameMap = nameMap;
+  }
+
+  let _mflBundle  = null;
+  let _mflNameMap = {};
+
+  function _renderMFLWeek(week) {
+    const el = document.getElementById("mfl-matchups-grid");
+    if (!el || !_mflBundle) return;
+    const weekMatchups = (_mflBundle.matchups || []).filter(m => Number(m.week) === Number(week));
+    el.innerHTML = _mflMatchupCards(weekMatchups, _mflNameMap);
+    // Update pill highlight
+    document.querySelectorAll(".matchups-week-pills .season-pill").forEach(b => {
+      b.classList.toggle("season-pill--current", b.textContent.trim() === String(week));
+    });
+  }
+
+  function _mflMatchupCards(matchups, nameMap) {
+    return matchups.map(m => {
+      const home  = m.home || m.homeTeam || {};
+      const away  = m.away || m.awayTeam || {};
+      const hId   = home.teamId || home.id || "";
+      const aId   = away.teamId || away.id || "";
+      const hSc   = parseFloat(home.score || 0);
+      const aSc   = parseFloat(away.score || 0);
+      const hWin  = hSc > aSc;
+      const aWin  = aSc > hSc;
+      return `
+        <div class="matchup-card">
+          <div class="matchup-team ${hWin ? "matchup-team--winner" : ""}">
+            <span class="matchup-name">${_esc(nameMap[hId] || hId || "TBD")}</span>
+            <span class="matchup-score">${hSc > 0 ? hSc.toFixed(2) : "—"}</span>
+          </div>
+          <div class="matchup-vs">vs</div>
+          <div class="matchup-team ${aWin ? "matchup-team--winner" : ""}">
+            <span class="matchup-name">${_esc(nameMap[aId] || aId || "TBD")}</span>
+            <span class="matchup-score">${aSc > 0 ? aSc.toFixed(2) : "—"}</span>
+          </div>
+        </div>`;
+    }).join("") || `<div class="dim" style="padding:var(--space-4)">No matchups this week.</div>`;
   }
 
   function _renderMatchupsShell() {
@@ -594,13 +684,9 @@ const DLRStandings = (() => {
   }
 
   return {
-    init,
-    reset,
-    setLeague,
-    refresh,
-    initMatchups,
-    loadMatchupsWeek,
-    initPlayoffs
+    init, reset, setLeague, refresh,
+    initMatchups, loadMatchupsWeek,
+    initPlayoffs, _renderMFLWeek
   };
 
 })();

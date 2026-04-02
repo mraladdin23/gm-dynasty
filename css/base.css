@@ -159,8 +159,14 @@ img { max-width: 100%; display: block; }
 }
 
 .btn-sm {
-  padding: var(--space-2) var(--space-4);
-  font-size: .85rem;
+  padding: var(--space-1) var(--space-3) !important;
+  font-size: .78rem !important;
+  width: auto !important;
+  min-width: unset !important;
+  display: inline-flex !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  font-family: var(--font-body) !important;
 }
 
 .btn-icon {

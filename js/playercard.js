@@ -9,6 +9,66 @@ const DLRPlayerCard = (() => {
   let _year      = 2025;
   let _weekCache = {};
 
+  // Watchlist stored in DLRIDB under "dlr_watchlist" key
+  const WATCH_KEY = "dlr_watchlist";
+
+  async function _getWatchlist() {
+    try {
+      const res = await DLRIDB.get(WATCH_KEY);
+      return res ? JSON.parse(res) : {};
+    } catch(e) { return {}; }
+  }
+
+  async function _saveWatchlist(wl) {
+    try { await DLRIDB.set(WATCH_KEY, JSON.stringify(wl)); } catch(e) {}
+  }
+
+  async function _updateWatchBtn() {
+    const btn = document.getElementById("pc-watch-btn");
+    if (!btn || !_playerId) return;
+    const wl      = await _getWatchlist();
+    const watching = !!wl[_playerId];
+    btn.textContent = watching ? "★" : "☆";
+    btn.title       = watching ? "Remove from watchlist" : "Add to watchlist";
+    btn.classList.toggle("pc-watch-btn--active", watching);
+  }
+
+  async function toggleWatch() {
+    if (!_playerId) return;
+    const wl = await _getWatchlist();
+    if (wl[_playerId]) {
+      delete wl[_playerId];
+      showToast("Removed from watchlist");
+    } else {
+      const p    = DLRPlayers.get(_playerId) || {};
+      const name = p.first_name ? `${p.first_name} ${p.last_name}` : _playerId;
+      wl[_playerId] = { name, pos: p.fantasy_positions?.[0] || p.position, addedAt: Date.now() };
+      showToast("Added to watchlist ★");
+    }
+    await _saveWatchlist(wl);
+    _updateWatchBtn();
+  }
+
+  function nominateFromCard() {
+    if (!_playerId) return;
+    const p    = DLRPlayers.get(_playerId) || {};
+    const name = p.first_name ? `${p.first_name} ${p.last_name}` : _playerId;
+    const pos  = (p.fantasy_positions?.[0] || p.position || "?").toUpperCase();
+    const team = p.team || "FA";
+    close();
+    if (typeof DLRAuction !== "undefined") {
+      DLRAuction.openNominate(_playerId, name, pos, team);
+    }
+  }
+
+  function _updateNominateBtn() {
+    const btn = document.getElementById("pc-nominate-btn");
+    if (!btn) return;
+    // Show nominate if auction is active and user can nominate
+    const canNom = typeof DLRAuction !== "undefined" && DLRAuction.canNominate?.();
+    btn.style.display = canNom ? "" : "none";
+  }
+
   const YEARS = [2022, 2023, 2024, 2025];
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
@@ -33,6 +93,8 @@ const DLRPlayerCard = (() => {
 
     const p = DLRPlayers.get(playerId);
     _renderHeader(p, playerId, playerName);
+    _updateWatchBtn();
+    _updateNominateBtn();
     await _loadYear(_year);
   }
 
@@ -59,7 +121,15 @@ const DLRPlayerCard = (() => {
             <div id="pc-team"  class="pc-team"></div>
             <div id="pc-bio"   class="pc-bio"></div>
           </div>
-          <button class="modal-close" onclick="DLRPlayerCard.close()">✕</button>
+          <div class="pc-header-actions">
+            <button id="pc-watch-btn" class="pc-watch-btn" onclick="DLRPlayerCard.toggleWatch()"
+              title="Add to watchlist">☆</button>
+            <button id="pc-nominate-btn" class="pc-nominate-btn btn-primary btn-sm"
+              style="display:none"
+              onclick="DLRPlayerCard.nominateFromCard()"
+              title="Nominate for auction">🏷 Nominate</button>
+            <button class="modal-close" onclick="DLRPlayerCard.close()">✕</button>
+          </div>
         </div>
         <div class="pc-year-tabs" id="pc-year-tabs"></div>
         <div class="pc-season-summary" id="pc-season-summary"></div>
@@ -258,6 +328,6 @@ const DLRPlayerCard = (() => {
     if (logEl) logEl.innerHTML = `<div class="pc-no-weekly">No stats available${year ? ` for ${year}` : ""}.</div>`;
   }
 
-  return { show, close, setYear };
+  return { show, close, setYear, toggleWatch, nominateFromCard };
 
 })();
