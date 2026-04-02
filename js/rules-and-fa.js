@@ -305,10 +305,16 @@ const DLRFreeAgents = (() => {
           const color = POS_COLOR[p.pos] || "#9ca3af";
           const pts   = p.pts ? p.pts.toFixed(0) : "—";
           const rank  = p.rank < 9999 ? `#${p.rank}` : "—";
+          const canNom = _auctionEnabled
+            ? (typeof DLRAuction !== "undefined" && DLRAuction.canNominate?.())
+            : false;
           const nomBtn = _auctionEnabled
-            ? `<button class="fa-nom-btn btn-primary btn-sm"
-                onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
-                title="Nominate for auction">🏷 Nominate</button>`
+            ? (canNom
+                ? `<button class="fa-nom-btn btn-primary btn-sm"
+                    onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
+                    title="Nominate for auction">🏷</button>`
+                : `<button class="fa-nom-btn btn-secondary btn-sm" disabled
+                    title="Max nominations reached" style="opacity:.4">🏷</button>`)
             : "";
           return `
             <div class="fa-player-row" onclick="DLRPlayerCard.show('${p.pid}', '${_escAttr(p.name)}')">

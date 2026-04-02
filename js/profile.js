@@ -100,7 +100,9 @@ const Profile = (() => {
       _leagueMeta = await GMDB.getLeagueMeta(username);
       const groups = Object.values(_leagueMeta).filter(m => m?.commishGroup).map(m => m.commishGroup);
       const labels = Object.values(_leagueMeta).filter(m => m?.customLabel).map(m => m.customLabel);
-      console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries, groups: [${groups.join(", ")}], labels: [${labels.join(", ")}]`);
+      console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries`);
+      console.log("[DLR] leagueMeta raw:", JSON.stringify(_leagueMeta).slice(0, 500));
+      console.log("[DLR] groups found:", groups, "labels found:", labels);
     } catch (err) {
       console.error("[DLR] loadLeagueMeta FAILED:", err.message);
       _leagueMeta = {};
@@ -1024,39 +1026,48 @@ const Profile = (() => {
     const typeEl = document.getElementById("label-type-override");
     if (typeEl) typeEl.value = meta.leagueTypeOverride || "";
 
-    document.getElementById("label-modal-save").onclick = async () => {
-      const saveBtn = document.getElementById("label-modal-save");
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
-      const typeOverride = document.getElementById("label-type-override")?.value || "";
-      try {
-        await saveLeagueMeta(_currentUsername, leagueKey, {
-          customLabel:          document.getElementById("label-custom-input").value.trim(),
-          commishGroup:         document.getElementById("label-commish-input").value.trim(),
-          pinned:               document.getElementById("label-pin-check").checked,
-          archived:             document.getElementById("label-archive-check").checked,
-          auctionEnabled:       document.getElementById("label-auction-check").checked,
-          auctionIncludePicks:  document.getElementById("label-picks-check").checked,
-          leagueTypeOverride:   typeOverride || null
-        });
-        // Force re-read from Firebase so filters reflect latest groups/labels
-        await loadLeagueMeta(_currentUsername);
-        // Apply override to in-memory league data immediately
-        if (typeOverride && _allLeagues[leagueKey]) {
-          _allLeagues[leagueKey].leagueType = typeOverride;
-        }
-        closeLabelModal();
-        _renderLeagueFilters();
-        _renderLeagues();
-        if (_detailLeagueKey === leagueKey) _buildDetailTabs(leagueKey);
-        showToast("League updated ✓");
-      } catch(err) {
-        console.error("[DLR] saveLeagueMeta failed:", err);
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
-        showToast("Save failed: " + err.message, "error");
-      }
-    };
-
+    document.getElementById("label-modal-save").onclick = () => _saveLeagueLabelModal();
     document.getElementById("league-label-modal").classList.remove("hidden");
+    // Store the current leagueKey so _saveLeagueLabelModal can access it
+    document.getElementById("league-label-modal").dataset.leagueKey = leagueKey;
+  }
+
+  async function _saveLeagueLabelModal() {
+    const modal    = document.getElementById("league-label-modal");
+    const leagueKey = modal?.dataset.leagueKey;
+    if (!leagueKey) { showToast("Error: no league key", "error"); return; }
+    const saveBtn  = document.getElementById("label-modal-save");
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+    const typeOverride = document.getElementById("label-type-override")?.value || "";
+    const commishGroup = document.getElementById("label-commish-input")?.value?.trim() || "";
+    const customLabel  = document.getElementById("label-custom-input")?.value?.trim()  || "";
+    console.log(`[DLR] Saving meta for key: ${leagueKey} | group: "${commishGroup}" | label: "${customLabel}"`);
+    try {
+      await saveLeagueMeta(_currentUsername, leagueKey, {
+        customLabel,
+        commishGroup,
+        pinned:              document.getElementById("label-pin-check")?.checked     || false,
+        archived:            document.getElementById("label-archive-check")?.checked || false,
+        auctionEnabled:      document.getElementById("label-auction-check")?.checked || false,
+        auctionIncludePicks: document.getElementById("label-picks-check")?.checked   || false,
+        leagueTypeOverride:  typeOverride || null
+      });
+      // Force re-read from Firebase to verify
+      await loadLeagueMeta(_currentUsername);
+      console.log("[DLR] After save, leagueMeta:", JSON.stringify(_leagueMeta).slice(0, 600));
+      if (typeOverride && _allLeagues[leagueKey]) {
+        _allLeagues[leagueKey].leagueType = typeOverride;
+      }
+      closeLabelModal();
+      _renderLeagueFilters();
+      _renderLeagues();
+      if (_detailLeagueKey === leagueKey) _buildDetailTabs(leagueKey);
+      showToast("League updated ✓");
+    } catch(err) {
+      console.error("[DLR] saveLeagueMeta failed:", err);
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
+      showToast("Save failed: " + err.message, "error");
+    }
   }
 
   function closeLabelModal() {
@@ -1539,6 +1550,7 @@ const Profile = (() => {
     saveProfileEdits,
     openLeagueLabelModal,
     closeLabelModal,
+    saveLeagueLabelModal: _saveLeagueLabelModal,
     initArchivedToggle,
     openLeagueDetail,
     closeLeagueDetail,
