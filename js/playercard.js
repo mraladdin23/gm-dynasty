@@ -64,9 +64,14 @@ const DLRPlayerCard = (() => {
   function _updateNominateBtn() {
     const btn = document.getElementById("pc-nominate-btn");
     if (!btn) return;
-    // Show nominate if auction is active and user can nominate
-    const canNom = typeof DLRAuction !== "undefined" && DLRAuction.canNominate?.();
-    btn.style.display = canNom ? "" : "none";
+    if (typeof DLRAuction === "undefined" || !DLRAuction.canNominate?.()) {
+      btn.style.display = "none";
+      return;
+    }
+    // Don't show nominate if player is already on a roster
+    const isRostered = typeof DLRAuction !== "undefined" && DLRAuction.isRostered?.(_playerId);
+    btn.style.display = (isRostered ? "none" : "");
+    btn.title = "Nominate for auction";
   }
 
   const YEARS = [2022, 2023, 2024, 2025];

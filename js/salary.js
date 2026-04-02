@@ -164,7 +164,6 @@ const DLRSalaryCap = (() => {
           <button class="sal-tab ${_viewMode==="overview" ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('overview')">Overview</button>
           <button class="sal-tab ${_viewMode==="roster"  ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('roster')">Rosters</button>
           <button class="sal-tab ${_viewMode==="toppaid" ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('toppaid')">Top Paid</button>
-          <button class="sal-tab ${_viewMode==="caproom" ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('caproom')">Cap Room</button>
           ${_isCommish ? `
             <button class="sal-tab ${_viewMode==="bulk"    ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('bulk')">📤 Bulk Upload</button>
             <button class="sal-tab ${_viewMode==="settings"?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('settings')">⚙ Settings</button>
@@ -261,54 +260,69 @@ const DLRSalaryCap = (() => {
     }
     const salaryMap = _getTeamSalaryMap();
     const POS = ["QB","RB","WR","TE","K"];
+    const irPct  = (_settings.irCapPct   ?? 75) / 100;
+    const txPct  = (_settings.taxiCapPct ?? 0)  / 100;
+
     const teams = [..._rosterData].map(t => {
-      const sm  = salaryMap[t.username] || {};
-      const seen = new Set();
-      const allPids = [...(t.players||[]), ...(t.reserve||[]), ...(t.taxi||[])];
+      const sm    = salaryMap[t.username] || {};
+      const irSet = new Set(t.reserve || []);
+      const txSet = new Set(t.taxi    || []);
+      const seen  = new Set();
       const byPos = {};
       POS.forEach(p => { byPos[p] = 0; });
       byPos["OTHER"] = 0;
-      let total = 0;
+      let capSpent = 0;
+
+      // Deduplicate — players array already includes reserve/taxi in Sleeper
+      const allPids = [...new Set([...(t.players||[]), ...(t.reserve||[]), ...(t.taxi||[])])];
       allPids.forEach(pid => {
         if (seen.has(pid)) return; seen.add(pid);
-        const sal = sm[pid]?.salary || 0;
+        const rawSal = sm[pid]?.salary || 0;
+        // Apply cap percentage based on slot
+        const effectiveSal = irSet.has(pid) ? rawSal * irPct
+                           : txSet.has(pid) ? rawSal * txPct
+                           : rawSal;
         const pos = _playerPos(pid);
-        if (POS.includes(pos)) byPos[pos] += sal;
-        else byPos["OTHER"] += sal;
-        total += sal;
+        const grp = POS.includes(pos) ? pos : "OTHER";
+        byPos[grp] += effectiveSal;
+        capSpent   += effectiveSal;
       });
-      return { ...t, byPos, total };
-    }).sort((a, b) => b.total - a.total);
+      capSpent = Math.round(capSpent);
+      return { ...t, byPos, capSpent };
+    }).sort((a, b) => b.capSpent - a.capSpent);
 
     const posColors = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#f97316", OTHER:"#6b7280" };
     const cap = _settings.cap || 0;
 
     el.innerHTML = `
+      ${irPct < 1 || txPct < 1 ? `<div class="sal-cap-note dim" style="font-size:.75rem;margin-bottom:var(--space-3)">
+        IR counts at ${Math.round(irPct*100)}% · Taxi counts at ${Math.round(txPct*100)}% of salary toward cap
+      </div>` : ""}
       <div class="sal-overview-grid">
         ${teams.map(t => {
-          const avail = cap - t.total;
-          const usedPct = cap > 0 ? Math.min(100, t.total / cap * 100) : 0;
-          // Stacked segments
+          const avail   = cap - t.capSpent;
+          const usedPct = cap > 0 ? Math.min(100, t.capSpent / cap * 100) : 0;
+          const capColor = usedPct >= 95 ? "var(--color-red)" : usedPct >= 80 ? "var(--color-gold)" : "var(--color-green)";
+
           const segments = [...POS, "OTHER"].map(pos => {
             const pct = cap > 0 ? (t.byPos[pos] / cap * 100) : 0;
-            return pct > 0.5 ? `<div class="sal-ov-seg" style="width:${pct.toFixed(1)}%;background:${posColors[pos]}" title="${pos}: ${_fmtMoney(t.byPos[pos])}"></div>` : "";
+            return pct > 0.3 ? `<div class="sal-ov-seg" style="width:${pct.toFixed(1)}%;background:${posColors[pos]}" title="${pos}: ${_fmtMoney(Math.round(t.byPos[pos]))}"></div>` : "";
           }).join("");
-          // Available segment
           const availPct = Math.max(0, 100 - usedPct);
-          const segAvail = availPct > 0 ? `<div class="sal-ov-seg" style="width:${availPct.toFixed(1)}%;background:var(--color-border)"></div>` : "";
+          const segAvail = availPct > 0.3 ? `<div class="sal-ov-seg" style="width:${availPct.toFixed(1)}%;background:rgba(255,255,255,.07)"></div>` : "";
 
           return `
             <div class="sal-ov-card" onclick="DLRSalaryCap.selectTeam('${t.username}');DLRSalaryCap.setView('roster')">
               <div class="sal-ov-header">
                 <div class="sal-ov-name">${_esc(t.teamName)}</div>
-                <div class="sal-ov-total" style="color:${avail<0?"var(--color-red)":"var(--color-text)"}">${_fmtMoney(t.total)}</div>
+                <div class="sal-ov-total" style="color:${capColor}">${_fmtMoney(t.capSpent)}</div>
               </div>
               <div class="sal-ov-bar">${segments}${segAvail}</div>
               <div class="sal-ov-meta">
-                <span class="${avail<0?"sal-ov-over":"sal-ov-avail"}">${avail<0?"−":""}${_fmtMoney(Math.abs(avail))} ${avail<0?"over":"avail"}</span>
+                <span class="${avail<0?"sal-ov-over":"sal-ov-avail"}">${avail<0?"−":""}${_fmtMoney(Math.abs(avail))} ${avail<0?"over cap":"available"}</span>
                 <div class="sal-ov-pos-row">
                   ${[...POS,"OTHER"].filter(p => t.byPos[p] > 0).map(p =>
-                    `<span class="sal-ov-pos-pill" style="color:${posColors[p]}">${p} ${_fmtMoney(t.byPos[p])}</span>`
+                    `<span class="sal-ov-pos-pill" style="color:${posColors[p]}">${p} ${_fmtMoney(Math.round(t.byPos[p]))}</span>`
                   ).join("")}
                 </div>
               </div>
@@ -317,7 +331,7 @@ const DLRSalaryCap = (() => {
       </div>
       <div class="sal-ov-legend">
         ${[...POS,"OTHER"].map(p => `<span><span class="sal-ov-dot" style="background:${posColors[p]}"></span>${p}</span>`).join("")}
-        <span><span class="sal-ov-dot" style="background:var(--color-border)"></span>Available</span>
+        <span><span class="sal-ov-dot" style="background:rgba(255,255,255,.1)"></span>Available</span>
       </div>`;
   }
 

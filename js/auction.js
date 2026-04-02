@@ -277,6 +277,11 @@ const DLRAuction = (() => {
     return s;
   }
 
+  function isRostered(playerId) {
+    if (!playerId) return false;
+    return _rosteredSet().has(String(playerId));
+  }
+
   function _alreadyNominated() {
     const now = Date.now();
     return new Set(_auctions
@@ -651,7 +656,6 @@ const DLRAuction = (() => {
     const el = document.getElementById(`team-detail-${rosterId}`);
     if (!el) return;
     const isOpen = el.style.display !== "none";
-    // Close all others
     document.querySelectorAll("[id^='team-detail-']").forEach(d => { d.style.display = "none"; });
     if (isOpen) return;
 
@@ -660,46 +664,55 @@ const DLRAuction = (() => {
 
     const now    = Date.now();
     const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
-    const sm     = _getSalaryMapForTeam(team.username);
-    const bids   = active.filter(a => {
+    const won    = _auctions.filter(a => a.processed && a.winner === rosterId);
+
+    // Active bids this team has placed
+    const activeBids = active.filter(a => {
       const bs = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
       return bs.some(b => b.rosterId === rosterId);
     });
 
-    const renderPlayer = (pid, slot) => {
-      const p    = _players[pid] || {};
-      const name = p.first_name ? `${p.first_name} ${p.last_name}` : pid;
+    // Players won this auction session
+    const wonItems = won.map(a => {
+      const p    = _players[a.playerId] || {};
+      const name = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
       const pos  = (p.fantasy_positions?.[0]||p.position||"?").toUpperCase();
-      const sal  = sm[pid]?.salary || 0;
-      const clr  = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-      const slotLabel = slot === "ir" ? " · IR" : slot === "taxi" ? " · Taxi" : "";
-      return `<div style="display:flex;align-items:center;gap:var(--space-2);padding:3px 0;font-size:.78rem">
-        <span style="font-size:.6rem;padding:1px 4px;border-radius:3px;border:1px solid;background:${clr}22;color:${clr};border-color:${clr}55">${pos}</span>
-        <span style="flex:1">${_esc(name)}${slotLabel}</span>
-        ${sal ? `<span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(sal)}</span>` : ""}
-      </div>`;
-    };
+      const clr  = {QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d"}[pos]||"#9ca3af";
+      const winningBid = a.winningBid ?? a.finalBid ?? 0;
+      return `
+        <div class="auc-won-row">
+          <span class="auc-pos-dot" style="background:${clr}22;color:${clr};border-color:${clr}55">${pos}</span>
+          <span class="auc-won-name">${_esc(name)}</span>
+          <span class="auc-won-price">✓ ${_fmtSal(winningBid)}</span>
+        </div>`;
+    }).join("");
 
-    const bidItems = bids.map(a => {
+    // Active bids summary
+    const bidItems = activeBids.map(a => {
       const p    = _players[a.playerId] || {};
       const name = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
       const bs   = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-      const mine = bs.filter(b => b.rosterId === rosterId);
-      const myMax = mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0;
-      return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:.78rem;padding:3px 0">
-        <span>${_esc(name)}</span>
-        <span style="font-family:var(--font-display);font-weight:700;color:var(--color-red)">${_fmtSal(myMax)} max</span>
-      </div>`;
+      const myMax = Math.max(...bs.filter(b => b.rosterId === rosterId).map(b => b.maxBid), 0);
+      return `
+        <div class="auc-won-row">
+          <span style="flex:1">${_esc(name)}</span>
+          <span style="color:var(--color-gold);font-weight:700">${_fmtSal(myMax)} max</span>
+        </div>`;
     }).join("");
 
     el.style.display = "";
     el.innerHTML = `
-      <div style="border-top:1px solid var(--color-border);padding-top:var(--space-3);margin-top:var(--space-2)">
-        ${bids.length ? `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Active Bids</div>${bidItems}` : ""}
-        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-dim);margin-top:var(--space-2);margin-bottom:var(--space-2)">Roster</div>
-        ${(team.players||[]).filter(pid => !(team.taxi||[]).includes(pid) && !(team.reserve||[]).includes(pid)).map(pid => renderPlayer(pid, "main")).join("")}
-        ${(team.reserve||[]).length ? (team.reserve.map(pid => renderPlayer(pid, "ir")).join("")) : ""}
-        ${(team.taxi||[]).length ? (team.taxi.map(pid => renderPlayer(pid, "taxi")).join("")) : ""}
+      <div class="auc-team-detail-body">
+        ${activeBids.length ? `
+          <div class="auc-detail-section-label">⬆ Active Bids</div>
+          ${bidItems}` : ""}
+        ${wonItems ? `
+          <div class="auc-detail-section-label" style="margin-top:var(--space-2)">🏷 Won This Auction</div>
+          ${wonItems}` : ""}
+        ${!activeBids.length && !wonItems ? `
+          <div style="font-size:.78rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) 0">
+            No active bids or wins yet.
+          </div>` : ""}
       </div>`;
   }
 
@@ -896,7 +909,7 @@ const DLRAuction = (() => {
   return {
     init, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
-    placeBid, claimAuction, cancelAuction, passAuction,
+    placeBid, claimAuction, cancelAuction, passAuction, isRostered,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
     canNominate

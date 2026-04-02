@@ -205,6 +205,36 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
   }
 });
 
+// ── Yahoo: detect OAuth callback ─────────────────────────
+// When Yahoo redirects back with ?yahoo=connected in URL
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("yahoo") === "connected") {
+    // Clean URL without reload
+    window.history.replaceState({}, "", window.location.pathname);
+    // Will be handled after auth loads — flag for pickup
+    sessionStorage.setItem("dlr_yahoo_pending", "1");
+  }
+})();
+
+// ── Yahoo: connect button ─────────────────────────────────
+document.getElementById("yahoo-link-btn")?.addEventListener("click", async () => {
+  const btn      = document.getElementById("yahoo-link-btn");
+  const statusEl = document.getElementById("yahoo-status");
+  const profile  = Auth.getCurrentProfile();
+  if (!profile) return;
+
+  btn.disabled    = true;
+  btn.textContent = "Redirecting to Yahoo…";
+  statusEl.textContent = "Opening Yahoo login…";
+
+  // Store current username so we can resume after OAuth redirect
+  sessionStorage.setItem("dlr_yahoo_linking_user", profile.username);
+
+  // Redirect to Yahoo OAuth — worker handles the redirect
+  YahooAPI.login();
+});
+
 // ── Onboarding: save & continue ───────────────────────────
 document.getElementById("onboarding-save-btn")?.addEventListener("click", async () => {
   setLoading(true, "Saving your dynasty...");

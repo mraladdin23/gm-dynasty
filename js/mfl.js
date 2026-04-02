@@ -136,5 +136,96 @@ const MFLAPI = (() => {
     return bundle;
   }
 
-  return { fetchJSON, searchUserLeagues, getLeagueBundle };
+  // ── searchLeagues alias (old name still used by profile.js) ─
+  async function searchLeagues(username, year) {
+    return searchUserLeagues(username, year);
+  }
+
+  // ── Derived helpers from bundle ──────────────────────────
+  function normalizeStandings(bundle) {
+    return (bundle.standings || []).map((s, i) => ({
+      teamId:     s.teamId,
+      wins:       s.wins       || 0,
+      losses:     s.losses     || 0,
+      ties:       s.ties       || 0,
+      ptsFor:     s.ptsFor     || 0,
+      ptsAgainst: s.ptsAgainst || 0,
+      rank:       s.rank       || (i + 1)
+    }));
+  }
+
+  function getStandingsMap(bundle) {
+    const map = {};
+    (bundle.standings || []).forEach(s => { map[s.teamId] = s; });
+    return map;
+  }
+
+  function getRoster(bundle, teamId) {
+    const roster = (bundle.rosters || []).find(r => r.teamId === teamId);
+    if (!roster) return [];
+    return (roster.players || [])
+      .map(pid => (bundle.players || []).find(p => p.id === pid))
+      .filter(Boolean);
+  }
+
+  function findMyFranchise(bundle, username) {
+    const search = (username || "").toLowerCase();
+    return (bundle.teams || []).find(t =>
+      (t.owner_name || "").toLowerCase().includes(search) ||
+      (t.name       || "").toLowerCase().includes(search)
+    ) || null;
+  }
+
+  // ── importUserLeagues: search by username + fetch bundles ─
+  async function importUserLeagues(username, leagueIds = []) {
+    const currentYear = new Date().getFullYear();
+    const years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
+    const results = [];
+
+    for (const leagueId of leagueIds) {
+      for (const year of years) {
+        try {
+          const bundle = await getLeagueBundle(leagueId, year);
+          if (!bundle?.teams?.length && !bundle?.league) continue;
+
+          const me = findMyFranchise(bundle, username);
+          if (!me) continue;
+
+          const standings = normalizeStandings(bundle);
+          const mySt = standings.find(s => s.teamId === me.id);
+
+          results.push({
+            leagueId:    String(leagueId),
+            year:        String(year),
+            leagueName:  bundle.league?.name || `League ${leagueId}`,
+            teamName:    me.name,
+            franchiseId: me.id,
+            wins:        mySt?.wins        || 0,
+            losses:      mySt?.losses      || 0,
+            ties:        mySt?.ties        || 0,
+            ptsFor:      mySt?.ptsFor      || 0,
+            ptsAgainst:  mySt?.ptsAgainst  || 0,
+            rank:        mySt?.rank        || null,
+            totalTeams:  (bundle.teams || []).length || 12,
+            playoffFinish: null
+          });
+        } catch(e) {
+          console.warn(`[MFL] Skip ${leagueId}/${year}:`, e.message);
+        }
+      }
+    }
+    return results;
+  }
+
+  return {
+    fetchJSON,
+    searchUserLeagues,
+    searchLeagues,       // alias
+    getLeagueBundle,
+    normalizeStandings,
+    getStandingsMap,
+    getRoster,
+    findMyFranchise,
+    importUserLeagues
+  };
 })();

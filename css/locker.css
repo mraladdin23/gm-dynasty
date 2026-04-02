@@ -5233,3 +5233,222 @@ select option { background: var(--color-bg-2); }
   }
   .league-row { min-height:50px; }
 }
+
+/* ── Auction team detail expand ──────────────────────── */
+.auc-team-detail-body {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+.auc-detail-section-label {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.auc-won-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .78rem;
+  padding: 3px 0;
+}
+.auc-pos-dot {
+  font-size: .58rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.auc-won-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auc-won-price { color: var(--color-green); font-family: var(--font-display); font-weight: 700; flex-shrink: 0; }
+
+
+/* ── Trophy timeline rows ─────────────────────────────── */
+.tr-year-row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.tr-year-row:last-child { border-bottom: none; }
+.tr-year-badge {
+  font-family: var(--font-display);
+  font-size: .88rem;
+  font-weight: 800;
+  color: var(--color-gold);
+  width: 42px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.tr-year-leagues { display: flex; flex-direction: column; gap: var(--space-2); flex: 1; min-width: 0; }
+.tr-tl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: .85rem;
+}
+.tr-tl-name {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tr-tl-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.tr-tl-rec  { font-family: var(--font-display); font-size: .8rem; font-weight: 700; }
+.tr-tl-icon { font-size: .9rem; }
+.tr-tl-type {
+  font-size: .62rem;
+  color: var(--color-text-dim);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* Fix trophy shelf — uniform card sizes, horizontal scroll if needed */
+.tr-trophy-shelf {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.tr-trophy-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  width: 140px;        /* fixed width — all cards same size */
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  transition: transform var(--transition);
+}
+.tr-trophy-card:hover { transform: translateY(-2px); }
+.tr-trophy-icon  { font-size: 2.2rem; line-height: 1; }
+.tr-trophy-season {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 800;
+}
+.tr-trophy-league {
+  font-size: .72rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+.tr-trophy-rec  { font-size: .68rem; }
+.tr-trophy-team { font-size: .62rem; }
+
+@media (max-width: 640px) {
+  .tr-trophy-shelf { flex-wrap: nowrap; overflow-x: auto; padding-bottom: var(--space-2); }
+  .tr-tl-row { font-size: .8rem; }
+}
+
+
+/* ── Mobile: no overflow-x anywhere ─────────────────────
+   Everything must fit within viewport width.
+   Scrollable containers use overflow-x:auto internally
+   but the page body never scrolls horizontally.        */
+@media (max-width: 640px) {
+  /* Hard stops on the page itself */
+  html, body { overflow-x: hidden; max-width: 100vw; }
+  .app-view  { overflow-x: hidden; }
+
+  /* League row — collapse fixed columns */
+  .league-row { flex-wrap: nowrap; overflow: hidden; }
+  .lrow-name-col { min-width: 0; flex: 1; overflow: hidden; }
+  .lrow-name { font-size: .78rem; }
+  .lrow-season-col { width: 48px; flex-shrink: 0; }
+
+  /* Salary tabs — scroll within container, don't push page */
+  .sal-view-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .sal-view-tabs::-webkit-scrollbar { display: none; }
+  .sal-tab { white-space: nowrap; flex-shrink: 0; font-size: .68rem; padding: 4px 8px; }
+
+  /* Overview grid — single column */
+  .sal-overview-grid { grid-template-columns: 1fr !important; }
+  .sal-ov-card { width: 100%; box-sizing: border-box; }
+
+  /* Team pills — scroll, don't wrap */
+  .sal-team-pills { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .sal-team-pills::-webkit-scrollbar { display: none; }
+
+  /* Cap room rows — shrink name column */
+  .sal-cr-name { width: 80px; font-size: .72rem; }
+  .sal-cr-numbers { width: 72px; }
+
+  /* Roster player row — constrain */
+  .sal-player-row { gap: var(--space-1); padding: var(--space-1) var(--space-2); }
+  .sal-player-name { max-width: 100px; font-size: .75rem; }
+
+  /* Auction cards — no overflow */
+  .auc-card { overflow: hidden; }
+  .auc-lead-row { flex-wrap: wrap; gap: var(--space-1); }
+  .auc-bid-input { width: 80px !important; font-size: .8rem; }
+  .auc-team-stats { flex-wrap: wrap; gap: 3px; }
+  .auc-stat-pill { font-size: .62rem; padding: 2px 5px; }
+
+  /* Draft board — internal scroll only */
+  .draft-board-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  .draft-board { min-width: unset; width: max-content; }
+  .draft-pick { min-width: 60px; max-width: 72px; padding: 4px 3px; }
+  .draft-pick-name { font-size: .55rem; }
+  .draft-pick-team { font-size: .5rem; }
+  .draft-round-label { font-size: .72rem; }
+
+  /* Standings table — internal scroll */
+  .standings-table-wrap { overflow-x: auto; max-width: 100%; }
+  .standings-table { min-width: 320px; font-size: .7rem; }
+  .standings-table td, .standings-table th { padding: 5px 4px; }
+
+  /* Detail panel tab content — no overflow */
+  .detail-tab-content { padding: var(--space-3) !important; overflow-x: hidden; }
+
+  /* Modal — full width, no overflow */
+  .modal-box, .modal-box--sm, .modal-box--wide {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  /* Player card */
+  .pc-modal-box { max-width: 100%; overflow-x: hidden; }
+  .pc-stats-grid { grid-template-columns: repeat(3, 1fr); gap: var(--space-2); }
+  .pc-stat-val { font-size: .95rem; }
+
+  /* Analytics */
+  .az-list-row { font-size: .78rem; }
+  .az-bar-wrap { min-width: 0; flex: 1; }
+
+  /* Hallway */
+  .hallway-grid { grid-template-columns: 1fr !important; }
+  .hallway-locker { overflow: hidden; }
+
+  /* Free agents — make row compact */
+  .fa-player-row { padding: var(--space-1) var(--space-2); gap: 5px; }
+  .fa-nom-btn { width: 26px !important; height: 26px !important; font-size: .75rem !important; }
+
+  /* Trophy room */
+  .tr-trophy-shelf { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+  .tr-trophy-card { width: 130px; flex-shrink: 0; }
+  .tr-tl-row { font-size: .78rem; }
+  .tr-tl-name { max-width: 150px; }
+}
+
