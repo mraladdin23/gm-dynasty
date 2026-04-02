@@ -577,6 +577,19 @@ const DLRAuction = (() => {
     const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
     const maxRoster = _settings.maxRosterSize || 30;
 
+    // Pull fresh cap data from salary module every render
+    const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
+    if (capData) {
+      _rosterData.forEach(team => {
+        const d = capData[team.username];
+        if (d) {
+          team.remainingCap = d.remaining;
+          team.capSpent     = d.spent;
+          team.capTotal     = d.cap;
+        }
+      });
+    }
+
     el.innerHTML = `
       <div style="margin-bottom:var(--space-3);font-size:.8rem;color:var(--color-text-dim)">
         Max roster size: <strong>${maxRoster}</strong> (active + IR, excl. taxi).
@@ -584,41 +597,47 @@ const DLRAuction = (() => {
       </div>
       <div class="auc-teams-list">
         ${_rosterData.map(team => {
-          // Active roster = players array minus reserve (IR) minus taxi
-          const mainCount  = Math.max(0, (team.players||[]).length - (team.reserve||[]).length - (team.taxi||[]).length);
-          const openSpots  = Math.max(0, maxRoster - mainCount);
-          const isMe       = team.roster_id === _myRosterId;
+          const mainCount = Math.max(0, (team.players||[]).length - (team.reserve||[]).length - (team.taxi||[]).length);
+          const openSpots = Math.max(0, maxRoster - mainCount);
+          const isMe      = team.roster_id === _myRosterId;
 
           const activeNoms = active.filter(a => a.nominatedBy === team.roster_id);
           const activeBids = active.filter(a => {
             const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
             return bids.some(b => b.rosterId === team.roster_id);
           });
-          const committed  = activeBids.reduce((sum, a) => {
+          const committed = activeBids.reduce((sum, a) => {
             const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
             const mine = bids.filter(b => b.rosterId === team.roster_id);
             return sum + (mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0);
           }, 0);
 
-          // FAAB = remaining cap from salary module (passed in via _rosterData.remainingCap)
-          // or waiver_budget if available from Sleeper
-          const faab      = team.remainingCap ?? (team.faab != null ? team.faab * 1_000_000 : null);
-          const available = faab != null ? faab - committed : null;
+          // Cap: prefer salary module data, fall back to Sleeper waiver budget
+          const cap       = team.remainingCap ?? (team.faab != null ? team.faab : null);
+          const available = cap != null ? cap - committed : null;
+          const capPct    = team.capTotal > 0 ? Math.min(100, (team.capSpent||0) / team.capTotal * 100) : 0;
+          const capColor  = capPct >= 95 ? "var(--color-red)" : capPct >= 80 ? "var(--color-gold)" : "var(--color-green)";
 
           return `
             <div class="auc-team-row ${isMe ? "auc-team-row--mine" : ""}"
-              onclick="DLRAuction.toggleTeamDetail(${team.roster_id})" style="cursor:pointer">
+              onclick="DLRAuction.toggleTeamDetail(${team.roster_id})">
               <div class="auc-team-header-row">
-                <div class="auc-team-name">${_esc(team.teamName)} ${isMe ? `<span class="dim" style="font-size:.72rem">(you)</span>` : ""}</div>
-                <div style="font-size:.72rem;color:var(--color-text-dim)">${team.wins}–${team.losses}</div>
+                <div class="auc-team-name">${_esc(team.teamName)}${isMe ? ` <span class="dim" style="font-size:.7rem">(you)</span>` : ""}</div>
+                <div class="dim" style="font-size:.72rem">${team.wins}–${team.losses}</div>
               </div>
               <div class="auc-team-stats">
-                <span class="auc-stat-pill ${openSpots === 0 ? "auc-stat-pill--full" : ""}">
+                <span class="auc-stat-pill ${openSpots===0?"auc-stat-pill--full":""}">
                   👥 ${mainCount}/${maxRoster} · <strong>${openSpots} open</strong>
                 </span>
-                ${faab != null ? `<span class="auc-stat-pill">💰 ${_fmtSal(faab)} cap</span>` : ""}
+                ${team.capTotal > 0 ? `
+                  <span class="auc-stat-pill" style="color:${capColor}">
+                    💰 ${_fmtSal(team.capSpent||0)} / ${_fmtSal(team.capTotal)} used
+                  </span>
+                  <span class="auc-stat-pill" style="color:${available!=null&&available<0?"var(--color-red)":"var(--color-green)"}">
+                    ${available!=null ? `✓ ${_fmtSal(Math.max(0,available))} avail` : `${_fmtSal(cap??0)} cap`}
+                  </span>
+                ` : cap != null ? `<span class="auc-stat-pill">💰 ${_fmtSal(cap)} cap</span>` : ""}
                 ${committed ? `<span class="auc-stat-pill auc-stat-pill--warn">🔥 ${_fmtSal(committed)} committed</span>` : ""}
-                ${available != null && committed ? `<span class="auc-stat-pill">✓ ${_fmtSal(available)} left</span>` : ""}
                 ${activeNoms.length ? `<span class="auc-stat-pill">🏷 ${activeNoms.length} nom${activeNoms.length!==1?"s":""}</span>` : ""}
                 ${activeBids.length ? `<span class="auc-stat-pill">⬆ ${activeBids.length} bid${activeBids.length!==1?"s":""}</span>` : ""}
               </div>

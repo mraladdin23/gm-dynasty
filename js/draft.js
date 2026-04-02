@@ -192,38 +192,29 @@ const DLRDraft = (() => {
       pickMap[key] = p;
     });
 
-    // Build slot owner map from original slot_to_roster_id
-    const slotOwners = {};
+    // Build slot owner map: key = "round-slot" using ORIGINAL (non-reversed) slot number
+    // so traded pick lookups are consistent regardless of snake direction
+    const slotOwners = {};  // "round-slot" → current owner roster_id (after trades)
+
     if (draft.slot_to_roster_id) {
       Object.entries(draft.slot_to_roster_id).forEach(([slot, rosterId]) => {
         for (let r = 1; r <= rounds; r++) {
-          const isReversed = isSnake && r % 2 === 0;
-          const pick = isReversed ? String(teams + 1 - Number(slot)) : String(slot);
-          slotOwners[`${r}-${pick}`] = rosterId;
+          slotOwners[`${r}-${slot}`] = rosterId;
         }
       });
     }
 
-    // Apply traded picks — most recent trade for a given round/slot wins
-    // Sleeper traded_picks: [{ season, round, roster_id (current owner), previous_owner_id, owner_id }]
-    if (tradedPicks && tradedPicks.length) {
-      // Sort by transaction order isn't available, but we can build the final state
-      // by processing all trades: owner_id = current owner, roster_id = original slot owner
-      const tradeMap = {}; // "round-originalSlot" → current_owner_roster_id
+    // Apply traded picks — Sleeper traded_picks format:
+    // { round, roster_id (original slot team), owner_id (current owner), previous_owner_id }
+    if (tradedPicks?.length) {
       tradedPicks.forEach(tp => {
-        // tp.round = round number, tp.roster_id = original slot owner, tp.owner_id = current owner
         if (!tp.round || !tp.roster_id) return;
-        // Find original slot for this roster
+        // Find the original draft slot for this roster_id
         const originalSlot = Object.entries(draft.slot_to_roster_id || {})
           .find(([, rid]) => String(rid) === String(tp.roster_id))?.[0];
         if (!originalSlot) return;
-        const isReversed = isSnake && tp.round % 2 === 0;
-        const pickSlot   = isReversed ? String(teams + 1 - Number(originalSlot)) : originalSlot;
-        const key        = `${tp.round}-${pickSlot}`;
-        tradeMap[key]    = tp.owner_id; // current owner after trade
+        slotOwners[`${tp.round}-${originalSlot}`] = tp.owner_id;
       });
-      // Apply overrides to slotOwners
-      Object.assign(slotOwners, tradeMap);
     }
 
     const draftTypeLabel = isSnake ? "🐍 Snake Draft" : "📋 Linear Draft";
@@ -232,32 +223,37 @@ const DLRDraft = (() => {
 
     let boardHTML = "";
     for (let r = 1; r <= rounds; r++) {
-      boardHTML += `
-        <div class="draft-round">
-          <div class="draft-round-label">Round ${r}</div>
-          <div class="draft-picks-row">`;
+      boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${r}</div><div class="draft-picks-row">`;
 
-      for (let slot = 1; slot <= teams; slot++) {
-        const isReversed  = isSnake && r % 2 === 0;
-        const pickSlot    = isReversed ? (teams + 1 - slot) : slot;
-        const key         = `${r}-${pickSlot}`;
-        const overallNum  = (r - 1) * teams + slot;
-        const pick        = pickMap[key];
-        const ownerRoster = slotOwners[key] ? rosterMap[slotOwners[key]] : null;
+      for (let display = 1; display <= teams; display++) {
+        // For snake, even rounds go right-to-left in display order
+        const isReversed = isSnake && r % 2 === 0;
+        // original slot = the slot in slot_to_roster_id (always 1..teams left to right)
+        const originalSlot = isReversed ? (teams + 1 - display) : display;
+        const overallNum   = (r - 1) * teams + display;
+        const key          = `${r}-${String(originalSlot)}`;
+
+        // Look up pick by round + original draft slot
+        const pick         = picks.find(p => p.round === r && p.draft_slot === originalSlot);
+        const currentOwner = slotOwners[key];
+        const originalOwner = draft.slot_to_roster_id?.[String(originalSlot)];
+        const isTraded     = currentOwner && String(currentOwner) !== String(originalOwner);
+        const ownerRoster  = currentOwner ? rosterMap[currentOwner] : null;
 
         if (pick?.metadata?.first_name) {
-          // Pick made
-          const pName = `${pick.metadata.first_name} ${pick.metadata.last_name}`;
-          const pos   = (pick.metadata.position || "—").toUpperCase();
-          const nfl   = pick.metadata.team || "FA";
-          const color = POS_COLOR[pos] || "#9ca3af";
+          // Pick has been made
+          const pName        = `${pick.metadata.first_name} ${pick.metadata.last_name}`;
+          const pos          = (pick.metadata.position || "—").toUpperCase();
+          const nfl          = pick.metadata.team || "FA";
+          const color        = POS_COLOR[pos] || "#9ca3af";
           const pickerRoster = rosterMap[pick.roster_id];
+          const pickLabel    = isSnake ? overallNum : `${r}.${String(originalSlot).padStart(2,"0")}`;
 
           boardHTML += `
             <div class="draft-pick draft-pick--filled"
-              onclick="DLRPlayerCard.show('${pick.player_id}', '${_escAttr(pName)}')"
+              onclick="DLRPlayerCard.show('${pick.player_id}','${_escAttr(pName)}')"
               title="${_esc(pName)} · ${pos} · ${nfl}">
-              <div class="draft-pick-num">${isSnake ? overallNum : `${r}.${String(pickSlot).padStart(2,"0")}`}</div>
+              <div class="draft-pick-num">${pickLabel}</div>
               <div class="draft-pick-player">
                 <div class="draft-pick-name">${_esc(pName)}</div>
                 <div class="draft-pick-meta">
@@ -268,16 +264,13 @@ const DLRDraft = (() => {
               <div class="draft-pick-team">${_esc(pickerRoster?.teamName || "")}</div>
             </div>`;
         } else {
-          // Empty pick — show current owner (may differ from original after trades)
-          const originalSlot = isSnake && r % 2 === 0 ? (teams + 1 - pickSlot) : pickSlot;
-          const originalRosterId = draft.slot_to_roster_id?.[String(originalSlot)];
-          const currentRosterId  = slotOwners[key];
-          const isTraded = currentRosterId && String(currentRosterId) !== String(originalRosterId);
-          const ownerName = currentRosterId ? (rosterMap[currentRosterId]?.teamName || `#${currentRosterId}`) : "";
+          // Empty pick — show current owner (may be different from original after trades)
+          const ownerName = ownerRoster?.teamName || (currentOwner ? `#${currentOwner}` : "");
+          const pickLabel = isSnake ? overallNum : `${r}.${String(originalSlot).padStart(2,"0")}`;
 
           boardHTML += `
             <div class="draft-pick draft-pick--empty ${isTraded ? "draft-pick--traded" : ""}">
-              <div class="draft-pick-num">${isSnake ? overallNum : `${r}.${String(pickSlot).padStart(2,"0")}`}</div>
+              <div class="draft-pick-num">${pickLabel}</div>
               <div class="draft-pick-owner">
                 ${_esc(ownerName)}
                 ${isTraded ? `<span class="draft-traded-badge">traded</span>` : ""}

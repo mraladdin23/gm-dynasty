@@ -24,7 +24,9 @@ const DLRSalaryCap = (() => {
   let _salaryData = null;  // from Firebase: { username: { players: [...] } }
   let _players    = {};    // slim player map
   let _initToken  = 0;
-  let _viewMode   = "roster";
+  let _viewMode   = "overview";
+  let _selectedTeam = null;   // username string, null = all teams
+  let _topPaidPos   = "ALL";  // position filter for top paid
 
   const DEFAULT_SETTINGS = {
     cap:        300000000,
@@ -62,7 +64,9 @@ const DLRSalaryCap = (() => {
     _settings   = null;
     _salaryData = null;
     _rosterData = null;
-    _viewMode   = "roster";
+    _viewMode     = "overview";
+    _selectedTeam = null;
+    _topPaidPos   = "ALL";
     _initToken++;
     const token = _initToken;
 
@@ -157,7 +161,8 @@ const DLRSalaryCap = (() => {
     el.innerHTML = `
       <div class="sal-toolbar">
         <div class="sal-view-tabs">
-          <button class="sal-tab ${_viewMode==="roster"  ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('roster')">Roster Salaries</button>
+          <button class="sal-tab ${_viewMode==="overview" ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('overview')">Overview</button>
+          <button class="sal-tab ${_viewMode==="roster"  ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('roster')">Rosters</button>
           <button class="sal-tab ${_viewMode==="toppaid" ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('toppaid')">Top Paid</button>
           <button class="sal-tab ${_viewMode==="caproom" ?"sal-tab--active":""}" onclick="DLRSalaryCap.setView('caproom')">Cap Room</button>
           ${_isCommish ? `
@@ -187,11 +192,22 @@ const DLRSalaryCap = (() => {
   function _renderView() {
     const el = document.getElementById("sal-content");
     if (!el) return;
-    if (_viewMode === "roster")   _renderRosters(el);
-    if (_viewMode === "toppaid")  _renderTopPaid(el);
-    if (_viewMode === "caproom")  _renderCapRoom(el);
-    if (_viewMode === "bulk")     _renderBulkUpload(el);
-    if (_viewMode === "settings") _renderSettings(el);
+    if (_viewMode === "overview")  _renderOverview(el);
+    if (_viewMode === "roster")    _renderRosters(el);
+    if (_viewMode === "toppaid")   _renderTopPaid(el);
+    if (_viewMode === "caproom")   _renderCapRoom(el);
+    if (_viewMode === "bulk")      _renderBulkUpload(el);
+    if (_viewMode === "settings")  _renderSettings(el);
+  }
+
+  function setPos(pos) {
+    _topPaidPos = pos || "ALL";
+    _renderView();
+  }
+
+  function selectTeam(username) {
+    _selectedTeam = username || null;
+    _renderView();
   }
 
   // ── Player helpers ────────────────────────────────────────
@@ -238,19 +254,96 @@ const DLRSalaryCap = (() => {
     return Math.round(spent);
   }
 
-  // ── Roster view ───────────────────────────────────────────
+  // ── Overview — salary breakdown per team ──────────────────
+  function _renderOverview(el) {
+    if (!_rosterData?.length) {
+      el.innerHTML = `<div class="sal-empty">No roster data.</div>`; return;
+    }
+    const salaryMap = _getTeamSalaryMap();
+    const POS = ["QB","RB","WR","TE","K"];
+    const teams = [..._rosterData].map(t => {
+      const sm  = salaryMap[t.username] || {};
+      const seen = new Set();
+      const allPids = [...(t.players||[]), ...(t.reserve||[]), ...(t.taxi||[])];
+      const byPos = {};
+      POS.forEach(p => { byPos[p] = 0; });
+      byPos["OTHER"] = 0;
+      let total = 0;
+      allPids.forEach(pid => {
+        if (seen.has(pid)) return; seen.add(pid);
+        const sal = sm[pid]?.salary || 0;
+        const pos = _playerPos(pid);
+        if (POS.includes(pos)) byPos[pos] += sal;
+        else byPos["OTHER"] += sal;
+        total += sal;
+      });
+      return { ...t, byPos, total };
+    }).sort((a, b) => b.total - a.total);
+
+    const posColors = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#f97316", OTHER:"#6b7280" };
+    const cap = _settings.cap || 0;
+
+    el.innerHTML = `
+      <div class="sal-overview-grid">
+        ${teams.map(t => {
+          const avail = cap - t.total;
+          const usedPct = cap > 0 ? Math.min(100, t.total / cap * 100) : 0;
+          // Stacked segments
+          const segments = [...POS, "OTHER"].map(pos => {
+            const pct = cap > 0 ? (t.byPos[pos] / cap * 100) : 0;
+            return pct > 0.5 ? `<div class="sal-ov-seg" style="width:${pct.toFixed(1)}%;background:${posColors[pos]}" title="${pos}: ${_fmtMoney(t.byPos[pos])}"></div>` : "";
+          }).join("");
+          // Available segment
+          const availPct = Math.max(0, 100 - usedPct);
+          const segAvail = availPct > 0 ? `<div class="sal-ov-seg" style="width:${availPct.toFixed(1)}%;background:var(--color-border)"></div>` : "";
+
+          return `
+            <div class="sal-ov-card" onclick="DLRSalaryCap.selectTeam('${t.username}');DLRSalaryCap.setView('roster')">
+              <div class="sal-ov-header">
+                <div class="sal-ov-name">${_esc(t.teamName)}</div>
+                <div class="sal-ov-total" style="color:${avail<0?"var(--color-red)":"var(--color-text)"}">${_fmtMoney(t.total)}</div>
+              </div>
+              <div class="sal-ov-bar">${segments}${segAvail}</div>
+              <div class="sal-ov-meta">
+                <span class="${avail<0?"sal-ov-over":"sal-ov-avail"}">${avail<0?"−":""}${_fmtMoney(Math.abs(avail))} ${avail<0?"over":"avail"}</span>
+                <div class="sal-ov-pos-row">
+                  ${[...POS,"OTHER"].filter(p => t.byPos[p] > 0).map(p =>
+                    `<span class="sal-ov-pos-pill" style="color:${posColors[p]}">${p} ${_fmtMoney(t.byPos[p])}</span>`
+                  ).join("")}
+                </div>
+              </div>
+            </div>`;
+        }).join("")}
+      </div>
+      <div class="sal-ov-legend">
+        ${[...POS,"OTHER"].map(p => `<span><span class="sal-ov-dot" style="background:${posColors[p]}"></span>${p}</span>`).join("")}
+        <span><span class="sal-ov-dot" style="background:var(--color-border)"></span>Available</span>
+      </div>`;
+  }
+
+  // ── Roster view — with team selector ─────────────────────
   function _renderRosters(el) {
     if (!_rosterData?.length) {
-      el.innerHTML = `<div class="sal-empty">No roster data. This tab requires a Sleeper league.</div>`;
-      return;
+      el.innerHTML = `<div class="sal-empty">No roster data.</div>`; return;
     }
-
     const salaryMap = _getTeamSalaryMap();
-    const teams = [..._rosterData].sort((a, b) =>
-      _calcCapSpent(b, salaryMap) - _calcCapSpent(a, salaryMap)
-    );
 
-    el.innerHTML = teams.map(team => _renderTeamCard(team, salaryMap)).join("");
+    // Team selector bar
+    const teamBtns = `
+      <div class="sal-team-pills">
+        <button class="sal-team-pill ${!_selectedTeam?"sal-team-pill--active":""}"
+          onclick="DLRSalaryCap.selectTeam(null)">All Teams</button>
+        ${_rosterData.map(t =>
+          `<button class="sal-team-pill ${_selectedTeam===t.username?"sal-team-pill--active":""}"
+            onclick="DLRSalaryCap.selectTeam('${t.username}')">${_esc(t.teamName)}</button>`
+        ).join("")}
+      </div>`;
+
+    const teamsToShow = _selectedTeam
+      ? _rosterData.filter(t => t.username === _selectedTeam)
+      : [..._rosterData].sort((a, b) => _calcCapSpent(b, salaryMap) - _calcCapSpent(a, salaryMap));
+
+    el.innerHTML = teamBtns + teamsToShow.map(t => _renderTeamCard(t, salaryMap)).join("");
   }
 
   function _renderTeamCard(team, salaryMap) {
@@ -352,12 +445,15 @@ const DLRSalaryCap = (() => {
   }
 
   // ── Top Paid ──────────────────────────────────────────────
+  // ── Top Paid — with position filter pills ─────────────────
   function _renderTopPaid(el) {
     const salaryMap = _getTeamSalaryMap();
     const all = [];
+    const seen = new Set();
     (_rosterData||[]).forEach(team => {
       const sm = salaryMap[team.username] || {};
-      [...team.players, ...team.reserve, ...team.taxi].forEach(pid => {
+      [...(team.players||[]), ...(team.reserve||[]), ...(team.taxi||[])].forEach(pid => {
+        if (seen.has(pid)) return; seen.add(pid);
         const entry = sm[pid];
         if (entry?.salary > 0) {
           all.push({ pid, salary: entry.salary, teamName: team.teamName,
@@ -367,71 +463,103 @@ const DLRSalaryCap = (() => {
     });
 
     if (!all.length) {
-      el.innerHTML = `<div class="sal-empty">No salary data yet. Commissioner can enter salaries in the Roster Salaries view.</div>`;
-      return;
+      el.innerHTML = `<div class="sal-empty">No salary data yet.</div>`; return;
     }
 
-    all.sort((a, b) => b.salary - a.salary);
-    const maxSal = all[0].salary;
+    const POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "K"];
+    const filtered = _topPaidPos === "ALL" ? all : all.filter(p => p.pos === _topPaidPos);
+    filtered.sort((a, b) => b.salary - a.salary);
+    const maxSal = filtered[0]?.salary || 1;
 
-    el.innerHTML = `<div class="sal-toppaid-list">${
-      all.slice(0, 30).map((p, i) => {
-        const c   = POS_COLOR[p.pos] || "#9ca3af";
-        const pct = (p.salary / maxSal * 100).toFixed(0);
-        return `
-          <div class="sal-toppaid-row" onclick="DLRPlayerCard.show('${p.pid}','${_escAttr(p.name)}')">
-            <div class="sal-tp-rank dim">${i+1}</div>
-            <div class="sal-tp-photo">
-              <img src="https://sleepercdn.com/content/nfl/players/thumb/${p.pid}.jpg"
-                onerror="this.style.display='none'" loading="lazy"/>
-            </div>
-            <div class="sal-pos-dot" style="background:${c}22;color:${c};border-color:${c}55">${p.pos}</div>
-            <div class="sal-tp-info">
-              <div class="sal-player-name-text">${_esc(p.name)}</div>
-              <div class="sal-tp-team dim">${_esc(p.teamName)}</div>
-            </div>
-            <div class="sal-tp-bar-outer"><div class="sal-tp-bar-fill" style="width:${pct}%;background:${c}99"></div></div>
-            <div class="sal-amount">${_fmtMoney(p.salary)}</div>
-          </div>`;
-      }).join("")
-    }</div>`;
-  }
-
-  // ── Cap Room ──────────────────────────────────────────────
-  function _renderCapRoom(el) {
-    if (!_rosterData?.length) {
-      el.innerHTML = `<div class="sal-empty">No roster data available.</div>`;
-      return;
-    }
-    const salaryMap = _getTeamSalaryMap();
-    const teams = [..._rosterData]
-      .map(t => ({ ...t, spent: _calcCapSpent(t, salaryMap) }))
-      .sort((a, b) => (b.spent) - (a.spent));
-    const maxSpent = Math.max(...teams.map(t => t.spent), 1);
+    const posColors = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#f97316" };
 
     el.innerHTML = `
-      <div class="sal-caproom-list">${
-        teams.map(t => {
-          const avail = _settings.cap - t.spent;
-          const pct   = _settings.cap > 0 ? Math.min(100,(t.spent/_settings.cap*100)).toFixed(0) : 0;
-          const color = pct >= 95 ? "var(--color-red)" : pct >= 80 ? "var(--color-gold)" : "var(--color-green)";
+      <div class="sal-pos-pills">
+        ${POSITIONS.map(pos =>
+          `<button class="sal-pos-pill ${_topPaidPos===pos?"sal-pos-pill--active":""}"
+            onclick="DLRSalaryCap.setPos('${pos}')">${pos}</button>`
+        ).join("")}
+      </div>
+      <div class="sal-toppaid-list">
+        ${filtered.slice(0, 40).map((p, i) => {
+          const c   = posColors[p.pos] || "#9ca3af";
+          const pct = (p.salary / maxSal * 100).toFixed(0);
+          return `
+            <div class="sal-toppaid-row" onclick="DLRPlayerCard.show('${p.pid}','${_escAttr(p.name)}')">
+              <div class="sal-tp-rank dim">${i+1}</div>
+              <div class="sal-tp-photo">
+                <img src="https://sleepercdn.com/content/nfl/players/thumb/${p.pid}.jpg"
+                  onerror="this.style.display='none'" loading="lazy"/>
+              </div>
+              <div class="sal-pos-dot" style="background:${c}22;color:${c};border-color:${c}55">${p.pos}</div>
+              <div class="sal-tp-info">
+                <div class="sal-player-name-text">${_esc(p.name)}</div>
+                <div class="sal-tp-team dim">${_esc(p.teamName)}</div>
+              </div>
+              <div class="sal-tp-bar-outer"><div class="sal-tp-bar-fill" style="width:${pct}%;background:${c}99"></div></div>
+              <div class="sal-amount">${_fmtMoney(p.salary)}</div>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  // ── Cap Room — stacked bar by position ───────────────────
+  function _renderCapRoom(el) {
+    if (!_rosterData?.length) {
+      el.innerHTML = `<div class="sal-empty">No roster data.</div>`; return;
+    }
+    const salaryMap = _getTeamSalaryMap();
+    const POS = ["QB","RB","WR","TE","K","OTHER"];
+    const posColors = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#f97316", OTHER:"#6b7280" };
+    const cap = _settings.cap || 0;
+
+    const teams = [..._rosterData].map(t => {
+      const sm  = salaryMap[t.username] || {};
+      const seen = new Set();
+      const byPos = {};
+      POS.forEach(p => { byPos[p] = 0; });
+      [...(t.players||[]),...(t.reserve||[]),...(t.taxi||[])].forEach(pid => {
+        if (seen.has(pid)) return; seen.add(pid);
+        const sal = sm[pid]?.salary || 0;
+        const pos = _playerPos(pid);
+        const grp = ["QB","RB","WR","TE","K"].includes(pos) ? pos : "OTHER";
+        byPos[grp] += sal;
+      });
+      const total = Object.values(byPos).reduce((s, v) => s + v, 0);
+      return { ...t, byPos, total };
+    }).sort((a, b) => b.total - a.total);
+
+    el.innerHTML = `
+      <div class="sal-cr-legend">
+        ${POS.map(p => `<span class="sal-cr-leg-item"><span class="sal-cr-leg-dot" style="background:${posColors[p]}"></span>${p}</span>`).join("")}
+        <span class="sal-cr-leg-item"><span class="sal-cr-leg-dot" style="background:rgba(255,255,255,.1)"></span>Available</span>
+      </div>
+      <div class="sal-cr-list">
+        ${teams.map(t => {
+          const avail = cap - t.total;
+          const capColor = cap > 0 && t.total/cap >= 0.95 ? "var(--color-red)"
+                         : cap > 0 && t.total/cap >= 0.8  ? "var(--color-gold)"
+                         : "var(--color-green)";
+          // Build stacked bar segments
+          const segs = POS.map(pos => {
+            const pct = cap > 0 ? (t.byPos[pos] / cap * 100) : 0;
+            return pct > 0.3 ? `<div class="sal-cr-seg" style="width:${pct.toFixed(1)}%;background:${posColors[pos]}" title="${pos}: ${_fmtMoney(t.byPos[pos])}"></div>` : "";
+          }).join("");
+          const availPct = cap > 0 ? Math.max(0, (avail / cap * 100)) : 0;
+          const availSeg = availPct > 0.3 ? `<div class="sal-cr-seg sal-cr-seg--avail" style="width:${availPct.toFixed(1)}%"></div>` : "";
+
           return `
             <div class="sal-cr-row">
-              <div class="sal-cr-name">${_esc(t.teamName)}</div>
-              <div class="sal-cr-bar-outer">
-                <div class="sal-cr-bar-fill" style="width:${(t.spent/maxSpent*100).toFixed(0)}%;background:${color}"></div>
+              <div class="sal-cr-name" title="${_esc(t.teamName)}">${_esc(t.teamName)}</div>
+              <div class="sal-cr-bar-wrap">
+                <div class="sal-cr-stacked">${segs}${availSeg}</div>
               </div>
-              <div class="sal-cr-spent" style="color:${color}">${_fmtMoney(t.spent)}</div>
-              <div class="sal-cr-avail" style="color:${avail<0?"var(--color-red)":"var(--color-green)"}">
-                ${avail < 0 ? "−" : "+"}${_fmtMoney(Math.abs(avail))}
+              <div class="sal-cr-numbers">
+                <span style="color:${capColor};font-family:var(--font-display);font-weight:700">${_fmtMoney(t.total)}</span>
+                <span style="color:${avail<0?"var(--color-red)":"var(--color-text-dim)"};font-size:.72rem">${avail<0?"−":"+"}${_fmtMoney(Math.abs(avail))}</span>
               </div>
             </div>`;
-        }).join("")
-      }</div>
-      <div class="sal-legend">
-        <span style="color:var(--color-green)">●</span> Under 80% &nbsp;
-        <span style="color:var(--color-gold)">●</span> 80–95% &nbsp;
-        <span style="color:var(--color-red)">●</span> Over 95%
+        }).join("")}
       </div>`;
   }
 
@@ -817,7 +945,7 @@ const DLRSalaryCap = (() => {
   }
 
   return {
-    init, reset, setView,
+    init, reset, setView, setPos, selectTeam,
     openEditModal, savePlayerSalary,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,

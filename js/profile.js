@@ -753,18 +753,16 @@ const Profile = (() => {
     });
 
     const wantArchived  = _activeFilters.has("archived");
-    const wantAll       = _activeFilters.size === 0; // no filters = show everything
     const otherFilters  = new Set([..._activeFilters].filter(f => f !== "archived"));
 
+    // Main grid always shows active leagues (+ archived when "Archived" filter selected)
     let pool = [];
-    if (wantAll) {
-      pool = [...active, ...archived]; // "All" = show everything
-    } else if (wantArchived && otherFilters.size === 0) {
+    if (wantArchived && otherFilters.size === 0) {
       pool = archived;
     } else if (wantArchived && otherFilters.size > 0) {
       pool = [...active, ...archived];
     } else {
-      pool = active;
+      pool = active; // "All" = active only; archived lives in the accordion below
     }
 
     const filtered = _applyFranchiseFilter(pool, otherFilters);
