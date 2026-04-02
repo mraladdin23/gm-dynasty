@@ -153,14 +153,18 @@ const DLRAuction = (() => {
   function _bidDurationMs() { return (_settings.bidDuration || 8) * 3_600_000; }
 
   function _nextExpiry(now = Date.now()) {
-    if (_isNightPause(now)) {
-      const ct     = new Date(new Date(now).toLocaleString("en-US", { timeZone: "America/Chicago" }));
+    // If auction has a scheduled start in the future, use that as the base
+    const base = (_settings.scheduledStart && _settings.scheduledStart > now)
+      ? _settings.scheduledStart
+      : now;
+    if (_isNightPause(base)) {
+      const ct     = new Date(new Date(base).toLocaleString("en-US", { timeZone: "America/Chicago" }));
       const resume = new Date(ct);
       resume.setHours(_settings.pauseEnd, 0, 0, 0);
       if (resume <= ct) resume.setDate(resume.getDate() + 1);
       return +resume + _bidDurationMs();
     }
-    return now + _bidDurationMs();
+    return base + _bidDurationMs();
   }
 
   function _timeLeft(a, now = Date.now()) {
@@ -189,8 +193,20 @@ const DLRAuction = (() => {
     const sorted = Object.entries(maxByRoster)
       .map(([id, max]) => ({ rosterId: parseInt(id), maxBid: max }))
       .sort((a, b) => b.maxBid - a.maxBid);
-    if (sorted.length === 1) return { rosterId: sorted[0].rosterId, displayBid: MIN_BID };
-    return { rosterId: sorted[0].rosterId, displayBid: Math.min(sorted[0].maxBid, sorted[1].maxBid + MIN_BID) };
+
+    if (sorted.length === 1) {
+      // Single bidder — show their first (opening) bid amount, not just MIN_BID
+      const firstBid = [...bids]
+        .filter(b => b.rosterId === sorted[0].rosterId)
+        .sort((a, b) => a.timestamp - b.timestamp)[0];
+      return { rosterId: sorted[0].rosterId, displayBid: firstBid?.maxBid ?? MIN_BID };
+    }
+
+    // Proxy: winner pays $1 increment above second-highest max
+    return {
+      rosterId:   sorted[0].rosterId,
+      displayBid: Math.min(sorted[0].maxBid, sorted[1].maxBid + MIN_BID)
+    };
   }
 
   function _myMaxBid(a) {
@@ -203,6 +219,53 @@ const DLRAuction = (() => {
     const now = Date.now();
     return _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now
       && a.nominatedBy === _myRosterId).length;
+  }
+
+  function _myHasPassed(a) {
+    if (!_myRosterId || !a.passes) return false;
+    return !!a.passes[String(_myRosterId)];
+  }
+
+  // ── Pass refs ─────────────────────────────────────────────
+  const _passRef = (id) => GMD.child(`auctions/${_leagueKey}/bids/${id}/passes`);
+
+  // ── Pass logic (matches SleeperBid exactly) ───────────────
+  async function passAuction(auctionId, playerName) {
+    if (!_myRosterId) return;
+    try {
+      // Record this team's pass
+      await _passRef(auctionId).update({ [String(_myRosterId)]: Date.now() });
+
+      // Read back full auction to check if all eligible teams have passed
+      const snap    = await _auctRef(auctionId).once("value");
+      const auction = snap.val();
+      if (!auction || auction.cancelled || auction.processed) return;
+
+      const bids    = Array.isArray(auction.bids) ? auction.bids : Object.values(auction.bids||{});
+      const bidders = new Set(bids.map(b => String(b.rosterId)));
+      const passes  = Object.keys(auction.passes || {});
+
+      // mustPass = all teams except the nominator who haven't placed a bid
+      const allRosterIds = _rosterData.map(r => String(r.roster_id));
+      const mustPass = allRosterIds.filter(id =>
+        id !== String(auction.nominatedBy) && !bidders.has(id)
+      );
+      const allPassed = mustPass.length > 0 && mustPass.every(id => passes.includes(id));
+
+      if (allPassed) {
+        // Close auction immediately — all non-bidding teams passed
+        await _auctRef(auctionId).update({
+          expiresAt: Date.now() - 1,
+          autoClosedByPasses: true
+        });
+        showToast(`All teams passed — ${playerName} auction closed early.`);
+      } else {
+        const remaining = mustPass.filter(id => !passes.includes(id)).length;
+        showToast(`Passed on ${playerName}. ${remaining} team${remaining !== 1 ? "s" : ""} yet to pass.`);
+      }
+    } catch(e) {
+      showToast("Pass failed: " + e.message, "error");
+    }
   }
 
   // ── Rostered player set ───────────────────────────────────
@@ -246,6 +309,10 @@ const DLRAuction = (() => {
         </div>
         <div class="auc-status-bar">
           ${_isNightPause() ? `<span class="auc-pause-badge">🌙 Paused (${_settings.pauseStart}–${_settings.pauseEnd}am CT)</span>` : ""}
+          ${_settings.scheduledStart && _settings.scheduledStart > Date.now()
+            ? `<span class="auc-pause-badge" style="background:rgba(0,212,255,.08);border-color:rgba(0,212,255,.25);color:#00d4ff">
+                📅 Starts ${new Date(_settings.scheduledStart).toLocaleDateString()} ${new Date(_settings.scheduledStart).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+               </span>` : ""}
           <span class="auc-nom-info">Nominations: ${myNoms}/${maxNoms}</span>
         </div>
       </div>
@@ -344,6 +411,14 @@ const DLRAuction = (() => {
               ${myBid > 0 ? "Update" : "Bid"}
             </button>
           </div>
+          ${_myHasPassed(a) ? `
+          <span class="auc-passed-badge">✓ Passed</span>` :
+          !winning && myBid === 0 ? `
+          <button class="auc-pass-btn btn-secondary btn-sm"
+            onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')"
+            title="Pass — if all non-bidding teams pass, auction closes early">
+            Pass
+          </button>` : ""}
           ${_isCommish ? `
           <div class="auc-comm-btns">
             <button class="btn-secondary btn-sm" onclick="DLRAuction.claimAuction('${a.id}','${_escA(name)}')">✓ Claim</button>
@@ -667,20 +742,34 @@ const DLRAuction = (() => {
   function _renderSettings(el) {
     if (!_isCommish) { el.innerHTML = `<div class="auc-empty">Commissioner only.</div>`; return; }
     const s = _settings;
+
+    // Format stored scheduledStart as local datetime-local value
+    const toDatetimeLocal = (ts) => {
+      if (!ts) return "";
+      const d = new Date(ts);
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
     el.innerHTML = `
       <div class="auc-settings-form">
         <div class="form-group">
-          <label>Bid Duration (hours)</label>
-          <input type="number" id="auc-s-duration" value="${s.bidDuration || 8}" min="1" max="72" step="1"/>
-          <span class="field-hint">How many active hours each auction runs after a bid.</span>
+          <label>Auction Season Start Date & Time</label>
+          <input type="datetime-local" id="auc-s-start" value="${toDatetimeLocal(s.scheduledStart || 0)}"/>
+          <span class="field-hint">Set when the auction season begins. Leave blank to start immediately when the first nomination is made.</span>
         </div>
         <div class="form-group">
-          <label>Overnight Pause Start (CT hour, 0–23)</label>
+          <label>Bid Duration (hours)</label>
+          <input type="number" id="auc-s-duration" value="${s.bidDuration || 8}" min="1" max="72" step="1"/>
+          <span class="field-hint">How many active hours each auction runs after a bid is placed.</span>
+        </div>
+        <div class="form-group">
+          <label>Overnight Pause — Start Hour (CT, 0–23)</label>
           <input type="number" id="auc-s-pstart" value="${s.pauseStart ?? 0}" min="0" max="23"/>
           <span class="field-hint">Timers pause from this hour (Central Time). 0 = midnight.</span>
         </div>
         <div class="form-group">
-          <label>Overnight Pause End (CT hour, 0–23)</label>
+          <label>Overnight Pause — End Hour (CT, 0–23)</label>
           <input type="number" id="auc-s-pend" value="${s.pauseEnd ?? 8}" min="0" max="23"/>
           <span class="field-hint">Timers resume at this hour (Central Time). 8 = 8am.</span>
         </div>
@@ -695,11 +784,17 @@ const DLRAuction = (() => {
           <span class="field-hint">Active roster only — IR and taxi slots don't count toward this limit.</span>
         </div>
         <button class="btn-primary" onclick="DLRAuction.saveSettings()" style="margin-top:var(--space-4)">Save Settings</button>
+        ${s.scheduledStart ? `<div style="margin-top:var(--space-3);font-size:.8rem;color:var(--color-text-dim)">
+          Auction scheduled to start: <strong style="color:var(--color-gold)">${new Date(s.scheduledStart).toLocaleString()}</strong>
+        </div>` : ""}
       </div>`;
   }
 
   async function saveSettings() {
+    const startInput = document.getElementById("auc-s-start")?.value;
+    const scheduledStart = startInput ? new Date(startInput).getTime() : 0;
     const settings = {
+      scheduledStart: scheduledStart || null,
       bidDuration:   parseInt(document.getElementById("auc-s-duration")?.value)    || 8,
       pauseStart:    parseInt(document.getElementById("auc-s-pstart")?.value)      ?? 0,
       pauseEnd:      parseInt(document.getElementById("auc-s-pend")?.value)        ?? 8,
@@ -773,12 +868,19 @@ const DLRAuction = (() => {
   function _esc(s)  { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function _escA(s) { return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
 
+  // Can the current user nominate? (for FA button check)
+  function canNominate() {
+    if (!_leagueKey) return false;
+    return _myActiveNoms() < (_settings.maxNoms || 2);
+  }
+
   return {
     init, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
-    placeBid, claimAuction, cancelAuction,
+    placeBid, claimAuction, cancelAuction, passAuction,
     saveSettings, renderFloatingBadge,
-    toggleTeamDetail, editRosterSize
+    toggleTeamDetail, editRosterSize,
+    canNominate
   };
 
 })();

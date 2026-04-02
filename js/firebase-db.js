@@ -274,8 +274,12 @@ const GMDB = (() => {
   // ── League meta (pins, labels, groups) — uses SDK ref for auth ──
   async function getLeagueMeta(username) {
     try {
-      const snap = await GMD.child(`users/${username.toLowerCase()}/leagueMeta`).once("value");
-      return snap.val() || {};
+      const path = `users/${username.toLowerCase()}/leagueMeta`;
+      console.log("[GMDB] getLeagueMeta path:", path);
+      const snap = await GMD.child(path).once("value");
+      const val  = snap.val() || {};
+      console.log("[GMDB] getLeagueMeta result keys:", Object.keys(val));
+      return val;
     } catch(e) {
       console.error("[GMDB] getLeagueMeta failed:", e.message);
       return {};
@@ -283,7 +287,10 @@ const GMDB = (() => {
   }
 
   async function saveLeagueMetaEntry(username, leagueKey, meta) {
-    await GMD.child(`users/${username.toLowerCase()}/leagueMeta/${leagueKey}`).set(meta);
+    const path = `users/${username.toLowerCase()}/leagueMeta/${leagueKey}`;
+    console.log("[GMDB] saveLeagueMetaEntry path:", path, "| meta:", JSON.stringify(meta));
+    await GMD.child(path).set(meta);
+    console.log("[GMDB] saveLeagueMetaEntry done");
   }
 
   // ── Salary cap data — uses SDK ref for auth ──────────────

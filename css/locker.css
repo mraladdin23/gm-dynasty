@@ -4124,3 +4124,451 @@ select option { background: var(--color-bg-2); }
   color: #0a0e1a;
 }
 
+
+/* ── Auction pass ─────────────────────────────────────── */
+.auc-pass-btn {
+  font-size: .72rem !important;
+  padding: 3px 10px !important;
+  color: var(--color-text-dim) !important;
+}
+.auc-passed-badge {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+  padding: 3px 6px;
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+
+/* ── Manager Search Panel ─────────────────────────────── */
+.ms-panel {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 380px;
+  max-width: 100vw;
+  background: var(--color-bg-2);
+  border-left: 1px solid var(--color-border);
+  z-index: 700;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform .25s ease;
+  box-shadow: -4px 0 20px rgba(0,0,0,.3);
+}
+.ms-panel--hidden { transform: translateX(100%); }
+.ms-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 699;
+}
+.ms-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.ms-title { font-family: var(--font-display); font-weight: 700; font-size: 1rem; }
+.ms-close { background: none; border: none; color: var(--color-text-muted); font-size: 1.1rem; cursor: pointer; padding: 4px; border-radius: 4px; }
+.ms-close:hover { color: var(--color-text); }
+.ms-body { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+.ms-search-row input {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-size: .9rem;
+  padding: var(--space-3) var(--space-4);
+  outline: none;
+}
+.ms-search-row input:focus { border-color: var(--color-gold); }
+.ms-results { display: flex; flex-direction: column; gap: 2px; }
+.ms-hint, .ms-empty, .ms-error { font-size: .82rem; color: var(--color-text-dim); padding: var(--space-3); text-align: center; }
+.ms-searching { display: flex; align-items: center; gap: var(--space-2); font-size: .82rem; color: var(--color-text-dim); padding: var(--space-2); }
+.ms-result-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: background var(--transition);
+}
+.ms-result-row:hover { background: var(--color-surface); }
+.ms-avatar {
+  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+  background: var(--color-bg-3);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: var(--color-gold); font-size: .9rem;
+}
+.ms-avatar--lg { width: 56px; height: 56px; font-size: 1.2rem; }
+.ms-info { flex: 1; min-width: 0; }
+.ms-username { font-weight: 700; font-size: .88rem; }
+.ms-bio { font-size: .72rem; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-stats { display: flex; flex-wrap: wrap; gap: 3px; flex-shrink: 0; }
+.ms-stat-pill {
+  font-size: .65rem; padding: 2px 6px;
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.ms-team-logo {
+  position: absolute; right: var(--space-2); top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; object-fit: contain; opacity: .15; pointer-events: none;
+}
+.ms-profile-header { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-5); }
+.ms-stats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3);
+}
+.ms-stat-card {
+  background: var(--color-bg-3); border-radius: var(--radius);
+  padding: var(--space-3); text-align: center;
+}
+.ms-stat-val { font-family: var(--font-display); font-weight: 800; font-size: 1.1rem; }
+.ms-stat-lbl { font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; color: var(--color-text-dim); margin-top: 3px; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   COMPREHENSIVE MOBILE OVERHAUL
+   Tested breakpoints: 640px (tablet/large phone), 390px (iPhone)
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Nav: show on mobile with icon-only mode ─────────────── */
+@media (max-width: 640px) {
+  .app-nav {
+    padding: 0 var(--space-3);
+    gap: var(--space-1);
+  }
+  .nav-links {
+    display: flex !important;
+    gap: 2px;
+  }
+  .nav-link {
+    font-size: .65rem;
+    padding: 4px 6px;
+    letter-spacing: 0;
+  }
+  .nav-logo { font-size: .85rem; letter-spacing: .04em; }
+
+  /* ── App view padding ──────────────────────────────────── */
+  .app-view { padding: var(--space-3) !important; }
+
+  /* ── Locker container ──────────────────────────────────── */
+  .locker-container { gap: var(--space-5); padding-top: var(--space-3); }
+
+  /* ── Locker header: stack vertically ─────────────────── */
+  .locker-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius);
+  }
+  .locker-header-top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .locker-avatar { width: 52px; height: 52px; flex-shrink: 0; }
+  #locker-avatar-initials { font-size: 1.2rem; }
+  .locker-identity h2 { font-size: 1.2rem; }
+  .locker-tagline { font-size: .78rem; }
+  .locker-header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    width: 100%;
+  }
+  .locker-header-actions .btn-secondary {
+    font-size: .68rem;
+    padding: var(--space-2) var(--space-2);
+    text-align: center;
+    justify-content: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Float badge full width */
+  #auc-float-container { grid-column: 1 / -1; }
+
+  /* ── Stats row: wraps ──────────────────────────────────── */
+  .locker-stats-row {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .stat-pill { font-size: .7rem; padding: 3px 8px; }
+
+  /* ── Platforms ─────────────────────────────────────────── */
+  .platforms-list { gap: var(--space-2); }
+  .platform-badge { font-size: .72rem; padding: var(--space-2) var(--space-3); }
+
+  /* ── League section header ─────────────────────────────── */
+  .leagues-header { flex-wrap: wrap; gap: var(--space-2); }
+  .leagues-header .section-title { font-size: .9rem; }
+  .btn-add-league { font-size: .7rem; padding: 4px 8px; }
+
+  /* ── Filter bar: horizontal scroll ────────────────────── */
+  .league-filters {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding-bottom: var(--space-2);
+    scrollbar-width: none;
+  }
+  .league-filters::-webkit-scrollbar { display: none; }
+  .filter-tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: .68rem;
+    padding: 4px 9px;
+  }
+  .filter-section-label { white-space: nowrap; flex-shrink: 0; font-size: .65rem; }
+
+  /* ── League tools row ──────────────────────────────────── */
+  .league-tools-row { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .league-jump-select { width: 100%; font-size: .8rem; }
+  .league-group-pills { gap: var(--space-1); }
+  .group-pill { font-size: .7rem; padding: 3px 10px; }
+
+  /* ── League rows: streamlined for mobile ──────────────── */
+  .league-row {
+    padding: var(--space-3);
+    gap: var(--space-2);
+    min-height: 48px;
+    position: relative;
+  }
+  .lrow-left { width: 46px; }
+  .lrow-plat, .lrow-type { font-size: .52rem; padding: 1px 3px; }
+  .lrow-center { flex: 1; min-width: 0; }
+  .lrow-name { font-size: .82rem; }
+  .lrow-team { font-size: .68rem; }
+  .lrow-season-col { width: 56px; }
+  .lrow-alltime-col { display: none !important; }
+  .lrow-tags { display: none !important; }
+  .lrow-record { font-size: .82rem; }
+  .lrow-season-label { font-size: .6rem; }
+  .lrow-actions { gap: var(--space-1); }
+  .lrow-chat-btn, .lrow-options-btn { font-size: .7rem; padding: 3px 6px; }
+
+  /* ── Pagination ────────────────────────────────────────── */
+  .leagues-pagination {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    justify-content: center;
+  }
+  .page-btn { font-size: .75rem; padding: 5px 10px; }
+  .page-size-select { font-size: .75rem; }
+
+  /* ── Archived section ──────────────────────────────────── */
+  .archived-toggle { font-size: .82rem; }
+
+  /* ── League detail panel: full screen ─────────────────── */
+  .league-detail-panel {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 0 !important;
+    display: flex;
+    flex-direction: column;
+  }
+  .league-detail-header {
+    flex-shrink: 0;
+    padding: var(--space-3) var(--space-4);
+  }
+  .league-detail-header h2 { font-size: 1rem; }
+  .detail-tab-select { font-size: .8rem; width: 100%; }
+  .season-bar-pills {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  .season-bar-pills::-webkit-scrollbar { display: none; }
+  .season-pill { font-size: .7rem; padding: 4px 8px; white-space: nowrap; flex-shrink: 0; }
+  .detail-body-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .detail-tab-content { padding: var(--space-3) !important; }
+
+  /* ── Overview tab ──────────────────────────────────────── */
+  .overview-grid { grid-template-columns: repeat(2, 1fr) !important; gap: var(--space-2) !important; }
+  .overview-stat-val { font-size: 1.2rem !important; }
+
+  /* ── Standings ─────────────────────────────────────────── */
+  .standings-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .standings-table { font-size: .72rem; min-width: 300px; }
+  .standings-table th, .standings-table td { padding: 6px 6px; }
+  .standings-avatar { width: 22px; height: 22px; }
+  .st-av { width: 22px; height: 22px; font-size: .65rem; }
+
+  /* ── Matchups ──────────────────────────────────────────── */
+  .matchup-row { flex-direction: column; gap: var(--space-2); }
+  .matchup-team { flex-direction: row; }
+
+  /* ── Roster ────────────────────────────────────────────── */
+  .roster-pos-group { gap: var(--space-2); }
+  .roster-player-row { gap: var(--space-2); padding: var(--space-2); }
+  .roster-player-photo { width: 28px; height: 28px; }
+  .roster-player-name { font-size: .82rem; }
+  .roster-player-meta { font-size: .68rem; }
+
+  /* ── Salary cap ─────────────────────────────────────────── */
+  .sal-toolbar { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .sal-view-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .sal-view-tab { font-size: .7rem; padding: 4px 8px; white-space: nowrap; flex-shrink: 0; }
+  .sal-summary-grid { grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
+  .sal-cap-val { font-size: 1.1rem; }
+  .sal-team-section { margin-bottom: var(--space-4); }
+  .sal-team-header { flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+  .sal-cap-summary { width: 100%; }
+  .sal-player-row { padding: var(--space-1) var(--space-2); gap: var(--space-2); }
+  .sal-player-name { font-size: .78rem; max-width: 120px; }
+  .sal-player-photo { width: 26px; height: 26px; }
+  .sal-bulk-table { font-size: .72rem; }
+  .sal-settings-form { padding: 0; }
+  .sal-cr-table { font-size: .75rem; }
+  .sal-cr-name { max-width: 100px; }
+
+  /* ── Auction ───────────────────────────────────────────── */
+  .auc-toolbar { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .auc-tabs { overflow-x: auto; flex-wrap: nowrap; gap: 3px; }
+  .auc-tab { font-size: .7rem; padding: 4px 8px; white-space: nowrap; flex-shrink: 0; }
+  .auc-card-header { flex-wrap: wrap; gap: var(--space-2); }
+  .auc-timer { text-align: left; }
+  .auc-lead-row { flex-wrap: wrap; gap: var(--space-2); }
+  .auc-actions { flex-wrap: wrap; gap: var(--space-2); }
+  .auc-bid-input { width: 100px; }
+  .auc-comm-btns { margin-left: 0; }
+  .auc-teams-list { gap: var(--space-2); }
+  .auc-team-stats { gap: var(--space-1); }
+  .auc-stat-pill { font-size: .65rem; padding: 2px 5px; }
+  .auc-settings-form { padding: 0; }
+  .auc-fa-toolbar { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .auc-pos-pills { flex-wrap: wrap; }
+
+  /* ── Free agents ───────────────────────────────────────── */
+  .fa-toolbar { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .fa-pos-filter { overflow-x: auto; flex-wrap: nowrap; }
+  .fa-player-row { padding: var(--space-2); gap: var(--space-2); }
+  .fa-photo { width: 28px; height: 28px; }
+  .fa-name { font-size: .82rem; }
+  .fa-meta { font-size: .68rem; }
+  .fa-stats--secondary { display: none; }
+
+  /* ── Draft board ────────────────────────────────────────── */
+  .draft-board-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .draft-pick { min-width: 72px; max-width: 90px; padding: var(--space-1); }
+  .draft-pick-name { font-size: .65rem; }
+  .draft-pick-meta { font-size: .58rem; }
+  .draft-pick-team { font-size: .55rem; }
+  .draft-pick-num { font-size: .6rem; }
+
+  /* ── Analytics ─────────────────────────────────────────── */
+  .az-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .az-tab { white-space: nowrap; flex-shrink: 0; font-size: .7rem; }
+  .az-list-row { flex-wrap: wrap; gap: var(--space-1); }
+  .az-bar-wrap { width: 100%; order: 10; }
+
+  /* ── Modals ────────────────────────────────────────────── */
+  .modal-overlay {
+    padding: var(--space-4) var(--space-3);
+    align-items: flex-start;
+  }
+  .modal-box, .modal-box--sm, .modal-box--wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - var(--space-8));
+    overflow-y: auto;
+    margin: 0;
+  }
+  .modal-body { padding: var(--space-4); }
+  .modal-footer { padding: var(--space-3) var(--space-4); }
+
+  /* ── Career summary ────────────────────────────────────── */
+  .cs-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .cs-stat-val { font-size: 1rem; }
+  .career-summary-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .cs-tab { white-space: nowrap; flex-shrink: 0; font-size: .7rem; }
+  .cs-table-wrap { overflow-x: auto; }
+  .cs-table { font-size: .78rem; }
+
+  /* ── Player card ────────────────────────────────────────── */
+  .pc-modal-box { max-width: 100%; }
+  .pc-header { flex-wrap: wrap; gap: var(--space-2); }
+  .pc-photo-wrap { width: 48px; height: 48px; }
+  .pc-name { font-size: 1rem; }
+  .pc-stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .pc-log-table { font-size: .7rem; }
+  .pc-log-table td, .pc-log-table th { padding: 4px 4px; }
+
+  /* ── Player report ──────────────────────────────────────── */
+  .pr-panel { width: 100% !important; left: 0 !important; right: 0 !important; }
+  .pr-summary-row { flex-wrap: wrap; gap: var(--space-2); }
+
+  /* ── Manager search ─────────────────────────────────────── */
+  .ms-panel { width: 100% !important; }
+  .ms-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Very small phones (< 380px) ─────────────────────────── */
+@media (max-width: 380px) {
+  .locker-identity h2 { font-size: 1rem; }
+  .locker-header-actions { grid-template-columns: 1fr; }
+  .league-row { padding: var(--space-2) var(--space-2); }
+  .lrow-left { display: none; }
+  .lrow-name { font-size: .78rem; }
+  .lrow-record { font-size: .75rem; }
+  .filter-tab { font-size: .62rem; padding: 3px 6px; }
+  .pc-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .draft-pick { min-width: 60px; }
+  .auc-bid-input { width: 80px; }
+}
+
+/* ── Touch-friendly tap targets (all mobile) ─────────────── */
+@media (hover: none) and (pointer: coarse) {
+  .filter-tab,
+  .page-btn,
+  .btn-secondary,
+  .lrow-chat-btn,
+  .lrow-options-btn,
+  .auc-tab,
+  .season-pill,
+  .cs-tab,
+  .az-tab,
+  .fa-sort-btn {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .league-row { min-height: 52px; }
+  .fa-player-row { min-height: 48px; }
+}
+
+
+/* ── locker-header-top: avatar + identity row ─────────── */
+.locker-header-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: 1;
+}
+.locker-header {
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.locker-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+

@@ -340,6 +340,10 @@ document.getElementById("chat-panel-backdrop")?.addEventListener("click", () => 
   Profile.closeLeagueChat();
 });
 
+document.getElementById("nav-search-btn")?.addEventListener("click", () => {
+  DLRManagerSearch.open();
+});
+
 // ── League label modal close ───────────────────────────────
 document.getElementById("label-modal-close")?.addEventListener("click", () => {
   Profile.closeLabelModal();
