@@ -4968,3 +4968,268 @@ select option { background: var(--color-bg-2); }
   .tr-header { flex-direction: column; align-items: flex-start; }
 }
 
+
+/* ── Salary: Overview cards ──────────────────────────── */
+.sal-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+}
+.sal-ov-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.sal-ov-card:hover { border-color: var(--color-gold-dim); }
+.sal-ov-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-2); }
+.sal-ov-name { font-weight:700; font-size:.88rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%; }
+.sal-ov-total { font-family:var(--font-display); font-weight:800; font-size:.95rem; }
+.sal-ov-bar { display:flex; height:10px; border-radius:99px; overflow:hidden; background:var(--color-surface); margin-bottom:var(--space-2); }
+.sal-ov-seg { height:100%; transition:width .3s; }
+.sal-ov-meta { display:flex; flex-direction:column; gap:3px; }
+.sal-ov-avail { font-size:.72rem; color:var(--color-green); }
+.sal-ov-over  { font-size:.72rem; color:var(--color-red); }
+.sal-ov-pos-row { display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; }
+.sal-ov-pos-pill { font-size:.62rem; font-weight:600; }
+.sal-ov-legend { display:flex; gap:var(--space-3); flex-wrap:wrap; margin-top:var(--space-4); font-size:.75rem; color:var(--color-text-dim); }
+.sal-ov-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+/* Salary: Team pills for Roster view */
+.sal-team-pills { display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-4); }
+.sal-team-pill {
+  font-size:.75rem; padding:4px 12px; border-radius:99px;
+  background:var(--color-surface); border:1px solid var(--color-border);
+  color:var(--color-text-muted); cursor:pointer; transition:all var(--transition);
+  white-space:nowrap;
+}
+.sal-team-pill:hover { border-color:var(--color-gold); color:var(--color-gold); }
+.sal-team-pill--active { background:var(--color-gold); border-color:var(--color-gold); color:#0a0e1a; font-weight:700; }
+
+/* Salary: Position pills for Top Paid */
+.sal-pos-pills { display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-4); }
+.sal-pos-pill {
+  font-size:.75rem; padding:4px 12px; border-radius:99px;
+  background:var(--color-surface); border:1px solid var(--color-border);
+  color:var(--color-text-muted); cursor:pointer; transition:all var(--transition);
+}
+.sal-pos-pill:hover { border-color:var(--color-gold); color:var(--color-gold); }
+.sal-pos-pill--active { background:var(--color-gold); border-color:var(--color-gold); color:#0a0e1a; font-weight:700; }
+
+/* Salary: Cap Room stacked bar */
+.sal-cr-list { display:flex; flex-direction:column; gap:var(--space-3); }
+.sal-cr-row { display:flex; align-items:center; gap:var(--space-3); }
+.sal-cr-name { width:130px; font-size:.8rem; font-weight:600; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sal-cr-bar-wrap { flex:1; min-width:0; }
+.sal-cr-stacked { display:flex; height:16px; border-radius:4px; overflow:hidden; background:rgba(255,255,255,.05); }
+.sal-cr-seg { height:100%; transition:width .3s; }
+.sal-cr-seg--avail { background:rgba(255,255,255,.06) !important; }
+.sal-cr-numbers { display:flex; flex-direction:column; align-items:flex-end; gap:1px; flex-shrink:0; width:90px; }
+.sal-cr-legend { display:flex; gap:var(--space-3); flex-wrap:wrap; margin-bottom:var(--space-4); font-size:.75rem; }
+.sal-cr-leg-item { display:flex; align-items:center; gap:4px; color:var(--color-text-dim); }
+.sal-cr-leg-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+/* ── Trophy Room: grid layout ─────────────────────────── */
+.tr-trophy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+.tr-trophy-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  /* Fixed height so all cards in a row are the same size */
+  min-height: 130px;
+  justify-content: center;
+  transition: transform var(--transition);
+}
+.tr-trophy-card:hover { transform: translateY(-2px); }
+.tr-trophy-icon { font-size: 2rem; line-height: 1; }
+.tr-trophy-season { font-family:var(--font-display); font-size:1rem; font-weight:800; }
+.tr-trophy-league { font-size:.72rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.tr-trophy-rec { font-size:.68rem; }
+.tr-trophy-team { font-size:.62rem; }
+
+/* Trophy timeline: 3-column grid */
+.tr-timeline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+.tr-season-card {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.tr-season-year {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-2);
+}
+.tr-season-league { padding: var(--space-1) 0; }
+.tr-sl-header { display:flex; align-items:center; justify-content:space-between; gap:4px; }
+.tr-sl-name { font-size:.8rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.tr-sl-icon { font-size:.85rem; flex-shrink:0; }
+.tr-sl-meta { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; margin-top:2px; }
+.tr-sl-rec { font-family:var(--font-display); font-size:.75rem; font-weight:700; color:var(--color-text-muted); }
+.tr-sl-type { font-size:.65rem; color:var(--color-text-dim); }
+.tr-sl-team { font-size:.65rem; }
+
+/* ── Mobile fixes — comprehensive overhaul ────────────── */
+@media (max-width: 640px) {
+  /* Nav */
+  .nav-links { display:flex !important; gap:2px; }
+  .nav-link  { font-size:.6rem; padding:4px 5px; letter-spacing:0; }
+  .nav-logo  { font-size:.8rem; }
+  .app-nav   { padding:0 var(--space-2); gap:var(--space-1); }
+  .btn-icon  { font-size:.85rem; padding:var(--space-1); }
+
+  /* App view */
+  .app-view  { padding:var(--space-3) !important; }
+
+  /* Locker header */
+  .locker-container  { gap:var(--space-4); padding-top:var(--space-2); }
+  .locker-header     { padding:var(--space-3); border-radius:var(--radius); }
+  .locker-header-top { gap:var(--space-2); }
+  .locker-avatar     { width:44px; height:44px; flex-shrink:0; }
+  #locker-avatar-initials { font-size:1rem; }
+  .locker-identity h2  { font-size:1rem; }
+  .locker-tagline      { font-size:.72rem; }
+  .locker-header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    width: 100%;
+    margin-top: var(--space-1);
+  }
+  .locker-header-actions .btn-secondary {
+    font-size:.65rem !important;
+    padding:var(--space-2) !important;
+    text-align:center;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  #auc-float-container { grid-column:1/-1; }
+
+  /* Stats row */
+  .locker-stats-row { flex-wrap:wrap; gap:var(--space-1); }
+  .stat-pill        { font-size:.65rem; padding:2px 6px; }
+
+  /* Filter bar */
+  .league-filters { overflow-x:auto; flex-wrap:nowrap; padding-bottom:4px; scrollbar-width:none; }
+  .league-filters::-webkit-scrollbar { display:none; }
+  .filter-tab { white-space:nowrap; flex-shrink:0; font-size:.65rem; padding:3px 7px; }
+
+  /* League rows */
+  .league-row     { padding:var(--space-2) var(--space-3); min-height:44px; }
+  .lrow-left      { width:40px; }
+  .lrow-plat, .lrow-type { font-size:.5rem; padding:1px 3px; }
+  .lrow-name      { font-size:.8rem; }
+  .lrow-team      { font-size:.65rem; }
+  .lrow-season-col  { width:52px; }
+  .lrow-alltime-col { display:none !important; }
+  .lrow-tags      { display:none !important; }
+  .lrow-record    { font-size:.8rem; }
+  .lrow-season-label { font-size:.58rem; }
+  .lrow-actions   { gap:2px; }
+  .lrow-chat-btn, .lrow-options-btn { font-size:.65rem; padding:2px 5px; }
+
+  /* League detail panel */
+  .league-detail-panel {
+    position:fixed !important;
+    inset:0 !important;
+    width:100% !important;
+    max-width:100% !important;
+    border-radius:0 !important;
+  }
+  .detail-tab-select { font-size:.78rem; width:100%; }
+  .season-bar-pills  { overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; }
+  .season-bar-pills::-webkit-scrollbar { display:none; }
+  .season-pill       { font-size:.68rem; padding:3px 7px; white-space:nowrap; flex-shrink:0; }
+
+  /* Modals */
+  .modal-overlay { padding:var(--space-3); align-items:flex-start; }
+  .modal-box, .modal-box--sm, .modal-box--wide {
+    width:100%; max-width:100%;
+    max-height:calc(100vh - 48px); overflow-y:auto;
+  }
+
+  /* Salary */
+  .sal-overview-grid { grid-template-columns:1fr; }
+  .sal-team-pills    { gap:var(--space-1); }
+  .sal-team-pill     { font-size:.68rem; padding:3px 8px; }
+  .sal-cr-name       { width:90px; font-size:.72rem; }
+  .sal-cr-numbers    { width:76px; font-size:.7rem; }
+  .sal-pos-pills     { gap:var(--space-1); }
+
+  /* Auction */
+  .auc-tabs { overflow-x:auto; flex-wrap:nowrap; }
+  .auc-tab  { white-space:nowrap; flex-shrink:0; font-size:.68rem; padding:4px 8px; }
+  .auc-card-header { flex-wrap:wrap; gap:var(--space-2); }
+
+  /* Draft */
+  .draft-board-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .draft-pick { min-width:68px; max-width:85px; }
+  .draft-pick-name { font-size:.58rem; }
+  .draft-pick-meta { font-size:.52rem; }
+
+  /* Standings */
+  .standings-table-wrap { overflow-x:auto; }
+  .standings-table { font-size:.7rem; min-width:280px; }
+
+  /* Analytics */
+  .az-tabs { overflow-x:auto; flex-wrap:nowrap; }
+  .az-tab  { white-space:nowrap; flex-shrink:0; font-size:.68rem; }
+
+  /* Player report */
+  .pr-panel { width:100% !important; left:0 !important; right:0 !important; }
+
+  /* Hallway */
+  .hallway-grid { grid-template-columns:1fr; }
+
+  /* Trophy room */
+  .tr-banner { grid-template-columns:repeat(3,1fr); }
+  .tr-trophy-grid { grid-template-columns:repeat(2,1fr); }
+  .tr-timeline-grid { grid-template-columns:1fr; }
+  .tr-header { flex-direction:column; align-items:flex-start; gap:var(--space-3); }
+
+  /* Manager search panel */
+  .ms-panel { width:100% !important; }
+  .ms-stats-grid { grid-template-columns:repeat(2,1fr); }
+}
+
+@media (max-width: 380px) {
+  .locker-header-actions { grid-template-columns:1fr; }
+  .tr-trophy-grid { grid-template-columns:repeat(2,1fr); }
+  .lrow-left { display:none; }
+  .sal-cr-name { width:70px; }
+  .tr-banner { grid-template-columns:repeat(2,1fr); }
+}
+
+/* Touch targets */
+@media (hover:none) and (pointer:coarse) {
+  .filter-tab, .page-btn, .season-pill, .sal-tab, .auc-tab,
+  .lrow-chat-btn, .lrow-options-btn, .btn-secondary {
+    min-height:36px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .league-row { min-height:50px; }
+}
