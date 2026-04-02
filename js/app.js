@@ -417,13 +417,104 @@ Auth.onAuthStateChanged(async (user, profile) => {
   const hasPlatforms = profile.platforms && Object.keys(profile.platforms).length > 0;
 
   if (!hasPlatforms && !hasLeagues) {
-    // First login — go to onboarding
     setLoading(false);
     AppState.showScreen("onboarding-screen");
   } else {
     AppState.showApp(profile);
+    // Start global auction monitor across all leagues
+    _startGlobalAucMonitor(profile);
   }
 });
+
+// ── Global active auctions monitor ────────────────────────
+let _globalAucListeners = [];
+let _globalAucData      = {};   // stored in closure, not on DOM element
+
+function _startGlobalAucMonitor(profile) {
+  // Clean up old listeners
+  _globalAucListeners.forEach(fn => fn());
+  _globalAucListeners = [];
+
+  const leagues = profile.leagues || {};
+  const now = Date.now();
+
+  // Only watch Sleeper leagues with auction enabled
+  const auctionLeagues = Object.entries(leagues).filter(([, l]) => l.platform === "sleeper");
+
+  // Collect active auctions across all leagues
+  auctionLeagues.forEach(([leagueKey, league]) => {
+    const ref = GMD.child(`auctions/${leagueKey}/bids`);
+    const handler = ref.on("value", snap => {
+      const data = snap.val() || {};
+      const live = Object.values(data).filter(a =>
+        !a.cancelled && !a.processed && a.expiresAt > Date.now()
+      );
+      if (live.length) {
+        _globalAucData[leagueKey] = { league, live };
+      } else {
+        delete _globalAucData[leagueKey];
+      }
+      _updateGlobalAucPill(_globalAucData);
+    });
+    _globalAucListeners.push(() => ref.off("value", handler));
+  });
+}
+
+function _updateGlobalAucPill(liveByLeague) {
+  const pill = document.getElementById("global-auc-pill");
+  if (!pill) return;
+
+  const totalLive = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
+  const leagueCount = Object.keys(liveByLeague).length;
+
+  if (totalLive === 0) {
+    pill.innerHTML = "";
+    return;
+  }
+
+    pill.innerHTML = `
+    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
+      🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
+      <span class="global-auc-pill-dot"></span>
+    </button>`;
+}
+
+function _openGlobalAucModal() {
+  const modal = document.getElementById("global-auc-modal");
+  const body  = document.getElementById("global-auc-modal-body");
+  if (!modal || !body) return;
+
+  const liveByLeague = _globalAucData;
+
+  body.innerHTML = Object.entries(liveByLeague).map(([leagueKey, { league, live }]) => `
+    <div style="margin-bottom:var(--space-5)">
+      <div style="font-weight:700;font-size:.88rem;margin-bottom:var(--space-2);color:var(--color-gold)">
+        ${_escHtml(league.leagueName || leagueKey)}
+      </div>
+      ${live.map(a => {
+        const timeLeft = Math.max(0, a.expiresAt - Date.now());
+        const mins     = Math.floor(timeLeft / 60000);
+        const hrs      = Math.floor(mins / 60);
+        const timeStr  = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins}m`;
+        const bids     = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+        const topBid   = bids.length ? Math.max(...bids.map(b => b.maxBid)) : 0;
+        return `
+          <div class="global-auc-row" onclick="Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},400);document.getElementById('global-auc-modal').classList.add('hidden')">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:.85rem">${_escHtml(a.playerName||a.playerId)}</div>
+              <div class="dim" style="font-size:.72rem">${bids.length} bid${bids.length!==1?"s":""} · ${timeStr} left</div>
+            </div>
+            <div style="font-family:var(--font-display);font-weight:700;color:var(--color-green)">$${(topBid/1000000).toFixed(1)}M</div>
+          </div>`;
+      }).join("")}
+    </div>`).join("") || `<div class="dim">No active auctions right now.</div>`;
+
+  modal.classList.remove("hidden");
+}
+
+function _escHtml(s) {
+  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
 
 // ── Utility ────────────────────────────────────────────────
 function showError(el, message) {

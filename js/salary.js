@@ -402,7 +402,8 @@ const DLRSalaryCap = (() => {
           </div>
           <div class="sal-pos-dot" style="background:${color}22;color:${color};border-color:${color}55">${pos}</div>
           <div class="sal-player-name-col">
-            <span class="sal-player-name-text">${_esc(name)}</span>
+            <span class="sal-player-name-text sal-player-link"
+              onclick="DLRPlayerCard.show('${pid}','${_escAttr(name)}')">${_esc(name)}</span>
             ${isHoldout ? `<span class="sal-badge sal-badge--holdout">🔥 Holdout</span>` : ""}
             ${slot==="ir"   ? `<span class="sal-badge sal-badge--slot">IR ${_settings.irCapPct}%</span>` : ""}
             ${slot==="taxi" ? `<span class="sal-badge sal-badge--taxi">Taxi ${_settings.taxiCapPct}%</span>` : ""}

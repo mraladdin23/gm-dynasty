@@ -1306,6 +1306,16 @@ const Profile = (() => {
     document.getElementById("league-detail-panel").classList.remove("hidden");
     document.getElementById("league-detail-backdrop").classList.remove("hidden");
 
+    // Pre-initialize auction module so canNominate/isRostered work on all tabs
+    const meta3      = _leagueMeta[leagueKey] || {};
+    const isSalary3  = (league.leagueType === "dynasty" && league.platform === "sleeper") || meta3.leagueTypeOverride === "dynasty";
+    const auctionOn3 = meta3.auctionEnabled || isSalary3;
+    if (auctionOn3 && league.platform === "sleeper") {
+      // Silently pre-load without switching to auction tab
+      DLRAuction.preInit(leagueKey, league.leagueId, league.isCommissioner,
+        league.myRosterId || null, league.teamName || "My Team", league.platform || "sleeper");
+    }
+
     // Show overview content
     document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
     document.getElementById("dtab-overview")?.classList.add("active");
