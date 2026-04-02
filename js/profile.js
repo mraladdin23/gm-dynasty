@@ -228,6 +228,27 @@ const Profile = (() => {
     document.getElementById("locker-display-name").textContent = profile.username;
     document.getElementById("nav-username").textContent = "@" + profile.username;
 
+    // Populate mobile nav identity bar
+    const navIdName  = document.getElementById("nav-id-name");
+    const navIdStats = document.getElementById("nav-id-stats");
+    const navAvatar  = document.getElementById("nav-avatar");
+    if (navIdName)  navIdName.textContent  = profile.username;
+    if (navIdStats && profile.stats) {
+      const w = profile.stats.totalWins || 0;
+      const l = profile.stats.totalLosses || 0;
+      const c = profile.stats.championships || 0;
+      navIdStats.textContent = `${w}–${l}${c > 0 ? ` · 🏆${c}` : ""}`;
+    }
+    if (navAvatar) {
+      if (profile.avatarUrl) {
+        navAvatar.style.backgroundImage = `url(${profile.avatarUrl})`;
+        navAvatar.style.backgroundSize  = "cover";
+        navAvatar.style.backgroundPosition = "center";
+      } else {
+        navAvatar.textContent = (profile.username || "?")[0].toUpperCase();
+      }
+    }
+
     if (profile.bio) {
       document.getElementById("locker-tagline").textContent = profile.bio;
     }

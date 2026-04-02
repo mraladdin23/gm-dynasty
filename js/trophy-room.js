@@ -22,13 +22,14 @@ const DLRTrophyRoom = (() => {
       return;
     }
 
-    // Only leagues where the user actually played (has wins/losses or a team name that isn't just "My Team")
-    // Exclude leagues where they are commish-only with no record
+    // Strict managed filter: must have a real record OR real team name (not generic)
+    // Explicitly exclude commish-only (isCommissioner=true, wins=0, losses=0, no real teamName)
     const managed = all.filter(l => {
       const hasRecord   = (l.wins || 0) + (l.losses || 0) > 0;
-      const hasTeamName = l.teamName && l.teamName !== "My Team" && l.teamName !== "";
+      const hasRealName = l.teamName && l.teamName !== "My Team" && l.teamName !== "" && l.teamName !== null;
       const hasRosterId = !!l.myRosterId;
-      return hasRecord || hasTeamName || hasRosterId;
+      const commishOnly = l.isCommissioner && !hasRecord && !hasRosterId && !hasRealName;
+      return !commishOnly && (hasRecord || hasRealName || hasRosterId);
     });
 
     const champs  = managed.filter(l => l.isChampion || l.playoffFinish === 1)

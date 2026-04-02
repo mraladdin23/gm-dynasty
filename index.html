@@ -165,6 +165,15 @@
         <span class="nav-logo">🏆</span>
         <span class="nav-title">DLR</span>
       </div>
+      <!-- Mobile identity strip (hidden on desktop) -->
+      <div class="nav-identity" id="nav-identity">
+        <div class="nav-avatar" id="nav-avatar"></div>
+        <div class="nav-id-info">
+          <div class="nav-id-name" id="nav-id-name"></div>
+          <div class="nav-id-stats" id="nav-id-stats"></div>
+        </div>
+        <div id="global-auc-pill"></div>
+      </div>
       <div class="nav-links">
         <a href="#" class="nav-link active" data-view="locker">My Locker</a>
         <a href="#" class="nav-link" data-view="hallway">Hallway</a>
@@ -181,6 +190,10 @@
     </nav>
     <!-- Mobile drawer -->
     <div class="nav-drawer" id="nav-drawer">
+      <div class="nav-drawer-section" id="drawer-auc-section" style="display:none">
+        <div class="nav-drawer-label">🏷 Live Auctions</div>
+        <div id="drawer-auc-list"></div>
+      </div>
       <div class="nav-drawer-section">
         <div class="nav-drawer-label">Views</div>
         <a href="#" class="nav-drawer-item" data-view="locker" onclick="DLRNav.go('locker')">🏠 My Locker</a>
@@ -214,11 +227,8 @@
               <p id="locker-tagline" class="locker-tagline">Dynasty GM</p>
               <div class="locker-stats-row" id="locker-stats-row"></div>
             </div>
-            <!-- Global auction pill visible on mobile next to avatar -->
-            <div id="global-auc-pill" class="locker-auc-pill-mobile"></div>
           </div>
           <div class="locker-header-actions">
-            <div id="global-auc-pill-desktop" class="global-auc-desktop"></div>
             <button class="btn-secondary btn-sm" id="career-summary-btn" title="Career Summary">📊 Career Stats</button>
             <button class="btn-secondary btn-sm" id="player-report-btn" title="Cross-League Player Report">📋 My Players</button>
             <button class="btn-secondary btn-sm" id="edit-profile-btn">✏ Edit Profile</button>
