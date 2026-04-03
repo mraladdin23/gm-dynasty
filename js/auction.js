@@ -724,27 +724,31 @@ const DLRAuction = (() => {
 
     // Pull cap data from salary module
     const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
+    console.log(`[Teams] capData keys=${capData ? Object.keys(capData).join(",") : "null"} | _franchiseId=${_franchiseId} | _leagueKey=${_leagueKey}`);
     if (capData && Object.keys(capData).length > 0) {
+      console.log(`[Teams] First cap entry:`, JSON.stringify(Object.entries(capData)[0]));
       // Cap data ready — apply to rosterData
       _rosterData.forEach(t => {
         const d = capData[t.username];
         if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
       });
     } else if (_leagueKey && !_capLoadTriggered && typeof DLRSalaryCap !== "undefined") {
-      // Cap not ready yet — trigger preloadCap and re-render when done
+      console.log(`[Teams] capData not ready, triggering preloadCap with franchiseId=${_franchiseId}`);
       _capLoadTriggered = true;
       DLRSalaryCap.preloadCap(_leagueKey, _leagueId, _franchiseId).then(() => {
         const d2 = DLRSalaryCap.getCapData?.();
+        console.log(`[Teams] preloadCap done, d2 keys=${d2 ? Object.keys(d2).join(",") : "null"}`);
         if (d2 && Object.keys(d2).length > 0) {
           _rosterData.forEach(t => {
             const d = d2[t.username];
+            console.log(`[Teams] applying cap for ${t.username}: d=${JSON.stringify(d)}`);
             if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
           });
         }
         _capLoadTriggered = false;
         const el2 = document.getElementById("auc-content");
         if (el2 && _viewMode === "teams") _renderTeams(el2);
-      }).catch(() => { _capLoadTriggered = false; });
+      }).catch(e => { console.error(`[Teams] preloadCap failed:`, e); _capLoadTriggered = false; });
     }
 
     // Sort: my team first, then by available cap desc
@@ -782,6 +786,9 @@ const DLRAuction = (() => {
           const available = baseCap != null ? Math.max(0, baseCap - committed) : null;
           const maxBase   = Math.max(...sorted.map(x => x.remainingCap ?? x.faab ?? 0), 1);
           const barPct    = baseCap != null ? Math.round(baseCap / maxBase * 100) : 0;
+
+          // DEBUG — remove once cap is confirmed working
+          console.log(`[Teams] ${t.teamName} | username=${t.username} | remainingCap=${t.remainingCap} | faab=${t.faab} | baseCap=${baseCap} | capTotal=${t.capTotal} | capSpent=${t.capSpent}`);
 
           // My active bids
           const myBids = active.filter(a => {
