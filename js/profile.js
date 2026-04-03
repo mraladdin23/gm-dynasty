@@ -41,11 +41,12 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, emailOrUsername, password) {
+  async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
   if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
   if (!password?.trim()) throw new Error("Enter your MFL password.");
 
   const mflUsername = emailOrUsername.trim().split("@")[0];
+  console.log(`[MFL] linkMFL called: username=${mflUsername}, hasPassword=${!!password}`);
 
   // ───────── STEP 1: FETCH USER LEAGUES (AUTH REQUIRED) ─────────
   let leagues;
@@ -54,10 +55,13 @@ const Profile = (() => {
       username: mflUsername,
       password
     });
+    console.log(`[MFL] getUserLeagues returned:`, leagues);
   } catch (err) {
-    console.error("[MFL] Failed to fetch leagues:", err);
-    throw new Error("Invalid MFL credentials or failed to fetch leagues.");
+    console.error("[MFL] getUserLeagues threw:", err.message, err);
+    throw new Error(`MFL connection failed: ${err.message}`);
   }
+
+  console.log(`[MFL] leagues array:`, Array.isArray(leagues), leagues?.length, leagues);
 
   if (!Array.isArray(leagues) || leagues.length === 0) {
     throw new Error("No MFL leagues found for this account.");
