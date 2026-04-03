@@ -1699,6 +1699,7 @@ select option { background: var(--color-bg-2); }
   overflow: hidden;
   box-sizing: border-box;
   padding: 0 var(--space-2);
+  position: relative;
 }
 
 /* Draft pick */
@@ -1719,6 +1720,9 @@ select option { background: var(--color-bg-2); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: .82rem;
 }
 
 /* Draft maxpf */
@@ -1733,15 +1737,40 @@ select option { background: var(--color-bg-2); }
 }
 
 /* ── Force all nested children to stay contained ── */
-.draft-order-row * {
+.draft-order-row .draft-pick * {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
   max-height: 100% !important;
-  line-height: 1 !important;
   margin: 0 !important;
   padding: 0 !important;
+  line-height: 1 !important;
   overflow: hidden !important;
+}
+
+.draft-order-row .draft-team * {
   display: flex !important;
-  align-items: inherit !important;
-  justify-content: inherit !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  overflow: hidden !important;
+}
+
+.draft-order-row .draft-maxpf * {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  overflow: hidden !important;
 }
 
 /* ── Mobile ───────────────────────────── */
