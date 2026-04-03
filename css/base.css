@@ -78,6 +78,7 @@ html, body {
   color: var(--color-text);
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
+  scrollbar-gutter: stable; /* reserves scrollbar space so layout doesn't shift */
 }
 
 a {
@@ -92,12 +93,15 @@ img { max-width: 100%; display: block; }
 .screen {
   display: none;
   min-height: 100vh;
-  width: 100%;
+  width: 100vw;        /* always full viewport width */
+  max-width: 100%;
   position: relative;
+  overflow-x: hidden;
 }
 .screen.active {
   display: flex;
   flex-direction: column;
+  align-items: stretch; /* children fill full width */
 }
 
 /* ── App views ────────────────────────────────────────── */
@@ -106,6 +110,11 @@ img { max-width: 100%; display: block; }
   padding: var(--space-6);
   max-width: 1100px;
   margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  align-self: stretch;  /* stretch to flex parent width, not content width */
+  flex-shrink: 0;
 }
 .app-view.active { display: block; }
 
