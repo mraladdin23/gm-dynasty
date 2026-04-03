@@ -1650,7 +1650,7 @@ select option { background: var(--color-bg-2); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
 
-/* ── Draft order: full CSS with fixed 3x2 grid ──────────────────────────── */
+/* ── Draft order: full CSS with condensed cards ──────────────────────────── */
 
 /* Section styling */
 .draft-order-section { 
@@ -1671,28 +1671,24 @@ select option { background: var(--color-bg-2); }
   margin-bottom: var(--space-3); 
 }
 
-/* Grid container: fixed 3 columns */
+/* Grid container: 3 cards across, rows auto-fit height */
 .draft-order-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* 3 cards across */
-  grid-auto-rows: 1fr;                   /* all rows same height */
+  grid-template-columns: repeat(3, 1fr); /* 3 across */
   gap: var(--space-2);
 }
 
 /* Each draft card */
 .draft-order-row {
   display: flex;
-  flex-direction: column;  /* stack pick, team, maxpf */
-  justify-content: flex-start;
-  align-items: stretch;    /* fill card width */
-  gap: var(--space-1);
-  background: var(--color-surface);
+  align-items: flex-start;   /* pick aligns with top of team/maxpf */
+  gap: var(--space-2);
+  padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: var(--space-2);
+  background: var(--color-surface);
   box-sizing: border-box;
   width: 100%;
-  height: 100%;            /* fill grid cell */
   overflow: hidden;
 }
 
@@ -1701,65 +1697,71 @@ select option { background: var(--color-bg-2); }
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--color-gold);
-  flex: 0 0 auto;          /* only as tall as content */
-  text-align: center;
-  margin: 0;
-  padding: 0;
-  display: inline-flex;
+  flex: 0 0 auto;            /* only as wide as defined */
+  width: 32px;
+  height: auto;              /* no stretching */
+  line-height: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
-  line-height: normal;
+  padding: 0;
+  text-align: center;
+}
+
+/* Team + Max PF wrapper */
+.draft-order-row .draft-team-maxpf {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;            /* fill remaining card space */
 }
 
 /* Team name */
 .draft-order-row .draft-team {
-  flex: 1 1 auto;          /* fill remaining space */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: .82rem;
+  font-weight: 500;
 }
 
 /* Max PF */
 .draft-order-row .draft-maxpf {
-  flex: 0 0 auto;
-  margin-top: auto;         /* push to bottom of card */
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--color-text-dim);
-  line-height: 1;
   white-space: nowrap;
 }
 
-/* ── Mobile: single column layout ──────────────────────────── */
+/* ── Mobile tweaks ──────────────────────────── */
 @media (max-width: 640px) {
   .draft-order-grid {
-    grid-template-columns: 1fr;  /* 1 card per row on mobile */
-    grid-auto-rows: auto;        /* height fits content */
+    grid-template-columns: 1fr;  /* single column on mobile */
+    gap: var(--space-2);
   }
 
   .draft-order-row {
-    flex-direction: row;         /* horizontal layout */
-    align-items: center;
-    justify-content: flex-start;
+    flex-direction: row;         /* horizontal layout on mobile */
+    align-items: center;         /* vertically center pick/team */
     gap: var(--space-2);
-    height: auto;                /* auto height */
+    padding: var(--space-2);
+    height: auto;
   }
 
   .draft-order-row .draft-pick {
-    width: 32px;
+    width: 28px;                 /* slightly smaller on mobile */
     flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  }
+
+  .draft-order-row .draft-team-maxpf {
+    flex-direction: column;
+    flex: 1 1 auto;
   }
 
   .draft-order-row .draft-maxpf {
     font-size: 0.7rem;
-    margin-top: 0;
-    margin-left: auto;           /* push to end horizontally */
   }
 }
-
 /* Loading/error states */
 .detail-loading {
   display: flex;
