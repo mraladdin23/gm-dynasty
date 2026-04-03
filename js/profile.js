@@ -1371,14 +1371,13 @@ const Profile = (() => {
         league.platform || "sleeper", sleeperUid);
     }
 
-    // Pre-initialize salary cap so Teams tab always has cap data without visiting salary tab first
-    const franchise4  = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+    // Silently preload salary cap data so Teams tab always has cap figures
+    // Use preloadCap (not init) so we don't clobber the salary tab's own init
+    const franchise4   = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
     const franchiseId4 = franchise4?.franchiseId || leagueKey;
-    const isSalary4   = (meta3.leagueTypeOverride === "salary") || league.leagueType === "salary";
+    const isSalary4    = (meta3.leagueTypeOverride === "salary") || league.leagueType === "salary";
     if (isSalary4 || meta3.auctionEnabled) {
-      // Init silently — won't render anything, just loads Firebase salary data into module
-      DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId4)
-        .catch(() => {});
+      DLRSalaryCap.preloadCap(leagueKey, league.leagueId, franchiseId4).catch(() => {});
     }
 
     // Show overview content

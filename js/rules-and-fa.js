@@ -302,15 +302,25 @@ const DLRFreeAgents = (() => {
       </div>
       <div class="fa-list">
         ${(() => {
-          // Evaluate once outside map — avoid calling canNominate per-row
-          const auctionReady = typeof DLRAuction !== "undefined" && typeof DLRAuction.canNominate === "function";
-          const canNom = _auctionEnabled && auctionReady ? DLRAuction.canNominate() : false;
+          // Check if auction module is ready for THIS league (has rosters loaded)
+          const auctionReady = _auctionEnabled
+            && typeof DLRAuction !== "undefined"
+            && DLRAuction.isReady?.(_leagueKey);
 
-          // If auction should be enabled but isn't ready yet, re-render once it loads
+          const canNom = auctionReady ? DLRAuction.canNominate() : false;
+
+          // If auction is enabled but not yet ready, poll until it is (max 5s)
           if (_auctionEnabled && !auctionReady) {
-            setTimeout(() => { if (_cachedData) _render(); }, 1500);
-          } else if (_auctionEnabled && auctionReady && !DLRAuction.isRostered) {
-            setTimeout(() => { if (_cachedData) _render(); }, 1000);
+            let attempts = 0;
+            const poll = setInterval(() => {
+              attempts++;
+              if (DLRAuction.isReady?.(_leagueKey)) {
+                clearInterval(poll);
+                if (_cachedData) _render();
+              } else if (attempts >= 10) {
+                clearInterval(poll);
+              }
+            }, 500);
           }
 
           return sorted.length ? sorted.map((p, i) => {
