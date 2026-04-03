@@ -1649,119 +1649,71 @@ select option { background: var(--color-bg-2); }
 .playoffs-icon  { font-size: 2.5rem; margin-bottom: var(--space-3); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
-
-/* ── Draft order: full CSS with condensed cards ──────────────────────────── */
-
-/* Section styling */
-.draft-order-section { 
-  margin-top: var(--space-6); 
-  padding-top: var(--space-4); 
-  border-top: 1px solid var(--color-border); 
-}
-
-.draft-order-title { 
-  font-size: .9rem; 
-  font-weight: 700; 
-  margin-bottom: var(--space-1); 
-}
-
-.draft-order-sub { 
-  font-size: .75rem; 
-  color: var(--color-text-dim); 
-  margin-bottom: var(--space-3); 
-}
-
-/* Grid container: 3 cards across, rows auto-fit height */
+.draft-order-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.draft-order-title { font-size: .9rem; font-weight: 700; margin-bottom: var(--space-1); }
+.draft-order-sub { font-size: .75rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
 .draft-order-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr); /* 3 across */
-  gap: var(--space-2);
-}
-
-/* Each draft card */
-.draft-order-row {
   display: flex;
-  align-items: flex-start;   /* pick aligns with top of team/maxpf */
-  gap: var(--space-2);
-  padding: var(--space-2);
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+}
+.draft-order-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 80px;  /* pick | team name | maxpf */
+  align-items: center;
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  box-sizing: border-box;
+  height: 36px;               /* fixed height — never changes */
   width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
-
-/* Draft pick */
 .draft-order-row .draft-pick {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  color: var(--color-gold);
-  flex: 0 0 auto;            /* only as wide as defined */
-  width: 32px;
-  height: auto;              /* no stretching */
-  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  text-align: center;
+  height: 100%;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: .82rem;
+  color: var(--color-gold);
+  background: var(--color-bg-3);
+  border-right: 1px solid var(--color-border);
+  padding: 0 var(--space-2);
+  box-sizing: border-box;
+  width: 100%;
 }
-
-/* Team + Max PF wrapper */
-.draft-order-row .draft-team-maxpf {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1 1 auto;            /* fill remaining card space */
-}
-
-/* Team name */
 .draft-order-row .draft-team {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  font-size: .82rem;
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: .82rem;
-  font-weight: 500;
+  width: 100%;
+  min-width: 0;
 }
-
-/* Max PF */
 .draft-order-row .draft-maxpf {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: .72rem;
   color: var(--color-text-dim);
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-3);
   white-space: nowrap;
+  width: 100%;
 }
 
-/* ── Mobile tweaks ──────────────────────────── */
-@media (max-width: 640px) {
-  .draft-order-grid {
-    grid-template-columns: 1fr;  /* single column on mobile */
-    gap: var(--space-2);
-  }
-
-  .draft-order-row {
-    flex-direction: row;         /* horizontal layout on mobile */
-    align-items: center;         /* vertically center pick/team */
-    gap: var(--space-2);
-    padding: var(--space-2);
-    height: auto;
-  }
-
-  .draft-order-row .draft-pick {
-    width: 28px;                 /* slightly smaller on mobile */
-    flex-shrink: 0;
-  }
-
-  .draft-order-row .draft-team-maxpf {
-    flex-direction: column;
-    flex: 1 1 auto;
-  }
-
-  .draft-order-row .draft-maxpf {
-    font-size: 0.7rem;
-  }
-}
 /* Loading/error states */
 .detail-loading {
   display: flex;
@@ -5205,6 +5157,8 @@ select option { background: var(--color-bg-2); }
   .tx-chip    { font-size: .65rem; padding: 1px 5px; }
   .tx-trade-grid { flex-direction: column; gap: var(--space-2); }
 }
+
+
 
 
 

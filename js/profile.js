@@ -954,24 +954,15 @@ const Profile = (() => {
       _updateJumpDropdown([]);
     } else {
       _filteredCache  = filtered;
-      _archivedCache  = archived; // always track for accordion
+      _archivedCache  = archived;
       _currentPage    = 0;
       _archivedPage   = 0;
       _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
-      // Only include archived in jump dropdown when archived filter is explicitly selected
       _updateJumpDropdown(wantArchived ? [..._filteredCache, ...archived] : _filteredCache);
     }
 
-    // Archived accordion
-    if (!wantArchived && archived.length > 0) {
-      if (archivedSec) archivedSec.classList.remove("hidden");
-      if (archivedCount) archivedCount.textContent = `${archived.length}`;
-      _archivedCache = archived;
-      _archivedPage  = 0;
-      _renderPage(archivedGrid, _archivedCache, _archivedPage, "archived-pagination", "arch-page-info", true);
-    } else {
-      if (archivedSec) archivedSec.classList.add("hidden");
-    }
+    // Always hide the archived accordion — use the 📦 Archived filter button instead
+    if (archivedSec) archivedSec.classList.add("hidden");
   }
 
   function _renderPage(gridEl, items, page, paginationId, infoId, isArchived) {
