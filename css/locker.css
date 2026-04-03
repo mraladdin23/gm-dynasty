@@ -1660,12 +1660,12 @@ select option { background: var(--color-bg-2); }
 }
 .draft-order-row {
   display: grid;
-  grid-template-columns: 56px 1fr 80px;  /* pick | team name | maxpf */
-  align-items: center;
+  grid-template-columns: 56px 1fr 80px;
+  align-items: stretch;       /* children stretch to fill row height */
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  height: 36px;               /* fixed height — never changes */
+  height: 36px;
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
@@ -1674,7 +1674,6 @@ select option { background: var(--color-bg-2); }
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
   font-family: var(--font-mono);
   font-weight: 700;
   font-size: .82rem;
@@ -1683,26 +1682,22 @@ select option { background: var(--color-bg-2); }
   border-right: 1px solid var(--color-border);
   padding: 0 var(--space-2);
   box-sizing: border-box;
-  width: 100%;
 }
 .draft-order-row .draft-team {
   display: flex;
   align-items: center;
-  height: 100%;
   font-size: .82rem;
   padding: 0 var(--space-3);
   box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 100%;
   min-width: 0;
 }
 .draft-order-row .draft-maxpf {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  height: 100%;
   font-family: var(--font-mono);
   font-size: .72rem;
   color: var(--color-text-dim);
@@ -1711,7 +1706,6 @@ select option { background: var(--color-bg-2); }
   border-left: 1px solid var(--color-border);
   background: var(--color-bg-3);
   white-space: nowrap;
-  width: 100%;
 }
 
 /* Loading/error states */
