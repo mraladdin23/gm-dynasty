@@ -17,6 +17,7 @@ const DLRAuction = (() => {
   let _isCommish    = false;
   let _myRosterId   = null;
   let _sleeperUserId = null;
+  let _franchiseId  = null;   // salary storage key
   let _myTeamName   = "My Team";
   let _rosterData   = [];
   let _auctions     = [];
@@ -43,8 +44,7 @@ const DLRAuction = (() => {
   const _settingsRef = () => GMD.child(`auctions/${_leagueKey}/settings`);
 
   // ── Pre-init: load state so canNominate/isRostered work on all tabs ──
-  async function preInit(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId) {
-    // Don't reset if already initialized for this league with a valid roster ID
+  async function preInit(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId, franchiseId) {
     if (_leagueKey === leagueKey && _rosterData.length && _myRosterId) return;
 
     _leagueKey     = leagueKey;
@@ -54,6 +54,7 @@ const DLRAuction = (() => {
     _myRosterId    = myRosterId != null ? Number(myRosterId) : null;
     _myTeamName    = myTeamName || "My Team";
     _sleeperUserId = sleeperUserId || null;
+    _franchiseId   = franchiseId  || leagueKey;
 
     // Load settings silently
     try {
@@ -125,7 +126,7 @@ const DLRAuction = (() => {
   }
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId) {
+  async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId, franchiseId) {
     _leagueKey      = leagueKey;
     _leagueId       = leagueId;
     _platform       = platform || "sleeper";
@@ -133,6 +134,7 @@ const DLRAuction = (() => {
     _myRosterId     = myRosterId != null ? Number(myRosterId) : null;
     _myTeamName     = myTeamName || "My Team";
     _sleeperUserId  = sleeperUserId || null;
+    _franchiseId    = franchiseId  || leagueKey;
     _viewMode       = "live";
     _capLoadTriggered = false;
     _capSettings = null;
@@ -731,8 +733,7 @@ const DLRAuction = (() => {
     } else if (_leagueKey && !_capLoadTriggered && typeof DLRSalaryCap !== "undefined") {
       // Cap not ready yet — trigger preloadCap and re-render when done
       _capLoadTriggered = true;
-      const franchiseId = _leagueKey; // profile sets this correctly
-      DLRSalaryCap.preloadCap(_leagueKey, _leagueId, franchiseId).then(() => {
+      DLRSalaryCap.preloadCap(_leagueKey, _leagueId, _franchiseId).then(() => {
         const d2 = DLRSalaryCap.getCapData?.();
         if (d2 && Object.keys(d2).length > 0) {
           _rosterData.forEach(t => {
