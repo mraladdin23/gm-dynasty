@@ -1359,24 +1359,25 @@ const Profile = (() => {
     document.getElementById("league-detail-backdrop").classList.remove("hidden");
 
     // Pre-initialize auction module so canNominate/isRostered work on all tabs
-    const meta3      = _leagueMeta[leagueKey] || {};
-    const isSalary3  = (league.leagueType === "dynasty" && league.platform === "sleeper") || meta3.leagueTypeOverride === "dynasty";
-    const auctionOn3 = meta3.auctionEnabled || isSalary3;
+    const meta3       = _leagueMeta[leagueKey] || {};
+    const isSalary3   = (league.leagueType === "dynasty" && league.platform === "sleeper") || meta3.leagueTypeOverride === "dynasty";
+    const auctionOn3  = meta3.auctionEnabled || isSalary3;
+
+    // Compute franchiseId once — used by both auction preInit and salary preloadCap
+    const franchise4   = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+    const franchiseId4 = franchise4?.franchiseId || leagueKey;
+
     if (auctionOn3 && league.platform === "sleeper") {
       const sleeperUid = league.sleeperUserId
         || _currentProfile?.platforms?.sleeper?.sleeperUserId
         || null;
-      const auctFranchiseId = franchise4?.franchiseId || leagueKey;
       DLRAuction.preInit(leagueKey, league.leagueId, league.isCommissioner,
         league.myRosterId || null, league.teamName || "My Team",
-        league.platform || "sleeper", sleeperUid, auctFranchiseId);
+        league.platform || "sleeper", sleeperUid, franchiseId4);
     }
 
     // Silently preload salary cap data so Teams tab always has cap figures
-    // Use preloadCap (not init) so we don't clobber the salary tab's own init
-    const franchise4   = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
-    const franchiseId4 = franchise4?.franchiseId || leagueKey;
-    const isSalary4    = (meta3.leagueTypeOverride === "salary") || league.leagueType === "salary";
+    const isSalary4 = (meta3.leagueTypeOverride === "salary") || league.leagueType === "salary";
     if (isSalary4 || meta3.auctionEnabled) {
       DLRSalaryCap.preloadCap(leagueKey, league.leagueId, franchiseId4).catch(() => {});
     }
