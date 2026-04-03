@@ -175,7 +175,7 @@
       statusEl.textContent = "Connecting...";
 
       try {
-        const res = await fetch("/mfl-userLeagues", {
+        const res = await fetch("/mfl/userLeagues", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password, leagueIds })
