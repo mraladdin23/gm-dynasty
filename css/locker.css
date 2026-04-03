@@ -1688,21 +1688,22 @@ select option { background: var(--color-bg-2); }
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  position: relative;
 }
 
-/* ── Cells act as containers ───────────────────────── */
+/* ── Cells as flex containers ───────────────────────── */
 .draft-order-row .draft-pick,
 .draft-order-row .draft-team,
 .draft-order-row .draft-maxpf {
-  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;   /* horizontally center by default */
   height: 100%;
   overflow: hidden;
-  padding: 0 var(--space-2);
   box-sizing: border-box;
+  padding: 0 var(--space-2);
 }
 
-/* ── Draft Pick (centered both ways) ───────────────── */
+/* ── Draft Pick ───────────────────────────── */
 .draft-order-row .draft-pick {
   background: var(--color-bg-3);
   border-right: 1px solid var(--color-border);
@@ -1712,38 +1713,35 @@ select option { background: var(--color-bg-2); }
   color: var(--color-gold);
 }
 
-/* clamp and center any nested content */
-.draft-order-row .draft-pick > * {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-height: 100%;
-  line-height: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* force nested elements to flex and center */
+.draft-order-row .draft-pick * {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+  margin: 0 !important;
+  line-height: 1 !important;
 }
 
-/* ── Draft Team (left-aligned, vertically centered) ── */
+/* ── Draft Team ───────────────────────────── */
 .draft-order-row .draft-team {
+  justify-content: flex-start;   /* left align */
+  padding: 0 var(--space-3);
   font-size: .82rem;
-}
-
-.draft-order-row .draft-team > * {
-  position: absolute;
-  top: 50%;
-  left: var(--space-3);
-  right: var(--space-3);
-  transform: translateY(-50%);
-  max-height: 100%;
-  line-height: 1;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* ── Draft Max PF (centered, matching background) ───── */
+.draft-order-row .draft-team * {
+  display: flex !important;
+  align-items: center !important;
+  height: 100% !important;
+  margin: 0 !important;
+  line-height: 1 !important;
+}
+
+/* ── Draft Max PF ───────────────────────────── */
 .draft-order-row .draft-maxpf {
   background: var(--color-bg-3);
   border-left: 1px solid var(--color-border);
@@ -1751,19 +1749,16 @@ select option { background: var(--color-bg-2); }
   font-weight: 700;
   font-size: .82rem;
   color: var(--color-gold);
-
 }
 
-.draft-order-row .draft-maxpf > * {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-height: 100%;
-  line-height: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* force nested elements to flex and center */
+.draft-order-row .draft-maxpf * {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+  margin: 0 !important;
+  line-height: 1 !important;
 }
 
 /* ── Mobile ───────────────────────────── */
