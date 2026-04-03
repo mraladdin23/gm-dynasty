@@ -1366,9 +1366,10 @@ const Profile = (() => {
       const sleeperUid = league.sleeperUserId
         || _currentProfile?.platforms?.sleeper?.sleeperUserId
         || null;
+      const auctFranchiseId = franchise4?.franchiseId || leagueKey;
       DLRAuction.preInit(leagueKey, league.leagueId, league.isCommissioner,
         league.myRosterId || null, league.teamName || "My Team",
-        league.platform || "sleeper", sleeperUid);
+        league.platform || "sleeper", sleeperUid, auctFranchiseId);
     }
 
     // Silently preload salary cap data so Teams tab always has cap figures
@@ -1531,6 +1532,8 @@ const Profile = (() => {
       const sleeperUid2 = league.sleeperUserId
         || _currentProfile?.platforms?.sleeper?.sleeperUserId
         || null;
+      const franchise5  = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+      const franchiseId5 = franchise5?.franchiseId || leagueKey;
       DLRAuction.init(
         leagueKey,
         league.leagueId,
@@ -1538,7 +1541,8 @@ const Profile = (() => {
         league.myRosterId    || null,
         league.teamName      || "My Team",
         league.platform      || "sleeper",
-        sleeperUid2
+        sleeperUid2,
+        franchiseId5
       );
     }
     if (tab === "chat")        _renderChat(el, leagueKey, league);
