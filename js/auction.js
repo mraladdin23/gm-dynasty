@@ -75,6 +75,7 @@ const DLRAuction = (() => {
           const u = userMap[r.owner_id] || {};
           return {
             roster_id:  r.roster_id,
+            ownerId:    r.owner_id,                              // Sleeper user_id for cap lookup
             username:   (u.username||"").toLowerCase(),
             teamName:   u.metadata?.team_name || u.display_name || `Team ${r.roster_id}`,
             players:    r.players  || [],
@@ -173,6 +174,7 @@ const DLRAuction = (() => {
           const u = userMap[r.owner_id] || {};
           return {
             roster_id:  r.roster_id,
+            ownerId:    r.owner_id,
             username:   (u.username||"").toLowerCase(),
             teamName:   u.metadata?.team_name || u.display_name || `Team ${r.roster_id}`,
             players:    r.players  || [],
@@ -181,7 +183,6 @@ const DLRAuction = (() => {
             wins:       r.settings?.wins   || 0,
             losses:     r.settings?.losses || 0,
             co_owners:  r.co_owners || [],
-            // FAAB = waiver budget remaining from Sleeper (in dollars, not millions)
             faab:       r.settings?.waiver_budget_used != null
                           ? Math.max(0, (r.settings.waiver_budget || 1000) - (r.settings.waiver_budget_used || 0)) * 1_000_000
                           : null
@@ -728,6 +729,12 @@ const DLRAuction = (() => {
     if (capData && Object.keys(capData).length > 0) {
       console.log(`[Teams] First cap entry:`, JSON.stringify(Object.entries(capData)[0]));
       // Cap data ready — apply to rosterData
+      // salary module keys by username, falling back to user_id when username is blank
+      _rosterData.forEach(t => {
+        // Try username first, then ownerId (salary module falls back to user_id)
+        const d = capData[t.username] || capData[t.ownerId] || capData[String(t.ownerId)];
+        if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
+      });
       _rosterData.forEach(t => {
         const d = capData[t.username];
         if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
@@ -740,8 +747,8 @@ const DLRAuction = (() => {
         console.log(`[Teams] preloadCap done, d2 keys=${d2 ? Object.keys(d2).join(",") : "null"}`);
         if (d2 && Object.keys(d2).length > 0) {
           _rosterData.forEach(t => {
-            const d = d2[t.username];
-            console.log(`[Teams] applying cap for ${t.username}: d=${JSON.stringify(d)}`);
+            const d = d2[t.username] || d2[t.ownerId] || d2[String(t.ownerId)];
+            console.log(`[Teams] applying cap for ${t.teamName} username=${t.username} ownerId=${t.ownerId}: d=${JSON.stringify(d)}`);
             if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
           });
         }
@@ -1189,7 +1196,7 @@ const DLRAuction = (() => {
       if (capData && Object.keys(capData).length > 0) {
         const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
         if (myTeam) {
-          const d = capData[myTeam.username];
+          const d = capData[myTeam.username] || capData[myTeam.ownerId] || capData[String(myTeam.ownerId)];
           if (d) {
             const now       = Date.now();
             const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
