@@ -114,23 +114,41 @@
         <div id="sleeper-leagues-preview" class="leagues-preview hidden"></div>
       </div>
 
-      <!-- MFL -->
-      <div class="platform-card" id="mfl-card">
-        <div class="platform-header">
-          <div class="platform-icon platform-icon-text">MFL</div>
-          <div class="platform-info">
-            <h3>MyFantasyLeague</h3>
-            <span class="platform-status" id="mfl-status">Not connected</span>
-          </div>
-        </div>
-        <div class="platform-body">
-          <input type="text" id="mfl-email-input" placeholder="MFL username (for team matching)" />
-          <input type="text" id="mfl-league-ids-input" placeholder="League IDs from MFL URL — e.g. 21600, 18432" />
-          <span class="field-hint">Paste your league ID(s) from the MFL URL (required — MFL doesn't support username-only search). Your username is used to identify your team within the league.</span>
-          <button class="btn-link-platform" id="mfl-link-btn">Import Leagues</button>
-        </div>
-        <div id="mfl-leagues-preview" class="leagues-preview hidden"></div>
-      </div>
+<!-- MFL Platform Card -->
+<div class="platform-card" id="mfl-card">
+  <!-- Header -->
+  <div class="platform-header">
+    <div class="platform-icon platform-icon-text">MFL</div>
+    <div class="platform-info">
+      <h3>MyFantasyLeague</h3>
+      <span class="platform-status" id="mfl-connection-status">Not connected</span>
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="platform-body">
+    <!-- Username / Password Inputs -->
+    <input type="text" id="mfl-username" placeholder="MFL Username" required />
+    <input type="password" id="mfl-password" placeholder="MFL Password" required />
+
+    <!-- Optional League IDs -->
+    <input type="text" id="mfl-league-ids-input" placeholder="Optional: League IDs from MFL URL — e.g. 21600, 18432" />
+
+    <!-- Field hint -->
+    <span class="field-hint">
+      Enter your MFL username and password to connect. Optionally, you can also paste your league ID(s) from the MFL URL to pre-link specific leagues.
+    </span>
+
+    <!-- Connect / Import Button -->
+    <button class="btn-link-platform" id="connect-mfl">Connect MFL</button>
+
+    <!-- Messages / Feedback -->
+    <div id="mfl-message" class="input-message hidden"></div>
+  </div>
+
+  <!-- Leagues Preview -->
+  <div id="league-container" class="leagues-preview hidden"></div>
+</div>
 
       <!-- Yahoo -->
       <div class="platform-card" id="yahoo-card">
