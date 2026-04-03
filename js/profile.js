@@ -45,11 +45,12 @@ const Profile = (() => {
     if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
     const mflUsername = emailOrUsername.trim().split("@")[0];
 
-    // Search by username across recent years if no league IDs given
     let ids = leagueIds.filter(Boolean);
+
+    // If no IDs provided, attempt username search (may not work without MFL auth)
     if (!ids.length) {
       const currentYear = new Date().getFullYear();
-      const years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
+      const years = [currentYear, currentYear - 1, currentYear - 2];
       const found = new Set();
       for (const year of years) {
         try {
@@ -60,16 +61,17 @@ const Profile = (() => {
               if (lid) found.add(String(lid));
             });
           }
-        } catch(e) { console.warn(`[MFL] search ${year}:`, e.message); }
+        } catch(e) { /* username search is best-effort */ }
       }
       ids = [...found];
-      if (!ids.length) {
-        throw new Error(
-          `No MFL leagues found for username "${mflUsername}".\n` +
-          `• Check your exact MFL username (case-sensitive on some searches)\n` +
-          `• Or paste league IDs directly (found in your MFL league URL)`
-        );
-      }
+    }
+
+    if (!ids.length) {
+      throw new Error(
+        `MFL requires league IDs to import.\n` +
+        `Find your league ID in the MFL URL — e.g. myfantasyleague.com/2025/home/21600 → ID is 21600.\n` +
+        `Paste it in the League IDs field above.`
+      );
     }
 
     const rawResults = await MFLAPI.importUserLeagues(mflUsername, ids);
@@ -1230,6 +1232,21 @@ const Profile = (() => {
       sleeper?.sleeperUsername ? `@${sleeper.sleeperUsername}` : "Not connected";
     document.getElementById("mfl-linked-user").textContent =
       mfl?.mflUsername ? `@${mfl.mflUsername}` : "Not connected";
+
+    // Pre-populate MFL fields with known values
+    if (mfl?.mflUsername) {
+      const emailInput = document.getElementById("mfl-email-input");
+      if (emailInput && !emailInput.value) emailInput.value = mfl.mflUsername;
+    }
+    // Pre-populate known league IDs from already-imported MFL leagues
+    const mflIds = Object.values(_allLeagues)
+      .filter(l => l.platform === "mfl")
+      .map(l => l.leagueId)
+      .filter(Boolean);
+    const idsInput = document.getElementById("mfl-league-ids-input");
+    if (idsInput && !idsInput.value && mflIds.length) {
+      idsInput.value = [...new Set(mflIds)].join(", ");
+    }
 
     document.getElementById("edit-profile-modal").classList.remove("hidden");
   }
