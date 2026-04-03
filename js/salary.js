@@ -949,7 +949,11 @@ const DLRSalaryCap = (() => {
   // Used by openLeagueDetail so Teams tab has cap data immediately
   async function preloadCap(leagueKey, leagueId, franchiseId) {
     // Don't overwrite if already loaded for this league
-    if (_leagueKey === leagueKey && _settings && _rosterData) return;
+    if (_leagueKey === leagueKey && _settings && _rosterData) {
+      console.log(`[SalaryCap.preloadCap] Already loaded for ${leagueKey}, cap=${_settings?.cap}`);
+      return;
+    }
+    console.log(`[SalaryCap.preloadCap] Loading for ${leagueKey}, franchiseId=${franchiseId}`);
 
     const storageKey = franchiseId || leagueKey;
     try {
@@ -989,11 +993,13 @@ const DLRSalaryCap = (() => {
         });
       }
     } catch(e) {
-      // Silent — don't break anything if preload fails
+      console.error(`[SalaryCap.preloadCap] Error:`, e.message);
     }
+    console.log(`[SalaryCap.preloadCap] Done. settings=${JSON.stringify(_settings)}, rosterData=${_rosterData?.length}`);
   }
 
   function getCapData() {
+    console.log(`[SalaryCap.getCapData] settings=${!!_settings} cap=${_settings?.cap} rosterData=${_rosterData?.length} leagueKey=${_leagueKey}`);
     if (!_settings || !_rosterData) return null;
     const salaryMap = _getSalaryMap();
     const result = {};

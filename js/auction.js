@@ -1188,7 +1188,9 @@ const DLRAuction = (() => {
 
   // Returns true when this module has rosters loaded for the given leagueKey
   function isReady(leagueKey) {
-    return _leagueKey === leagueKey && _rosterData.length > 0;
+    const ready = _leagueKey === leagueKey && _rosterData.length > 0;
+    console.log(`[Auction.isReady] leagueKey=${leagueKey} _leagueKey=${_leagueKey} rosterData=${_rosterData.length} myRosterId=${_myRosterId} => ${ready}`);
+    return ready;
   }
 
   return {
