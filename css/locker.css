@@ -1681,30 +1681,27 @@ select option { background: var(--color-bg-2); }
 .draft-order-row {
   display: grid;
   grid-template-columns: 56px 1fr 80px;
+  height: 36px;
+  width: 100%;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  height: 36px;
-  width: 100%;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: hidden; /* clip overflowing content */
 }
 
-/* ── Cells: force flex and height ───────────────────────── */
-.draft-order-row .draft-pick,
-.draft-order-row .draft-team,
-.draft-order-row .draft-maxpf {
+/* ── Cells ───────────────────────────── */
+.draft-order-row > * {
   display: flex;
-  align-items: center;        /* vertical centering */
-  justify-content: center;    /* horizontal centering for pick/maxpf */
+  align-items: center;
+  justify-content: center; /* pick/maxpf will center, team overridden */
   height: 100%;
-  max-height: 100%;
   overflow: hidden;
-  padding: 0 var(--space-2);
   box-sizing: border-box;
+  padding: 0 var(--space-2);
 }
 
-/* ── Draft Pick ───────────────────────────── */
+/* Draft pick */
 .draft-order-row .draft-pick {
   background: var(--color-bg-3);
   border-right: 1px solid var(--color-border);
@@ -1714,9 +1711,9 @@ select option { background: var(--color-bg-2); }
   color: var(--color-gold);
 }
 
-/* ── Draft Team ───────────────────────────── */
+/* Draft team */
 .draft-order-row .draft-team {
-  justify-content: flex-start;  /* left-align team */
+  justify-content: flex-start; /* left align */
   padding: 0 var(--space-3);
   font-size: .82rem;
   overflow: hidden;
@@ -1724,7 +1721,7 @@ select option { background: var(--color-bg-2); }
   white-space: nowrap;
 }
 
-/* ── Draft Max PF ───────────────────────────── */
+/* Draft maxpf */
 .draft-order-row .draft-maxpf {
   background: var(--color-bg-3);
   border-left: 1px solid var(--color-border);
@@ -1735,20 +1732,16 @@ select option { background: var(--color-bg-2); }
 
 }
 
-/* ── Force all nested children inside cells to stay contained and centered ── */
-.draft-order-row .draft-pick *,
-.draft-order-row .draft-team *,
-.draft-order-row .draft-maxpf * {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: inherit !important; /* pick/maxpf centered, team left */
-  height: 100% !important;
+/* ── Force all nested children to stay contained ── */
+.draft-order-row * {
   max-height: 100% !important;
+  line-height: 1 !important;
   margin: 0 !important;
   padding: 0 !important;
-  line-height: 1 !important;
   overflow: hidden !important;
-  white-space: nowrap !important;
+  display: flex !important;
+  align-items: inherit !important;
+  justify-content: inherit !important;
 }
 
 /* ── Mobile ───────────────────────────── */
