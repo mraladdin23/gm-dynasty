@@ -110,7 +110,7 @@ const DLRAuction = (() => {
       }
     }
 
-    // Subscribe to live auctions for nom count
+    // Subscribe to live auctions for nom count — also refreshes FA tab on change
     try {
       _unsubFn?.();
       const onVal = snap => {
@@ -120,6 +120,10 @@ const DLRAuction = (() => {
           nominatedBy: a.nominatedBy != null ? Number(a.nominatedBy) : null,
           bids: Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{})
         }));
+        // Re-render FA tab if it's currently visible so nominate buttons stay current
+        if (typeof DLRFreeAgents !== "undefined" && DLRFreeAgents.refresh) {
+          DLRFreeAgents.refresh();
+        }
       };
       _listRef().on("value", onVal);
       _unsubFn = () => _listRef().off("value", onVal);
@@ -689,6 +693,20 @@ const DLRAuction = (() => {
       return;
     }
 
+    // Hard check at submit time — catches stale UI where buttons weren't updated
+    // For commish nominating on behalf: check that specific team's nom count
+    const nomTeamActiveNoms = _auctions.filter(a => {
+      const now = Date.now();
+      return !a.cancelled && !a.processed && a.expiresAt > now &&
+             Number(a.nominatedBy) === nomRosterId;
+    }).length;
+    if (nomTeamActiveNoms >= (_settings.maxNoms || 2)) {
+      showToast(`Max ${_settings.maxNoms || 2} active nominations reached for this team.`, "error");
+      document.getElementById("auc-nom-modal")?.remove();
+      if (typeof DLRFreeAgents !== "undefined" && DLRFreeAgents.refresh) DLRFreeAgents.refresh();
+      return;
+    }
+
     const nomTeam = _rosterData.find(r => Number(r.roster_id) === nomRosterId);
     const nomName = nomTeam?.teamName || `Team ${nomRosterId}`;
     const btn        = document.querySelector("#auc-nom-modal .btn-primary");
@@ -704,13 +722,16 @@ const DLRAuction = (() => {
         nominatedByCommish: nomRosterId !== _myRosterId ? _myRosterId : null,
         startTime: now,
         expiresAt: _nextExpiry(now),
-        // Nomination counts as opening bid
         bids: [{ rosterId: nomRosterId, maxBid, timestamp: now, isNomination: true }],
         processed: false, cancelled: false
       });
       document.getElementById("auc-nom-modal")?.remove();
-      setView("live");
       showToast(`${playerName} nominated by ${nomName} ✓`);
+      // Re-render FA list so nominate buttons update immediately
+      if (typeof DLRFreeAgents !== "undefined" && DLRFreeAgents.refresh) {
+        DLRFreeAgents.refresh();
+      }
+      setView("live");
     } catch(e) {
       if (btn) { btn.textContent = "Start Auction"; btn.disabled = false; }
       showToast("Nomination failed: " + e.message, "error");
