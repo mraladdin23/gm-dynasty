@@ -720,30 +720,30 @@ const DLRAuction = (() => {
     const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
     const maxRoster = _settings.maxRosterSize || 25;
 
-    // Option 1: salary module already loaded — get cap data from it
+    // Pull cap data from salary module
     const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
     if (capData && Object.keys(capData).length > 0) {
+      // Cap data ready — apply to rosterData
       _rosterData.forEach(t => {
         const d = capData[t.username];
         if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
       });
-    } else if (_leagueKey && !_capLoadTriggered) {
-      // Option 2: init salary module silently, re-render when done
+    } else if (_leagueKey && !_capLoadTriggered && typeof DLRSalaryCap !== "undefined") {
+      // Cap not ready yet — trigger preloadCap and re-render when done
       _capLoadTriggered = true;
-      if (typeof DLRSalaryCap !== "undefined") {
-        const franchiseId = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId))?.username || "";
-        DLRSalaryCap.init(_leagueKey, _leagueId, false, `sleeper__${_leagueId}`).then(() => {
-          const d2 = DLRSalaryCap.getCapData?.();
-          if (d2 && Object.keys(d2).length > 0) {
-            _rosterData.forEach(t => {
-              const d = d2[t.username];
-              if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
-            });
-            const el2 = document.getElementById("auc-content");
-            if (el2 && _viewMode === "teams") { _capLoadTriggered = false; _renderTeams(el2); }
-          }
-        }).catch(() => {});
-      }
+      const franchiseId = _leagueKey; // profile sets this correctly
+      DLRSalaryCap.preloadCap(_leagueKey, _leagueId, franchiseId).then(() => {
+        const d2 = DLRSalaryCap.getCapData?.();
+        if (d2 && Object.keys(d2).length > 0) {
+          _rosterData.forEach(t => {
+            const d = d2[t.username];
+            if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
+          });
+        }
+        _capLoadTriggered = false;
+        const el2 = document.getElementById("auc-content");
+        if (el2 && _viewMode === "teams") _renderTeams(el2);
+      }).catch(() => { _capLoadTriggered = false; });
     }
 
     // Sort: my team first, then by available cap desc
@@ -1174,23 +1174,31 @@ const DLRAuction = (() => {
   function canNominate() {
     if (!_leagueKey) return false;
     if (_myActiveNoms() >= (_settings.maxNoms || 2)) return false;
-    // Check cap — must have at least minBid available after committed
-    const now    = Date.now();
-    const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
-    const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
-    if (myTeam) {
-      const cap       = myTeam.remainingCap ?? myTeam.faab ?? null;
-      const committed = _getCommitted(active, _myRosterId);
-      if (cap !== null && (cap - committed) < MIN_BID()) return false;
+    // Check cap — pull from salary module directly (most reliable source)
+    // Fall back to _rosterData cache, then skip check if neither is available
+    if (typeof DLRSalaryCap !== "undefined") {
+      const capData = DLRSalaryCap.getCapData?.();
+      if (capData && Object.keys(capData).length > 0) {
+        const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+        if (myTeam) {
+          const d = capData[myTeam.username];
+          if (d) {
+            const now       = Date.now();
+            const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+            const committed = _getCommitted(active, _myRosterId);
+            if ((d.remaining - committed) < MIN_BID()) return false;
+          }
+        }
+        return true; // cap data available, passed the check
+      }
     }
+    // No cap data available — don't block nomination (salary may not be configured)
     return true;
   }
 
   // Returns true when this module has rosters loaded for the given leagueKey
   function isReady(leagueKey) {
-    const ready = _leagueKey === leagueKey && _rosterData.length > 0;
-    console.log(`[Auction.isReady] leagueKey=${leagueKey} _leagueKey=${_leagueKey} rosterData=${_rosterData.length} myRosterId=${_myRosterId} => ${ready}`);
-    return ready;
+    return _leagueKey === leagueKey && _rosterData.length > 0;
   }
 
   return {
