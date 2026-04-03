@@ -3819,9 +3819,10 @@ select option { background: var(--color-bg-2); }
 
   /* Page structure */
   html, body         { overflow-x: hidden; max-width: 100vw; }
-  .screen.active     { height: 100%; overflow: hidden; }
-  .app-view          { padding: var(--space-2) !important; overflow-x: hidden; }
-  .app-view.active   { overflow-y: auto; overflow-x: hidden; height: calc(100vh - 48px); box-sizing: border-box; }
+  .screen            { width: 100vw; max-width: 100vw; overflow-x: hidden; }
+  .screen.active     { height: 100%; overflow: hidden; width: 100vw; max-width: 100vw; }
+  .app-view          { padding: var(--space-2) !important; overflow-x: hidden; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
+  .app-view.active   { overflow-y: auto; overflow-x: hidden; height: calc(100vh - 48px); box-sizing: border-box; width: 100% !important; }
 
   /* Nav */
   .top-nav   { height: 48px; min-height: 48px; padding: 0 var(--space-2); }
