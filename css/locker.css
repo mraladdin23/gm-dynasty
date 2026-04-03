@@ -1688,48 +1688,82 @@ select option { background: var(--color-bg-2); }
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  position: relative;
 }
 
-/* ── Draft Pick ───────────────────────────── */
-.draft-order-row .draft-pick {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: .82rem;
-  color: var(--color-gold);
-  background: var(--color-bg-3);
-  border-right: 1px solid var(--color-border);
+/* ── Cells act as containers ───────────────────────── */
+.draft-order-row .draft-pick,
+.draft-order-row .draft-team,
+.draft-order-row .draft-maxpf {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
   padding: 0 var(--space-2);
   box-sizing: border-box;
 }
 
-/* ── Draft Team ───────────────────────────── */
-.draft-order-row .draft-team {
-  display: flex;
-  align-items: center;        /* vertically center */
-  padding: 0 var(--space-3);
+/* ── Draft Pick (centered both ways) ───────────────── */
+.draft-order-row .draft-pick {
+  background: var(--color-bg-3);
+  border-right: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-weight: 700;
   font-size: .82rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+  color: var(--color-gold);
 }
 
-/* ── Draft Max PF ───────────────────────────── */
+/* clamp and center any nested content */
+.draft-order-row .draft-pick > * {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-height: 100%;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Draft Team (left-aligned, vertically centered) ── */
+.draft-order-row .draft-team {
+  font-size: .82rem;
+}
+
+.draft-order-row .draft-team > * {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  right: var(--space-3);
+  transform: translateY(-50%);
+  max-height: 100%;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Draft Max PF (centered, matching background) ───── */
 .draft-order-row .draft-maxpf {
-  display: flex;
-  align-items: center;        /* vertically center */
-  justify-content: center;    /* fully center horizontally */
-  font-family: var(--font-mono);
-  font-size: .72rem;
-  color: var(--color-gold);
   background: var(--color-bg-3);
   border-left: 1px solid var(--color-border);
-  padding: 0 var(--space-3);
-  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: .82rem;
+  color: var(--color-gold);
+
+}
+
+.draft-order-row .draft-maxpf > * {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-height: 100%;
+  line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Mobile ───────────────────────────── */
