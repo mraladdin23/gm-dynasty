@@ -128,8 +128,8 @@
   <!-- Body -->
   <div class="platform-body">
     <!-- Username / Password Inputs -->
-    <input type="text" id="mfl-username" placeholder="MFL Username" required />
-    <input type="password" id="mfl-password" placeholder="MFL Password" required />
+    <input type="text" id="mfl-email-input" placeholder="MFL Username" required />
+    <input type="password" id="mfl-password-input" placeholder="MFL Password" required />
 
     <!-- Optional League IDs -->
     <input type="text" id="mfl-league-ids-input" placeholder="Optional: League IDs from MFL URL — e.g. 21600, 18432" />
@@ -153,8 +153,8 @@
 <!-- JS to handle Connect button -->
   <script>
     document.getElementById("connect-mfl").addEventListener("click", async () => {
-      const username = document.getElementById("mfl-username").value.trim();
-      const password = document.getElementById("mfl-password").value.trim();
+      const username = document.getElementById("mfl-email-input").value.trim();
+      const password = document.getElementById("mfl-password-input").value.trim();
       const leagueIds = document.getElementById("mfl-league-ids-input").value.trim();
 
       const messageEl = document.getElementById("mfl-message");
@@ -175,22 +175,27 @@
       statusEl.textContent = "Connecting...";
 
       try {
-        const res = await fetch("/mfl/userLeagues", {
+        const res = await fetch("https://mfl-proxy.mraladdin23.workers.dev/mfl/userLeagues", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, leagueIds })
+          body: JSON.stringify({ username, password, year: new Date().getFullYear() })
         });
 
         const data = await res.json();
 
         if (res.ok) {
+          // Worker returns array of league objects directly
+          const leagues = Array.isArray(data) ? data : (data.leagues || []);
           statusEl.textContent = "Connected!";
 
-          if (data.leagues && data.leagues.length > 0) {
+          if (leagues.length > 0) {
             leagueContainer.classList.remove("hidden");
-            leagueContainer.innerHTML = data.leagues
-              .map(l => `<div>${l.name} (ID: ${l.id})</div>`)
+            leagueContainer.innerHTML = leagues
+              .map(l => `<div>${l.name || l.league_name || "League"} (ID: ${l.franchise_id || l.id || ""})</div>`)
               .join("");
+          } else {
+            messageEl.textContent = "No leagues found. Check your username and password.";
+            messageEl.classList.remove("hidden");
           }
         } else {
           statusEl.textContent = "Not connected";
