@@ -9,7 +9,6 @@ const MFLAPI = (() => {
   // ───────── GENERIC POST HELPER ─────────
   async function post(endpoint, body) {
     try {
-      console.log(`[MFL] POST ${endpoint}`, { username: body.username, hasPassword: !!body.password });
       const res = await fetch(`${BASE_URL}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -18,7 +17,6 @@ const MFLAPI = (() => {
       });
 
       const text = await res.text();
-      console.log(`[MFL] Response status: ${res.status}, body preview:`, text.slice(0, 300));
 
       if (!res.ok) {
         throw new Error(`MFL Worker ${res.status}: ${text.slice(0, 200)}`);
@@ -44,9 +42,6 @@ const MFLAPI = (() => {
     const data = await post("/mfl/userLeagues", { username, password, year });
 
     // Handle debug response format {leagues: [...], debug: {...}}
-    if (data?.debug) {
-      console.log("[MFL] Debug info:", JSON.stringify(data.debug).slice(0, 2000));
-    }
 
     // Return the leagues array whether it's wrapped or bare
     return Array.isArray(data) ? data : (data?.leagues || []);

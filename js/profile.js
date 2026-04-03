@@ -43,29 +43,56 @@ const Profile = (() => {
 
   async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
   if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
-  if (!password?.trim()) throw new Error("Enter your MFL password.");
 
   const mflUsername = emailOrUsername.trim().split("@")[0];
-  console.log(`[MFL] linkMFL called: username=${mflUsername}, hasPassword=${!!password}`);
+  const hasPassword = !!password?.trim();
+  const extraIds = (Array.isArray(leagueIds) ? leagueIds : [])
+    .map(s => String(s).trim()).filter(Boolean);
 
-  // ───────── STEP 1: FETCH USER LEAGUES (AUTH REQUIRED) ─────────
-  let leagues;
-  try {
-    leagues = await MFLAPI.getUserLeagues({
-      username: mflUsername,
-      password
-    });
-    console.log(`[MFL] getUserLeagues returned:`, leagues);
-  } catch (err) {
-    console.error("[MFL] getUserLeagues threw:", err.message, err);
-    throw new Error(`MFL connection failed: ${err.message}`);
+
+  // ───────── STEP 1: TRY TO FETCH USER LEAGUES VIA CREDENTIALS ─────────
+  let leagues = [];
+
+  if (hasPassword) {
+    try {
+      leagues = await MFLAPI.getUserLeagues({ username: mflUsername, password });
+    } catch (err) {
+      // Don't throw — fall through to league ID path
+    }
   }
 
-  console.log(`[MFL] leagues array:`, Array.isArray(leagues), leagues?.length, leagues);
+  // ───────── STEP 2: MERGE IN ANY MANUALLY SPECIFIED LEAGUE IDs ─────────
+  // Build a set of already-found league IDs to avoid duplicates
+  const foundIds = new Set(leagues.map(l => String(l.league_id || l.id)));
 
-  if (!Array.isArray(leagues) || leagues.length === 0) {
-    throw new Error("No MFL leagues found for this account.");
+  // Add extra IDs as stub entries (bundle fetch will fill in the real data)
+  for (const id of extraIds) {
+    if (!foundIds.has(id)) {
+      const currentYear = new Date().getFullYear();
+      leagues.push({ league_id: id, season: String(currentYear) });
+      foundIds.add(id);
+    }
   }
+
+  // Also add any already-imported MFL leagues so they get refreshed
+  const existingMflLeagues = Object.values(
+    typeof _allLeagues !== "undefined" ? _allLeagues : {}
+  ).filter(l => l.platform === "mfl");
+  for (const l of existingMflLeagues) {
+    if (l.leagueId && !foundIds.has(String(l.leagueId))) {
+      leagues.push({ league_id: l.leagueId, season: l.season || String(new Date().getFullYear()) });
+      foundIds.add(String(l.leagueId));
+    }
+  }
+
+  if (leagues.length === 0) {
+    throw new Error(
+      "No MFL leagues found.\n" +
+      (hasPassword ? "• Check your MFL username and password\n" : "• Enter your MFL password to auto-find leagues\n") +
+      "• Or paste your league ID(s) in the League IDs field (found in the MFL URL)"
+    );
+  }
+
 
   // ───────── STEP 2: FETCH FULL DATA PER LEAGUE ─────────
   const leaguesMap = {};
@@ -1196,7 +1223,6 @@ const Profile = (() => {
   async function _saveLeagueLabelModal() {
     const modal     = document.getElementById("league-label-modal");
     const leagueKey = modal?.dataset.leagueKey;
-    console.log("[DLR] _saveLeagueLabelModal | leagueKey from dataset:", leagueKey, "| _currentUsername:", _currentUsername);
     if (!leagueKey) { showToast("Error: no league key — please close and reopen the ⋯ options", "error"); return; }
     if (!_currentUsername) { showToast("Error: not logged in", "error"); return; }
     const saveBtn  = document.getElementById("label-modal-save");
@@ -1204,7 +1230,6 @@ const Profile = (() => {
     const typeOverride = document.getElementById("label-type-override")?.value || "";
     const commishGroup = document.getElementById("label-commish-input")?.value?.trim() || "";
     const customLabel  = document.getElementById("label-custom-input")?.value?.trim()  || "";
-    console.log(`[DLR] Saving meta for key: ${leagueKey} | group: "${commishGroup}" | label: "${customLabel}"`);
     try {
       await saveLeagueMeta(_currentUsername, leagueKey, {
         customLabel,
