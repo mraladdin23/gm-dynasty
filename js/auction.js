@@ -16,6 +16,7 @@ const DLRAuction = (() => {
   let _platform     = "sleeper";
   let _isCommish    = false;
   let _myRosterId   = null;
+  let _sleeperUserId = null;
   let _myTeamName   = "My Team";
   let _rosterData   = [];
   let _auctions     = [];
@@ -42,16 +43,17 @@ const DLRAuction = (() => {
   const _settingsRef = () => GMD.child(`auctions/${_leagueKey}/settings`);
 
   // ── Pre-init: load state so canNominate/isRostered work on all tabs ──
-  async function preInit(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform) {
-    // Don't reset if already initialized for this league
-    if (_leagueKey === leagueKey && _rosterData.length) return;
+  async function preInit(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId) {
+    // Don't reset if already initialized for this league with a valid roster ID
+    if (_leagueKey === leagueKey && _rosterData.length && _myRosterId) return;
 
-    _leagueKey  = leagueKey;
-    _leagueId   = leagueId;
-    _platform   = platform || "sleeper";
-    _isCommish  = !!isCommish;
-    _myRosterId = myRosterId != null ? Number(myRosterId) : null;
-    _myTeamName = myTeamName || "My Team";
+    _leagueKey     = leagueKey;
+    _leagueId      = leagueId;
+    _platform      = platform || "sleeper";
+    _isCommish     = !!isCommish;
+    _myRosterId    = myRosterId != null ? Number(myRosterId) : null;
+    _myTeamName    = myTeamName || "My Team";
+    _sleeperUserId = sleeperUserId || null;
 
     // Load settings silently
     try {
@@ -83,12 +85,15 @@ const DLRAuction = (() => {
           };
         });
 
-        // Co-owner: if _myRosterId not matched by primary owner, check co_owners
-        if (!_myRosterId) {
-          const currentUid = typeof Auth !== "undefined" ? Auth.getCurrentProfile()?.uid : null;
-          if (currentUid) {
-            const coRoster = rosters.find(r => (r.co_owners||[]).includes(currentUid));
-            if (coRoster) _myRosterId = coRoster.roster_id;
+        // Resolve _myRosterId using Sleeper owner_id (not Firebase uid)
+        if (!_myRosterId && _sleeperUserId) {
+          const sid = String(_sleeperUserId);
+          const primary = rosters.find(r => String(r.owner_id) === sid);
+          if (primary) {
+            _myRosterId = primary.roster_id;
+          } else {
+            const co = rosters.find(r => (r.co_owners||[]).map(String).includes(sid));
+            if (co) _myRosterId = co.roster_id;
           }
         }
       } catch(e) { console.warn("[Auction] preInit roster load failed:", e.message); }
@@ -120,14 +125,15 @@ const DLRAuction = (() => {
   }
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform) {
-    _leagueKey   = leagueKey;
-    _leagueId    = leagueId;
-    _platform    = platform || "sleeper";
-    _isCommish   = !!isCommish;
-    _myRosterId  = myRosterId != null ? Number(myRosterId) : null;
-    _myTeamName  = myTeamName || "My Team";
-    _viewMode    = "live";
+  async function init(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId) {
+    _leagueKey      = leagueKey;
+    _leagueId       = leagueId;
+    _platform       = platform || "sleeper";
+    _isCommish      = !!isCommish;
+    _myRosterId     = myRosterId != null ? Number(myRosterId) : null;
+    _myTeamName     = myTeamName || "My Team";
+    _sleeperUserId  = sleeperUserId || null;
+    _viewMode       = "live";
     _capLoadTriggered = false;
     _capSettings = null;
     _initToken++;
@@ -180,18 +186,15 @@ const DLRAuction = (() => {
           };
         });
 
-        // Co-owner detection: if _myRosterId not set by profile, check Sleeper co_owners
-        if (!_myRosterId) {
-          const currentUser = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
-          const currentUid  = currentUser?.uid || null;
-          if (currentUid) {
-            const coOwnerRoster = rosters.find(r =>
-              (r.co_owners || []).includes(currentUid)
-            );
-            if (coOwnerRoster) {
-              _myRosterId = coOwnerRoster.roster_id;
-              console.log(`[Auction] Co-owner detected: roster ${_myRosterId}`);
-            }
+        // Resolve _myRosterId using Sleeper owner_id (not Firebase uid)
+        if (!_myRosterId && _sleeperUserId) {
+          const sid = String(_sleeperUserId);
+          const primary = rosters.find(r => String(r.owner_id) === sid);
+          if (primary) {
+            _myRosterId = primary.roster_id;
+          } else {
+            const co = rosters.find(r => (r.co_owners||[]).map(String).includes(sid));
+            if (co) _myRosterId = co.roster_id;
           }
         }
 

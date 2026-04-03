@@ -283,6 +283,7 @@ const SleeperAPI = (() => {
             isCommissioner:   isComm,
             isCoOwner:        isCoOwner || false,
             myRosterId:       myRoster?.roster_id || null,
+            sleeperUserId:    userId,  // Sleeper user_id for roster matching in auction
             wins,
             losses,
             ties,
