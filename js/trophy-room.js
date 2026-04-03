@@ -22,15 +22,11 @@ const DLRTrophyRoom = (() => {
       return;
     }
 
-    // Only include leagues where the user actually managed a team as a player.
-    // A commish-only league has isCommissioner=true, 0-0 record, and teamName "Commissioner" or "My Team".
-    // We require either a real win/loss record OR a non-generic team name.
-    const GENERIC_NAMES = new Set(["My Team", "Commissioner", "", null, undefined]);
-    const managed = all.filter(l => {
-      const hasRecord   = (l.wins || 0) + (l.losses || 0) > 0;
-      const hasRealName = l.teamName && !GENERIC_NAMES.has(l.teamName.trim());
-      return hasRecord || hasRealName;
-    });
+    // Use same filter as Career Summary: only leagues where user actually played
+    // (has wins, losses, or points scored — commish-only leagues have all zeros)
+    const managed = all.filter(l =>
+      (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
+    );
 
     const champs  = managed.filter(l => l.isChampion || l.playoffFinish === 1)
                            .sort((a,b) => (b.season||"").localeCompare(a.season||""));

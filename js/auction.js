@@ -33,6 +33,8 @@ const DLRAuction = (() => {
   let _viewMode     = "live";
   let _posFilter    = "ALL";
   let _teamFilter   = "";
+  let _capLoadTriggered = false;
+  let _capSettings  = null;
 
   // ── Firebase refs ──────────────────────────────────────────
   const _listRef     = () => GMD.child(`auctions/${_leagueKey}/bids`);
@@ -48,7 +50,7 @@ const DLRAuction = (() => {
     _leagueId   = leagueId;
     _platform   = platform || "sleeper";
     _isCommish  = !!isCommish;
-    _myRosterId = myRosterId;
+    _myRosterId = myRosterId != null ? Number(myRosterId) : null;
     _myTeamName = myTeamName || "My Team";
 
     // Load settings silently
@@ -106,8 +108,9 @@ const DLRAuction = (() => {
       _unsubFn?.();
       const onVal = snap => {
         const d = snap.val() || {};
-        _auctions = Object.values(d).map(a => ({
+        _auctions = Object.values(d).filter(Boolean).map(a => ({
           ...a,
+          nominatedBy: a.nominatedBy != null ? Number(a.nominatedBy) : null,
           bids: Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{})
         }));
       };
@@ -122,9 +125,11 @@ const DLRAuction = (() => {
     _leagueId    = leagueId;
     _platform    = platform || "sleeper";
     _isCommish   = !!isCommish;
-    _myRosterId  = myRosterId;
+    _myRosterId  = myRosterId != null ? Number(myRosterId) : null;
     _myTeamName  = myTeamName || "My Team";
     _viewMode    = "live";
+    _capLoadTriggered = false;
+    _capSettings = null;
     _initToken++;
     const token  = _initToken;
 
@@ -212,7 +217,12 @@ const DLRAuction = (() => {
     const onVal = snap => {
       if (token !== _initToken) return;
       const d = snap.val() || {};
-      _auctions = Object.values(d).filter(Boolean);
+      _auctions = Object.values(d).filter(Boolean).map(a => ({
+        ...a,
+        // Normalize to integers so comparisons always work regardless of Firebase type
+        nominatedBy: a.nominatedBy != null ? Number(a.nominatedBy) : null,
+        bids: Array.isArray(a.bids) ? a.bids : Object.values(a.bids || {})
+      }));
       _render();
     };
     const onErr = err => {
@@ -236,6 +246,7 @@ const DLRAuction = (() => {
   function reset() {
     _unsubFn?.();
     _unsubFn = null;
+    _capLoadTriggered = false;
     if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
     _leagueKey = null;
     _auctions  = [];
@@ -622,7 +633,7 @@ const DLRAuction = (() => {
         <label>Nominating Team</label>
         <select id="auc-nom-team">
           ${_rosterData.map(t =>
-            `<option value="${t.roster_id}" ${t.roster_id === _myRosterId ? "selected" : ""}>${_esc(t.teamName)}</option>`
+            `<option value="${t.roster_id}" ${Number(t.roster_id) === Number(_myRosterId) ? "selected" : ""}>${_esc(t.teamName)}</option>`
           ).join("")}
         </select>
         <span class="field-hint">As commissioner you can nominate on behalf of any team.</span>
@@ -661,10 +672,19 @@ const DLRAuction = (() => {
   }
 
   async function submitNomination(pid, playerName) {
-    const maxBid     = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID();
-    const nomRosterId = parseInt(document.getElementById("auc-nom-team")?.value) || parseInt(_myRosterId) || _myRosterId;
-    const nomTeam    = _rosterData.find(r => r.roster_id === nomRosterId);
-    const nomName    = nomTeam?.teamName || `Team ${nomRosterId}`;
+    const maxBid = parseInt(document.getElementById("auc-nom-bid")?.value) || MIN_BID();
+
+    // Resolve nominating roster — commish select OR hidden input OR current user
+    const teamEl = document.getElementById("auc-nom-team");
+    const nomRosterId = teamEl ? parseInt(teamEl.value) : parseInt(_myRosterId);
+
+    if (!nomRosterId || isNaN(nomRosterId)) {
+      showToast("Could not determine nominating team. Please re-open the league.", "error");
+      return;
+    }
+
+    const nomTeam = _rosterData.find(r => Number(r.roster_id) === nomRosterId);
+    const nomName = nomTeam?.teamName || `Team ${nomRosterId}`;
     const btn        = document.querySelector("#auc-nom-modal .btn-primary");
     if (btn) { btn.textContent = "Starting…"; btn.disabled = true; }
     try {
@@ -697,30 +717,30 @@ const DLRAuction = (() => {
     const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
     const maxRoster = _settings.maxRosterSize || 25;
 
-    // Pull fresh cap data from salary module (keyed by username)
+    // Option 1: salary module already loaded — get cap data from it
     const capData = (typeof DLRSalaryCap !== "undefined") ? DLRSalaryCap.getCapData?.() : null;
     if (capData && Object.keys(capData).length > 0) {
       _rosterData.forEach(t => {
         const d = capData[t.username];
         if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
       });
-    }
-
-    // Fallback: load cap settings from Firebase if salary module has no data
-    if (!capData || Object.keys(capData).length === 0) {
-      const franchiseId = `mfl__${_leagueId}`;  // try both patterns
-      const salRef = GMD.child(`salaryCap/${_leagueKey}`);
-      salRef.child("settings").once("value").then(snap => {
-        const s = snap.val();
-        if (s?.capAmount) {
-          _rosterData.forEach(t => {
-            if (t.capTotal == null) t.capTotal = s.capAmount;
-          });
-          // Re-render with cap data
-          const el2 = document.getElementById("auc-content");
-          if (el2 && _viewMode === "teams") _renderTeams(el2);
-        }
-      }).catch(() => {});
+    } else if (_leagueKey && !_capLoadTriggered) {
+      // Option 2: init salary module silently, re-render when done
+      _capLoadTriggered = true;
+      if (typeof DLRSalaryCap !== "undefined") {
+        const franchiseId = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId))?.username || "";
+        DLRSalaryCap.init(_leagueKey, _leagueId, false, `sleeper__${_leagueId}`).then(() => {
+          const d2 = DLRSalaryCap.getCapData?.();
+          if (d2 && Object.keys(d2).length > 0) {
+            _rosterData.forEach(t => {
+              const d = d2[t.username];
+              if (d) { t.remainingCap = d.remaining; t.capSpent = d.spent; t.capTotal = d.cap; }
+            });
+            const el2 = document.getElementById("auc-content");
+            if (el2 && _viewMode === "teams") { _capLoadTriggered = false; _renderTeams(el2); }
+          }
+        }).catch(() => {});
+      }
     }
 
     // Sort: my team first, then by available cap desc
