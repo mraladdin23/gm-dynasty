@@ -333,7 +333,7 @@ const DLRFreeAgents = (() => {
                     onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
                     title="Nominate for auction">🏷</button>`
                 : `<button class="fa-nom-btn btn-secondary btn-sm" disabled
-                    title="${auctionReady ? "Max nominations or cap reached" : "Loading…"}" style="opacity:.4">🏷</button>`)
+                    title="${auctionReady ? (typeof DLRAuction !== "undefined" && DLRAuction._settings?.scheduledStart > Date.now() ? "Auction not started yet" : "Max nominations or cap reached") : "Loading…"}" style="opacity:.4">🏷</button>`)
             : "";
           return `
             <div class="fa-player-row" onclick="DLRPlayerCard.show('${p.pid}', '${_escAttr(p.name)}')">

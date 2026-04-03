@@ -694,6 +694,12 @@ const DLRAuction = (() => {
     }
 
     // Hard check at submit time — catches stale UI where buttons weren't updated
+    if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
+      const startStr = new Date(_settings.scheduledStart).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+      showToast(`Auction hasn't started yet. Opens ${startStr}.`, "error");
+      document.getElementById("auc-nom-modal")?.remove();
+      return;
+    }
     // For commish nominating on behalf: check that specific team's nom count
     const nomTeamActiveNoms = _auctions.filter(a => {
       const now = Date.now();
@@ -1209,6 +1215,8 @@ const DLRAuction = (() => {
   // Can the current user nominate? (for FA button check)
   function canNominate() {
     if (!_leagueKey) return false;
+    // Block if auction hasn't started yet
+    if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) return false;
     if (_myActiveNoms() >= (_settings.maxNoms || 2)) return false;
     // Check cap — pull from salary module directly (most reliable source)
     // Fall back to _rosterData cache, then skip check if neither is available
