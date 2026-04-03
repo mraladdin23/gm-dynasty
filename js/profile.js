@@ -580,7 +580,7 @@ const Profile = (() => {
     const el = document.getElementById("cs-type");
     if (!el) return;
 
-    const types = ["dynasty", "redraft", "keeper"];
+    const types = ["dynasty", "salary", "redraft", "keeper"];
     const byType = {};
     types.forEach(t => { byType[t] = leagues.filter(l => l.leagueType === t); });
     byType["other"] = leagues.filter(l => !types.includes(l.leagueType));
@@ -620,9 +620,9 @@ const Profile = (() => {
     const el = document.getElementById("cs-matrix");
     if (!el) return;
 
-    const types   = ["dynasty","redraft","keeper","other"];
+    const types   = ["dynasty","salary","redraft","keeper","other"];
     const seasons = [...new Set(leagues.map(l => l.season).filter(Boolean))].sort((a, b) => b.localeCompare(a));
-    const typeLeagues = (t) => leagues.filter(l => t === "other" ? !["dynasty","redraft","keeper"].includes(l.leagueType) : l.leagueType === t);
+    const typeLeagues = (t) => leagues.filter(l => t === "other" ? !["dynasty","salary","redraft","keeper"].includes(l.leagueType) : l.leagueType === t);
 
     // Only include types that have data
     const activeTypes = types.filter(t => typeLeagues(t).length > 0);
@@ -660,7 +660,7 @@ const Profile = (() => {
               const pct = tot > 0 ? ((w / tot) * 100).toFixed(0) : "0";
               return `<tr>
                 <td class="cs-season">${s}</td>
-                ${activeTypes.map(t => cell(seasonLeagues.filter(l => t === "other" ? !["dynasty","redraft","keeper"].includes(l.leagueType) : l.leagueType === t))).join("")}
+                ${activeTypes.map(t => cell(seasonLeagues.filter(l => t === "other" ? !["dynasty","salary","redraft","keeper"].includes(l.leagueType) : l.leagueType === t))).join("")}
                 <td class="cs-matrix-cell cs-matrix-total">
                   <span class="cs-mx-record">${w}–${lo}</span>
                   <span class="cs-mx-pct">${pct}%</span>
@@ -1049,6 +1049,7 @@ const Profile = (() => {
       case "owner":        return f.seasons.some(s => s.league.myRosterId || s.league.wins > 0 || s.league.losses > 0 || s.league.ties > 0 || (s.league.pointsFor > 0));
       case "pinned":       return !!meta.pinned;
       case "dynasty":      return latest?.leagueType === "dynasty";
+      case "salary":       return latest?.leagueType === "salary";
       case "redraft":      return latest?.leagueType === "redraft";
       case "keeper":       return latest?.leagueType === "keeper";
       case "commissioner": return f.seasons.some(s => s.league.isCommissioner);
@@ -1098,7 +1099,7 @@ const Profile = (() => {
     if (meta.commishGroup) tags.push(`<span class="lrow-tag lrow-tag--group">⚡ ${_escHtml(meta.commishGroup)}</span>`);
 
     // Abbreviate type to 3 chars max
-    const typeShort = { dynasty:"DYN", redraft:"RDR", keeper:"KEP" }[league.leagueType] || (league.leagueType||"RDR").slice(0,3).toUpperCase();
+    const typeShort = { dynasty:"DYN", salary:"SAL", redraft:"RDR", keeper:"KEP" }[league.leagueType] || (league.leagueType||"RDR").slice(0,3).toUpperCase();
     const platShort = (league.platform||"").slice(0,3).toUpperCase();
     const typeBadge = `<span class="lrow-type lrow-type--${league.leagueType || "redraft"}">${typeShort}</span>`;
     const platBadge = `<span class="lrow-plat lrow-plat--${league.platform}">${platShort}</span>`;
@@ -1210,11 +1211,41 @@ const Profile = (() => {
         auctionIncludePicks: document.getElementById("label-picks-check")?.checked   || false,
         leagueTypeOverride:  typeOverride || null
       });
+
+      // Propagate leagueTypeOverride to all seasons in the same franchise chain
+      if (typeOverride) {
+        const franchise = Object.values(_buildFranchises()).find(f =>
+          f.seasons.some(s => s.key === leagueKey)
+        );
+        if (franchise) {
+          const otherKeys = franchise.seasons
+            .map(s => s.key)
+            .filter(k => k !== leagueKey);
+          for (const k of otherKeys) {
+            const existingMeta = _leagueMeta[k] || {};
+            // Only propagate if the other season doesn't have its own explicit override
+            if (!existingMeta.leagueTypeOverride) {
+              await saveLeagueMeta(_currentUsername, k, {
+                ...existingMeta,
+                leagueTypeOverride: typeOverride
+              });
+            }
+          }
+        }
+      }
       // Force re-read from Firebase to verify
       await loadLeagueMeta(_currentUsername);
-      console.log("[DLR] After save, leagueMeta:", JSON.stringify(_leagueMeta).slice(0, 600));
-      if (typeOverride && _allLeagues[leagueKey]) {
-        _allLeagues[leagueKey].leagueType = typeOverride;
+      // Apply type override to all affected leagues in local state
+      if (typeOverride) {
+        const franchise = Object.values(_buildFranchises()).find(f =>
+          f.seasons.some(s => s.key === leagueKey)
+        );
+        const keysToUpdate = franchise
+          ? franchise.seasons.map(s => s.key)
+          : [leagueKey];
+        keysToUpdate.forEach(k => {
+          if (_allLeagues[k]) _allLeagues[k].leagueType = typeOverride;
+        });
       }
       closeLabelModal();
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
