@@ -4948,3 +4948,143 @@ select option { background: var(--color-bg-2); }
   .lrow-season-label { font-size: .54rem; color: var(--color-text-dim); line-height: 1.2; }
 }
 
+
+/* ── Salary roster: right-justified salary + holdout ── */
+.sal-salary-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.sal-holdout-icon {
+  font-size: .85rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+/* Player row: name col takes remaining space, salary right-aligns */
+.sal-player-row { justify-content: flex-start; }
+.sal-player-name-col { flex: 1; min-width: 0; overflow: hidden; }
+
+
+/* ── Transactions tab ────────────────────────────────── */
+.tx-toolbar {
+  margin-bottom: var(--space-4);
+}
+.tx-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.tx-filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.tx-filter-label {
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+.tx-select {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: .8rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+.tx-select:focus { border-color: var(--color-gold); }
+.tx-count { font-size: .78rem; margin-left: auto; }
+
+/* Transaction rows */
+.tx-list { display: flex; flex-direction: column; gap: 2px; }
+.tx-row {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  transition: border-color var(--transition);
+}
+.tx-row:hover { border-color: var(--color-border-light); }
+.tx-row--trade { border-left: 3px solid #b89ffe; }
+.tx-row--waiver { border-left: 3px solid var(--color-gold); }
+.tx-row--free_agent { border-left: 3px solid var(--color-green); }
+
+.tx-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.tx-spacer { flex: 1; }
+.tx-type-badge {
+  font-size: .65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.tx-type-badge--trade      { background: rgba(184,159,254,.15); color: #b89ffe; }
+.tx-type-badge--waiver     { background: rgba(240,180,41,.15);  color: var(--color-gold); }
+.tx-type-badge--free_agent { background: rgba(24,224,122,.15);  color: var(--color-green); }
+.tx-team-name { font-size: .8rem; font-weight: 600; }
+.tx-week, .tx-date { font-size: .7rem; }
+.tx-status { font-size: .7rem; }
+.tx-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: .8rem;
+}
+.tx-drops { opacity: .65; }
+.tx-arrow { color: var(--color-text-dim); }
+.tx-bid   { font-size: .72rem; color: var(--color-gold); }
+
+/* Player chips */
+.tx-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.tx-chip--add   { background: rgba(24,224,122,.12); color: var(--color-green); border-color: rgba(24,224,122,.25); }
+.tx-chip--drop  { background: rgba(239,68,68,.1);   color: var(--color-red);   border-color: rgba(239,68,68,.2);  text-decoration: line-through; }
+.tx-chip--trade { background: var(--color-surface);  color: var(--color-text);  border-color: var(--color-border); }
+.tx-chip--pick  { background: rgba(0,212,255,.1);   color: #00d4ff;            border-color: rgba(0,212,255,.25); }
+
+/* Trade summary */
+.tx-trade-grid {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.tx-trade-side { display: flex; flex-direction: column; gap: 3px; min-width: 120px; }
+.tx-trade-team { font-size: .75rem; font-weight: 700; color: var(--color-text-dim); margin-bottom: 2px; }
+.tx-trade-row  { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
+.tx-gets-lbl   { font-size: .62rem; color: var(--color-green); font-weight: 700; white-space: nowrap; }
+.tx-gives-lbl  { font-size: .62rem; color: var(--color-red);   font-weight: 700; white-space: nowrap; }
+.tx-trade-divider { font-size: 1rem; color: var(--color-text-dim); align-self: center; padding: 0 var(--space-1); }
+
+.tx-empty { padding: var(--space-8); text-align: center; color: var(--color-text-dim); font-size: .88rem; }
+.tx-more  { text-align: center; padding: var(--space-3); font-size: .78rem; }
+
+@media (max-width: 640px) {
+  .tx-filters { gap: var(--space-2); }
+  .tx-select  { font-size: .72rem; padding: 3px 6px; }
+  .tx-chip    { font-size: .65rem; padding: 1px 5px; }
+  .tx-trade-grid { flex-direction: column; gap: var(--space-2); }
+}
+
