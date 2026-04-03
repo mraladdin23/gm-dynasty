@@ -14,26 +14,35 @@ const YahooAPI = (() => {
   }
 
   /**
-   * Fetches all leagues for logged-in user
+   * Fetches all leagues for logged-in user using stored access token
    */
   async function getLeagues() {
+    const token = sessionStorage.getItem("dlr_yahoo_access_token");
+    if (!token) throw new Error("No Yahoo access token — please reconnect Yahoo.");
+
     try {
-      const res = await fetch(`${BASE}/yahoo/leagues`, { credentials: "include" });
-      if (!res.ok) throw new Error(`Yahoo worker error ${res.status}`);
+      const res = await fetch(`${BASE}/yahoo/leagues`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: token })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Yahoo worker error ${res.status}`);
+      }
       const data = await res.json();
       if (!Array.isArray(data)) return [];
 
       return data.map(league => ({
-        platform: "yahoo",
-        leagueId: league.leagueId,
-        leagueName: league.leagueName,
-        season: league.season,
-        numTeams: league.numTeams,
-        bundle: null // Placeholder for normalized league data
+        platform:  "yahoo",
+        leagueId:  league.league_id  || league.leagueId,
+        leagueName:league.name       || league.leagueName,
+        season:    league.season,
+        numTeams:  league.num_teams  || league.numTeams || 12,
       }));
     } catch (err) {
-      console.error("YahooAPI error:", err.message);
-      return [];
+      console.error("YahooAPI.getLeagues error:", err.message);
+      throw err;
     }
   }
 
