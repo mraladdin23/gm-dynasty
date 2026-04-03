@@ -44,10 +44,20 @@ const DLRTrophyRoom = (() => {
 
     // Timeline — group managed leagues by season only
     const seasonMap = {};
+    const TYPE_ORDER = { dynasty: 0, salary: 1, keeper: 2, redraft: 3 };
     managed.forEach(l => {
       if (!l.season) return;
       if (!seasonMap[l.season]) seasonMap[l.season] = [];
       seasonMap[l.season].push(l);
+    });
+    // Sort each season's leagues by type order, then alphabetically
+    Object.values(seasonMap).forEach(arr => {
+      arr.sort((a, b) => {
+        const ao = TYPE_ORDER[a.leagueType] ?? 99;
+        const bo = TYPE_ORDER[b.leagueType] ?? 99;
+        if (ao !== bo) return ao - bo;
+        return (a.leagueName || "").localeCompare(b.leagueName || "");
+      });
     });
     const seasons = Object.keys(seasonMap).sort((a,b) => b.localeCompare(a));
 

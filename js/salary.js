@@ -404,15 +404,17 @@ const DLRSalaryCap = (() => {
           <div class="sal-player-name-col">
             <span class="sal-player-name-text sal-player-link"
               onclick="DLRPlayerCard.show('${pid}','${_escAttr(name)}')">${_esc(name)}</span>
-            ${isHoldout ? `<span class="sal-badge sal-badge--holdout">🔥 Holdout</span>` : ""}
             ${slot==="ir"   ? `<span class="sal-badge sal-badge--slot">IR ${_settings.irCapPct}%</span>` : ""}
             ${slot==="taxi" ? `<span class="sal-badge sal-badge--taxi">Taxi ${_settings.taxiCapPct}%</span>` : ""}
           </div>
-          <div class="sal-salary-cell">
-            ${sal > 0 ? `<span class="sal-amount">${_fmtMoney(sal)}</span>` : `<span class="sal-unset">—</span>`}
-            ${_settings.contracts && entry.years ? `<span class="sal-years">${entry.years}yr</span>` : ""}
+          <div class="sal-salary-right">
+            ${isHoldout ? `<span class="sal-holdout-icon" title="Holdout">🔥</span>` : ""}
+            <div class="sal-salary-cell">
+              ${sal > 0 ? `<span class="sal-amount">${_fmtMoney(sal)}</span>` : `<span class="sal-unset">—</span>`}
+              ${_settings.contracts && entry.years ? `<span class="sal-years">${entry.years}yr</span>` : ""}
+            </div>
+            ${editBtn}
           </div>
-          ${editBtn}
         </div>`;
     };
 

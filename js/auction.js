@@ -436,7 +436,7 @@ const DLRAuction = (() => {
             ? `<span class="auc-pause-badge" style="background:rgba(0,212,255,.08);border-color:rgba(0,212,255,.25);color:#00d4ff">
                 📅 Starts ${new Date(_settings.scheduledStart).toLocaleDateString()} ${new Date(_settings.scheduledStart).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
                </span>` : ""}
-          <span class="auc-nom-info">Nominations: ${myNoms}/${maxNoms} <span class="dim" style="font-size:.65rem">(roster #${_myRosterId ?? "?"})</span></span>
+          <span class="auc-nom-info">Nominations: ${myNoms}/${maxNoms}</span>
         </div>
       </div>
       <div id="auc-content"></div>`;

@@ -1402,17 +1402,17 @@ const Profile = (() => {
     const auctionOn   = meta.auctionEnabled || isSalary; // salary cap always has auction
 
     const tabs = [
-      { val: "overview",   label: "Overview" },
-      { val: "standings",  label: "Standings" },
-      { val: "matchups",   label: "Matchups" },
-      { val: "playoffs",   label: "Playoffs" },
-      // Roster tab label changes based on league type
-      { val: "roster",     label: isSalary ? "Roster & Salaries" : "Rosters" },
-      { val: "freeagents", label: "Free Agents" },
-      { val: "draft",      label: "Draft" },
-      { val: "analytics",  label: "Analytics" },
-      { val: "rules",      label: "Rules" },
-      { val: "chat",       label: "Chat" },
+      { val: "overview",     label: "Overview" },
+      { val: "standings",    label: "Standings" },
+      { val: "matchups",     label: "Matchups" },
+      { val: "playoffs",     label: "Playoffs" },
+      { val: "roster",       label: isSalary ? "Roster & Salaries" : "Rosters" },
+      { val: "freeagents",   label: "Free Agents" },
+      { val: "draft",        label: "Draft" },
+      { val: "transactions", label: "Transactions" },
+      { val: "analytics",    label: "Analytics" },
+      { val: "rules",        label: "Rules" },
+      { val: "chat",         label: "Chat" },
     ];
 
     // Conditionally inject Auction tab after Free Agents
@@ -1516,9 +1516,10 @@ const Profile = (() => {
       DLRFreeAgents.init(league.leagueId, leagueKey, auctionOn, incPicks,
         league.myRosterId || null, league.teamName || "My Team");
     }
-    if (tab === "draft")       DLRDraft.init(league.leagueId, league.platform);
-    if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
-    if (tab === "rules")       DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
+    if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform);
+    if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season);
+    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
+    if (tab === "rules")         DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
       const sleeperUid2 = league.sleeperUserId
         || _currentProfile?.platforms?.sleeper?.sleeperUserId
