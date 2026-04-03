@@ -153,9 +153,10 @@
 <!-- JS to handle Connect button -->
   <script>
     document.getElementById("connect-mfl").addEventListener("click", async () => {
-      const username = document.getElementById("mfl-email-input").value.trim();
-      const password = document.getElementById("mfl-password-input").value.trim();
-      const leagueIds = document.getElementById("mfl-league-ids-input").value.trim();
+      const username   = document.getElementById("mfl-email-input").value.trim();
+      const password   = document.getElementById("mfl-password-input").value.trim();
+      const leagueIdsRaw = document.getElementById("mfl-league-ids-input").value.trim();
+      const leagueIds  = leagueIdsRaw ? leagueIdsRaw.split(/[\s,]+/).filter(Boolean) : [];
 
       const messageEl = document.getElementById("mfl-message");
       const statusEl  = document.getElementById("mfl-connection-status");
@@ -165,78 +166,36 @@
       leagueContainer.classList.add("hidden");
       leagueContainer.innerHTML = "";
 
-      if (!username || !password) {
-        messageEl.textContent = "Username and password are required.";
+      if (!username) {
+        messageEl.textContent = "Username is required.";
         messageEl.classList.remove("hidden");
         return;
       }
 
       statusEl.textContent = "Connecting...";
-      console.log("[MFL inline] Calling worker with username:", username);
 
       try {
-        const res = await fetch("https://mfl-proxy.mraladdin23.workers.dev/mfl/userLeagues", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password })
-        });
-
-        const text = await res.text();
-        console.log("[MFL inline] Worker response status:", res.status);
-        console.log("[MFL inline] Worker response body:", text.slice(0, 1000));
-
-        let data;
-        try { data = JSON.parse(text); } catch(e) {
-          console.error("[MFL inline] JSON parse failed:", e.message, text.slice(0, 200));
-          messageEl.textContent = "Worker returned invalid response.";
+        const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+        if (!profile) {
+          messageEl.textContent = "Not logged in.";
           messageEl.classList.remove("hidden");
-          statusEl.textContent = "Not connected";
           return;
         }
 
-        console.log("[MFL inline] Parsed data:", data);
+        const result = await Profile.linkMFL(profile.username, username, password, leagueIds);
+        const count  = Object.keys(result.leagues).length;
+        statusEl.textContent = `✓ Connected — ${count} league(s) saved`;
 
-        // Worker now returns {leagues: [...], debug: {...}}
-        const leagues = Array.isArray(data) ? data : (data.leagues || []);
-        console.log("[MFL inline] Leagues found:", leagues.length, leagues);
-
-        if (res.ok && leagues.length > 0) {
-          statusEl.textContent = `Connected — ${leagues.length} league(s) found`;
+        if (count > 0) {
           leagueContainer.classList.remove("hidden");
-          leagueContainer.innerHTML = leagues
-            .map(l => `<div>${l.name || "League"} — ID: ${l.league_id || l.id || "?"} (${l.season || ""})</div>`)
+          leagueContainer.innerHTML = Object.values(result.leagues)
+            .map(l => `<div>${l.leagueName} (${l.season})</div>`)
             .join("");
-          // Now hand off to Profile.linkMFL to actually save
-          const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
-          if (profile) {
-            try {
-              statusEl.textContent = "Saving leagues...";
-              const result = await Profile.linkMFL(profile.username, username, password, leagueIds ? leagueIds.split(/[\s,]+/).filter(Boolean) : []);
-              const count = Object.keys(result.leagues).length;
-              statusEl.textContent = `✓ Connected — ${count} league(s) saved`;
-              if (typeof Profile.renderLeaguePreview === "function") {
-                Profile.renderLeaguePreview("mfl-leagues-preview", result.leagues);
-              }
-            } catch(saveErr) {
-              console.error("[MFL inline] Save error:", saveErr);
-              messageEl.textContent = "Leagues found but save failed: " + saveErr.message;
-              messageEl.classList.remove("hidden");
-            }
-          }
-        } else {
-          statusEl.textContent = "Not connected";
-          const errMsg = data?.debug
-            ? `No leagues found. Debug: ${JSON.stringify(data.debug).slice(0, 300)}`
-            : (data?.error || "No leagues found. Check username and password.");
-          messageEl.textContent = errMsg;
-          messageEl.classList.remove("hidden");
         }
-
       } catch (err) {
         statusEl.textContent = "Not connected";
-        messageEl.textContent = "Error: " + err.message;
+        messageEl.textContent = err.message;
         messageEl.classList.remove("hidden");
-        console.error("[MFL inline] Fetch error:", err);
       }
     });
   </script>
