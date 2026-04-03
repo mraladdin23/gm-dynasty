@@ -184,15 +184,13 @@ const SleeperAPI = (() => {
     if (!sleeperUser) throw new Error(`Sleeper user "${sleeperUsername}" not found.`);
     const userId = sleeperUser.user_id;
 
-    // Fetch leagues across multiple years — some leagues aren't renewed each season
-    // so their chains never get started if we only look at the most recent year
-    const yearsToFetch = [
-      currentYear.toString(),
-      (currentYear - 1).toString(),
-      (currentYear - 2).toString(),
-      (currentYear - 3).toString(),
-      (currentYear - 4).toString(),
-    ];
+    // Fetch leagues across all years since Sleeper launched (2017)
+    // Some leagues aren't renewed each season so their chains never get started
+    // if we only look at recent years
+    const yearsToFetch = [];
+    for (let y = currentYear; y >= 2017; y--) {
+      yearsToFetch.push(y.toString());
+    }
 
     // Collect all unique league IDs the user appears in across all years
     const allStartingLeagueIds = new Set();
