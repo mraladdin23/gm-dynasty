@@ -1650,7 +1650,7 @@ select option { background: var(--color-bg-2); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
 
-/* ── Draft order: full CSS ──────────────────────────── */
+/* ── Draft order: full CSS with consolation draft fix ──────────────────────────── */
 
 /* Section styling */
 .draft-order-section { 
@@ -1680,40 +1680,44 @@ select option { background: var(--color-bg-2); }
 
 /* Row styling */
 .draft-order-row {
-  display: flex;
-  align-items: stretch;          /* stretch children to row height */
+  display: flex !important;
+  align-items: stretch !important;  /* row controls height */
   justify-content: flex-start;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   width: 100%;
   min-width: 0;
+  min-height: 32px;                 /* compact row height */
   box-sizing: border-box;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  flex-wrap: nowrap;
-  line-height: 1;                /* ensures text does not add extra height */
+  flex-wrap: nowrap !important;
+  line-height: 1;                    /* ensure no extra height from text */
 }
 
-/* Draft pick box */
-.draft-order-row .draft-pick {
+/* Draft pick box + all children fix */
+.draft-order-row .draft-pick,
+.draft-order-row .draft-pick * {
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-flex !important;      /* prevents block children from stretching row */
+  align-items: center !important;       /* vertically center text */
+  justify-content: center !important;   /* horizontally center text */
+  height: 100% !important;              /* match row height */
+  box-sizing: border-box !important;
+  line-height: normal !important;
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--color-gold);
-  flex: 0 0 32px;               /* fixed width, no grow/shrink */
-  display: flex;
-  align-items: center;           /* vertically center number */
-  justify-content: center;       /* horizontally center number */
-  height: 100%;                  /* match row height */
-  padding: 0;
-  line-height: normal;           /* prevent font from stretching container */
-  box-sizing: border-box;
+  flex-shrink: 0 !important;
+  width: 32px !important;                /* fixed width */
 }
 
 /* Team name */
 .draft-order-row .draft-team {
-  flex: 1 1 auto;                /* fill remaining space */
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1723,7 +1727,7 @@ select option { background: var(--color-bg-2); }
 /* Max PF */
 .draft-order-row .draft-maxpf {
   flex: 0 0 auto;
-  margin-left: auto;             /* push to end */
+  margin-left: auto;                     /* push to end */
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--color-text-dim);
@@ -1734,7 +1738,7 @@ select option { background: var(--color-bg-2); }
 /* ── Mobile tweaks ──────────────────────────── */
 @media (max-width: 640px) {
   .draft-order-grid {
-    grid-template-columns: 1fr;  /* single column on mobile */
+    grid-template-columns: 1fr;        /* single column on mobile */
     gap: var(--space-2);
   }
 
@@ -1742,15 +1746,17 @@ select option { background: var(--color-bg-2); }
     padding: var(--space-2) var(--space-3);
   }
 
-  .draft-order-row .draft-pick {
-    flex: 0 0 28px;             /* slightly smaller on mobile */
+  .draft-order-row .draft-pick,
+  .draft-order-row .draft-pick * {
+    width: 28px !important;            /* slightly smaller on mobile */
+    height: 100% !important;
+    line-height: normal !important;
   }
 
   .draft-order-row .draft-maxpf {
     font-size: 0.7rem;
   }
 }
-
 /* Loading/error states */
 .detail-loading {
   display: flex;
