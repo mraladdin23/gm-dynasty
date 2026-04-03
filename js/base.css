@@ -109,6 +109,7 @@ img { max-width: 100%; display: block; }
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+  overflow-x: hidden;  /* nothing inside can widen the layout */
 }
 .app-view.active { display: block; }
 
