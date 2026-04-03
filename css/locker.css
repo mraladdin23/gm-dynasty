@@ -1681,11 +1681,10 @@ select option { background: var(--color-bg-2); }
 /* Row styling */
 .draft-order-row {
   display: flex;
-  align-items: center;        /* vertically center all items */
+  align-items: stretch;          /* stretch children to row height */
+  justify-content: flex-start;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  min-height: 32px;           /* compact row height */
-  height: auto;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -1694,6 +1693,7 @@ select option { background: var(--color-bg-2); }
   border-radius: var(--radius-sm);
   overflow: hidden;
   flex-wrap: nowrap;
+  line-height: 1;                /* ensures text does not add extra height */
 }
 
 /* Draft pick box */
@@ -1701,17 +1701,19 @@ select option { background: var(--color-bg-2); }
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--color-gold);
-  flex-shrink: 0;
-  width: 32px;               /* fixed width */
-  height: 24px;              /* fixed height */
-  line-height: 24px;         /* center text vertically */
-  text-align: center;
+  flex: 0 0 32px;               /* fixed width, no grow/shrink */
+  display: flex;
+  align-items: center;           /* vertically center number */
+  justify-content: center;       /* horizontally center number */
+  height: 100%;                  /* match row height */
   padding: 0;
+  line-height: normal;           /* prevent font from stretching container */
+  box-sizing: border-box;
 }
 
 /* Team name */
 .draft-order-row .draft-team {
-  flex: 1;                   /* fill available space */
+  flex: 1 1 auto;                /* fill remaining space */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1720,13 +1722,13 @@ select option { background: var(--color-bg-2); }
 
 /* Max PF */
 .draft-order-row .draft-maxpf {
+  flex: 0 0 auto;
+  margin-left: auto;             /* push to end */
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--color-text-dim);
-  flex-shrink: 0;
   line-height: 1;
   white-space: nowrap;
-  margin-left: auto;         /* push to end */
 }
 
 /* ── Mobile tweaks ──────────────────────────── */
@@ -1737,30 +1739,15 @@ select option { background: var(--color-bg-2); }
   }
 
   .draft-order-row {
-    flex-wrap: nowrap;
     padding: var(--space-2) var(--space-3);
-    min-height: 32px;
   }
 
   .draft-order-row .draft-pick {
-    width: 28px;               /* slightly smaller on mobile */
-    height: 20px;
-    line-height: 20px;
-  }
-
-  .draft-order-row .draft-team {
-    flex: 1;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: block;
+    flex: 0 0 28px;             /* slightly smaller on mobile */
   }
 
   .draft-order-row .draft-maxpf {
     font-size: 0.7rem;
-    line-height: 1;
   }
 }
 
