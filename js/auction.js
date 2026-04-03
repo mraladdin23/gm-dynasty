@@ -1186,13 +1186,18 @@ const DLRAuction = (() => {
     return true;
   }
 
+  // Returns true when this module has rosters loaded for the given leagueKey
+  function isReady(leagueKey) {
+    return _leagueKey === leagueKey && _rosterData.length > 0;
+  }
+
   return {
     init, preInit, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
     placeBid, showBidHistory, claimAuction, cancelAuction, passAuction, isRostered,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
-    canNominate
+    canNominate, isReady
   };
 
 })();

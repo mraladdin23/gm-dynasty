@@ -945,6 +945,54 @@ const DLRSalaryCap = (() => {
   function _escAttr(s) { return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
 
   // ── Expose cap data to auction module ────────────────────
+  // ── Silent preload — loads cap data without touching UI or initToken ──
+  // Used by openLeagueDetail so Teams tab has cap data immediately
+  async function preloadCap(leagueKey, leagueId, franchiseId) {
+    // Don't overwrite if already loaded for this league
+    if (_leagueKey === leagueKey && _settings && _rosterData) return;
+
+    const storageKey = franchiseId || leagueKey;
+    try {
+      const [settings, salaryData] = await Promise.all([
+        _loadSettings(storageKey),
+        _loadSalaryData(storageKey)
+      ]);
+      // Only update module state if we're not already initialized for this league
+      if (_leagueKey !== leagueKey || !_settings) {
+        _leagueKey  = leagueKey;
+        _leagueId   = leagueId;
+        _storageKey = storageKey;
+        _settings   = settings;
+        _salaryData = salaryData;
+      }
+      // Load roster data for cap calculations
+      if (leagueId && !_rosterData) {
+        const [rosters, users] = await Promise.all([
+          SleeperAPI.getRosters(leagueId),
+          SleeperAPI.getLeagueUsers(leagueId)
+        ]);
+        const userMap = {};
+        (users||[]).forEach(u => { userMap[u.user_id] = u; });
+        _rosterData = (rosters||[]).map(r => {
+          const u = userMap[r.owner_id] || {};
+          return {
+            roster_id: r.roster_id,
+            ownerId:   r.owner_id,
+            username:  (u.username || u.user_id || `team_${r.roster_id}`).toLowerCase(),
+            teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
+            players:   r.players  || [],
+            reserve:   r.reserve  || [],
+            taxi:      r.taxi     || [],
+            wins:      r.settings?.wins   || 0,
+            losses:    r.settings?.losses || 0
+          };
+        });
+      }
+    } catch(e) {
+      // Silent — don't break anything if preload fails
+    }
+  }
+
   function getCapData() {
     if (!_settings || !_rosterData) return null;
     const salaryMap = _getSalaryMap();
@@ -962,7 +1010,7 @@ const DLRSalaryCap = (() => {
   }
 
   return {
-    init, reset, setView, setPos, selectTeam,
+    init, preloadCap, reset, setView, setPos, selectTeam,
     openEditModal, savePlayerSalary,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
