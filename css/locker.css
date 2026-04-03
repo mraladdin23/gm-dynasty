@@ -1649,7 +1649,10 @@ select option { background: var(--color-bg-2); }
 .playoffs-icon  { font-size: 2.5rem; margin-bottom: var(--space-3); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
-/* ── Draft order: desktop / main block ──────────────────────────── */
+
+/* ── Draft order: full CSS ──────────────────────────── */
+
+/* Section styling */
 .draft-order-section { 
   margin-top: var(--space-6); 
   padding-top: var(--space-4); 
@@ -1668,55 +1671,97 @@ select option { background: var(--color-bg-2); }
   margin-bottom: var(--space-3); 
 }
 
+/* Grid container */
 .draft-order-grid { 
   display: grid; 
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
   gap: var(--space-2); 
 }
 
+/* Row styling */
 .draft-order-row {
   display: flex;
-  align-items: center;       /* vertically center all items */
+  align-items: center;        /* vertically center all items */
   gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  min-height: 32px;           /* compact row height */
+  height: auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  font-size: .82rem;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;             /* allow children to shrink */
-  box-sizing: border-box;
   overflow: hidden;
+  flex-wrap: nowrap;
 }
 
+/* Draft pick box */
 .draft-order-row .draft-pick {
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--color-gold);
-  min-width: 36px;           /* enough for pick number */
-  width: auto;
-  line-height: 1;            /* reduces extra height */
-  padding: 0;
   flex-shrink: 0;
+  width: 32px;               /* fixed width */
+  height: 24px;              /* fixed height */
+  line-height: 24px;         /* center text vertically */
   text-align: center;
+  padding: 0;
 }
 
+/* Team name */
 .draft-order-row .draft-team {
-  flex: 1;                   /* fills available space */
+  flex: 1;                   /* fill available space */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
 }
 
+/* Max PF */
 .draft-order-row .draft-maxpf {
   font-family: var(--font-mono);
-  font-size: .72rem;
+  font-size: 0.72rem;
   color: var(--color-text-dim);
-  white-space: nowrap;
   flex-shrink: 0;
   line-height: 1;
+  white-space: nowrap;
+  margin-left: auto;         /* push to end */
+}
+
+/* ── Mobile tweaks ──────────────────────────── */
+@media (max-width: 640px) {
+  .draft-order-grid {
+    grid-template-columns: 1fr;  /* single column on mobile */
+    gap: var(--space-2);
+  }
+
+  .draft-order-row {
+    flex-wrap: nowrap;
+    padding: var(--space-2) var(--space-3);
+    min-height: 32px;
+  }
+
+  .draft-order-row .draft-pick {
+    width: 28px;               /* slightly smaller on mobile */
+    height: 20px;
+    line-height: 20px;
+  }
+
+  .draft-order-row .draft-team {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+
+  .draft-order-row .draft-maxpf {
+    font-size: 0.7rem;
+    line-height: 1;
+  }
 }
 
 /* Loading/error states */
@@ -5165,50 +5210,3 @@ select option { background: var(--color-bg-2); }
 
 
 
-/* ── Draft order: mobile fixes ──────────────────────────── */
-@media (max-width: 640px) {
-  .draft-order-grid {
-    grid-template-columns: 1fr;  /* single column on mobile */
-    gap: var(--space-2);
-  }
-
-  .draft-order-row {
-    display: flex;
-    align-items: center;       /* vertically center content */
-    gap: var(--space-2);
-    flex-wrap: nowrap;         /* prevent wrapping */
-    width: 100%;
-    min-width: 0;
-    min-height: 0;
-    box-sizing: border-box;
-    padding: var(--space-2) var(--space-3);
-    overflow: hidden;
-  }
-
-  .draft-order-row .draft-pick {
-    flex-shrink: 0;            /* don’t shrink horizontally */
-    min-width: 32px;           /* smaller for mobile */
-    width: auto;
-    line-height: 1;            /* reduce extra vertical space */
-    padding: 0;
-  }
-
-  .draft-order-row .draft-team {
-    flex: 1;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: block;            /* ensure it renders */
-  }
-
-  .draft-order-row .draft-maxpf {
-    flex-shrink: 0;
-    margin-left: auto;         /* push to the end of the row */
-    white-space: nowrap;
-    font-size: 0.72rem;
-    line-height: 1;            /* reduce height */
-  }
-}
-✅ What change
