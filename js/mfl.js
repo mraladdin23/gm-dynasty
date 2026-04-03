@@ -36,11 +36,15 @@ const MFLAPI = (() => {
       throw new Error("Missing username or password");
     }
 
-    return post("/mfl/userLeagues", {
-      username,
-      password,
-      year
-    });
+    const data = await post("/mfl/userLeagues", { username, password, year });
+
+    // Handle debug response format {leagues: [...], debug: {...}}
+    if (data?.debug) {
+      console.log("[MFL] Debug info:", JSON.stringify(data.debug).slice(0, 2000));
+    }
+
+    // Return the leagues array whether it's wrapped or bare
+    return Array.isArray(data) ? data : (data?.leagues || []);
   }
 
   // ───────── GET FULL LEAGUE DATA ─────────
