@@ -1053,8 +1053,17 @@ const Profile = (() => {
     if (meta.customLabel)  tags.push(`<span class="lrow-tag lrow-tag--label">🏷 ${_escHtml(meta.customLabel)}</span>`);
     if (meta.commishGroup) tags.push(`<span class="lrow-tag lrow-tag--group">⚡ ${_escHtml(meta.commishGroup)}</span>`);
 
-    const typeBadge = `<span class="lrow-type lrow-type--${league.leagueType || "redraft"}">${league.leagueType || "redraft"}</span>`;
-    const platBadge = `<span class="lrow-plat lrow-plat--${league.platform}">${(league.platform||"").toUpperCase()}</span>`;
+    // Abbreviate type to 3 chars max
+    const typeShort = { dynasty:"DYN", redraft:"RDR", keeper:"KEP" }[league.leagueType] || (league.leagueType||"RDR").slice(0,3).toUpperCase();
+    const platShort = (league.platform||"").slice(0,3).toUpperCase();
+    const typeBadge = `<span class="lrow-type lrow-type--${league.leagueType || "redraft"}">${typeShort}</span>`;
+    const platBadge = `<span class="lrow-plat lrow-plat--${league.platform}">${platShort}</span>`;
+
+    // Championship badges for name row
+    const champBadges = [
+      titles    > 0 ? `<span class="lrow-champ-badge lrow-champ-badge--gold">🏆${titles > 1 ? titles : ""}</span>` : "",
+      runnerUps > 0 ? `<span class="lrow-champ-badge">🥈${runnerUps > 1 ? runnerUps : ""}</span>` : "",
+    ].filter(Boolean).join("");
 
     return `
       <div class="league-row ${isArchived ? "league-row--archived" : ""} ${titles > 0 ? "league-row--champion" : ""}" data-key="${key}">
@@ -1065,19 +1074,17 @@ const Profile = (() => {
         <div class="lrow-name-col">
           <div class="lrow-name">
             ${_escHtml(league.leagueName)}
-            <span class="lrow-cur-record">${cW}–${cL}${finishIcon ? " " + finishIcon : ""}</span>
           </div>
-          <div class="lrow-team">${_escHtml(league.teamName || "")}</div>
-        </div>
-        <div class="lrow-tags">
-          ${tags.join("")}
+          <div class="lrow-team-row">
+            <span class="lrow-team">${_escHtml(league.teamName || "")}</span>
+            ${champBadges}
+          </div>
         </div>
         <div class="lrow-alltime-col">
           <div class="lrow-record">${totalWins}–${totalLosses}</div>
-          <div class="lrow-season-label">all-time${seasons.length > 1 ? ` · ${seasons.length} seas.` : ""}</div>
+          <div class="lrow-season-label">${cW}–${cL}${finishIcon ? " " + finishIcon : ""}</div>
         </div>
         <div class="lrow-actions">
-          <button class="lrow-chat-btn" data-key="${key}" title="Chat">💬</button>
           <button class="lrow-options-btn league-options-btn" data-key="${key}" title="Options">⋯</button>
         </div>
       </div>`;

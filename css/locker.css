@@ -4612,3 +4612,99 @@ select option { background: var(--color-bg-2); }
   .nav-identity { display: none !important; }
 }
 
+
+/* ── League row: new layout with champ badges ────────── */
+.lrow-team-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.lrow-champ-badge {
+  font-size: .6rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.lrow-champ-badge--gold { color: var(--color-gold); }
+
+/* Abbreviated badges — fixed width so they don't bleed */
+.lrow-plat, .lrow-type {
+  font-size: .52rem !important;
+  padding: 1px 3px !important;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* All-time record column — show season record on second line */
+.lrow-alltime-col { min-width: 44px; text-align: right; flex-shrink: 0; }
+.lrow-record      { font-family: var(--font-display); font-weight: 700; font-size: .82rem; }
+.lrow-season-label { font-size: .58rem; color: var(--color-text-dim); }
+
+/* Remove tags column (now in team row) */
+.lrow-tags { display: none !important; }
+.lrow-cur-record { display: none !important; }
+
+/* ── Mobile: lock top nav, no page drag ──────────────── */
+@media (max-width: 640px) {
+  /* Hard lock: no touch scrolling on the root, only inside scroll containers */
+  body { overscroll-behavior: none; touch-action: pan-y; }
+  html { overscroll-behavior: none; }
+
+  /* Nav stays pinned at top */
+  .top-nav {
+    position: fixed !important;
+    top: 0; left: 0; right: 0;
+    z-index: 200;
+    height: 48px;
+  }
+  /* Push content below fixed nav */
+  #app-screen { padding-top: 48px; }
+
+  /* App view padding */
+  .app-view { padding: var(--space-3) var(--space-3) var(--space-6) !important; }
+
+  /* Roster and salary font sizes */
+  .roster-player-name  { font-size: .78rem !important; }
+  .sal-player-name-text { font-size: .75rem !important; }
+  .sal-amount          { font-size: .75rem !important; }
+  .sal-team-name       { font-size: .78rem !important; }
+  .detail-tab-content  { font-size: .82rem; }
+
+  /* Trophy room: full width, scroll within */
+  #view-trophies .trophy-room-container,
+  .tr-trophy-shelf {
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+  .tr-trophy-shelf {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+    gap: var(--space-2) !important;
+  }
+  .tr-trophy-card {
+    min-height: 145px !important;
+    padding: var(--space-3) var(--space-2) !important;
+  }
+  .tr-trophy-icon { font-size: 1.8rem !important; }
+  .tr-trophy-season { font-size: .88rem !important; }
+  .tr-trophy-league { font-size: .65rem !important; }
+
+  /* Draft board: 4 cols, 3 rows visible */
+  .draft-picks-row {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 3px !important;
+  }
+  .draft-pick {
+    min-width: unset !important;
+    max-width: unset !important;
+    width: 100% !important;
+    font-size: .55rem !important;
+    padding: 4px 3px !important;
+  }
+  .draft-board-scroll { overflow-x: hidden !important; }
+  .draft-board { width: 100% !important; }
+}
+
