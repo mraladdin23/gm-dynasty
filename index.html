@@ -125,13 +125,32 @@
     </div>
   </div>
 
-<body>
-  <!-- Your full MFL card HTML goes here -->
-  <div class="platform-card" id="mfl-card">
-    <!-- ... all your inputs, button, status, league container ... -->
+  <!-- Body -->
+  <div class="platform-body">
+    <!-- Username / Password Inputs -->
+    <input type="text" id="mfl-username" placeholder="MFL Username" required />
+    <input type="password" id="mfl-password" placeholder="MFL Password" required />
+
+    <!-- Optional League IDs -->
+    <input type="text" id="mfl-league-ids-input" placeholder="Optional: League IDs from MFL URL — e.g. 21600, 18432" />
+
+    <!-- Field hint -->
+    <span class="field-hint">
+      Enter your MFL username and password to connect. Optionally, you can also paste your league ID(s) from the MFL URL to pre-link specific leagues.
+    </span>
+
+    <!-- Connect / Import Button -->
+    <button class="btn-link-platform" id="connect-mfl">Connect MFL</button>
+
+    <!-- Messages / Feedback -->
+    <div id="mfl-message" class="input-message hidden"></div>
   </div>
 
-  <!-- JS to handle Connect button -->
+  <!-- Leagues Preview -->
+  <div id="league-container" class="leagues-preview hidden"></div>
+</div>
+
+<!-- JS to handle Connect button -->
   <script>
     document.getElementById("connect-mfl").addEventListener("click", async () => {
       const username = document.getElementById("mfl-username").value.trim();
@@ -187,7 +206,6 @@
       }
     });
   </script>
-</body>
 
       <!-- Yahoo -->
       <div class="platform-card" id="yahoo-card">
