@@ -1649,19 +1649,38 @@ select option { background: var(--color-bg-2); }
 .playoffs-icon  { font-size: 2.5rem; margin-bottom: var(--space-3); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
-.draft-order-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
-.draft-order-title { font-size: .9rem; font-weight: 700; margin-bottom: var(--space-1); }
-.draft-order-sub { font-size: .75rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
+/* ── Draft Order Section ───────────────────────────── */
+.draft-order-section {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.draft-order-title {
+  font-size: .9rem;
+  font-weight: 700;
+  margin-bottom: var(--space-1);
+}
+
+.draft-order-sub {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-3);
+}
+
+/* ── Grid ───────────────────────────── */
 .draft-order-grid {
   display: flex;
   flex-direction: column;
   gap: 3px;
   width: 100%;
 }
+
+/* ── Row ───────────────────────────── */
 .draft-order-row {
   display: grid;
   grid-template-columns: 56px 1fr 80px;
-  align-items: center;       /* children stretch to fill row height */
+  align-items: center;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1671,14 +1690,18 @@ select option { background: var(--color-bg-2); }
   overflow: hidden;
 }
 
-.draft-order-row > * {
+/* ── Columns (ONLY target what we need) ───────────────────────────── */
+.draft-order-row .draft-pick,
+.draft-order-row .draft-team,
+.draft-order-row .draft-maxpf {
+  display: flex;
+  align-items: center;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  display: flex;
-  align-items: center;
 }
 
+/* ── Draft Pick ───────────────────────────── */
 .draft-order-row .draft-pick {
   justify-content: center;
   font-family: var(--font-mono);
@@ -1691,15 +1714,21 @@ select option { background: var(--color-bg-2); }
   box-sizing: border-box;
 }
 
+/* 🔥 CRITICAL FIX: force MFL inner wrapper to behave */
+.draft-order-row .draft-pick > * {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+/* Clean up injected spacing WITHOUT breaking layout */
 .draft-order-row .draft-pick * {
   margin: 0 !important;
   padding: 0 !important;
   line-height: 1 !important;
-  height: auto !important;
-  max-height: 100% !important;
-  display: inline !important;
 }
 
+/* ── Team ───────────────────────────── */
 .draft-order-row .draft-team {
   font-size: .82rem;
   padding: 0 var(--space-3);
@@ -1709,6 +1738,8 @@ select option { background: var(--color-bg-2); }
   white-space: nowrap;
   min-width: 0;
 }
+
+/* ── Max PF ───────────────────────────── */
 .draft-order-row .draft-maxpf {
   justify-content: flex-end;
   font-family: var(--font-mono);
@@ -1721,6 +1752,7 @@ select option { background: var(--color-bg-2); }
   white-space: nowrap;
 }
 
+/* ── Mobile ───────────────────────────── */
 @media (max-width: 640px) {
   .draft-order-row {
     grid-template-columns: 48px 1fr 70px;
