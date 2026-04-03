@@ -301,20 +301,29 @@ const DLRFreeAgents = (() => {
         </div>
       </div>
       <div class="fa-list">
-        ${sorted.length ? sorted.map((p, i) => {
+        ${(() => {
+          // Evaluate once outside map — avoid calling canNominate per-row
+          const auctionReady = typeof DLRAuction !== "undefined" && typeof DLRAuction.canNominate === "function";
+          const canNom = _auctionEnabled && auctionReady ? DLRAuction.canNominate() : false;
+
+          // If auction should be enabled but isn't ready yet, re-render once it loads
+          if (_auctionEnabled && !auctionReady) {
+            setTimeout(() => { if (_cachedData) _render(); }, 1500);
+          } else if (_auctionEnabled && auctionReady && !DLRAuction.isRostered) {
+            setTimeout(() => { if (_cachedData) _render(); }, 1000);
+          }
+
+          return sorted.length ? sorted.map((p, i) => {
           const color = POS_COLOR[p.pos] || "#9ca3af";
           const pts   = p.pts ? p.pts.toFixed(0) : "—";
           const rank  = p.rank < 9999 ? `#${p.rank}` : "—";
-          const canNom = _auctionEnabled
-            ? (typeof DLRAuction !== "undefined" && DLRAuction.canNominate?.())
-            : false;
           const nomBtn = _auctionEnabled
             ? (canNom
                 ? `<button class="fa-nom-btn btn-primary btn-sm"
                     onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
                     title="Nominate for auction">🏷</button>`
                 : `<button class="fa-nom-btn btn-secondary btn-sm" disabled
-                    title="Max nominations reached" style="opacity:.4">🏷</button>`)
+                    title="${auctionReady ? "Max nominations or cap reached" : "Loading…"}" style="opacity:.4">🏷</button>`)
             : "";
           return `
             <div class="fa-player-row" onclick="DLRPlayerCard.show('${p.pid}', '${_escAttr(p.name)}')">
@@ -338,7 +347,8 @@ const DLRFreeAgents = (() => {
               </div>
               ${nomBtn}
             </div>`;
-        }).join("") : `<div class="fa-empty">No free agents found.</div>`}
+          }).join("") : `<div class="fa-empty">No free agents found.</div>`;
+        })()}
       </div>`;
   }
 

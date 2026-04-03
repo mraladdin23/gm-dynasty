@@ -4925,11 +4925,14 @@ select option { background: var(--color-bg-2); }
   color: var(--color-gold);
 }
 .nav-id-dscore {
-  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 .nav-id-dscore-val {
   font-size: .6rem;
   color: var(--color-text-dim);
+  white-space: nowrap;
 }
 
 /* ── Mobile record/trophy spacing fix ───────────────── */
