@@ -9,23 +9,28 @@ const MFLAPI = (() => {
   // ───────── GENERIC POST HELPER ─────────
   async function post(endpoint, body) {
     try {
+      console.log(`[MFL] POST ${endpoint}`, { username: body.username, hasPassword: !!body.password });
       const res = await fetch(`${BASE_URL}${endpoint}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(20000)
+        signal: AbortSignal.timeout(30000)
       });
 
+      const text = await res.text();
+      console.log(`[MFL] Response status: ${res.status}, body preview:`, text.slice(0, 300));
+
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`MFL Worker Error ${res.status}: ${text}`);
+        throw new Error(`MFL Worker ${res.status}: ${text.slice(0, 200)}`);
       }
 
-      return await res.json();
+      try {
+        return JSON.parse(text);
+      } catch(e) {
+        throw new Error(`MFL response not JSON: ${text.slice(0, 200)}`);
+      }
     } catch (err) {
-      console.error("MFL POST Error:", err);
+      console.error("[MFL] POST error:", err);
       throw err;
     }
   }
