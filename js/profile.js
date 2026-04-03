@@ -7,7 +7,7 @@
 const Profile = (() => {
 
   const CURRENT_SEASON = new Date().getFullYear().toString();
-  const PAGE_SIZE_DEFAULT = 5;
+  const PAGE_SIZE_DEFAULT = 10;
   let   PAGE_SIZE         = PAGE_SIZE_DEFAULT;
 
   let _activeFilter    = "all";
@@ -229,21 +229,23 @@ const Profile = (() => {
     document.getElementById("nav-username").textContent = "@" + profile.username;
 
     // Populate mobile nav identity bar
-    const navIdName  = document.getElementById("nav-id-name");
-    const navIdStats = document.getElementById("nav-id-stats");
-    const navAvatar  = document.getElementById("nav-avatar");
-    if (navIdName)  navIdName.textContent  = profile.username;
-    if (navIdStats && profile.stats) {
-      const w = profile.stats.totalWins || 0;
-      const l = profile.stats.totalLosses || 0;
-      const c = profile.stats.championships || 0;
-      navIdStats.textContent = `${w}–${l}${c > 0 ? ` · 🏆${c}` : ""}`;
+    const navIdName   = document.getElementById("nav-id-name");
+    const navIdMeta   = document.getElementById("nav-id-meta");
+    const navAvatar   = document.getElementById("nav-avatar");
+    if (navIdName) navIdName.textContent = profile.username;
+    if (navIdMeta && profile.stats) {
+      const w = profile.stats.totalWins        || 0;
+      const l = profile.stats.totalLosses      || 0;
+      const c = profile.stats.championships    || 0;
+      const p = profile.stats.playoffAppearances || 0;
+      navIdMeta.innerHTML = `
+        <span class="nav-id-record">${w}–${l}</span>
+        ${c > 0 ? `<span class="nav-id-trophies">🏆${c > 1 ? c : ""}</span>` : ""}
+        ${p > 0 && !c ? `<span class="nav-id-trophies">🏅${p}</span>` : ""}`;
     }
     if (navAvatar) {
       if (profile.avatarUrl) {
-        navAvatar.style.backgroundImage = `url(${profile.avatarUrl})`;
-        navAvatar.style.backgroundSize  = "cover";
-        navAvatar.style.backgroundPosition = "center";
+        navAvatar.innerHTML = `<img src="${profile.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentElement.textContent='${(profile.username||"?")[0].toUpperCase()}'"/>`;
       } else {
         navAvatar.textContent = (profile.username || "?")[0].toUpperCase();
       }
@@ -400,8 +402,10 @@ const Profile = (() => {
   function _renderCareerSummary(profile) {
     // Career summary is now a modal — just precompute the data
     const allLeagues   = Object.values(_allLeagues);
+    // Owner = has a roster (myRosterId set by Sleeper owner_id or co_owners check)
+    // Include new leagues with no games yet — exclude commish-only (no myRosterId, no record)
     const ownerLeagues = allLeagues.filter(l =>
-      (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
+      l.myRosterId || (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
     );
     if (!ownerLeagues.length) return;
 
@@ -654,107 +658,125 @@ const Profile = (() => {
   }
 
   // ── Filter bar ─────────────────────────────────────────
-  // Filters are multi-select — clicking toggles them, "All" clears all
-
   function _renderLeagueFilters() {
     const customLabels  = new Set();
     const commishGroups = new Set();
-    const platforms     = new Set();
 
     Object.values(_leagueMeta).forEach(m => {
       if (m && m.customLabel  && m.customLabel.trim())  customLabels.add(m.customLabel.trim());
       if (m && m.commishGroup && m.commishGroup.trim()) commishGroups.add(m.commishGroup.trim());
     });
 
-    // Detect which platforms the user has leagues on
-    Object.values(_allLeagues).forEach(l => {
-      if (l.platform) platforms.add(l.platform);
-    });
+    // Show/hide group buttons
+    document.getElementById("filter-groups-btn")?.style.setProperty("display", customLabels.size > 0 ? "" : "none");
+    document.getElementById("filter-commish-btn")?.style.setProperty("display", commishGroups.size > 0 ? "" : "none");
 
-    console.log("[DLR filters] meta keys:", Object.keys(_leagueMeta).length,
-      "labels:", [...customLabels], "groups:", [...commishGroups], "platforms:", [...platforms]);
-
-    const filterBar = document.getElementById("league-filters");
-    if (!filterBar) return;
-
-    const groupBtns = [...commishGroups].map(g =>
-      `<button class="filter-tab filter-tab--group" data-filter="group:${_escHtml(g)}">⚡ ${_escHtml(g)}</button>`
-    ).join("");
-    const labelBtns = [...customLabels].map(l =>
-      `<button class="filter-tab filter-tab--label" data-filter="label:${_escHtml(l)}">🏷 ${_escHtml(l)}</button>`
-    ).join("");
-    const platBtns = [...platforms].map(p =>
-      `<button class="filter-tab filter-tab--plat" data-filter="platform:${p}">${p === "sleeper" ? "🟣 Sleeper" : p === "mfl" ? "🟢 MFL" : p.toUpperCase()}</button>`
-    ).join("");
-
-    filterBar.innerHTML = `
-      <button class="filter-tab active" data-filter="all">All</button>
-      <button class="filter-tab" data-filter="active">Active</button>
-      <button class="filter-tab" data-filter="owner">🏈 Owner</button>
-      <button class="filter-tab" data-filter="pinned">📌 Pinned</button>
-      <button class="filter-tab" data-filter="dynasty">Dynasty</button>
-      <button class="filter-tab" data-filter="redraft">Redraft</button>
-      <button class="filter-tab" data-filter="keeper">Keeper</button>
-      <button class="filter-tab" data-filter="commissioner">👑 Commish</button>
-      ${platforms.size > 1 ? platBtns : ""}
-      ${commishGroups.size > 0 ? `<span class="filter-section-label">Groups</span>${groupBtns}` : ""}
-      ${customLabels.size  > 0 ? `<span class="filter-section-label">Labels</span>${labelBtns}` : ""}
-      <div class="filter-divider"></div>
-      <button class="filter-tab" data-filter="archived">📦 Archived</button>
-    `;
-
-    // Also render group + label pills in the tools row (next to jump dropdown)
-    const pillsEl = document.getElementById("league-group-pills");
-    if (pillsEl) {
-      const allPills = [...commishGroups].map(g =>
-        `<button class="group-pill" data-filter="group:${_escHtml(g)}">⚡ ${_escHtml(g)}</button>`
-      ).concat([...customLabels].map(l =>
-        `<button class="group-pill group-pill--label" data-filter="label:${_escHtml(l)}">🏷 ${_escHtml(l)}</button>`
-      ));
-      pillsEl.innerHTML = allPills.join("");
-      pillsEl.querySelectorAll(".group-pill").forEach(pill => {
-        pill.addEventListener("click", () => {
-          const f = pill.dataset.filter;
-          // Toggle this filter
-          if (_activeFilters.has(f)) {
-            _activeFilters.delete(f);
-            pill.classList.remove("group-pill--active");
-          } else {
-            _activeFilters.add(f);
-            pill.classList.add("group-pill--active");
-          }
-          _currentPage = 0;
-          _renderLeagues();
-        });
-      });
-      pillsEl.style.display = allPills.length ? "" : "none";
+    // Populate groups panel
+    const groupsList = document.getElementById("filter-groups-list");
+    if (groupsList) {
+      groupsList.innerHTML = [...customLabels].map(l =>
+        `<button class="filter-chip" data-filter="label:${_escHtml(l)}" onclick="Profile.toggleFilter('label:${_escHtml(l)}')">🏷 ${_escHtml(l)}</button>`
+      ).join("");
+    }
+    const commishList = document.getElementById("filter-commish-list");
+    if (commishList) {
+      commishList.innerHTML = [...commishGroups].map(g =>
+        `<button class="filter-chip" data-filter="group:${_escHtml(g)}" onclick="Profile.toggleFilter('group:${_escHtml(g)}')">⚡ ${_escHtml(g)}</button>`
+      ).join("");
     }
 
-    // Multi-select wiring
-    filterBar.querySelectorAll(".filter-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        const f = tab.dataset.filter;
+    // Wire checkboxes in main panel
+    document.querySelectorAll("#filter-panel-main input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const f = cb.dataset.filter;
         if (f === "all") {
           _activeFilters.clear();
-          filterBar.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
-          tab.classList.add("active");
+          document.querySelectorAll("#filter-panel-main input[type=checkbox]").forEach(x => {
+            x.checked = x.dataset.filter === "all";
+          });
         } else {
-          // Toggle this filter — archived now combinable with others
-          filterBar.querySelector('[data-filter="all"]')?.classList.remove("active");
-          if (_activeFilters.has(f)) {
-            _activeFilters.delete(f);
-            tab.classList.remove("active");
-          } else {
-            _activeFilters.add(f);
-            tab.classList.add("active");
-          }
+          // Uncheck "all" when specific filter selected
+          document.querySelector('#filter-panel-main input[data-filter="all"]').checked = false;
+          if (cb.checked) _activeFilters.add(f);
+          else _activeFilters.delete(f);
           if (_activeFilters.size === 0) {
-            filterBar.querySelector('[data-filter="all"]')?.classList.add("active");
+            document.querySelector('#filter-panel-main input[data-filter="all"]').checked = true;
           }
         }
+        _updateFilterBtnCount();
         _renderLeagues();
       });
     });
+
+    // Wire legacy hidden filterBar so existing click handlers still work
+    const filterBar = document.getElementById("league-filters");
+    if (filterBar && !filterBar.dataset.wired) {
+      filterBar.dataset.wired = "1";
+      filterBar.querySelectorAll(".filter-tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+          const f = tab.dataset.filter;
+          if (f === "all") { _activeFilters.clear(); }
+          else if (_activeFilters.has(f)) _activeFilters.delete(f);
+          else _activeFilters.add(f);
+          _renderLeagues();
+        });
+      });
+    }
+  }
+
+  function _updateFilterBtnCount() {
+    const countEl = document.getElementById("filter-main-count");
+    if (!countEl) return;
+    const n = _activeFilters.size;
+    countEl.textContent = n;
+    countEl.style.display = n > 0 ? "" : "none";
+    // Update archived button highlight
+    document.getElementById("filter-archived-btn")?.classList.toggle("filter-btn--active",
+      _activeFilters.has("archived"));
+  }
+
+  function toggleFilterPanel(name) {
+    const panels = ["main","groups","commish"];
+    panels.forEach(p => {
+      const el = document.getElementById(`filter-panel-${p}`);
+      if (!el) return;
+      if (p === name) el.classList.toggle("hidden");
+      else el.classList.add("hidden");
+    });
+    // Update button active states
+    panels.forEach(p => {
+      document.getElementById(`filter-${p}-btn`)?.classList.toggle("filter-btn--active",
+        !document.getElementById(`filter-panel-${p}`)?.classList.contains("hidden"));
+    });
+  }
+
+  function toggleFilter(f) {
+    if (f === "archived") {
+      if (_activeFilters.has("archived")) _activeFilters.delete("archived");
+      else _activeFilters.add("archived");
+      document.getElementById("filter-archived-btn")?.classList.toggle("filter-btn--active", _activeFilters.has("archived"));
+    } else {
+      if (_activeFilters.has(f)) _activeFilters.delete(f);
+      else _activeFilters.add(f);
+      // Sync checkbox if panel exists
+      const cb = document.querySelector(`#filter-panel-main input[data-filter="${CSS.escape(f)}"]`);
+      if (cb) cb.checked = _activeFilters.has(f);
+      // Sync chip
+      document.querySelectorAll(`.filter-chip[data-filter="${CSS.escape(f)}"]`).forEach(c =>
+        c.classList.toggle("filter-chip--active", _activeFilters.has(f)));
+      _updateFilterBtnCount();
+    }
+    _renderLeagues();
+  }
+
+  function clearFilters() {
+    _activeFilters.clear();
+    document.querySelectorAll("#filter-panel-main input[type=checkbox]").forEach(cb => {
+      cb.checked = cb.dataset.filter === "all";
+    });
+    document.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("filter-chip--active"));
+    _updateFilterBtnCount();
+    _renderLeagues();
   }
 
   // ── League grid rendering ──────────────────────────────
@@ -1002,7 +1024,7 @@ const Profile = (() => {
           : (Object.values(_allLeagues).map(l => l.season).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || ruleSeason);
         return f.seasons.some(s => s.league.season === checkSeason);
       }
-      case "owner":        return f.seasons.some(s => s.league.wins > 0 || s.league.losses > 0 || s.league.ties > 0 || (s.league.pointsFor > 0));
+      case "owner":        return f.seasons.some(s => s.league.myRosterId || s.league.wins > 0 || s.league.losses > 0 || s.league.ties > 0 || (s.league.pointsFor > 0));
       case "pinned":       return !!meta.pinned;
       case "dynasty":      return latest?.leagueType === "dynasty";
       case "redraft":      return latest?.leagueType === "redraft";
@@ -1687,7 +1709,10 @@ const Profile = (() => {
     closeLeagueChat,
     changePage,
     setPageSize,
-    jumpToLeague
+    jumpToLeague,
+    toggleFilterPanel,
+    toggleFilter,
+    clearFilters
   };
 
 })();

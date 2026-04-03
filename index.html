@@ -170,7 +170,7 @@
         <div class="nav-avatar" id="nav-avatar"></div>
         <div class="nav-id-info">
           <div class="nav-id-name" id="nav-id-name"></div>
-          <div class="nav-id-stats" id="nav-id-stats"></div>
+          <div class="nav-id-meta" id="nav-id-meta"></div>
         </div>
         <div id="global-auc-pill"></div>
       </div>
@@ -252,18 +252,56 @@
             </div>
           </div>
 
-          <!-- Filter tabs -->
-          <div class="league-filters" id="league-filters">
+          <!-- League filter bar — compact button approach -->
+          <div class="league-filters-row" id="league-filters-row">
+            <button class="filter-btn" id="filter-main-btn" onclick="Profile.toggleFilterPanel('main')">
+              🔍 Filter <span id="filter-main-count" class="filter-btn-count" style="display:none"></span>
+            </button>
+            <button class="filter-btn" id="filter-archived-btn" onclick="Profile.toggleFilter('archived')">
+              📦 Archived
+            </button>
+            <button class="filter-btn" id="filter-groups-btn" onclick="Profile.toggleFilterPanel('groups')" style="display:none">
+              🗂 Groups
+            </button>
+            <button class="filter-btn" id="filter-commish-btn" onclick="Profile.toggleFilterPanel('commish')" style="display:none">
+              ⚡ Commish Groups
+            </button>
+          </div>
+          <!-- Filter panels (hidden by default) -->
+          <div class="filter-panel hidden" id="filter-panel-main">
+            <div class="filter-panel-cols">
+              <div class="filter-panel-col">
+                <div class="filter-panel-label">View</div>
+                <label class="filter-check"><input type="checkbox" data-filter="all" checked> All</label>
+                <label class="filter-check"><input type="checkbox" data-filter="active"> Active</label>
+                <label class="filter-check"><input type="checkbox" data-filter="pinned"> 📌 Pinned</label>
+                <label class="filter-check"><input type="checkbox" data-filter="owner"> 🏈 Owner</label>
+                <label class="filter-check"><input type="checkbox" data-filter="commissioner"> 👑 Commish</label>
+              </div>
+              <div class="filter-panel-col">
+                <div class="filter-panel-label">Platform</div>
+                <label class="filter-check"><input type="checkbox" data-filter="platform:sleeper"> 🟣 Sleeper</label>
+                <label class="filter-check"><input type="checkbox" data-filter="platform:mfl"> 🟢 MFL</label>
+                <label class="filter-check"><input type="checkbox" data-filter="platform:yahoo"> 🔵 Yahoo</label>
+              </div>
+              <div class="filter-panel-col">
+                <div class="filter-panel-label">Type</div>
+                <label class="filter-check"><input type="checkbox" data-filter="dynasty"> Dynasty</label>
+                <label class="filter-check"><input type="checkbox" data-filter="redraft"> Redraft</label>
+                <label class="filter-check"><input type="checkbox" data-filter="keeper"> Keeper</label>
+              </div>
+            </div>
+            <button class="filter-panel-clear btn-secondary btn-sm" onclick="Profile.clearFilters()">Clear All</button>
+          </div>
+          <div class="filter-panel hidden" id="filter-panel-groups">
+            <div id="filter-groups-list" class="filter-chip-list"></div>
+          </div>
+          <div class="filter-panel hidden" id="filter-panel-commish">
+            <div id="filter-commish-list" class="filter-chip-list"></div>
+          </div>
+          <!-- Legacy hidden filter bar (still used by JS internally) -->
+          <div class="league-filters" id="league-filters" style="display:none">
             <button class="filter-tab active" data-filter="all">All</button>
-            <button class="filter-tab" data-filter="active">Active</button>
-            <button class="filter-tab" data-filter="owner">🏈 Owner</button>
-            <button class="filter-tab" data-filter="pinned">📌 Pinned</button>
-            <button class="filter-tab" data-filter="dynasty">Dynasty</button>
-            <button class="filter-tab" data-filter="redraft">Redraft</button>
-            <button class="filter-tab" data-filter="keeper">Keeper</button>
-            <button class="filter-tab" data-filter="commissioner">👑 Commish</button>
-            <div class="filter-divider"></div>
-            <button class="filter-tab" data-filter="archived">📦 Archived</button>
           </div>
 
           <!-- League search + group pills row -->

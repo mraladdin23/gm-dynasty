@@ -22,10 +22,11 @@ const DLRTrophyRoom = (() => {
       return;
     }
 
-    // Use same filter as Career Summary: only leagues where user actually played
-    // (has wins, losses, or points scored — commish-only leagues have all zeros)
+    // Owner leagues: has a roster assigned OR has played games
+    // New leagues (no games yet) qualify if myRosterId is set
+    // Commish-only leagues have no myRosterId and no record
     const managed = all.filter(l =>
-      (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
+      l.myRosterId || (l.wins || 0) > 0 || (l.losses || 0) > 0 || (l.pointsFor || 0) > 0
     );
 
     const champs  = managed.filter(l => l.isChampion || l.playoffFinish === 1)
