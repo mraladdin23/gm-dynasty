@@ -1363,14 +1363,22 @@ const Profile = (() => {
     const isSalary3  = (league.leagueType === "dynasty" && league.platform === "sleeper") || meta3.leagueTypeOverride === "dynasty";
     const auctionOn3 = meta3.auctionEnabled || isSalary3;
     if (auctionOn3 && league.platform === "sleeper") {
-      // Silently pre-load without switching to auction tab
-      // Use league-level sleeperUserId (newer imports) or fall back to platform-level
       const sleeperUid = league.sleeperUserId
         || _currentProfile?.platforms?.sleeper?.sleeperUserId
         || null;
       DLRAuction.preInit(leagueKey, league.leagueId, league.isCommissioner,
         league.myRosterId || null, league.teamName || "My Team",
         league.platform || "sleeper", sleeperUid);
+    }
+
+    // Pre-initialize salary cap so Teams tab always has cap data without visiting salary tab first
+    const franchise4  = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
+    const franchiseId4 = franchise4?.franchiseId || leagueKey;
+    const isSalary4   = (meta3.leagueTypeOverride === "salary") || league.leagueType === "salary";
+    if (isSalary4 || meta3.auctionEnabled) {
+      // Init silently — won't render anything, just loads Firebase salary data into module
+      DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId4)
+        .catch(() => {});
     }
 
     // Show overview content
