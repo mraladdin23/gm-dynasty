@@ -41,78 +41,96 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
-    if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
-    const mflUsername = emailOrUsername.trim().split("@")[0];
+  async function linkMFL(gmdUsername, emailOrUsername, password) {
+  if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
+  if (!password?.trim()) throw new Error("Enter your MFL password.");
 
-    let ids = leagueIds.filter(Boolean);
+  const mflUsername = emailOrUsername.trim().split("@")[0];
 
-    // If no IDs provided, attempt username search (may not work without MFL auth)
-    if (!ids.length) {
-      const currentYear = new Date().getFullYear();
-      const years = [currentYear, currentYear - 1, currentYear - 2];
-      const found = new Set();
-      for (const year of years) {
-        try {
-          const results = await MFLAPI.searchUserLeagues(mflUsername, String(year));
-          if (Array.isArray(results)) {
-            results.forEach(l => {
-              const lid = l.leagueId || l.id || l.league_id;
-              if (lid) found.add(String(lid));
-            });
-          }
-        } catch(e) { /* username search is best-effort */ }
-      }
-      ids = [...found];
-    }
-
-    if (!ids.length) {
-      throw new Error(
-        `MFL requires league IDs to import.\n` +
-        `Find your league ID in the MFL URL — e.g. myfantasyleague.com/2025/home/21600 → ID is 21600.\n` +
-        `Paste it in the League IDs field above.`
-      );
-    }
-
-    const rawResults = await MFLAPI.importUserLeagues(mflUsername, ids);
-    if (!rawResults.length) {
-      throw new Error(
-        `Found league IDs but couldn't match your team in them.\n` +
-        `Make sure your MFL username matches what's shown on your team page.`
-      );
-    }
-
-    const leaguesMap = {};
-    for (const r of rawResults) {
-      const key = `mfl_${r.year}_${r.leagueId}`;
-      leaguesMap[key] = {
-        platform:       "mfl",
-        leagueId:       String(r.leagueId),
-        franchiseId:    `mfl__${r.leagueId}`,
-        leagueName:     r.leagueName || `League ${r.leagueId}`,
-        season:         String(r.year),
-        leagueType:     _detectMFLLeagueType(r.leagueName || ""),
-        totalTeams:     r.totalTeams || 12,
-        teamName:       r.teamName   || "My Team",
-        isCommissioner: r.isCommissioner || false,
-        myRosterId:     r.franchiseId || null,
-        wins:           r.wins        || 0,
-        losses:         r.losses      || 0,
-        ties:           r.ties        || 0,
-        pointsFor:      r.ptsFor      || 0,
-        pointsAgainst:  r.ptsAgainst  || 0,
-        standing:       r.rank        || null,
-        playoffFinish:  r.playoffFinish || null,
-        isChampion:     r.playoffFinish === 1,
-        playoffResult:  null
-      };
-    }
-
-    await GMDB.linkPlatform(gmdUsername, "mfl", { mflUsername, linked: true });
-    await GMDB.saveLeagues(gmdUsername, leaguesMap);
-    await GMDB.recomputeStats(gmdUsername);
-    return { leagues: leaguesMap, mflUsername };
+  // ───────── STEP 1: FETCH USER LEAGUES (AUTH REQUIRED) ─────────
+  let leagues;
+  try {
+    leagues = await MFLAPI.getUserLeagues({
+      username: mflUsername,
+      password
+    });
+  } catch (err) {
+    console.error("[MFL] Failed to fetch leagues:", err);
+    throw new Error("Invalid MFL credentials or failed to fetch leagues.");
   }
+
+  if (!Array.isArray(leagues) || leagues.length === 0) {
+    throw new Error("No MFL leagues found for this account.");
+  }
+
+  // ───────── STEP 2: FETCH FULL DATA PER LEAGUE ─────────
+  const leaguesMap = {};
+
+  for (const l of leagues) {
+    const leagueId = l.league_id || l.id;
+    const season   = l.season || new Date().getFullYear();
+
+    try {
+      const bundle = await MFLAPI.getLeagueBundle({
+        leagueId,
+        year: season,
+        username: mflUsername,
+        password
+      });
+
+      // Extract basic info
+      const leagueInfo = bundle?.league?.league || {};
+      const standings  = bundle?.standings?.leagueStandings?.franchise || [];
+
+      // Try to find user's franchise
+      let myTeam = standings.find(f =>
+        f.name?.toLowerCase().includes(mflUsername.toLowerCase())
+      );
+
+      const key = `mfl_${season}_${leagueId}`;
+
+      leaguesMap[key] = {
+        platform: "mfl",
+        leagueId: String(leagueId),
+        franchiseId: `mfl__${leagueId}`,
+        leagueName: leagueInfo?.name || `League ${leagueId}`,
+        season: String(season),
+        leagueType: _detectMFLLeagueType(leagueInfo?.name || ""),
+        totalTeams: Number(leagueInfo?.franchises) || 12,
+        teamName: myTeam?.name || "My Team",
+        isCommissioner: myTeam?.is_commish === "1",
+        myRosterId: myTeam?.id || null,
+        wins: Number(myTeam?.wins) || 0,
+        losses: Number(myTeam?.losses) || 0,
+        ties: Number(myTeam?.ties) || 0,
+        pointsFor: Number(myTeam?.pf) || 0,
+        pointsAgainst: Number(myTeam?.pa) || 0,
+        standing: Number(myTeam?.rank) || null,
+        playoffFinish: null,
+        isChampion: false
+      };
+
+    } catch (err) {
+      console.warn(`[MFL] Failed to fetch league ${leagueId}:`, err);
+    }
+  }
+
+  if (Object.keys(leaguesMap).length === 0) {
+    throw new Error("Failed to process any MFL leagues.");
+  }
+
+  // ───────── STEP 3: SAVE TO YOUR SYSTEM ─────────
+  await GMDB.linkPlatform(gmdUsername, "mfl", {
+    mflUsername,
+    linked: true
+  });
+
+  await GMDB.saveLeagues(gmdUsername, leaguesMap);
+  await GMDB.recomputeStats(gmdUsername);
+
+  // 🔥 IMPORTANT: credentials are NOT stored anywhere
+  return { leagues: leaguesMap, mflUsername };
+}
 
   // ── Link Yahoo ────────────────────────────────────────────
   async function linkYahoo(gmdUsername) {
