@@ -1727,6 +1727,15 @@ select option { background: var(--color-bg-2); }
     height: 34px;
   }
 
+  .draft-order-row .draft-pick {
+    font-size: .78rem;
+  }
+
+  .draft-order-row .draft-maxpf {
+    font-size: 0.7rem;
+  }
+}
+
 /* Loading/error states */
 .detail-loading {
   display: flex;
