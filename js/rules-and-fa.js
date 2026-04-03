@@ -375,6 +375,10 @@ const DLRFreeAgents = (() => {
   function _esc(s)     { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function _escAttr(s) { return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
 
-  return { init, reset, setSort, setPos };
+  function refresh() {
+    if (_cachedData) _render();
+  }
+
+  return { init, reset, setSort, setPos, refresh };
 
 })();
