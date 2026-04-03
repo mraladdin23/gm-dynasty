@@ -125,30 +125,69 @@
     </div>
   </div>
 
-  <!-- Body -->
-  <div class="platform-body">
-    <!-- Username / Password Inputs -->
-    <input type="text" id="mfl-username" placeholder="MFL Username" required />
-    <input type="password" id="mfl-password" placeholder="MFL Password" required />
-
-    <!-- Optional League IDs -->
-    <input type="text" id="mfl-league-ids-input" placeholder="Optional: League IDs from MFL URL — e.g. 21600, 18432" />
-
-    <!-- Field hint -->
-    <span class="field-hint">
-      Enter your MFL username and password to connect. Optionally, you can also paste your league ID(s) from the MFL URL to pre-link specific leagues.
-    </span>
-
-    <!-- Connect / Import Button -->
-    <button class="btn-link-platform" id="connect-mfl">Connect MFL</button>
-
-    <!-- Messages / Feedback -->
-    <div id="mfl-message" class="input-message hidden"></div>
+<body>
+  <!-- Your full MFL card HTML goes here -->
+  <div class="platform-card" id="mfl-card">
+    <!-- ... all your inputs, button, status, league container ... -->
   </div>
 
-  <!-- Leagues Preview -->
-  <div id="league-container" class="leagues-preview hidden"></div>
-</div>
+  <!-- JS to handle Connect button -->
+  <script>
+    document.getElementById("connect-mfl").addEventListener("click", async () => {
+      const username = document.getElementById("mfl-username").value.trim();
+      const password = document.getElementById("mfl-password").value.trim();
+      const leagueIds = document.getElementById("mfl-league-ids-input").value.trim();
+
+      const messageEl = document.getElementById("mfl-message");
+      const statusEl = document.getElementById("mfl-connection-status");
+      const leagueContainer = document.getElementById("league-container");
+
+      // Clear previous messages
+      messageEl.classList.add("hidden");
+      leagueContainer.classList.add("hidden");
+      leagueContainer.innerHTML = "";
+
+      if (!username || !password) {
+        messageEl.textContent = "Username and password are required.";
+        messageEl.classList.remove("hidden");
+        return;
+      }
+
+      statusEl.textContent = "Connecting...";
+
+      try {
+        const res = await fetch("/mfl-connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, leagueIds })
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          statusEl.textContent = "Connected!";
+
+          if (data.leagues && data.leagues.length > 0) {
+            leagueContainer.classList.remove("hidden");
+            leagueContainer.innerHTML = data.leagues
+              .map(l => `<div>${l.name} (ID: ${l.id})</div>`)
+              .join("");
+          }
+        } else {
+          statusEl.textContent = "Not connected";
+          messageEl.textContent = data.error || "Connection failed.";
+          messageEl.classList.remove("hidden");
+        }
+
+      } catch (err) {
+        statusEl.textContent = "Not connected";
+        messageEl.textContent = "Error connecting to MFL.";
+        messageEl.classList.remove("hidden");
+        console.error(err);
+      }
+    });
+  </script>
+</body>
 
       <!-- Yahoo -->
       <div class="platform-card" id="yahoo-card">
