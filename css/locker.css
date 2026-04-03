@@ -1661,7 +1661,7 @@ select option { background: var(--color-bg-2); }
 .draft-order-row {
   display: grid;
   grid-template-columns: 56px 1fr 80px;
-  align-items: stretch;       /* children stretch to fill row height */
+  align-items: center;       /* children stretch to fill row height */
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1670,9 +1670,16 @@ select option { background: var(--color-bg-2); }
   box-sizing: border-box;
   overflow: hidden;
 }
-.draft-order-row .draft-pick {
+
+.draft-order-row > * {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
+}
+
+.draft-order-row .draft-pick {
   justify-content: center;
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1683,9 +1690,17 @@ select option { background: var(--color-bg-2); }
   padding: 0 var(--space-2);
   box-sizing: border-box;
 }
+
+.draft-order-row .draft-pick * {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  height: auto !important;
+  max-height: 100% !important;
+  display: inline !important;
+}
+
 .draft-order-row .draft-team {
-  display: flex;
-  align-items: center;
   font-size: .82rem;
   padding: 0 var(--space-3);
   box-sizing: border-box;
@@ -1695,8 +1710,6 @@ select option { background: var(--color-bg-2); }
   min-width: 0;
 }
 .draft-order-row .draft-maxpf {
-  display: flex;
-  align-items: center;
   justify-content: flex-end;
   font-family: var(--font-mono);
   font-size: .72rem;
@@ -1707,6 +1720,12 @@ select option { background: var(--color-bg-2); }
   background: var(--color-bg-3);
   white-space: nowrap;
 }
+
+@media (max-width: 640px) {
+  .draft-order-row {
+    grid-template-columns: 48px 1fr 70px;
+    height: 34px;
+  }
 
 /* Loading/error states */
 .detail-loading {
