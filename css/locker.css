@@ -1163,6 +1163,7 @@ select option { background: var(--color-bg-2); }
 .detail-tab-content {
   display: none;
   padding: var(--space-5);
+  font-size: .875rem; /* ~14px — consistent with DLR aesthetic */
 }
 .detail-tab-content.active { display: block; }
 
@@ -1860,7 +1861,7 @@ select option { background: var(--color-bg-2); }
 
 .roster-player-info { flex: 1; min-width: 0; }
 .roster-player-name {
-  font-size: .88rem;
+  font-size: .82rem;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4852,18 +4853,6 @@ select option { background: var(--color-bg-2); }
   gap: var(--space-2);
   flex-wrap: nowrap;
 }
-.nav-id-record {
-  font-size: .62rem;
-  color: var(--color-text-dim);
-  font-family: var(--font-display);
-  font-weight: 700;
-  white-space: nowrap;
-}
-.nav-id-trophies {
-  font-size: .6rem;
-  white-space: nowrap;
-  color: var(--color-gold);
-}
 
 @media (max-width: 640px) {
   .nav-identity { display: flex; }
@@ -4895,5 +4884,67 @@ select option { background: var(--color-bg-2); }
   .lrow-record      { display: block !important; font-size: .72rem; }
   .lrow-season-label{ display: block !important; font-size: .52rem; }
   .lrow-tags { display: none !important; }
+}
+
+
+/* ── Nav identity: name + record on same row ────────── */
+.nav-id-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.nav-id-name {
+  font-size: .78rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.nav-id-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.nav-id-record {
+  font-family: var(--font-display);
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  padding: 1px 5px;
+  background: var(--color-surface);
+  border-radius: 3px;
+}
+.nav-id-trophy {
+  font-size: .65rem;
+  color: var(--color-gold);
+}
+.nav-id-dscore {
+  margin-top: 1px;
+}
+.nav-id-dscore-val {
+  font-size: .6rem;
+  color: var(--color-text-dim);
+}
+
+/* ── Mobile record/trophy spacing fix ───────────────── */
+@media (max-width: 640px) {
+  .nav-id-record { margin-right: 2px; }
+  .nav-id-meta   { gap: 6px; }
+  /* League row: add spacing between overall and season record */
+  .lrow-alltime-col {
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    min-width: 48px;
+  }
+  .lrow-record { font-size: .72rem; line-height: 1.2; }
+  .lrow-season-label { font-size: .54rem; color: var(--color-text-dim); line-height: 1.2; }
 }
 

@@ -231,21 +231,23 @@ const Profile = (() => {
     // Populate mobile nav identity bar
     const navIdName   = document.getElementById("nav-id-name");
     const navIdMeta   = document.getElementById("nav-id-meta");
+    const navIdDscore = document.getElementById("nav-id-dscore");
     const navAvatar   = document.getElementById("nav-avatar");
     if (navIdName) navIdName.textContent = profile.username;
     if (navIdMeta && profile.stats) {
       const w = profile.stats.totalWins        || 0;
       const l = profile.stats.totalLosses      || 0;
       const c = profile.stats.championships    || 0;
-      const p = profile.stats.playoffAppearances || 0;
       navIdMeta.innerHTML = `
         <span class="nav-id-record">${w}–${l}</span>
-        ${c > 0 ? `<span class="nav-id-trophies">🏆${c > 1 ? c : ""}</span>` : ""}
-        ${p > 0 && !c ? `<span class="nav-id-trophies">🏅${p}</span>` : ""}`;
+        ${c > 0 ? `<span class="nav-id-trophy">🏆${c > 1 ? c : ""}</span>` : ""}`;
+    }
+    if (navIdDscore && profile.stats?.dynastyScore) {
+      navIdDscore.innerHTML = `<span class="nav-id-dscore-val">⚡ ${profile.stats.dynastyScore}</span>`;
     }
     if (navAvatar) {
       if (profile.avatarUrl) {
-        navAvatar.innerHTML = `<img src="${profile.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentElement.textContent='${(profile.username||"?")[0].toUpperCase()}'"/>`;
+        navAvatar.innerHTML = `<img src="${profile.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentElement.innerHTML='${(profile.username||"?")[0].toUpperCase()}'"/>`;
       } else {
         navAvatar.textContent = (profile.username || "?")[0].toUpperCase();
       }
@@ -1362,8 +1364,13 @@ const Profile = (() => {
     const auctionOn3 = meta3.auctionEnabled || isSalary3;
     if (auctionOn3 && league.platform === "sleeper") {
       // Silently pre-load without switching to auction tab
+      // Use league-level sleeperUserId (newer imports) or fall back to platform-level
+      const sleeperUid = league.sleeperUserId
+        || _currentProfile?.platforms?.sleeper?.sleeperUserId
+        || null;
       DLRAuction.preInit(leagueKey, league.leagueId, league.isCommissioner,
-        league.myRosterId || null, league.teamName || "My Team", league.platform || "sleeper");
+        league.myRosterId || null, league.teamName || "My Team",
+        league.platform || "sleeper", sleeperUid);
     }
 
     // Show overview content
@@ -1513,13 +1520,17 @@ const Profile = (() => {
     if (tab === "analytics")   DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
     if (tab === "rules")       DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
+      const sleeperUid2 = league.sleeperUserId
+        || _currentProfile?.platforms?.sleeper?.sleeperUserId
+        || null;
       DLRAuction.init(
         leagueKey,
         league.leagueId,
         league.isCommissioner,
-        league.myRosterId || null,
-        league.teamName   || "My Team",
-        league.platform   || "sleeper"
+        league.myRosterId    || null,
+        league.teamName      || "My Team",
+        league.platform      || "sleeper",
+        sleeperUid2
       );
     }
     if (tab === "chat")        _renderChat(el, leagueKey, league);
