@@ -1649,13 +1649,34 @@ select option { background: var(--color-bg-2); }
 .playoffs-icon  { font-size: 2.5rem; margin-bottom: var(--space-3); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
-.draft-order-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
-.draft-order-title { font-size: .9rem; font-weight: 700; margin-bottom: var(--space-1); }
-.draft-order-sub { font-size: .75rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
-.draft-order-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-2); }
+/* ── Draft order: desktop / main block ──────────────────────────── */
+.draft-order-section { 
+  margin-top: var(--space-6); 
+  padding-top: var(--space-4); 
+  border-top: 1px solid var(--color-border); 
+}
+
+.draft-order-title { 
+  font-size: .9rem; 
+  font-weight: 700; 
+  margin-bottom: var(--space-1); 
+}
+
+.draft-order-sub { 
+  font-size: .75rem; 
+  color: var(--color-text-dim); 
+  margin-bottom: var(--space-3); 
+}
+
+.draft-order-grid { 
+  display: grid; 
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+  gap: var(--space-2); 
+}
+
 .draft-order-row {
   display: flex;
-  align-items: center;
+  align-items: center;       /* vertically center all items */
   gap: var(--space-2);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -1664,12 +1685,39 @@ select option { background: var(--color-bg-2); }
   font-size: .82rem;
   width: 100%;
   min-width: 0;
+  min-height: 0;             /* allow children to shrink */
   box-sizing: border-box;
   overflow: hidden;
 }
-.draft-pick { font-family: var(--font-mono); font-weight: 700; color: var(--color-gold); min-width: 36px; }
-.draft-team { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.draft-maxpf { font-family: var(--font-mono); font-size: .72rem; color: var(--color-text-dim); }
+
+.draft-order-row .draft-pick {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--color-gold);
+  min-width: 36px;           /* enough for pick number */
+  width: auto;
+  line-height: 1;            /* reduces extra height */
+  padding: 0;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.draft-order-row .draft-team {
+  flex: 1;                   /* fills available space */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.draft-order-row .draft-maxpf {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1;
+}
 
 /* Loading/error states */
 .detail-loading {
@@ -5121,31 +5169,46 @@ select option { background: var(--color-bg-2); }
 @media (max-width: 640px) {
   .draft-order-grid {
     grid-template-columns: 1fr;  /* single column on mobile */
+    gap: var(--space-2);
   }
+
   .draft-order-row {
+    display: flex;
+    align-items: center;       /* vertically center content */
+    gap: var(--space-2);
+    flex-wrap: nowrap;         /* prevent wrapping */
     width: 100%;
     min-width: 0;
-    box-sizing: border-box;
-    flex-wrap: nowrap;
-    height: auto;
     min-height: 0;
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    overflow: hidden;
   }
+
   .draft-order-row .draft-pick {
-    flex-shrink: 0;
-    min-width: 32px;
+    flex-shrink: 0;            /* don’t shrink horizontally */
+    min-width: 32px;           /* smaller for mobile */
     width: auto;
+    line-height: 1;            /* reduce extra vertical space */
+    padding: 0;
   }
+
   .draft-order-row .draft-team {
     flex: 1;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    display: block;        /* ensure it renders */
-    max-width: 100%;
+    display: block;            /* ensure it renders */
   }
+
   .draft-order-row .draft-maxpf {
     flex-shrink: 0;
+    margin-left: auto;         /* push to the end of the row */
     white-space: nowrap;
+    font-size: 0.72rem;
+    line-height: 1;            /* reduce height */
   }
 }
+✅ What change
