@@ -7,8 +7,10 @@
 const Profile = (() => {
 
   const CURRENT_SEASON = new Date().getFullYear().toString();
-  const PAGE_SIZE_DEFAULT = 10;
-  let   PAGE_SIZE         = PAGE_SIZE_DEFAULT;
+  // 10 per page on desktop (2 cols × 5), 5 on mobile (1 col × 5)
+  function _getPageSize() {
+    return window.innerWidth <= 640 ? 5 : 10;
+  }
 
   let _activeFilter    = "all";
   let _activeFilters   = new Set();
@@ -949,13 +951,15 @@ const Profile = (() => {
     if (filtered.length === 0) {
       grid.innerHTML = `<p class="empty-state">No leagues match this filter.</p>`;
       _hidePagination();
+      _updateJumpDropdown([]);
     } else {
       _filteredCache  = filtered;
-      _archivedCache  = wantArchived ? filtered : archived;
+      _archivedCache  = archived; // always track for accordion
       _currentPage    = 0;
       _archivedPage   = 0;
       _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
-      _updateJumpDropdown([..._filteredCache, ...(_archivedCache || [])]);
+      // Only include archived in jump dropdown when archived filter is explicitly selected
+      _updateJumpDropdown(wantArchived ? [..._filteredCache, ...archived] : _filteredCache);
     }
 
     // Archived accordion
@@ -973,9 +977,9 @@ const Profile = (() => {
   function _renderPage(gridEl, items, page, paginationId, infoId, isArchived) {
     if (!gridEl) return;
     const total    = items.length;
-    const pages    = Math.ceil(total / PAGE_SIZE);
-    const start    = page * PAGE_SIZE;
-    const slice    = items.slice(start, start + PAGE_SIZE);
+    const pages    = Math.ceil(total / _getPageSize());
+    const start    = page * _getPageSize();
+    const slice    = items.slice(start, start + _getPageSize());
 
     gridEl.innerHTML = slice.map(f => _franchiseCardHTML(f, isArchived)).join("");
     _wireCardEvents(gridEl);
@@ -985,11 +989,11 @@ const Profile = (() => {
     const prev   = pag?.querySelector("[id$='-prev']") || document.getElementById("page-prev");
     const next   = pag?.querySelector("[id$='-next']") || document.getElementById("page-next");
 
-    if (total <= PAGE_SIZE) {
+    if (total <= _getPageSize()) {
       if (pag) pag.style.display = "none";
     } else {
       if (pag) pag.style.display = "flex";
-      if (info) info.textContent = `${start + 1}–${Math.min(start + PAGE_SIZE, total)} of ${total}`;
+      if (info) info.textContent = `${start + 1}–${Math.min(start + _getPageSize(), total)} of ${total}`;
       if (prev) prev.disabled = page === 0;
       if (next) next.disabled = page >= pages - 1;
     }
@@ -1012,17 +1016,7 @@ const Profile = (() => {
     }
   }
 
-  function setPageSize(n) {
-    PAGE_SIZE    = n === 0 ? 9999 : n;
-    _currentPage = 0;
-    _archivedPage = 0;
-    const grid = document.getElementById("leagues-grid");
-    _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
-    const archGrid = document.getElementById("archived-grid");
-    if (archGrid && _archivedCache.length) {
-      _renderPage(archGrid, _archivedCache, _archivedPage, "archived-pagination", "arch-page-info", true);
-    }
-  }
+  function _noOp() {}
 
   function _updateJumpDropdown(allFranchises) {
     const sel = document.getElementById("league-jump-select");
@@ -1827,7 +1821,7 @@ const Profile = (() => {
     openLeagueChat,
     closeLeagueChat,
     changePage,
-    setPageSize,
+    setPageSize: _noOp,
     jumpToLeague,
     toggleFilterPanel,
     toggleFilter,
