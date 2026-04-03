@@ -33,6 +33,30 @@ const AppState = {
     Profile.initArchivedToggle();
     AppState.showScreen("app-screen");
     setLoading(false);
+
+    // If returning from Yahoo OAuth, auto-trigger the import
+    if (sessionStorage.getItem("dlr_yahoo_pending") === "1") {
+      sessionStorage.removeItem("dlr_yahoo_pending");
+      sessionStorage.removeItem("dlr_yahoo_linking_user");
+      setTimeout(async () => {
+        try {
+          setLoading(true, "Importing Yahoo leagues…");
+          const result = await Profile.linkYahoo(profile.username);
+          const count  = Object.keys(result.leagues || {}).length;
+          setLoading(false);
+          if (count > 0) {
+            const refreshed = await Auth.refreshProfile();
+            Profile.renderLocker(refreshed || profile);
+            const statusEl = document.getElementById("yahoo-status");
+            if (statusEl) statusEl.textContent = `✓ ${count} league${count !== 1 ? "s" : ""} connected`;
+          }
+        } catch(err) {
+          setLoading(false);
+          const statusEl = document.getElementById("yahoo-status");
+          if (statusEl) statusEl.textContent = "Import failed: " + err.message;
+        }
+      }, 500);
+    }
   }
 };
 
@@ -206,13 +230,30 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
 });
 
 // ── Yahoo: detect OAuth callback ─────────────────────────
-// When Yahoo redirects back with ?yahoo=connected in URL
+// Worker redirects back with #yahoo_token=... in the hash
 (function() {
+  const hash = window.location.hash;
+  if (hash.includes("yahoo_token=")) {
+    const params = new URLSearchParams(hash.slice(1)); // strip leading #
+    const accessToken  = params.get("yahoo_token");
+    const refreshToken = params.get("yahoo_refresh") || "";
+    const expiresIn    = parseInt(params.get("yahoo_expires") || "3600");
+
+    if (accessToken) {
+      // Store token for pickup after auth loads
+      sessionStorage.setItem("dlr_yahoo_access_token",  accessToken);
+      sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken);
+      sessionStorage.setItem("dlr_yahoo_expires_in",    String(expiresIn));
+      sessionStorage.setItem("dlr_yahoo_pending",       "1");
+    }
+
+    // Clean the hash from the URL immediately so token isn't visible
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+  // Legacy query-string path
   const params = new URLSearchParams(window.location.search);
   if (params.get("yahoo") === "connected") {
-    // Clean URL without reload
     window.history.replaceState({}, "", window.location.pathname);
-    // Will be handled after auth loads — flag for pickup
     sessionStorage.setItem("dlr_yahoo_pending", "1");
   }
 })();
