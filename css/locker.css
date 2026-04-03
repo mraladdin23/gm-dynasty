@@ -5110,3 +5110,10 @@ select option { background: var(--color-bg-2); }
   .tx-trade-grid { flex-direction: column; gap: var(--space-2); }
 }
 
+
+/* ── DEBUG: highlight changing elements ─────────────────── */
+.league-row { outline: 1px solid red !important; }
+.leagues-grid { outline: 1px solid blue !important; }
+.leagues-section { outline: 1px solid green !important; }
+.locker-container { outline: 1px solid orange !important; }
+.app-view { outline: 1px solid purple !important; }
