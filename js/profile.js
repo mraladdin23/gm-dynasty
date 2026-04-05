@@ -219,47 +219,93 @@ const Profile = (() => {
   // ── League meta: localStorage-first, Firebase backup ─────
   const _metaLSKey = () => `dlr_leagueMeta_${_currentUsername || "anon"}`;
 
-  async function loadLeagueMeta(username) {
-    try {
-      // Always load localStorage first (instant, no auth needed)
-      const lsRaw = localStorage.getItem(`dlr_leagueMeta_${username.toLowerCase()}`);
-      const lsData = lsRaw ? JSON.parse(lsRaw) : {};
+async function loadLeagueMeta(username) {
+  try {
+    const lsRaw = localStorage.getItem(`dlr_leagueMeta_${username.toLowerCase()}`);
+    const lsData = lsRaw ? JSON.parse(lsRaw) : {};
 
-      // Also fetch Firebase (may have data from other devices)
-      const fbData = await GMDB.getLeagueMeta(username).catch(() => ({}));
+    const fbUserMeta = await GMDB.getLeagueMeta(username).catch(() => ({}));
+    const globalMeta = await GMDB.getAllLeagueMeta().catch(() => ({}));
+    const groups     = await GMDB.getAllGroups().catch(() => ({}));
 
-      // Merge: Firebase wins for any key it has, localStorage fills gaps
-      _leagueMeta = { ...lsData, ...fbData };
+    _leagueMeta = {};
 
-      // Write merged result back to localStorage
-      try { localStorage.setItem(`dlr_leagueMeta_${username.toLowerCase()}`, JSON.stringify(_leagueMeta)); } catch(e) {}
+    const allKeys = new Set([
+      ...Object.keys(lsData),
+      ...Object.keys(fbUserMeta),
+      ...Object.keys(globalMeta)
+    ]);
 
-      const groups = Object.values(_leagueMeta).filter(m => m?.commishGroup).map(m => m.commishGroup);
-      const labels = Object.values(_leagueMeta).filter(m => m?.customLabel).map(m => m.customLabel);
-      console.log(`[DLR] leagueMeta loaded: ${Object.keys(_leagueMeta).length} entries | groups: [${groups}] | labels: [${labels}]`);
-    } catch(err) {
-      console.error("[DLR] loadLeagueMeta FAILED:", err.message);
-      _leagueMeta = {};
-    }
-  }
+    allKeys.forEach(key => {
+      _leagueMeta[key] = {
+        ...(globalMeta[key] || {}),
+        ...(lsData[key] || {}),
+        ...(fbUserMeta[key] || {})
+      };
 
-  async function saveLeagueMeta(username, leagueKey, updates) {
-    const existing = _leagueMeta[leagueKey] || {};
-    const merged   = { ...existing, ...updates };
-    // Remove null/empty-string but keep false/0
-    Object.keys(merged).forEach(k => {
-      if (merged[k] === null || merged[k] === undefined || merged[k] === "") delete merged[k];
+      // Attach group info
+      Object.entries(groups).forEach(([groupId, group]) => {
+        if (group.leagues?.includes(key)) {
+          _leagueMeta[key].groupId = groupId;
+          _leagueMeta[key].groupName = group.name;
+        }
+      });
     });
-    _leagueMeta[leagueKey] = merged;
 
-    // 1. Save to localStorage immediately (always works, no auth needed)
-    try { localStorage.setItem(`dlr_leagueMeta_${username.toLowerCase()}`, JSON.stringify(_leagueMeta)); } catch(e) {}
+    localStorage.setItem(`dlr_leagueMeta_${username.toLowerCase()}`, JSON.stringify(_leagueMeta));
 
-    // 2. Also save to Firebase (best-effort, may fail silently)
-    try { await GMDB.saveLeagueMetaEntry(username, leagueKey, merged); } catch(e) {
-      console.warn("[DLR] Firebase meta save failed (localStorage backup saved):", e.message);
+  } catch(err) {
+    console.error("[DLR] loadLeagueMeta FAILED:", err.message);
+    _leagueMeta = {};
+  }
+}
+
+async function saveLeagueMeta(username, leagueKey, updates) {
+  const league = _allLeagues[leagueKey];
+  const isCommish = league?.isCommissioner;
+
+  const existing = _leagueMeta[leagueKey] || {};
+  const merged   = { ...existing, ...updates };
+
+  // Split fields
+  const globalFields = {
+    leagueTypeOverride: merged.leagueTypeOverride,
+    auctionEnabled: merged.auctionEnabled,
+    auctionIncludePicks: merged.auctionIncludePicks
+  };
+
+  const userFields = {
+    pinned: merged.pinned,
+    archived: merged.archived,
+    customLabel: merged.customLabel
+  };
+
+  // Save USER (always)
+  try {
+    await GMDB.saveLeagueMetaEntry(username, leagueKey, userFields);
+  } catch(e) {
+    console.warn("User meta save failed:", e.message);
+  }
+
+  // Save GLOBAL (commish only)
+  if (isCommish) {
+    try {
+      await GMDB.saveGlobalLeagueMeta(leagueKey, globalFields);
+
+      if (merged.groupId) {
+        await GMDB.addLeagueToGroup(merged.groupId, leagueKey);
+      }
+    } catch(e) {
+      console.warn("Global meta save failed:", e.message);
     }
   }
+
+  _leagueMeta[leagueKey] = merged;
+
+  try {
+    localStorage.setItem(`dlr_leagueMeta_${username.toLowerCase()}`, JSON.stringify(_leagueMeta));
+  } catch(e) {}
+}
 
   // ── Main locker render ─────────────────────────────────
 
