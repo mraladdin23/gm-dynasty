@@ -12,8 +12,8 @@ const GMDB = (() => {
   const socialRef   = (username) => GMD.child(`social/${username.toLowerCase()}`);
   const rivalryRef  = (a, b)     => GMD.child(`rivalries/${[a,b].sort().join("_")}`);
   const metaRef     = ()         => GMD.child("meta");
-  const leagueMetaGlobalRef = (leagueKey) => GMD.child(`leagues/${leagueKey}/meta`);
-  const groupRef            = (groupId)   => GMD.child(`groups/${groupId}`);
+  // Shared commish settings — keyed by leagueId, visible to all members
+  const leagueSettingsRef = (leagueId) => GMD.child(`leagueSettings/${leagueId}`);
 
   // ── Username helpers ───────────────────────────────────
   function sanitizeUsername(raw) {
@@ -275,105 +275,49 @@ const GMDB = (() => {
   }
 
   // ── League meta (pins, labels, groups) — uses SDK ref for auth ──
-
-// ── GLOBAL LEAGUE META (NEW) ──────────────────────────
-
-async function getGlobalLeagueMeta(leagueKey) {
-  try {
-    const snap = await leagueMetaGlobalRef(leagueKey).once("value");
-    return snap.val() || {};
-  } catch(e) {
-    console.error("[GMDB] getGlobalLeagueMeta failed:", e.message);
-    return {};
-  }
-}
-
-async function saveGlobalLeagueMeta(leagueKey, meta) {
-  try {
-    await leagueMetaGlobalRef(leagueKey).update(meta);
-  } catch(e) {
-    console.error("[GMDB] saveGlobalLeagueMeta failed:", e.message);
-  }
-}
-
-async function getAllLeagueMeta() {
-  try {
-    const snap = await GMD.child("leagues").once("value");
-    const val = snap.val() || {};
-    const out = {};
-
-    Object.keys(val).forEach(k => {
-      if (val[k]?.meta) out[k] = val[k].meta;
-    });
-
-    return out;
-  } catch(e) {
-    console.error("[GMDB] getAllLeagueMeta failed:", e.message);
-    return {};
-  }
-}
-
-// ── COMMISH GROUPS (NEW) ─────────────────────────────
-
-async function createGroup(groupId, data = {}) {
-  await groupRef(groupId).set({
-    createdAt: Date.now(),
-    leagues: [],
-    ...data
-  });
-}
-
-async function addLeagueToGroup(groupId, leagueKey) {
-  const ref = groupRef(groupId).child("leagues");
-  const snap = await ref.once("value");
-  const leagues = snap.val() || [];
-
-  if (!leagues.includes(leagueKey)) {
-    leagues.push(leagueKey);
-    await ref.set(leagues);
-  }
-}
-
-async function removeLeagueFromGroup(groupId, leagueKey) {
-  const ref = groupRef(groupId).child("leagues");
-  const snap = await ref.once("value");
-  let leagues = snap.val() || [];
-
-  leagues = leagues.filter(l => l !== leagueKey);
-  await ref.set(leagues);
-}
-
-async function getGroup(groupId) {
-  const snap = await groupRef(groupId).once("value");
-  return snap.val() || null;
-}
-
-async function getAllGroups() {
-  const snap = await GMD.child("groups").once("value");
-  return snap.val() || {};
-}
-
   async function getLeagueMeta(username) {
     try {
-      const path = `users/${username.toLowerCase()}/leagueMeta`;
-      console.log("[GMDB] getLeagueMeta path:", path);
-      const snap = await GMD.child(path).once("value");
-      const val  = snap.val() || {};
-      console.log("[GMDB] getLeagueMeta result keys:", Object.keys(val));
-      return val;
-    } catch(e) {
-      console.error("[GMDB] getLeagueMeta failed:", e.message);
-      return {};
+      const snap = await GMD.child(`users/${username.toLowerCase()}/leagueMeta`).once("value");
+      return snap.val() || {};
+    } catch(e) { return {}; }
+  }
+
+  // Save leagueMeta — splits into personal (per-user) and shared (commish, all members see)
+  async function saveLeagueMetaEntry(username, leagueKey, meta) {
+    // Personal fields — stored under the user's own path
+    const personal = {
+      pinned:    meta.pinned    ?? false,
+      archived:  meta.archived  ?? false,
+      customLabel: meta.customLabel || null
+    };
+    await GMD.child(`users/${username.toLowerCase()}/leagueMeta/${leagueKey}`).update(personal);
+
+    // Shared commish fields — stored at leagueSettings/{leagueId}, visible to all
+    // leagueKey format is e.g. "sleeper_123456" — leagueId is the numeric part
+    const leagueId = meta._leagueId || leagueKey.replace(/^[^_]+_/, "");
+    if (meta.isCommissioner && leagueId) {
+      const shared = {};
+      if (meta.leagueTypeOverride  !== undefined) shared.leagueTypeOverride  = meta.leagueTypeOverride  || null;
+      if (meta.auctionEnabled      !== undefined) shared.auctionEnabled      = meta.auctionEnabled      || false;
+      if (meta.auctionIncludePicks !== undefined) shared.auctionIncludePicks = meta.auctionIncludePicks || false;
+      if (meta.commishGroup        !== undefined) shared.commishGroup        = meta.commishGroup        || null;
+      if (Object.keys(shared).length) {
+        await leagueSettingsRef(leagueId).update(shared);
+      }
     }
   }
 
-  async function saveLeagueMetaEntry(username, leagueKey, meta) {
-    const path = `users/${username.toLowerCase()}/leagueMeta/${leagueKey}`;
-    console.log("[GMDB] saveLeagueMetaEntry path:", path, "| meta:", JSON.stringify(meta));
-    await GMD.child(path).set(meta);
-    // Immediate readback to verify write succeeded
-    const verify = await GMD.child(path).once("value");
-    console.log("[GMDB] readback:", JSON.stringify(verify.val()));
+  // Get shared commish settings for a batch of leagueIds
+  async function getSharedLeagueSettings(leagueIds) {
+    if (!leagueIds || !leagueIds.length) return {};
+    const results = {};
+    await Promise.all(leagueIds.map(async id => {
+      try {
+        const snap = await leagueSettingsRef(id).once("value");
+        if (snap.val()) results[id] = snap.val();
+      } catch(e) {}
+    }));
+    return results;
   }
 
   // ── Salary cap data — uses SDK ref for auth ──────────────
@@ -424,19 +368,11 @@ async function getAllGroups() {
     saveLeagueRules,
     getLeagueMeta,
     saveLeagueMetaEntry,
+    getSharedLeagueSettings,
     getSalarySettings,
     saveSalarySettings,
     getSalaryRosters,
     saveSalaryRosters,
-
-    getGlobalLeagueMeta,
-    saveGlobalLeagueMeta,
-    getAllLeagueMeta,
-    createGroup,
-    addLeagueToGroup,
-    removeLeagueFromGroup,
-    getGroup,
-    getAllGroups,
     _restGet,
     _restPut
   };
