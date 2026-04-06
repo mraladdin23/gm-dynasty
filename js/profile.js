@@ -1310,10 +1310,13 @@ const Profile = (() => {
     // Show linked usernames
     const sleeper = profile.platforms?.sleeper;
     const mfl     = profile.platforms?.mfl;
+    const yahoo   = profile.platforms?.yahoo;
     document.getElementById("sleeper-linked-user").textContent =
       sleeper?.sleeperUsername ? `@${sleeper.sleeperUsername}` : "Not connected";
     document.getElementById("mfl-linked-user").textContent =
       mfl?.mflUsername ? `@${mfl.mflUsername}` : "Not connected";
+    const yahooEl = document.getElementById("yahoo-linked-user");
+    if (yahooEl) yahooEl.textContent = yahoo?.linked ? "Connected" : "Not connected";
 
     // Pre-populate MFL fields with known values
     if (mfl?.mflUsername) {

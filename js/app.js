@@ -157,6 +157,11 @@ document.getElementById("welcome-skip-btn")?.addEventListener("click", async () 
 });
 
 document.getElementById("onboarding-back-btn")?.addEventListener("click", () => {
+  if (sessionStorage.getItem("dlr_manage_mode") === "1") {
+    sessionStorage.removeItem("dlr_manage_mode");
+    const profile = Auth.getCurrentProfile();
+    if (profile) { AppState.showApp(profile); return; }
+  }
   AppState.showScreen("welcome-screen");
 });
 
@@ -278,6 +283,7 @@ document.getElementById("yahoo-link-btn")?.addEventListener("click", async () =>
 
 // ── Onboarding: save & continue ───────────────────────────
 document.getElementById("onboarding-save-btn")?.addEventListener("click", async () => {
+  sessionStorage.removeItem("dlr_manage_mode");
   setLoading(true, "Saving your dynasty...");
   const profile = await Auth.refreshProfile();
   AppState.showApp(profile);
@@ -285,6 +291,7 @@ document.getElementById("onboarding-save-btn")?.addEventListener("click", async 
 
 // ── Onboarding: skip ──────────────────────────────────────
 document.getElementById("onboarding-skip-btn")?.addEventListener("click", async () => {
+  sessionStorage.removeItem("dlr_manage_mode");
   setLoading(true, "Loading your locker...");
   const profile = await Auth.refreshProfile();
   AppState.showApp(profile);
@@ -336,10 +343,16 @@ document.getElementById("drawer-edit-btn")?.addEventListener("click", e => {
   if (profile) Profile.openEditProfileModal(profile);
 });
 document.getElementById("drawer-leagues-btn")?.addEventListener("click", e => {
-  e.preventDefault(); DLRNav.close(); Profile.openManageLeagues?.();
+  e.preventDefault();
+  DLRNav.close();
+  sessionStorage.setItem("dlr_manage_mode", "1");
+  AppState.showOnboarding();
 });
-document.getElementById("drawer-logout-btn")?.addEventListener("click", e => {
-  e.preventDefault(); DLRNav.close(); Auth.signOut?.();
+document.getElementById("drawer-logout-btn")?.addEventListener("click", async e => {
+  e.preventDefault();
+  DLRNav.close();
+  await Auth.logout();
+  AppState.showScreen("auth-screen");
 });
 
 
@@ -411,6 +424,15 @@ document.getElementById("relink-sleeper-btn")?.addEventListener("click", async (
     showToast(err.message, "error");
   }
 });
+document.getElementById("relink-yahoo-btn")?.addEventListener("click", async () => {
+  const profile = Auth.getCurrentProfile();
+  if (!profile) return;
+  // Store username so we can resume after OAuth redirect
+  sessionStorage.setItem("dlr_yahoo_linking_user", profile.username);
+  sessionStorage.setItem("dlr_yahoo_pending", "1");
+  Profile.closeEditProfileModal();
+  YahooAPI.login();
+});
 document.getElementById("relink-mfl-btn")?.addEventListener("click", async () => {
   const email    = prompt("Enter your MFL email address:");
   if (!email) return;
@@ -433,11 +455,13 @@ document.getElementById("relink-mfl-btn")?.addEventListener("click", async () =>
 
 // ── Manage leagues (go to onboarding to re-import) ────────
 document.getElementById("manage-leagues-btn")?.addEventListener("click", () => {
+  sessionStorage.setItem("dlr_manage_mode", "1");
   AppState.showOnboarding();
 });
 
-// ── Groups manager ─────────────────────────────────────────
+// ── Add league button ──────────────────────────────────────
 document.getElementById("add-league-btn")?.addEventListener("click", () => {
+  sessionStorage.setItem("dlr_manage_mode", "1");
   AppState.showOnboarding();
 });
 
@@ -500,21 +524,22 @@ Auth.onAuthStateChanged(async (user, profile) => {
   }
 
   if (!profile) {
-    // User authenticated but no profile found
     setLoading(false);
     AppState.showScreen("auth-screen");
     return;
   }
 
-  const hasLeagues = profile.leagues && Object.keys(profile.leagues).length > 0;
-  const hasPlatforms = profile.platforms && Object.keys(profile.platforms).length > 0;
+  const hasLeagues    = profile.leagues   && Object.keys(profile.leagues).length   > 0;
+  const hasPlatforms  = profile.platforms && Object.keys(profile.platforms).length > 0;
+  const isFirstLogin  = !hasPlatforms && !hasLeagues;
 
-  if (!hasPlatforms && !hasLeagues) {
+  if (isFirstLogin) {
+    // Brand new account — show onboarding (not welcome, which can show stale state)
     setLoading(false);
+    sessionStorage.removeItem("dlr_manage_mode");
     AppState.showScreen("onboarding-screen");
   } else {
     AppState.showApp(profile);
-    // Start global auction monitor across all leagues
     _startGlobalAucMonitor(profile);
   }
 });
