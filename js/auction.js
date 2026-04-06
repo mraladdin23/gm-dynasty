@@ -848,11 +848,16 @@ const DLRAuction = (() => {
     }
 
     // Sort: my team first, then by available cap desc
+    // Use display price for committed (not proxy) for fairness in sort
+    const _committedDisplay = (rosterId) => active
+      .filter(a => Number(_computeLeader(a).rosterId) === Number(rosterId))
+      .reduce((sum, a) => sum + _computeLeader(a).displayBid, 0);
+
     const sorted = [..._rosterData].sort((a, b) => {
       if (Number(a.roster_id) === Number(_myRosterId)) return -1;
       if (Number(b.roster_id) === Number(_myRosterId)) return 1;
-      const aAvail = (a.remainingCap ?? a.faab ?? 0) - _getCommitted(active, a.roster_id);
-      const bAvail = (b.remainingCap ?? b.faab ?? 0) - _getCommitted(active, b.roster_id);
+      const aAvail = (a.remainingCap ?? a.faab ?? 0) - _committedDisplay(a.roster_id);
+      const bAvail = (b.remainingCap ?? b.faab ?? 0) - _committedDisplay(b.roster_id);
       return bAvail - aAvail;
     });
 
@@ -867,13 +872,27 @@ const DLRAuction = (() => {
           const taxiSet   = new Set(t.taxi    || []);
           const irSet     = new Set(t.reserve || []);
           const active_   = (t.players||[]).filter(id => !taxiSet.has(id) && !irSet.has(id)).length;
-          const committed = _getCommitted(active, t.roster_id);
 
-          // Leading auctions (winning bids)
+          // Leading auctions (winning bids only)
           const leading = active.filter(a => {
             const l = _computeLeader(a);
             return Number(l.rosterId) === Number(t.roster_id);
           });
+
+          // Committed = sum of amounts on auctions this team is WINNING only
+          // Owner sees their proxy (maxBid), others see the display price
+          const committed = leading.reduce((sum, a) => {
+            const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+            const isThisMe = Number(t.roster_id) === Number(_myRosterId);
+            if (isThisMe) {
+              // Show my own proxy bid
+              const mine = bids.filter(b => Number(b.rosterId) === Number(t.roster_id));
+              return sum + (mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0);
+            } else {
+              // Show display price only (never expose proxy to others)
+              return sum + _computeLeader(a).displayBid;
+            }
+          }, 0);
           const openSpots = Math.max(0, maxRoster - active_ - leading.length);
           const spotsColor = openSpots === 0 ? "var(--color-red)" : openSpots <= 2 ? "var(--color-gold)" : "var(--color-text)";
 
