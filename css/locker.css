@@ -131,6 +131,8 @@
   background:
     radial-gradient(ellipse 60% 40% at 50% 0%, rgba(240,180,41,.08) 0%, transparent 60%),
     var(--color-bg);
+  overflow-y: auto;   /* allow scrolling to see all platform cards on mobile */
+  overflow-x: hidden;
 }
 
 .onboarding-container {
@@ -1649,128 +1651,63 @@ select option { background: var(--color-bg-2); }
 .playoffs-icon  { font-size: 2.5rem; margin-bottom: var(--space-3); }
 .playoffs-title { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .playoffs-sub   { font-size: .85rem; }
-
-/* ── Draft Order Section ───────────────────────────── */
-.draft-order-section {
-  margin-top: var(--space-6);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-}
-
-.draft-order-title {
-  font-size: .9rem;
-  font-weight: 700;
-  margin-bottom: var(--space-1);
-}
-
-.draft-order-sub {
-  font-size: .75rem;
-  color: var(--color-text-dim);
-  margin-bottom: var(--space-3);
-}
-
-/* ── Grid ───────────────────────────── */
+.draft-order-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.draft-order-title { font-size: .9rem; font-weight: 700; margin-bottom: var(--space-1); }
+.draft-order-sub { font-size: .75rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
 .draft-order-grid {
   display: flex;
   flex-direction: column;
   gap: 3px;
   width: 100%;
 }
-
-/* ── Row ───────────────────────────── */
 .draft-order-row {
   display: grid;
   grid-template-columns: 56px 1fr 80px;
-  height: 72px;
-  width: 100%;
+  align-items: stretch;       /* children stretch to fill row height */
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+  height: 36px;
+  width: 100%;
   box-sizing: border-box;
-  overflow: hidden; /* clip overflowing content */
+  overflow: hidden;
 }
-
-/* ── Cells ───────────────────────────── */
-.draft-order-row > * {
+.draft-order-row .draft-pick {
   display: flex;
   align-items: center;
-  justify-content: center; /* pick/maxpf will center, team overridden */
-  height: 100%;
-  overflow: hidden;
-  box-sizing: border-box;
-  padding: 0 var(--space-2);
-  position: relative;
-}
-
-/* Draft pick */
-.draft-order-row .draft-pick {
-  background: var(--color-bg-3);
-  border-right: 1px solid var(--color-border);
+  justify-content: center;
   font-family: var(--font-mono);
   font-weight: 700;
   font-size: .82rem;
   color: var(--color-gold);
+  background: var(--color-bg-3);
+  border-right: 1px solid var(--color-border);
+  padding: 0 var(--space-2);
+  box-sizing: border-box;
 }
-
-/* Draft team */
 .draft-order-row .draft-team {
-  justify-content: flex-start; /* left align */
-  padding: 0 var(--space-3);
+  display: flex;
+  align-items: center;
   font-size: .82rem;
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: .82rem;
+  min-width: 0;
 }
-
-/* Draft maxpf */
 .draft-order-row .draft-maxpf {
-  background: var(--color-bg-3);
-  border-left: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: .82rem;
-  color: var(--color-gold);
-
-}
-
-/* ── Force all nested children to stay contained ── */
-.draft-order-row .draft-pick * {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  height: 100% !important;
-  max-height: 100% !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  line-height: 1 !important;
-  overflow: hidden !important;
-}
-
-.draft-order-row .draft-team * {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  height: 100% !important;
-  max-height: 100% !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  line-height: 1 !important;
-  overflow: hidden !important;
-}
-
-.draft-order-row .draft-maxpf * {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  height: 100% !important;
-  max-height: 100% !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  line-height: 1 !important;
-  overflow: hidden !important;
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-3);
+  white-space: nowrap;
 }
 
 /* Loading/error states */
@@ -3927,6 +3864,7 @@ select option { background: var(--color-bg-2); }
   html, body         { overflow-x: hidden; max-width: 100vw; }
   .screen            { width: 100vw; max-width: 100vw; overflow-x: hidden; }
   .screen.active     { height: 100%; overflow: hidden; width: 100vw; max-width: 100vw; }
+  #onboarding-screen.active { overflow-y: auto; overflow-x: hidden; } /* must scroll to see all platforms */
   .app-view          { padding: var(--space-2) !important; overflow-x: hidden; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
   .app-view.active   { overflow-y: auto; overflow-x: hidden; height: calc(100vh - 48px); box-sizing: border-box; width: 100% !important; }
 
