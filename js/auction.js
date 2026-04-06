@@ -1199,10 +1199,6 @@ const DLRAuction = (() => {
           showToast(`Proxy must be at least ${_fmtSal(floor)} (current price ${_fmtSal(leader.displayBid)} + ${_fmtSal(MIN_INC())} increment)`, "error");
           return;
         }
-        if (maxBid === myCurrentMax) {
-          showToast(`That's already your current proxy of ${_fmtSal(myCurrentMax)}`, "error");
-          return;
-        }
       } else {
         // Not winning — must beat current display price by at least one increment
         if (leader.rosterId) {
@@ -1212,11 +1208,6 @@ const DLRAuction = (() => {
             return;
           }
         }
-        // No lowering when not winning — must strictly exceed own previous bid
-        if (myCurrentMax > 0 && maxBid <= myCurrentMax) {
-          showToast(`Bid must exceed your previous bid of ${_fmtSal(myCurrentMax)}`, "error");
-          return;
-        }
       }
     }
 
@@ -1225,7 +1216,7 @@ const DLRAuction = (() => {
         if (!cur || cur.cancelled || cur.processed) return;
         const bids = Array.isArray(cur.bids) ? cur.bids : Object.values(cur.bids||{});
 
-        // Compute current leader BEFORE adding this bid
+        // Compute current leader BEFORE modifying bids
         const maxByRoster = {};
         bids.forEach(b => {
           if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
@@ -1237,19 +1228,23 @@ const DLRAuction = (() => {
         const currentLeaderId = sorted.length ? sorted[0].rosterId : null;
         const isCurrentLeader = Number(currentLeaderId) === Number(_myRosterId);
 
+        // Replace my existing bid entirely rather than appending.
+        // This prevents stale higher values from blocking future updates.
+        // Keep other teams' bids and any nomination marker intact.
+        const myNomBid = bids.find(b => Number(b.rosterId) === Number(_myRosterId) && b.isNomination);
+        const newBids  = bids.filter(b => Number(b.rosterId) !== Number(_myRosterId));
+        if (myNomBid) newBids.push(myNomBid);
+        newBids.push({ rosterId: _myRosterId, maxBid, timestamp: Date.now() });
+        cur.bids = newBids;
+
         // Only reset timer if a DIFFERENT bidder is placing this bid
-        // Updating your own proxy (already leading) never resets the clock
         if (!isCurrentLeader) {
           cur.expiresAt = _nextExpiry(Date.now());
         }
 
-        bids.push({ rosterId: _myRosterId, maxBid, timestamp: Date.now() });
-        cur.bids = bids;
         return cur;
       });
-      const myPrev = _myMaxBid(_auctions.find(a => a.id === auctionId) || {});
-      const action = maxBid < myPrev ? "lowered to" : "set to";
-      showToast(`Proxy ${action} ${_fmtSal(maxBid)} on ${playerName} ✓`);
+      showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
     } catch(e) { showToast("Bid failed: " + e.message, "error"); }
   }
 
