@@ -1189,9 +1189,27 @@ const DLRAuction = (() => {
       await _auctRef(auctionId).transaction(cur => {
         if (!cur || cur.cancelled || cur.processed) return;
         const bids = Array.isArray(cur.bids) ? cur.bids : Object.values(cur.bids||{});
+
+        // Compute current leader BEFORE adding this bid
+        const maxByRoster = {};
+        bids.forEach(b => {
+          if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
+            maxByRoster[b.rosterId] = b.maxBid;
+        });
+        const sorted = Object.entries(maxByRoster)
+          .map(([id, m]) => ({ rosterId: parseInt(id), maxBid: m }))
+          .sort((a, b) => b.maxBid - a.maxBid);
+        const currentLeaderId = sorted.length ? sorted[0].rosterId : null;
+        const isCurrentLeader = Number(currentLeaderId) === Number(_myRosterId);
+
+        // Only reset timer if a DIFFERENT bidder is placing this bid
+        // Updating your own proxy (already leading) never resets the clock
+        if (!isCurrentLeader) {
+          cur.expiresAt = _nextExpiry(Date.now());
+        }
+
         bids.push({ rosterId: _myRosterId, maxBid, timestamp: Date.now() });
         cur.bids = bids;
-        cur.expiresAt = _nextExpiry(Date.now());
         return cur;
       });
       showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
