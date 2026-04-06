@@ -1247,18 +1247,24 @@ const DLRAuction = (() => {
         const entries = Object.entries(cur.proxies)
           .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
           .sort((a, b) => b.maxBid - a.maxBid);
-        const isCurrentLeader  = entries.length > 0 && entries[0].rosterId === Number(_myRosterId);
-        const isNewBidder      = cur.proxies[myKey] === undefined;
+        const currentLeaderId  = entries.length > 0 ? entries[0].rosterId : null;
+        const isCurrentLeader  = currentLeaderId === Number(_myRosterId);
         const currentLeaderMax = entries.length > 0 ? entries[0].maxBid : 0;
 
         // Set/update proxy
         cur.proxies[myKey] = maxBid;
 
-        // Only reset timer if this bid actually BEATS the current leader's proxy
-        // — a new bidder below the proxy doesn't change the leader, so no reset
-        // — updating your own proxy never resets the clock
-        const beatsCurrentProxy = !isCurrentLeader && maxBid > currentLeaderMax;
-        if (isNewBidder && beatsCurrentProxy) {
+        // Recompute leader AFTER this update to see if it changed
+        const newEntries = Object.entries(cur.proxies)
+          .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
+          .sort((a, b) => b.maxBid - a.maxBid);
+        const newLeaderId = newEntries.length > 0 ? newEntries[0].rosterId : null;
+
+        // Reset timer only when the lead actually changes hands
+        // — proxy updates by current leader: no reset
+        // — new bid that doesn't beat proxy: no reset (proxy still leads)
+        // — bid that takes the lead: reset
+        if (newLeaderId !== currentLeaderId) {
           cur.expiresAt = _nextExpiry(Date.now());
         }
 
