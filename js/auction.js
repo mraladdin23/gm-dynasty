@@ -1243,19 +1243,22 @@ const DLRAuction = (() => {
 
         const myKey = String(Number(_myRosterId));
 
-        // Is this roster currently leading BEFORE this update?
+        // Compute current state BEFORE this update
         const entries = Object.entries(cur.proxies)
           .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
           .sort((a, b) => b.maxBid - a.maxBid);
-        const isCurrentLeader = entries.length > 0 && entries[0].rosterId === Number(_myRosterId);
-        const isNewBidder     = cur.proxies[myKey] === undefined;
+        const isCurrentLeader  = entries.length > 0 && entries[0].rosterId === Number(_myRosterId);
+        const isNewBidder      = cur.proxies[myKey] === undefined;
+        const currentLeaderMax = entries.length > 0 ? entries[0].maxBid : 0;
 
-        // Set/update proxy — simple key=value, replaces any previous value
+        // Set/update proxy
         cur.proxies[myKey] = maxBid;
 
-        // Only reset timer when a genuinely new bidder enters
-        // Updating your own proxy (raise or lower) never resets the clock
-        if (isNewBidder) {
+        // Only reset timer if this bid actually BEATS the current leader's proxy
+        // — a new bidder below the proxy doesn't change the leader, so no reset
+        // — updating your own proxy never resets the clock
+        const beatsCurrentProxy = !isCurrentLeader && maxBid > currentLeaderMax;
+        if (isNewBidder && beatsCurrentProxy) {
           cur.expiresAt = _nextExpiry(Date.now());
         }
 
