@@ -328,7 +328,7 @@ const DLRAuction = (() => {
 
   function _myMaxBid(a) {
     const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-    const mine = bids.filter(b => b.rosterId === _myRosterId);
+    const mine = bids.filter(b => Number(b.rosterId) === Number(_myRosterId));  // always cast both
     return mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0;
   }
 
@@ -1219,25 +1219,24 @@ const DLRAuction = (() => {
         // Compute current leader BEFORE modifying bids
         const maxByRoster = {};
         bids.forEach(b => {
-          if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
-            maxByRoster[b.rosterId] = b.maxBid;
+          const rid = Number(b.rosterId);
+          if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid])
+            maxByRoster[rid] = b.maxBid;
         });
         const sorted = Object.entries(maxByRoster)
-          .map(([id, m]) => ({ rosterId: parseInt(id), maxBid: m }))
+          .map(([id, m]) => ({ rosterId: Number(id), maxBid: m }))
           .sort((a, b) => b.maxBid - a.maxBid);
-        const currentLeaderId = sorted.length ? sorted[0].rosterId : null;
-        const isCurrentLeader = Number(currentLeaderId) === Number(_myRosterId);
+        const isCurrentLeader = sorted.length > 0 && sorted[0].rosterId === Number(_myRosterId);
 
         // Replace my existing bid entirely rather than appending.
-        // This prevents stale higher values from blocking future updates.
-        // Keep other teams' bids and any nomination marker intact.
         const myNomBid = bids.find(b => Number(b.rosterId) === Number(_myRosterId) && b.isNomination);
         const newBids  = bids.filter(b => Number(b.rosterId) !== Number(_myRosterId));
         if (myNomBid) newBids.push(myNomBid);
-        newBids.push({ rosterId: _myRosterId, maxBid, timestamp: Date.now() });
+        newBids.push({ rosterId: Number(_myRosterId), maxBid, timestamp: Date.now() });
         cur.bids = newBids;
 
-        // Only reset timer if a DIFFERENT bidder is placing this bid
+        // Only reset timer if a DIFFERENT bidder is placing this bid for the first time
+        // — never reset when current leader is just updating their proxy
         if (!isCurrentLeader) {
           cur.expiresAt = _nextExpiry(Date.now());
         }
