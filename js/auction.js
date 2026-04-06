@@ -1187,20 +1187,36 @@ const DLRAuction = (() => {
       return;
     }
     if (auction) {
-      const leader = _computeLeader(auction);
+      const leader       = _computeLeader(auction);
       const myCurrentMax = _myMaxBid(auction);
-      // Must beat the current display price by at least MIN_INC if not already leading
-      if (leader.rosterId && Number(leader.rosterId) !== Number(_myRosterId)) {
-        const minRequired = leader.displayBid + MIN_INC();
-        if (maxBid < minRequired) {
-          showToast(`Bid must be at least ${_fmtSal(minRequired)} (current ${_fmtSal(leader.displayBid)} + ${_fmtSal(MIN_INC())} increment)`, "error");
+      const amLeading    = Number(leader.rosterId) === Number(_myRosterId);
+
+      if (amLeading) {
+        // Already winning — can raise OR lower proxy, but floor is displayBid + MIN_INC
+        // (must stay at least one increment above current price to keep winning)
+        const floor = leader.displayBid + MIN_INC();
+        if (maxBid < floor) {
+          showToast(`Proxy must be at least ${_fmtSal(floor)} (current price ${_fmtSal(leader.displayBid)} + ${_fmtSal(MIN_INC())} increment)`, "error");
           return;
         }
-      }
-      // Must be higher than own existing max
-      if (myCurrentMax >= maxBid) {
-        showToast(`New max must exceed your current max of ${_fmtSal(myCurrentMax)}`, "error");
-        return;
+        if (maxBid === myCurrentMax) {
+          showToast(`That's already your current proxy of ${_fmtSal(myCurrentMax)}`, "error");
+          return;
+        }
+      } else {
+        // Not winning — must beat current display price by at least one increment
+        if (leader.rosterId) {
+          const minRequired = leader.displayBid + MIN_INC();
+          if (maxBid < minRequired) {
+            showToast(`Bid must be at least ${_fmtSal(minRequired)} (current ${_fmtSal(leader.displayBid)} + ${_fmtSal(MIN_INC())} increment)`, "error");
+            return;
+          }
+        }
+        // No lowering when not winning — must strictly exceed own previous bid
+        if (myCurrentMax > 0 && maxBid <= myCurrentMax) {
+          showToast(`Bid must exceed your previous bid of ${_fmtSal(myCurrentMax)}`, "error");
+          return;
+        }
       }
     }
 
@@ -1231,7 +1247,9 @@ const DLRAuction = (() => {
         cur.bids = bids;
         return cur;
       });
-      showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
+      const myPrev = _myMaxBid(_auctions.find(a => a.id === auctionId) || {});
+      const action = maxBid < myPrev ? "lowered to" : "set to";
+      showToast(`Proxy ${action} ${_fmtSal(maxBid)} on ${playerName} ✓`);
     } catch(e) { showToast("Bid failed: " + e.message, "error"); }
   }
 
