@@ -302,33 +302,47 @@ const DLRAuction = (() => {
   }
 
   // ── Proxy bid computation ─────────────────────────────────
+  // Core proxy logic — works with flat proxies map {rosterId: maxBid}
+  // Falls back to bids array for backward compat with older auctions
   function _computeLeader(a) {
-    const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-    if (!bids.length) return { rosterId: null, displayBid: MIN_BID() };
-    const maxByRoster = {};
-    bids.forEach(b => {
-      if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
-        maxByRoster[b.rosterId] = b.maxBid;
-    });
-    const sorted = Object.entries(maxByRoster)
-      .map(([id, max]) => ({ rosterId: parseInt(id), maxBid: max }))
-      .sort((a, b) => b.maxBid - a.maxBid);
+    // Prefer flat proxies map (new structure)
+    const proxies = a.proxies || {};
+    let entries = Object.entries(proxies).map(([id, maxBid]) => ({ rosterId: Number(id), maxBid: Number(maxBid) }));
 
-    if (sorted.length === 1) {
-      // Single bidder — current price is always MIN_BID (proxy stays hidden)
-      return { rosterId: sorted[0].rosterId, displayBid: MIN_BID() };
+    // Fall back to bids array for old auctions
+    if (!entries.length && a.bids) {
+      const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+      const maxByRoster = {};
+      bids.forEach(b => {
+        const rid = Number(b.rosterId);
+        if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid]) maxByRoster[rid] = b.maxBid;
+      });
+      entries = Object.entries(maxByRoster).map(([id, maxBid]) => ({ rosterId: Number(id), maxBid }));
     }
 
-    // Proxy: winner pays one increment above second-highest max
+    if (!entries.length) return { rosterId: null, displayBid: MIN_BID() };
+    entries.sort((a, b) => b.maxBid - a.maxBid);
+
+    if (entries.length === 1) {
+      // Single bidder — show MIN_BID, proxy stays hidden
+      return { rosterId: entries[0].rosterId, displayBid: MIN_BID() };
+    }
+    // Proxy: winner pays one increment above second-highest
     return {
-      rosterId:   sorted[0].rosterId,
-      displayBid: Math.min(sorted[0].maxBid, sorted[1].maxBid + MIN_INC())
+      rosterId:   entries[0].rosterId,
+      displayBid: Math.min(entries[0].maxBid, entries[1].maxBid + MIN_INC())
     };
   }
 
   function _myMaxBid(a) {
+    // Check flat proxies first
+    if (a.proxies && a.proxies[String(_myRosterId)] !== undefined)
+      return Number(a.proxies[String(_myRosterId)]);
+    if (a.proxies && a.proxies[Number(_myRosterId)] !== undefined)
+      return Number(a.proxies[Number(_myRosterId)]);
+    // Fall back to bids array
     const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-    const mine = bids.filter(b => Number(b.rosterId) === Number(_myRosterId));  // always cast both
+    const mine = bids.filter(b => Number(b.rosterId) === Number(_myRosterId));
     return mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0;
   }
 
@@ -381,35 +395,39 @@ const DLRAuction = (() => {
   async function passAuction(auctionId, playerName) {
     if (!_myRosterId) return;
     try {
-      // Record this team's pass
-      await _passRef(auctionId).update({ [String(_myRosterId)]: Date.now() });
+      // Remove this team's proxy bid and record their pass atomically
+      await _auctRef(auctionId).transaction(cur => {
+        if (!cur || cur.cancelled || cur.processed) return;
+        // Record pass
+        cur.passes = cur.passes || {};
+        cur.passes[String(_myRosterId)] = Date.now();
+        // Remove proxy if they had one
+        if (cur.proxies) {
+          delete cur.proxies[String(Number(_myRosterId))];
+          cur.bidCount = Object.keys(cur.proxies).length;
+        }
+        return cur;
+      });
 
-      // Read back full auction to check if all eligible teams have passed
+      // Read back to check if all eligible teams have passed
       const snap    = await _auctRef(auctionId).once("value");
       const auction = snap.val();
       if (!auction || auction.cancelled || auction.processed) return;
 
-      const bids    = Array.isArray(auction.bids) ? auction.bids : Object.values(auction.bids||{});
-      const bidders = new Set(bids.map(b => String(b.rosterId)));
-      const passes  = Object.keys(auction.passes || {});
-
-      // mustPass = all teams except the nominator who haven't placed a bid
+      const passes       = Object.keys(auction.passes || {});
       const allRosterIds = _rosterData.map(r => String(r.roster_id));
-      const mustPass = allRosterIds.filter(id =>
-        id !== String(auction.nominatedBy) && !bidders.has(id)
-      );
-      const allPassed = mustPass.length > 0 && mustPass.every(id => passes.includes(id));
 
-      if (allPassed) {
-        // Close auction immediately — all non-bidding teams passed
-        await _auctRef(auctionId).update({
-          expiresAt: Date.now() - 1,
-          autoClosedByPasses: true
-        });
-        showToast(`All teams passed — ${playerName} auction closed early.`);
+      // mustPass = every team except the nominator must either have an active proxy OR have passed
+      const proxies   = auction.proxies || {};
+      const mustPass  = allRosterIds.filter(id => id !== String(auction.nominatedBy));
+      const allDone   = mustPass.every(id => passes.includes(id) || proxies[id] !== undefined);
+
+      if (allDone && mustPass.length > 0) {
+        await _auctRef(auctionId).update({ expiresAt: Date.now() - 1, autoClosedByPasses: true });
+        showToast(`All teams resolved — ${playerName} auction closing.`);
       } else {
-        const remaining = mustPass.filter(id => !passes.includes(id)).length;
-        showToast(`Passed on ${playerName}. ${remaining} team${remaining !== 1 ? "s" : ""} yet to pass.`);
+        const remaining = mustPass.filter(id => !passes.includes(id) && proxies[id] === undefined).length;
+        showToast(`Passed on ${playerName}. ${remaining} team${remaining !== 1 ? "s" : ""} yet to act.`);
       }
     } catch(e) {
       showToast("Pass failed: " + e.message, "error");
@@ -529,8 +547,7 @@ const DLRAuction = (() => {
     const leadTeam= leader.rosterId ? (_rosterData.find(r => Number(r.roster_id) === Number(leader.rosterId))?.teamName || `#${leader.rosterId}`) : "No bids";
     const myBid   = _myMaxBid(a);
     const winning = Number(leader.rosterId) === Number(_myRosterId);
-    const bids    = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-    const uniqueBidders = [...new Set(bids.map(b => b.rosterId))].length;
+    const uniqueBidders = a.proxies ? Object.keys(a.proxies).length : (a.bidCount || 1);
 
     return `
       <div class="auc-card ${winning ? "auc-card--winning" : ""}">
@@ -565,9 +582,7 @@ const DLRAuction = (() => {
           })()}
           ${_myHasPassed(a)
             ? `<span class="auc-passed-badge">✓ Passed</span>`
-            : !winning && myBid === 0
-              ? `<button class="auc-pass-btn btn-secondary btn-sm" onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')">Pass</button>`
-              : ""}
+            : `<button class="auc-pass-btn btn-secondary btn-sm" onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')">Pass</button>`}
           ${_isCommish ? `
             <button class="btn-secondary btn-sm" onclick="DLRAuction.claimAuction('${a.id}','${_escA(name)}')">✓</button>
             <button class="btn-secondary btn-sm" style="color:var(--color-red)" onclick="DLRAuction.cancelAuction('${a.id}','${_escA(name)}')">✕</button>` : ""}
@@ -787,7 +802,6 @@ const DLRAuction = (() => {
     try {
       const id  = `auc_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
       const now = Date.now();
-      // Nomination IS the opening bid — bids array starts with nominator's bid
       await _auctRef(id).set({
         id, playerId: pid, playerName,
         nominatedBy:    nomRosterId,
@@ -795,7 +809,8 @@ const DLRAuction = (() => {
         nominatedByCommish: nomRosterId !== _myRosterId ? _myRosterId : null,
         startTime: now,
         expiresAt: _nextExpiry(now),
-        bids: [{ rosterId: nomRosterId, maxBid, timestamp: now, isNomination: true }],
+        proxies:  { [String(Number(nomRosterId))]: maxBid }, // flat map: {rosterId: proxyAmount}
+        bidCount: 1,
         processed: false, cancelled: false
       });
       document.getElementById("auc-nom-modal")?.remove();
@@ -1214,32 +1229,38 @@ const DLRAuction = (() => {
     try {
       await _auctRef(auctionId).transaction(cur => {
         if (!cur || cur.cancelled || cur.processed) return;
-        const bids = Array.isArray(cur.bids) ? cur.bids : Object.values(cur.bids||{});
 
-        // Compute current leader BEFORE modifying bids
-        const maxByRoster = {};
-        bids.forEach(b => {
-          const rid = Number(b.rosterId);
-          if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid])
-            maxByRoster[rid] = b.maxBid;
-        });
-        const sorted = Object.entries(maxByRoster)
-          .map(([id, m]) => ({ rosterId: Number(id), maxBid: m }))
+        // Migrate old bids-array auctions to flat proxies map on first update
+        if (!cur.proxies) {
+          cur.proxies = {};
+          const bids = Array.isArray(cur.bids) ? cur.bids : Object.values(cur.bids||{});
+          bids.forEach(b => {
+            const rid = String(Number(b.rosterId));
+            if (!cur.proxies[rid] || b.maxBid > cur.proxies[rid])
+              cur.proxies[rid] = b.maxBid;
+          });
+        }
+
+        const myKey = String(Number(_myRosterId));
+
+        // Is this roster currently leading BEFORE this update?
+        const entries = Object.entries(cur.proxies)
+          .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
           .sort((a, b) => b.maxBid - a.maxBid);
-        const isCurrentLeader = sorted.length > 0 && sorted[0].rosterId === Number(_myRosterId);
+        const isCurrentLeader = entries.length > 0 && entries[0].rosterId === Number(_myRosterId);
+        const isNewBidder     = cur.proxies[myKey] === undefined;
 
-        // Replace my existing bid entirely rather than appending.
-        const myNomBid = bids.find(b => Number(b.rosterId) === Number(_myRosterId) && b.isNomination);
-        const newBids  = bids.filter(b => Number(b.rosterId) !== Number(_myRosterId));
-        if (myNomBid) newBids.push(myNomBid);
-        newBids.push({ rosterId: Number(_myRosterId), maxBid, timestamp: Date.now() });
-        cur.bids = newBids;
+        // Set/update proxy — simple key=value, replaces any previous value
+        cur.proxies[myKey] = maxBid;
 
-        // Only reset timer if a DIFFERENT bidder is placing this bid for the first time
-        // — never reset when current leader is just updating their proxy
-        if (!isCurrentLeader) {
+        // Only reset timer when a genuinely new bidder enters
+        // Updating your own proxy (raise or lower) never resets the clock
+        if (isNewBidder) {
           cur.expiresAt = _nextExpiry(Date.now());
         }
+
+        // Track bid count for display (how many unique bidders)
+        cur.bidCount = Object.keys(cur.proxies).length;
 
         return cur;
       });
@@ -1250,42 +1271,41 @@ const DLRAuction = (() => {
   function showBidHistory(auctionId) {
     const a = _auctions.find(x => x.id === auctionId);
     if (!a) return;
-    const rawBids = [...(Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{}))];
 
-    // Build per-team max bids for proxy display calculation
-    const maxByRoster = {};
-    rawBids.forEach(b => {
-      if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
-        maxByRoster[b.rosterId] = b.maxBid;
-    });
-    const sorted = Object.entries(maxByRoster)
-      .map(([id, max]) => ({ rosterId: parseInt(id), maxBid: max }))
-      .sort((a, b) => b.maxBid - a.maxBid);
-    const secondHighest = sorted.length > 1 ? sorted[1].maxBid : null;
+    // Build entries from proxies map (new) or bids array (legacy)
+    let entries = [];
+    if (a.proxies && Object.keys(a.proxies).length) {
+      entries = Object.entries(a.proxies)
+        .map(([id, maxBid]) => ({ rosterId: Number(id), maxBid: Number(maxBid) }))
+        .sort((x, y) => y.maxBid - x.maxBid);
+    } else {
+      const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+      const maxByRoster = {};
+      bids.forEach(b => {
+        const rid = Number(b.rosterId);
+        if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid]) maxByRoster[rid] = b.maxBid;
+      });
+      entries = Object.entries(maxByRoster)
+        .map(([id, maxBid]) => ({ rosterId: Number(id), maxBid }))
+        .sort((x, y) => y.maxBid - x.maxBid);
+    }
 
-    // Deduplicate to one entry per team showing their effective display amount
-    const teamEntries = sorted.map(({ rosterId, maxBid }) => {
-      const isMine   = Number(rosterId) === Number(_myRosterId);
-      const isLeader = rosterId === sorted[0].rosterId;
-      // What amount to show:
-      // - Your own bid: always show your real max
-      // - Leader with multiple bidders: show display price (second + increment)
-      // - Others: show display price only, never their proxy
+    const secondHighest = entries.length > 1 ? entries[1].maxBid : null;
+    const leader = _computeLeader(a);
+
+    const teamEntries = entries.map(({ rosterId, maxBid }, i) => {
+      const isMine   = rosterId === Number(_myRosterId);
+      const isLeader = i === 0;
       let showAmount;
       if (isMine) {
-        showAmount = maxBid; // you always see your own max
-      } else if (isLeader && secondHighest !== null) {
-        showAmount = Math.min(maxBid, secondHighest + MIN_INC());
+        showAmount = maxBid; // always show your own proxy
+      } else if (_isCommish) {
+        // Commish sees display price only — never another team's proxy
+        showAmount = isLeader ? leader.displayBid : MIN_BID();
       } else {
-        showAmount = maxBid; // only bidder, show MIN_BID equivalent
+        showAmount = isLeader ? leader.displayBid : MIN_BID();
       }
-      // Commish sees display prices only — never another team's proxy
-      if (_isCommish && !isMine) {
-        showAmount = isLeader && secondHighest !== null
-          ? Math.min(maxBid, secondHighest + MIN_INC())
-          : MIN_BID();
-      }
-      return { rosterId, showAmount };
+      return { rosterId, showAmount, isMine, isLeader };
     });
 
     const p    = _players[a.playerId] || {};
@@ -1296,28 +1316,26 @@ const DLRAuction = (() => {
     modal.innerHTML = `
       <div class="modal-box modal-box--sm">
         <div class="modal-header">
-          <h3>📜 Bid History — ${_esc(name)}</h3>
+          <h3>📜 Bid Status — ${_esc(name)}</h3>
           <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
         </div>
         <div class="modal-body" style="padding:var(--space-4)">
           ${!teamEntries.length ? `<div class="dim">No bids yet.</div>` :
-            teamEntries.map(({ rosterId, showAmount }, i) => {
-              const team  = _rosterData.find(r => Number(r.roster_id) === Number(rosterId));
+            teamEntries.map(({ rosterId, showAmount, isMine, isLeader }) => {
+              const team  = _rosterData.find(r => Number(r.roster_id) === rosterId);
               const tName = team?.teamName || `Team ${rosterId}`;
-              const isMe  = Number(rosterId) === Number(_myRosterId);
-              const isTop = i === 0;
               return `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
                   <div>
                     <span style="font-weight:600">${_esc(tName)}</span>
-                    ${isTop ? `<span style="font-size:.7rem;color:var(--color-gold);margin-left:4px">👑 Leading</span>` : ""}
-                    ${isMe  ? `<span style="font-size:.7rem;color:var(--color-blue);margin-left:4px">(you)</span>` : ""}
+                    ${isLeader ? `<span style="font-size:.7rem;color:var(--color-gold);margin-left:4px">👑 Leading</span>` : ""}
+                    ${isMine   ? `<span style="font-size:.7rem;color:var(--color-blue);margin-left:4px">(you)</span>` : ""}
                   </div>
                   <span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(showAmount)}</span>
                 </div>`;
             }).join("")
           }
-          <div class="dim" style="font-size:.72rem;margin-top:var(--space-3)">Proxy bids are hidden. Displayed amounts reflect current auction price.</div>
+          <div class="dim" style="font-size:.72rem;margin-top:var(--space-3)">Current price shown. Proxy bids are hidden.</div>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -1378,9 +1396,17 @@ const DLRAuction = (() => {
         if (myTeam) {
           const d = capData[myTeam.username] || capData[myTeam.ownerId] || capData[String(myTeam.ownerId)];
           if (d) {
-            const now       = Date.now();
-            const active    = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
-            const committed = _getCommitted(active, _myRosterId);
+            const now    = Date.now();
+            const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+            // Committed = sum of my proxy on auctions I'm currently winning
+            const committed = active.reduce((sum, a) => {
+              const leader = _computeLeader(a);
+              if (Number(leader.rosterId) !== Number(_myRosterId)) return sum;
+              const myProxy = a.proxies
+                ? (Number(a.proxies[String(Number(_myRosterId))]) || 0)
+                : _myMaxBid(a);
+              return sum + myProxy;
+            }, 0);
             if ((d.remaining - committed) < MIN_BID()) return false;
           }
         }
