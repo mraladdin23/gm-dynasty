@@ -548,6 +548,24 @@ Auth.onAuthStateChanged(async (user, profile) => {
 let _globalAucListeners = [];
 let _globalAucData      = {};   // stored in closure, not on DOM element
 
+// Compute correct display bid — mirrors DLRAuction proxy logic.
+// Single bidder = MIN_BID. Multi-bidder = second-highest + increment.
+// Never exposes proxy bid amounts.
+function _computeDisplayBid(a) {
+  const MIN_BID = 100_000;
+  const MIN_INC = 100_000;
+  const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids || {});
+  if (!bids.length) return MIN_BID;
+  const maxByRoster = {};
+  bids.forEach(b => {
+    if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
+      maxByRoster[b.rosterId] = b.maxBid;
+  });
+  const sorted = Object.values(maxByRoster).sort((a, b) => b - a);
+  if (sorted.length === 1) return MIN_BID;
+  return Math.min(sorted[0], sorted[1] + MIN_INC);
+}
+
 function _startGlobalAucMonitor(profile) {
   // Clean up old listeners
   _globalAucListeners.forEach(fn => fn());
@@ -610,8 +628,7 @@ function _updateGlobalAucPill(liveByLeague) {
       drawerSection.style.display = "";
       drawerList.innerHTML = Object.entries(liveByLeague).flatMap(([leagueKey, { league, live }]) =>
         live.map(a => {
-          const bids    = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-          const topBid  = bids.length ? Math.max(...bids.map(b => b.maxBid)) : 0;
+          const displayBid = _computeDisplayBid(a);
           const mins    = Math.max(0, Math.floor((a.expiresAt - Date.now()) / 60000));
           const timeStr = mins > 60 ? `${Math.floor(mins/60)}h` : `${mins}m`;
           return `<div class="nav-drawer-item" onclick="DLRNav.close();Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},350)">
@@ -619,7 +636,7 @@ function _updateGlobalAucPill(liveByLeague) {
               <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(a.playerName||"Player")}</div>
               <div style="font-size:.7rem;color:var(--color-text-dim)">${_escHtml(league.leagueName||leagueKey)} · ${timeStr}</div>
             </div>
-            <span style="font-family:var(--font-display);font-weight:700;color:var(--color-green);font-size:.82rem;flex-shrink:0">$${(topBid/1e6).toFixed(1)}M</span>
+            <span style="font-family:var(--font-display);font-weight:700;color:var(--color-green);font-size:.82rem;flex-shrink:0">$${(displayBid/1e6).toFixed(1)}M</span>
           </div>`;
         })
       ).join("");
@@ -643,19 +660,20 @@ function _openGlobalAucModal() {
         <span style="font-size:.72rem;color:var(--color-text-dim);margin-left:var(--space-2)">${live.length} active →</span>
       </div>
       ${live.map(a => {
-        const timeLeft = Math.max(0, a.expiresAt - Date.now());
-        const mins     = Math.floor(timeLeft / 60000);
-        const hrs      = Math.floor(mins / 60);
-        const timeStr  = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins}m`;
-        const bids     = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-        const topBid   = bids.length ? Math.max(...bids.map(b => b.maxBid)) : 0;
+        const timeLeft   = Math.max(0, a.expiresAt - Date.now());
+        const mins       = Math.floor(timeLeft / 60000);
+        const hrs        = Math.floor(mins / 60);
+        const timeStr    = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins}m`;
+        const bids       = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+        const bidCount   = [...new Set(bids.map(b => b.rosterId))].length;
+        const displayBid = _computeDisplayBid(a);
         return `
           <div class="global-auc-row" onclick="${leagueClick}">
             <div style="flex:1">
               <div style="font-weight:600;font-size:.85rem">${_escHtml(a.playerName||a.playerId)}</div>
-              <div class="dim" style="font-size:.72rem">${bids.length} bid${bids.length!==1?"s":""} · ${timeStr} left</div>
+              <div class="dim" style="font-size:.72rem">${bidCount} bid${bidCount!==1?"s":""} · ${timeStr} left</div>
             </div>
-            <div style="font-family:var(--font-display);font-weight:700;color:var(--color-green)">$${(topBid/1_000_000).toFixed(1)}M</div>
+            <div style="font-family:var(--font-display);font-weight:700;color:var(--color-green)">$${(displayBid/1_000_000).toFixed(1)}M</div>
           </div>`;
       }).join("")}
     </div>`;

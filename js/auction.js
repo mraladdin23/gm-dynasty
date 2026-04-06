@@ -315,14 +315,11 @@ const DLRAuction = (() => {
       .sort((a, b) => b.maxBid - a.maxBid);
 
     if (sorted.length === 1) {
-      // Single bidder — show their first (opening) bid amount, not just MIN_BID
-      const firstBid = [...bids]
-        .filter(b => b.rosterId === sorted[0].rosterId)
-        .sort((a, b) => a.timestamp - b.timestamp)[0];
-      return { rosterId: sorted[0].rosterId, displayBid: firstBid?.maxBid ?? MIN_BID() };
+      // Single bidder — current price is always MIN_BID (proxy stays hidden)
+      return { rosterId: sorted[0].rosterId, displayBid: MIN_BID() };
     }
 
-    // Proxy: winner pays $1 increment above second-highest max
+    // Proxy: winner pays one increment above second-highest max
     return {
       rosterId:   sorted[0].rosterId,
       displayBid: Math.min(sorted[0].maxBid, sorted[1].maxBid + MIN_INC())
@@ -1183,11 +1180,46 @@ const DLRAuction = (() => {
   function showBidHistory(auctionId) {
     const a = _auctions.find(x => x.id === auctionId);
     if (!a) return;
-    const bids = [...(Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{}))];
-    bids.sort((x, y) => y.timestamp - x.timestamp);
+    const rawBids = [...(Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{}))];
+
+    // Build per-team max bids for proxy display calculation
+    const maxByRoster = {};
+    rawBids.forEach(b => {
+      if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
+        maxByRoster[b.rosterId] = b.maxBid;
+    });
+    const sorted = Object.entries(maxByRoster)
+      .map(([id, max]) => ({ rosterId: parseInt(id), maxBid: max }))
+      .sort((a, b) => b.maxBid - a.maxBid);
+    const secondHighest = sorted.length > 1 ? sorted[1].maxBid : null;
+
+    // Deduplicate to one entry per team showing their effective display amount
+    const teamEntries = sorted.map(({ rosterId, maxBid }) => {
+      const isMine   = Number(rosterId) === Number(_myRosterId);
+      const isLeader = rosterId === sorted[0].rosterId;
+      // What amount to show:
+      // - Your own bid: always show your real max
+      // - Leader with multiple bidders: show display price (second + increment)
+      // - Others: show display price only, never their proxy
+      let showAmount;
+      if (isMine) {
+        showAmount = maxBid; // you always see your own max
+      } else if (isLeader && secondHighest !== null) {
+        showAmount = Math.min(maxBid, secondHighest + MIN_INC());
+      } else {
+        showAmount = maxBid; // only bidder, show MIN_BID equivalent
+      }
+      // Commish sees display prices only — never another team's proxy
+      if (_isCommish && !isMine) {
+        showAmount = isLeader && secondHighest !== null
+          ? Math.min(maxBid, secondHighest + MIN_INC())
+          : MIN_BID();
+      }
+      return { rosterId, showAmount };
+    });
+
     const p    = _players[a.playerId] || {};
     const name = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || "Player");
-
     const modal = document.createElement("div");
     modal.className = "modal-overlay";
     modal.style.zIndex = "860";
@@ -1198,25 +1230,24 @@ const DLRAuction = (() => {
           <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
         </div>
         <div class="modal-body" style="padding:var(--space-4)">
-          ${!bids.length ? `<div class="dim">No bids yet.</div>` :
-            bids.map(b => {
-              const team = _rosterData.find(r => r.roster_id === b.rosterId);
-              const tName = team?.teamName || `Team ${b.rosterId}`;
-              const time  = new Date(b.timestamp).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
-              const isNom = b.isNomination;
+          ${!teamEntries.length ? `<div class="dim">No bids yet.</div>` :
+            teamEntries.map(({ rosterId, showAmount }, i) => {
+              const team  = _rosterData.find(r => Number(r.roster_id) === Number(rosterId));
+              const tName = team?.teamName || `Team ${rosterId}`;
+              const isMe  = Number(rosterId) === Number(_myRosterId);
+              const isTop = i === 0;
               return `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
                   <div>
                     <span style="font-weight:600">${_esc(tName)}</span>
-                    ${isNom ? `<span class="dim" style="font-size:.7rem;margin-left:4px">(nomination)</span>` : ""}
+                    ${isTop ? `<span style="font-size:.7rem;color:var(--color-gold);margin-left:4px">👑 Leading</span>` : ""}
+                    ${isMe  ? `<span style="font-size:.7rem;color:var(--color-blue);margin-left:4px">(you)</span>` : ""}
                   </div>
-                  <div style="display:flex;align-items:center;gap:var(--space-3)">
-                    <span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(b.maxBid)}</span>
-                    <span class="dim" style="font-size:.72rem">${time}</span>
-                  </div>
+                  <span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(showAmount)}</span>
                 </div>`;
             }).join("")
           }
+          <div class="dim" style="font-size:.72rem;margin-top:var(--space-3)">Proxy bids are hidden. Displayed amounts reflect current auction price.</div>
         </div>
       </div>`;
     document.body.appendChild(modal);
