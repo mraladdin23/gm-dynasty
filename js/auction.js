@@ -658,6 +658,16 @@ const DLRAuction = (() => {
 
   // ── Nominate modal ────────────────────────────────────────
   function openNominate(pid, name, pos, nflTeam) {
+    // Block if already in an active auction
+    const alreadyActive = _auctions.some(a =>
+      !a.cancelled && !a.processed && a.expiresAt > Date.now() &&
+      String(a.playerId) === String(pid)
+    );
+    if (alreadyActive) {
+      showToast(`${name} is already in an active auction.`, "error");
+      return;
+    }
+
     document.getElementById("auc-nom-modal")?.remove();
     const modal = document.createElement("div");
     modal.id = "auc-nom-modal";
@@ -757,6 +767,17 @@ const DLRAuction = (() => {
         document.getElementById("auc-nom-modal")?.remove();
         return;
       }
+    }
+
+    // Block if player already has an active auction
+    const alreadyActive = _auctions.some(a =>
+      !a.cancelled && !a.processed && a.expiresAt > Date.now() &&
+      String(a.playerId) === String(pid)
+    );
+    if (alreadyActive) {
+      showToast(`${playerName} is already in an active auction. Teams can only bid on the current nomination.`, "error");
+      document.getElementById("auc-nom-modal")?.remove();
+      return;
     }
 
     const nomTeam = _rosterData.find(r => Number(r.roster_id) === nomRosterId);
