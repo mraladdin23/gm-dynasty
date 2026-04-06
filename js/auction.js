@@ -346,6 +346,32 @@ const DLRAuction = (() => {
     return active.length;
   }
 
+  // Returns how many open active roster spots the current user has,
+  // accounting for current active roster size AND auctions they are currently winning.
+  // IR and Taxi don't count toward the active roster limit.
+  function _myOpenSpots() {
+    if (!_myRosterId) return 0;
+    const maxRoster = _settings.maxRosterSize || 25;
+    const myTeam    = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+    if (!myTeam) return 0;
+
+    // Active roster = players minus IR and taxi
+    const irSet   = new Set(myTeam.reserve || []);
+    const taxiSet = new Set(myTeam.taxi    || []);
+    const activeRosterCount = (myTeam.players || [])
+      .filter(pid => !irSet.has(pid) && !taxiSet.has(pid)).length;
+
+    // Auctions currently winning (would add to active roster if won)
+    const now = Date.now();
+    const winningCount = _auctions.filter(a => {
+      if (a.cancelled || a.processed || a.expiresAt <= now) return false;
+      const leader = _computeLeader(a);
+      return Number(leader.rosterId) === Number(_myRosterId);
+    }).length;
+
+    return Math.max(0, maxRoster - activeRosterCount - winningCount);
+  }
+
   function _myHasPassed(a) {
     if (!_myRosterId || !a.passes) return false;
     return !!a.passes[String(_myRosterId)];
@@ -534,7 +560,12 @@ const DLRAuction = (() => {
         <div class="auc-actions">
           <input type="number" id="bid-${a.id}" class="auc-bid-input"
             value="${myBid || ""}" placeholder="Max bid" step="${MIN_INC()}" min="${MIN_BID()}"/>
-          <button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">${myBid > 0 ? "Update" : "Bid"}</button>
+          ${(() => {
+            const noSpots = !winning && _myOpenSpots() <= 0;
+            return noSpots
+              ? `<button class="btn-secondary btn-sm" disabled title="Roster full" style="opacity:.4">Bid</button>`
+              : `<button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">${myBid > 0 ? "Update" : "Bid"}</button>`;
+          })()}
           ${_myHasPassed(a)
             ? `<span class="auc-passed-badge">✓ Passed</span>`
             : !winning && myBid === 0
@@ -711,6 +742,24 @@ const DLRAuction = (() => {
       document.getElementById("auc-nom-modal")?.remove();
       if (typeof DLRFreeAgents !== "undefined" && DLRFreeAgents.refresh) DLRFreeAgents.refresh();
       return;
+    }
+    // Check roster space for the nominating team
+    const nomTeamRoster = _rosterData.find(r => Number(r.roster_id) === nomRosterId);
+    if (nomTeamRoster) {
+      const maxRoster   = _settings.maxRosterSize || 25;
+      const irSet       = new Set(nomTeamRoster.reserve || []);
+      const taxiSet     = new Set(nomTeamRoster.taxi    || []);
+      const activeCount = (nomTeamRoster.players || []).filter(pid => !irSet.has(pid) && !taxiSet.has(pid)).length;
+      const winningCount = _auctions.filter(a => {
+        if (a.cancelled || a.processed || a.expiresAt <= Date.now()) return false;
+        return Number(_computeLeader(a).rosterId) === nomRosterId;
+      }).length;
+      const openSpots = maxRoster - activeCount - winningCount;
+      if (openSpots <= 0) {
+        showToast(`No open roster spots — this team's active roster is full.`, "error");
+        document.getElementById("auc-nom-modal")?.remove();
+        return;
+      }
     }
 
     const nomTeam = _rosterData.find(r => Number(r.roster_id) === nomRosterId);
@@ -1093,8 +1142,13 @@ const DLRAuction = (() => {
     const maxBid = parseInt(input?.value) || 0;
     if (maxBid < MIN_BID()) { showToast(`Minimum bid is ${_fmtSal(MIN_BID())}`, "error"); return; }
 
-    // Validate against current proxy leader
+    // Check roster space — bidding on a new player you're not already winning
     const auction = _auctions.find(a => a.id === auctionId);
+    const alreadyWinning = auction && Number(_computeLeader(auction).rosterId) === Number(_myRosterId);
+    if (!alreadyWinning && _myOpenSpots() <= 0) {
+      showToast("No open roster spots — you are already winning enough auctions to fill your roster.", "error");
+      return;
+    }
     if (auction) {
       const leader = _computeLeader(auction);
       const myCurrentMax = _myMaxBid(auction);
@@ -1212,6 +1266,8 @@ const DLRAuction = (() => {
     // Block if auction hasn't started yet
     if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) return false;
     if (_myActiveNoms() >= (_settings.maxNoms || 2)) return false;
+    // Block if no open roster spots (active roster + winning auctions >= max)
+    if (_myOpenSpots() <= 0) return false;
     // Check cap — pull from salary module directly (most reliable source)
     // Fall back to _rosterData cache, then skip check if neither is available
     if (typeof DLRSalaryCap !== "undefined") {
