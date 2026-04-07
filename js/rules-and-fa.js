@@ -170,6 +170,7 @@ const DLRFreeAgents = (() => {
   let _teamFilter         = "";
   let _faOnly             = false;
   let _watchlistOnly      = false;
+  let _searchQuery        = "";
   let _watchlist          = null;
   let _cachedData         = null;
   let _rosterLookup       = {};   // playerId → teamName
@@ -194,6 +195,7 @@ const DLRFreeAgents = (() => {
     _teamFilter         = "";
     _faOnly             = false;
     _watchlistOnly      = false;
+    _searchQuery        = "";
     _watchlist          = null;
     _rosterLookup       = {};
     _wonIds             = new Set();
@@ -232,6 +234,7 @@ const DLRFreeAgents = (() => {
   function setFaOnly(val)        { _faOnly        = val; _render(); }
   function setWatchlistOnly(val) { _watchlistOnly  = val; _render(); }
   function setTeamFilter(val)    { _teamFilter     = val; _render(); }
+  function setSearch(q)          { _searchQuery    = (q||"").toLowerCase().trim(); _render(); }
 
   function reset() {
     _leagueId   = null;
@@ -373,6 +376,7 @@ const DLRFreeAgents = (() => {
         if (_teamFilter && p.team !== _teamFilter) return false;
         if (_faOnly && p.isRostered) return false;
         if (_watchlistOnly && !p.starred) return false;
+        if (_searchQuery && !p.name.toLowerCase().includes(_searchQuery)) return false;
         return true;
       })
       .sort((a, b) =>
@@ -383,6 +387,12 @@ const DLRFreeAgents = (() => {
       .slice(0, 100);
 
     el.innerHTML = `
+      <div class="fa-toolbar">
+        <input type="text" class="fa-search" placeholder="Search players…"
+          value="${_searchQuery}"
+          oninput="DLRFreeAgents.setSearch(this.value)"
+          style="flex:1;min-width:0;padding:var(--space-2) var(--space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-body);font-size:.85rem;outline:none"/>
+      </div>
       <div class="fa-toolbar">
         <div class="fa-pos-filter">
           ${["ALL",...SKILL_POS].map(pos =>
@@ -420,9 +430,9 @@ const DLRFreeAgents = (() => {
           let nomBtn = "";
           if (_auctionEnabled) {
             if (p.isWon) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.7rem">Claimed</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.72rem">Claimed</span>`;
             } else if (p.activeNom) {
-              nomBtn = `<span class="fa-nom-badge" style="font-size:.7rem">Active bid</span>`;
+              nomBtn = `<span class="fa-nom-badge">Active bid</span>`;
             } else if (p.isRostered) {
               nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.7rem">Rostered</span>`;
             } else if (canNom) {
@@ -481,6 +491,6 @@ const DLRFreeAgents = (() => {
     if (_cachedData) _render();
   }
 
-  return { init, reset, setSort, setPos, setTeamFilter, setFaOnly, setWatchlistOnly, toggleWatchlist, refresh };
+  return { init, reset, setSort, setPos, setTeamFilter, setFaOnly, setWatchlistOnly, setSearch, toggleWatchlist, refresh };
 
 })();
