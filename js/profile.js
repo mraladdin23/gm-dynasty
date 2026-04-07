@@ -1518,7 +1518,7 @@ const Profile = (() => {
       { val: "matchups",     label: "Matchups" },
       { val: "playoffs",     label: "Playoffs" },
       { val: "roster",       label: isSalary ? "Roster & Salaries" : "Rosters" },
-      { val: "freeagents",   label: "Free Agents" },
+      { val: "freeagents",   label: "Players" },
       { val: "draft",        label: "Draft" },
       { val: "transactions", label: "Transactions" },
       { val: "analytics",    label: "Analytics" },
@@ -1529,7 +1529,7 @@ const Profile = (() => {
     // Conditionally inject Auction tab after Free Agents
     if (auctionOn) {
       tabs.splice(tabs.findIndex(t => t.val === "freeagents") + 1, 0,
-        { val: "auction", label: isSalary ? "Auction / FAAB" : "FAAB Auction" }
+        { val: "auction", label: "Auction" }
       );
     }
 
