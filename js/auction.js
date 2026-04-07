@@ -35,9 +35,7 @@ const DLRAuction = (() => {
   let _viewMode     = "live";
   let _posFilter    = "ALL";
   let _teamFilter   = "";
-  let _faOnly       = false;   // show only free agents
-  let _watchlistOnly = false;  // show only starred players
-  let _watchlist    = null;    // Set of pids — loaded from localStorage
+  let _capLoadTriggered = false;
   let _capSettings  = null;
 
   // ── Firebase refs ──────────────────────────────────────────
@@ -263,11 +261,8 @@ const DLRAuction = (() => {
     _unsubFn = null;
     _capLoadTriggered = false;
     if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
-    _leagueKey     = null;
-    _auctions      = [];
-    _watchlist     = null;  // force reload from localStorage on next open
-    _faOnly        = false;
-    _watchlistOnly = false;
+    _leagueKey = null;
+    _auctions  = [];
     _initToken++;
   }
 
@@ -448,26 +443,6 @@ const DLRAuction = (() => {
   }
 
   // ── Rostered player set ───────────────────────────────────
-  function _getWatchlist() {
-    if (_watchlist) return _watchlist;
-    try {
-      const key = `dlr_watchlist_${_leagueKey}`;
-      _watchlist = new Set(JSON.parse(localStorage.getItem(key) || "[]"));
-    } catch(e) { _watchlist = new Set(); }
-    return _watchlist;
-  }
-  function _saveWatchlist() {
-    try {
-      localStorage.setItem(`dlr_watchlist_${_leagueKey}`, JSON.stringify([..._getWatchlist()]));
-    } catch(e) {}
-  }
-  function toggleWatchlist(pid) {
-    const wl = _getWatchlist();
-    if (wl.has(pid)) wl.delete(pid); else wl.add(pid);
-    _saveWatchlist();
-    _renderView();
-  }
-
   function _rosteredSet() {
     const s = new Set();
     _rosterData.forEach(t => {
@@ -507,7 +482,6 @@ const DLRAuction = (() => {
           <button class="auc-tab ${_viewMode==="live"      ? "auc-tab--active":""}" onclick="DLRAuction.setView('live')">
             Live ${live.length > 0 ? `<span class="auc-badge">${live.length}</span>` : ""}
           </button>
-          <button class="auc-tab ${_viewMode==="fa"        ? "auc-tab--active":""}" onclick="DLRAuction.setView('fa')">Players</button>
           <button class="auc-tab ${_viewMode==="teams"     ? "auc-tab--active":""}" onclick="DLRAuction.setView('teams')">Teams</button>
           <button class="auc-tab ${_viewMode==="history"   ? "auc-tab--active":""}" onclick="DLRAuction.setView('history')">History</button>
           ${_isCommish ? `<button class="auc-tab ${_viewMode==="settings" ? "auc-tab--active":""}" onclick="DLRAuction.setView('settings')">⚙ Settings</button>` : ""}
@@ -621,137 +595,15 @@ const DLRAuction = (() => {
       </div>`;
   }
 
-  // ── Players tab (all players: FA + rostered + watchlist) ───
-  function _renderFreeAgents(el, canNom) {
-    const rostered   = _rosteredSet();
-    const nominated  = _alreadyNominated();
-    const watchlist  = _getWatchlist();
-    const wonPlayerIds = new Set(_auctions.filter(a => a.processed && !a.cancelled).map(a => String(a.playerId)));
-
-    // Build roster lookup: playerId → teamName
-    const rosterLookup = {};
-    _rosterData.forEach(t => {
-      [...(t.players||[]), ...(t.reserve||[]), ...(t.taxi||[])].forEach(pid => {
-        rosterLookup[String(pid)] = t.teamName || `Team ${t.roster_id}`;
-      });
-    });
-
-    // All skill-position players
-    const allPlayers = Object.entries(_players)
-      .filter(([pid, p]) => {
-        const pos = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
-        if (!["QB","RB","WR","TE"].includes(pos)) return false;
-        return p.active !== false;
-      })
-      .map(([pid, p]) => ({
-        pid,
-        name:      `${p.first_name || ""} ${p.last_name || ""}`.trim(),
-        pos:       (p.fantasy_positions?.[0] || p.position || "?").toUpperCase(),
-        nflTeam:   p.team || "FA",
-        rank:      p.search_rank || 9999,
-        age:       p.age || null,
-        isFA:      !rostered.has(pid) && (p.team && p.team !== "FA" && p.team !== ""),
-        isRostered: rostered.has(pid),
-        rosterTeam: rosterLookup[pid] || null,
-        nominated:  nominated.has(pid),
-        won:        wonPlayerIds.has(pid),
-        starred:    watchlist.has(pid)
-      }))
-      .sort((a, b) => a.rank - b.rank);
-
-    // Build NFL team list from all players
-    const nflTeams = [...new Set(allPlayers.map(p => p.nflTeam).filter(t => t && t !== "FA"))].sort();
-
-    // Apply filters
-    const filtered = allPlayers.filter(p => {
-      if (_posFilter !== "ALL" && p.pos !== _posFilter) return false;
-      if (_teamFilter && p.nflTeam !== _teamFilter) return false;
-      if (_faOnly && !p.isFA) return false;
-      if (_watchlistOnly && !p.starred) return false;
-      return true;
-    });
-
-    el.innerHTML = `
-      <div class="auc-fa-toolbar">
-        <div class="auc-fa-filters">
-          <div class="auc-pos-pills">
-            ${["ALL","QB","RB","WR","TE"].map(pos => `
-              <button class="auc-pos-btn ${_posFilter === pos ? "auc-pos-btn--active" : ""}"
-                onclick="DLRAuction.setPos('${pos}')">${pos}</button>
-            `).join("")}
-          </div>
-          <select class="auc-team-select" onchange="DLRAuction.setTeamFilter(this.value)">
-            <option value="">All NFL Teams</option>
-            ${nflTeams.map(t => `<option value="${t}" ${_teamFilter === t ? "selected" : ""}>${t}</option>`).join("")}
-          </select>
-        </div>
-        <div class="auc-fa-filters" style="margin-top:var(--space-2);gap:var(--space-2)">
-          <button class="auc-pos-btn ${_faOnly ? "auc-pos-btn--active" : ""}"
-            onclick="DLRAuction.setFaOnly(${!_faOnly})">🟢 FA Only</button>
-          <button class="auc-pos-btn ${_watchlistOnly ? "auc-pos-btn--active" : ""}"
-            onclick="DLRAuction.setWatchlistOnly(${!_watchlistOnly})">⭐ Watchlist</button>
-          <span class="dim" style="font-size:.78rem;margin-left:auto">${filtered.length} players</span>
-        </div>
-      </div>
-      ${!canNom ? `<div class="auc-nom-limit">⚠️ ${_myActiveNoms() >= (_settings.maxNoms||2) ? `Max ${_settings.maxNoms||2} active nominations reached.` : _myOpenSpots() <= 0 ? "Roster is full." : "Insufficient cap space to nominate."}</div>` : ""}
-      <div class="auc-fa-list">
-        ${filtered.slice(0, 80).map((p, i) => {
-          const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[p.pos] || "#9ca3af";
-          const starIcon = p.starred ? "⭐" : "☆";
-          const starColor = p.starred ? "var(--color-gold)" : "var(--color-text-dim)";
-
-          // Right-side action
-          let action;
-          if (p.won) {
-            action = `<span class="auc-already-nom" style="color:var(--color-blue)">Claimed</span>`;
-          } else if (p.nominated) {
-            action = `<span class="auc-already-nom">Active bid</span>`;
-          } else if (p.isRostered) {
-            action = `<span class="auc-already-nom" style="color:var(--color-text-dim);font-size:.72rem">${_esc(p.rosterTeam||"Rostered")}</span>`;
-          } else if (canNom) {
-            action = `<button class="btn-primary btn-sm" onclick="DLRAuction.openNominate('${p.pid}','${_escA(p.name)}','${p.pos}','${p.nflTeam}')">Nominate</button>`;
-          } else {
-            action = `<button class="btn-secondary btn-sm" disabled title="${_myActiveNoms() >= (_settings.maxNoms||2) ? "Max nominations reached" : _myOpenSpots() <= 0 ? "Roster full" : "Insufficient cap"}">🚫</button>`;
-          }
-
-          return `
-            <div class="auc-fa-row">
-              <button class="auc-star-btn" onclick="DLRAuction.toggleWatchlist('${p.pid}')" title="${p.starred ? "Remove from watchlist" : "Add to watchlist"}" style="color:${starColor};background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 2px;flex-shrink:0">${starIcon}</button>
-              <div class="auc-fa-rank dim">${i+1}</div>
-              <img class="auc-fa-photo" src="https://sleepercdn.com/content/nfl/players/thumb/${p.pid}.jpg" onerror="this.style.display='none'" loading="lazy"/>
-              <span class="auc-pos-pill" style="background:${color}22;color:${color};border-color:${color}55">${p.pos}</span>
-              <div class="auc-fa-info">
-                <div class="auc-player-name">${_esc(p.name)}</div>
-                <div class="dim" style="font-size:.72rem">${p.nflTeam !== "FA" ? p.nflTeam : "Free Agent"}${p.age ? ` · Age ${p.age}` : ""}${p.isRostered ? " · <span style='color:var(--color-text-muted)'>Rostered</span>" : ""}</div>
-              </div>
-              ${action}
-            </div>`;
-        }).join("")}
-        ${filtered.length > 80 ? `<div class="dim" style="text-align:center;padding:var(--space-3);font-size:.78rem">Showing top 80 — use filters to narrow results</div>` : ""}
-      </div>`;
+  // ── FA view stub — Players tab lives in rules-and-fa.js ───
+  function _renderFreeAgents(el) {
+    el.innerHTML = `<div class="auc-empty">Use the Players tab to nominate a player.</div>`;
   }
 
-  function setPos(pos) {
-    _posFilter = pos;
-    _renderView();
-  }
+  function setFaOnly()        {} // no-op
+  function setWatchlistOnly() {} // no-op
 
-  function setTeamFilter(team) {
-    _teamFilter = team;
-    _renderView();
-  }
-
-  function setFaOnly(val) {
-    _faOnly = val;
-    _renderView();
-  }
-
-  function setWatchlistOnly(val) {
-    _watchlistOnly = val;
-    _renderView();
-  }
-
-  // ── Nominate modal ────────────────────────────────────────
+    // ── Nominate modal ────────────────────────────────────────
   function openNominate(pid, name, pos, nflTeam) {
     // Block if already on a roster
     if (isRostered(pid)) {
@@ -1762,15 +1614,22 @@ const DLRAuction = (() => {
     return _leagueKey === leagueKey && _rosterData.length > 0;
   }
 
+  function getActiveNominations() {
+    const now = Date.now();
+    return _auctions
+      .filter(a => !a.cancelled && !a.processed && a.expiresAt > now)
+      .map(a => String(a.playerId));
+  }
+
   return {
-    init, preInit, reset, setView, setPos, setTeamFilter, setFaOnly, setWatchlistOnly, toggleWatchlist,
+    init, preInit, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
     openBidModal, _confirmBid, placeBid,
     showBidHistory, _deleteLogEntry,
     claimAuction, cancelAuction, passAuction, isRostered,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
-    canNominate, isReady
+    canNominate, isReady, getActiveNominations
   };
 
 })();

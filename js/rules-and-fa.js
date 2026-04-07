@@ -158,16 +158,22 @@ const DLRRules = (() => {
 // ══════════════════════════════════════════════════════════
 const DLRFreeAgents = (() => {
 
-  let _leagueId      = null;
-  let _leagueKey     = null;
-  let _auctionEnabled = false;
+  let _leagueId           = null;
+  let _leagueKey          = null;
+  let _auctionEnabled     = false;
   let _auctionIncludePicks = false;
-  let _myRosterId    = null;
-  let _myTeamName    = "My Team";
-  let _initToken = 0;
-  let _sortMode  = "adp";
-  let _posFilter = "ALL";
-  let _cachedData = null;
+  let _myRosterId         = null;
+  let _myTeamName         = "My Team";
+  let _initToken          = 0;
+  let _sortMode           = "adp";
+  let _posFilter          = "ALL";
+  let _teamFilter         = "";
+  let _faOnly             = false;
+  let _watchlistOnly      = false;
+  let _watchlist          = null;
+  let _cachedData         = null;
+  let _rosterLookup       = {};   // playerId → teamName
+  let _wonIds             = new Set(); // playerIds claimed this auction session
 
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
@@ -182,15 +188,21 @@ const DLRFreeAgents = (() => {
     _auctionIncludePicks= !!auctionIncludePicks;
     _myRosterId         = myRosterId || null;
     _myTeamName         = myTeamName || "My Team";
-    _cachedData = null;
-    _sortMode   = "adp";
-    _posFilter  = "ALL";
+    _cachedData         = null;
+    _sortMode           = "adp";
+    _posFilter          = "ALL";
+    _teamFilter         = "";
+    _faOnly             = false;
+    _watchlistOnly      = false;
+    _watchlist          = null;
+    _rosterLookup       = {};
+    _wonIds             = new Set();
     _initToken++;
     const token = _initToken;
 
     const el = document.getElementById("dtab-freeagents");
     if (!el) return;
-    el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading free agents…</span></div>`;
+    el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading players…</span></div>`;
 
     try {
       await _loadData(leagueId, token);
@@ -199,6 +211,27 @@ const DLRFreeAgents = (() => {
       el.innerHTML = `<div class="detail-error">⚠️ ${e.message}</div>`;
     }
   }
+
+  // ── Watchlist helpers ─────────────────────────────────────
+  function _getWatchlist() {
+    if (_watchlist) return _watchlist;
+    try {
+      _watchlist = new Set(JSON.parse(localStorage.getItem(`dlr_watchlist_${_leagueKey}`) || "[]"));
+    } catch(e) { _watchlist = new Set(); }
+    return _watchlist;
+  }
+  function _saveWatchlist() {
+    try { localStorage.setItem(`dlr_watchlist_${_leagueKey}`, JSON.stringify([..._getWatchlist()])); } catch(e) {}
+  }
+  function toggleWatchlist(pid) {
+    const wl = _getWatchlist();
+    if (wl.has(pid)) wl.delete(pid); else wl.add(pid);
+    _saveWatchlist();
+    _render();
+  }
+  function setFaOnly(val)        { _faOnly        = val; _render(); }
+  function setWatchlistOnly(val) { _watchlistOnly  = val; _render(); }
+  function setTeamFilter(val)    { _teamFilter     = val; _render(); }
 
   function reset() {
     _leagueId   = null;
@@ -213,18 +246,11 @@ const DLRFreeAgents = (() => {
     const rosters = await SleeperAPI.getRosters(leagueId);
     if (token !== _initToken) return;
 
-    const rostered = new Set();
-    (rosters||[]).forEach(r => {
-      (r.players||[]).forEach(id => rostered.add(id));
-      (r.reserve||[]).forEach(id => rostered.add(id));
-      (r.taxi||[]).forEach(id => rostered.add(id));
-    });
-
-    // Get player database via IndexedDB-backed module
+    // Get player database
     const players = await DLRPlayers.load();
     if (token !== _initToken) return;
 
-    // Fetch prior year PPR stats
+    // Build roster lookup and all-player list
     const priorYear = new Date().getFullYear() - 1;
     let priorStats  = {};
     try {
@@ -244,28 +270,55 @@ const DLRFreeAgents = (() => {
 
     if (token !== _initToken) return;
 
-    // Build free agent list
-    const fas = Object.entries(players)
+    // Build roster lookup: playerId → teamName (for all players, not just FAs)
+    _rosterLookup = {};
+    const rostered = new Set();
+    (rosters||[]).forEach(r => {
+      const tName = r.teamName || r.team_name || `Team ${r.roster_id}`;
+      [...(r.players||[]), ...(r.reserve||[]), ...(r.taxi||[])].forEach(id => {
+        rostered.add(id);
+        _rosterLookup[String(id)] = tName;
+      });
+    });
+
+    // Build won IDs from auction history if available
+    _wonIds = new Set();
+    if (_leagueKey && typeof GMD !== "undefined") {
+      try {
+        const snap = await GMD.child(`auctions/${_leagueKey}/bids`).once("value");
+        const auctData = snap.val() || {};
+        Object.values(auctData).forEach(a => {
+          if (a.processed && !a.cancelled && a.playerId) _wonIds.add(String(a.playerId));
+        });
+      } catch(e) {}
+    }
+
+    // Build ALL skill-position players (rostered + FA)
+    const allPlayers = Object.entries(players)
       .filter(([pid, p]) => {
-        if (rostered.has(pid)) return false;
         const pos = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
         if (!SKILL_POS.includes(pos)) return false;
-        const onTeam = p.team && p.team !== "FA" && p.team !== "" && p.active !== false;
+        if (p.active === false) return false;
+        // Include if on NFL team, has prior stats, or is currently rostered
+        const onTeam = p.team && p.team !== "FA" && p.team !== "";
         const hasPts = priorStats[pid] && (priorStats[pid].pts_ppr || 0) > 0;
-        return onTeam || hasPts;
+        return onTeam || hasPts || rostered.has(pid);
       })
       .map(([pid, p]) => ({
         pid,
-        name:  `${p.first_name} ${p.last_name}`,
-        pos:   (p.fantasy_positions?.[0] || p.position || "—").toUpperCase(),
-        team:  p.team || "FA",
-        rank:  p.search_rank || 9999,
-        pts:   priorStats[pid]?.pts_ppr || null,
-        age:   p.age || null,
-        status: p.injury_status || null
+        name:       `${p.first_name || ""} ${p.last_name || ""}`.trim(),
+        pos:        (p.fantasy_positions?.[0] || p.position || "—").toUpperCase(),
+        team:       p.team || "FA",
+        rank:       p.search_rank || 9999,
+        pts:        priorStats[pid]?.pts_ppr || null,
+        age:        p.age || null,
+        status:     p.injury_status || null,
+        isRostered: rostered.has(pid),
+        rosterTeam: _rosterLookup[pid] || null,
+        isWon:      _wonIds.has(pid)
       }));
 
-    _cachedData = fas;
+    _cachedData = allPlayers;
     if (token !== _initToken) return;
     _render();
   }
@@ -274,16 +327,51 @@ const DLRFreeAgents = (() => {
     const el = document.getElementById("dtab-freeagents");
     if (!el || !_cachedData) return;
 
-    const sorted = [..._cachedData]
-      .filter(p => _posFilter === "ALL" || p.pos === _posFilter)
+    const priorYear  = new Date().getFullYear() - 1;
+    const watchlist  = _getWatchlist();
+    const nominated  = (typeof DLRAuction !== "undefined" && DLRAuction.isReady?.(_leagueKey))
+      ? new Set() : new Set(); // placeholder — nom status shown via isWon/isRostered
+
+    // Check auction readiness
+    const auctionReady = _auctionEnabled
+      && typeof DLRAuction !== "undefined"
+      && DLRAuction.isReady?.(_leagueKey);
+    const canNom = auctionReady ? DLRAuction.canNominate() : false;
+    const nominated_ = auctionReady
+      ? new Set(DLRAuction.getActiveNominations())
+      : new Set();
+
+    // Poll if not ready
+    if (_auctionEnabled && !auctionReady) {
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        if (DLRAuction.isReady?.(_leagueKey)) {
+          clearInterval(poll);
+          if (_cachedData) _render();
+        } else if (attempts >= 10) clearInterval(poll);
+      }, 500);
+    }
+
+    // Build NFL team list
+    const nflTeams = [...new Set(_cachedData.map(p => p.team).filter(t => t && t !== "FA"))].sort();
+
+    // Apply all filters + sort
+    const sorted = _cachedData
+      .map(p => ({ ...p, starred: watchlist.has(p.pid), activeNom: nominated_.has(p.pid) }))
+      .filter(p => {
+        if (_posFilter !== "ALL" && p.pos !== _posFilter) return false;
+        if (_teamFilter && p.team !== _teamFilter) return false;
+        if (_faOnly && p.isRostered) return false;
+        if (_watchlistOnly && !p.starred) return false;
+        return true;
+      })
       .sort((a, b) =>
         _sortMode === "pts"
           ? (b.pts || 0) - (a.pts || 0)
           : (a.rank || 9999) - (b.rank || 9999)
       )
-      .slice(0, 50);
-
-    const priorYear = new Date().getFullYear() - 1;
+      .slice(0, 100);
 
     el.innerHTML = `
       <div class="fa-toolbar">
@@ -300,43 +388,49 @@ const DLRFreeAgents = (() => {
             onclick="DLRFreeAgents.setSort('pts')">${priorYear} Pts</button>
         </div>
       </div>
+      <div class="fa-toolbar" style="margin-top:var(--space-2);gap:var(--space-2);flex-wrap:wrap">
+        <select class="fa-sort-btn" style="padding:3px 8px;border-radius:var(--radius-sm)" onchange="DLRFreeAgents.setTeamFilter(this.value)">
+          <option value="">All NFL Teams</option>
+          ${nflTeams.map(t => `<option value="${t}" ${_teamFilter === t ? "selected" : ""}>${t}</option>`).join("")}
+        </select>
+        <button class="fa-sort-btn ${_faOnly ? "fa-sort-btn--active" : ""}"
+          onclick="DLRFreeAgents.setFaOnly(${!_faOnly})">🟢 FA Only</button>
+        <button class="fa-sort-btn ${_watchlistOnly ? "fa-sort-btn--active" : ""}"
+          onclick="DLRFreeAgents.setWatchlistOnly(${!_watchlistOnly})">⭐ Watchlist</button>
+        <span class="dim" style="font-size:.75rem;margin-left:auto">${sorted.length} players</span>
+      </div>
       <div class="fa-list">
-        ${(() => {
-          // Check if auction module is ready for THIS league (has rosters loaded)
-          const auctionReady = _auctionEnabled
-            && typeof DLRAuction !== "undefined"
-            && DLRAuction.isReady?.(_leagueKey);
+        ${sorted.length ? sorted.map((p, i) => {
+          const color    = POS_COLOR[p.pos] || "#9ca3af";
+          const pts      = p.pts  ? p.pts.toFixed(0) : "—";
+          const rank     = p.rank < 9999 ? `#${p.rank}` : "—";
+          const starIcon = p.starred ? "⭐" : "☆";
+          const starClr  = p.starred ? "var(--color-gold)" : "var(--color-text-dim)";
 
-          const canNom = auctionReady ? DLRAuction.canNominate() : false;
-
-          // If auction is enabled but not yet ready, poll until it is (max 5s)
-          if (_auctionEnabled && !auctionReady) {
-            let attempts = 0;
-            const poll = setInterval(() => {
-              attempts++;
-              if (DLRAuction.isReady?.(_leagueKey)) {
-                clearInterval(poll);
-                if (_cachedData) _render();
-              } else if (attempts >= 10) {
-                clearInterval(poll);
-              }
-            }, 500);
+          // Right-side action
+          let nomBtn = "";
+          if (_auctionEnabled) {
+            if (p.isWon) {
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.72rem">Claimed</span>`;
+            } else if (p.activeNom) {
+              nomBtn = `<span class="fa-nom-badge">Active bid</span>`;
+            } else if (p.isRostered) {
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.7rem">${_esc(p.rosterTeam||"Rostered")}</span>`;
+            } else if (canNom) {
+              nomBtn = `<button class="fa-nom-btn btn-primary btn-sm"
+                onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
+                title="Nominate for auction">🏷</button>`;
+            } else {
+              nomBtn = `<button class="fa-nom-btn btn-secondary btn-sm" disabled style="opacity:.4"
+                title="${auctionReady ? "Max nominations or cap reached" : "Loading…"}">🏷</button>`;
+            }
           }
 
-          return sorted.length ? sorted.map((p, i) => {
-          const color = POS_COLOR[p.pos] || "#9ca3af";
-          const pts   = p.pts ? p.pts.toFixed(0) : "—";
-          const rank  = p.rank < 9999 ? `#${p.rank}` : "—";
-          const nomBtn = _auctionEnabled
-            ? (canNom
-                ? `<button class="fa-nom-btn btn-primary btn-sm"
-                    onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
-                    title="Nominate for auction">🏷</button>`
-                : `<button class="fa-nom-btn btn-secondary btn-sm" disabled
-                    title="${auctionReady ? (typeof DLRAuction !== "undefined" && DLRAuction._settings?.scheduledStart > Date.now() ? "Auction not started yet" : "Max nominations or cap reached") : "Loading…"}" style="opacity:.4">🏷</button>`)
-            : "";
           return `
             <div class="fa-player-row" onclick="DLRPlayerCard.show('${p.pid}', '${_escAttr(p.name)}')">
+              <button class="fa-star-btn" onclick="event.stopPropagation();DLRFreeAgents.toggleWatchlist('${p.pid}')"
+                title="${p.starred ? "Remove from watchlist" : "Add to watchlist"}"
+                style="color:${starClr};background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 2px;flex-shrink:0;line-height:1">${starIcon}</button>
               <div class="fa-rank">${i + 1}</div>
               <div class="fa-photo">
                 <img src="https://sleepercdn.com/content/nfl/players/thumb/${p.pid}.jpg"
@@ -345,7 +439,7 @@ const DLRFreeAgents = (() => {
               <div class="fa-pos-dot" style="background:${color}22;color:${color};border-color:${color}55">${p.pos}</div>
               <div class="fa-info">
                 <div class="fa-name">${_esc(p.name)}${p.status ? ` <span class="fa-injury">${p.status}</span>` : ""}</div>
-                <div class="fa-meta">${p.team}${p.age ? ` · Age ${p.age}` : ""}</div>
+                <div class="fa-meta">${p.team !== "FA" ? p.team : "Free Agent"}${p.age ? ` · Age ${p.age}` : ""}${p.isRostered ? ` · <span style="color:var(--color-text-dim)">${_esc(p.rosterTeam||"Rostered")}</span>` : ""}</div>
               </div>
               <div class="fa-stats">
                 <div class="fa-stat-val">${_sortMode === "pts" ? pts : rank}</div>
@@ -357,8 +451,7 @@ const DLRFreeAgents = (() => {
               </div>
               ${nomBtn}
             </div>`;
-          }).join("") : `<div class="fa-empty">No free agents found.</div>`;
-        })()}
+        }).join("") : `<div class="fa-empty">No players match the current filters.</div>`}
       </div>`;
   }
 
@@ -379,6 +472,6 @@ const DLRFreeAgents = (() => {
     if (_cachedData) _render();
   }
 
-  return { init, reset, setSort, setPos, refresh };
+  return { init, reset, setSort, setPos, setTeamFilter, setFaOnly, setWatchlistOnly, toggleWatchlist, refresh };
 
 })();
