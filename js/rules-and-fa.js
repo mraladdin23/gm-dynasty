@@ -234,7 +234,10 @@ const DLRFreeAgents = (() => {
   function setFaOnly(val)        { _faOnly        = val; _render(); }
   function setWatchlistOnly(val) { _watchlistOnly  = val; _render(); }
   function setTeamFilter(val)    { _teamFilter     = val; _render(); }
-  function setSearch(q)          { _searchQuery    = (q||"").toLowerCase().trim(); _render(); }
+  function setSearch(q) {
+    _searchQuery = (q||"").toLowerCase().trim();
+    _renderList(); // only rebuild the list, not the toolbar
+  }
 
   function reset() {
     _leagueId   = null;
@@ -416,10 +419,15 @@ const DLRFreeAgents = (() => {
           onclick="DLRFreeAgents.setFaOnly(${!_faOnly})">🟢 FA Only</button>
         <button class="fa-sort-btn ${_watchlistOnly ? "fa-sort-btn--active" : ""}"
           onclick="DLRFreeAgents.setWatchlistOnly(${!_watchlistOnly})">⭐ Watchlist</button>
-        <span class="dim" style="font-size:.75rem;margin-left:auto">${sorted.length} players</span>
+        <span class="dim" style="font-size:.75rem;margin-left:auto" id="fa-count">${sorted.length} players</span>
       </div>
-      <div class="fa-list">
-        ${sorted.length ? sorted.map((p, i) => {
+      <div class="fa-list" id="fa-list-body">
+        ${_buildListHTML(sorted, canNom, auctionReady)}
+      </div>`;
+  }
+
+  function _buildListHTML(sorted, canNom, auctionReady) {
+    return sorted.length ? sorted.map((p, i) => {
           const color    = POS_COLOR[p.pos] || "#9ca3af";
           const pts      = p.pts  ? p.pts.toFixed(0) : "—";
           const rank     = p.rank < 9999 ? `#${p.rank}` : "—";
@@ -470,8 +478,39 @@ const DLRFreeAgents = (() => {
               </div>
               ${nomBtn}
             </div>`;
-        }).join("") : `<div class="fa-empty">No players match the current filters.</div>`}
-      </div>`;
+        }).join("") : `<div class="fa-empty">No players match the current filters.</div>`;
+  }
+
+  // Only rebuilds the list — called by search to preserve input focus
+  function _renderList() {
+    const listEl  = document.getElementById("fa-list-body");
+    const countEl = document.getElementById("fa-count");
+    if (!listEl || !_cachedData) return;
+
+    const watchlist  = _getWatchlist();
+    const auctionReady = _auctionEnabled && typeof DLRAuction !== "undefined" && DLRAuction.isReady?.(_leagueKey);
+    const canNom       = auctionReady ? DLRAuction.canNominate() : false;
+    const nominated_   = auctionReady ? new Set(DLRAuction.getActiveNominations()) : new Set();
+
+    const sorted = _cachedData
+      .map(p => ({ ...p, starred: watchlist.has(p.pid), activeNom: nominated_.has(p.pid) }))
+      .filter(p => {
+        if (_posFilter !== "ALL" && p.pos !== _posFilter) return false;
+        if (_teamFilter && p.team !== _teamFilter) return false;
+        if (_faOnly && p.isRostered) return false;
+        if (_watchlistOnly && !p.starred) return false;
+        if (_searchQuery && !p.name.toLowerCase().includes(_searchQuery)) return false;
+        return true;
+      })
+      .sort((a, b) =>
+        _sortMode === "pts"
+          ? (b.pts || 0) - (a.pts || 0)
+          : (a.rank || 9999) - (b.rank || 9999)
+      )
+      .slice(0, 100);
+
+    listEl.innerHTML  = _buildListHTML(sorted, canNom, auctionReady);
+    if (countEl) countEl.textContent = `${sorted.length} players`;
   }
 
   function setSort(mode) {
