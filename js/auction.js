@@ -267,62 +267,91 @@ const DLRAuction = (() => {
   }
 
   // ── Time helpers ──────────────────────────────────────────
-  function _isNightPause(now = Date.now()) {
-    const ct   = new Date(new Date(now).toLocaleString("en-US", { timeZone: "America/Chicago" }));
-    const h    = ct.getHours();
-    return h >= _settings.pauseStart && h < _settings.pauseEnd;
-  }
+function _getCTParts(ts) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(ts));
+
+  const get = (type) => parts.find(p => p.type === type)?.value;
+
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    second: Number(get("second"))
+  };
+}
+
+function _isNightPause(now = Date.now()) {
+  const { hour } = _getCTParts(now);
+  return hour >= _settings.pauseStart && hour < _settings.pauseEnd;
+}
 
   function _bidDurationMs() { return (_settings.bidDuration || 8) * 3_600_000; }
 
-  function _nextExpiry(now = Date.now()) {
-    const pauseStart = _settings.pauseStart ?? 0;  // hour CT, e.g. 0 = midnight
-    const pauseEnd   = _settings.pauseEnd   ?? 8;  // hour CT, e.g. 8 = 8am
-    const duration   = _bidDurationMs();
+function _nextExpiry(now = Date.now()) {
+  const pauseStart = _settings.pauseStart ?? 0;
+  const pauseEnd   = _settings.pauseEnd   ?? 8;
+  const duration   = _bidDurationMs();
 
-    // Helper: given a timestamp, return the next pause-start and pause-end in ms
-    function _nextPauseWindow(ts) {
-      const ct = new Date(new Date(ts).toLocaleString("en-US", { timeZone: "America/Chicago" }));
-      const ps = new Date(ct); ps.setHours(pauseStart, 0, 0, 0);
-      if (+ps <= ts) ps.setDate(ps.getDate() + 1); // next occurrence
-      const pe = new Date(ps);
-      pe.setHours(pe.getHours() + ((pauseEnd - pauseStart + 24) % 24));
-      return { start: +ps, end: +pe };
+  function nextPauseWindow(ts) {
+    let d = new Date(ts);
+
+    for (let i = 0; i < 48; i++) {
+      const parts = _getCTParts(d.getTime());
+
+      if (parts.hour === pauseStart) {
+        const start = new Date(d.getTime());
+
+        const end = new Date(start.getTime());
+        end.setHours(end.getHours() + ((pauseEnd - pauseStart + 24) % 24));
+
+        return { start: start.getTime(), end: end.getTime() };
+      }
+
+      d.setHours(d.getHours() + 1, 0, 0, 0);
     }
+
+    return { start: ts + 86400000, end: ts + 86400000 + 3600000 };
+  }
 
     // If bid placed during pause, start counting from pause end
     let start = now;
-    if (_isNightPause(now)) {
-      const ct = new Date(new Date(now).toLocaleString("en-US", { timeZone: "America/Chicago" }));
-      const resume = new Date(ct);
-      resume.setHours(pauseEnd, 0, 0, 0);
-      if (resume <= ct) resume.setDate(resume.getDate() + 1);
-      start = +resume;
+if (_isNightPause(now)) {
+    let d = new Date(now);
+    for (let i = 0; i < 24; i++) {
+      const parts = _getCTParts(d.getTime());
+      if (parts.hour === pauseEnd) break;
+      d.setHours(d.getHours() + 1, 0, 0, 0);
     }
+    start = d.getTime();
+  }
 
     // Walk forward: accumulate `duration` ms of non-pause time
     // Each time we hit a pause window, skip over it
-    let remaining = duration;
-    let cursor    = start;
+  let remaining = duration;
+  let cursor    = start;
 
-    for (let i = 0; i < 10; i++) {
-      const { start: ps, end: pe } = _nextPauseWindow(cursor);
-      const rawEnd = cursor + remaining;
+  for (let i = 0; i < 10; i++) {
+    const { start: ps, end: pe } = nextPauseWindow(cursor);
+    const rawEnd = cursor + remaining;
 
-      if (rawEnd <= ps) {
-        // Expiry is before next pause — done
-        cursor = rawEnd;
-        break;
-      } else {
-        // Expiry crosses into the pause window
-        // Consume time up to pause start
-        const consumed = ps - cursor;
-        remaining -= consumed;
-        // Jump to pause end and continue
-        cursor = pe;
-        // remaining duration still needs to run after the pause
-      }
+    if (rawEnd <= ps) {
+      return rawEnd;
     }
+
+    remaining -= (ps - cursor);
+    cursor = pe;
+  }
 
     return cursor;
   }
