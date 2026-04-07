@@ -438,11 +438,11 @@ const DLRFreeAgents = (() => {
           let nomBtn = "";
           if (_auctionEnabled) {
             if (p.isWon) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.72rem">Claimed</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.76rem">Claimed</span>`;
             } else if (p.activeNom) {
               nomBtn = `<span class="fa-nom-badge" style="font-size:.7rem">Active bid</span>`;
             } else if (p.isRostered) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.7rem">Rostered</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.72rem">Rostered</span>`;
             } else if (canNom) {
               nomBtn = `<button class="fa-nom-btn btn-primary btn-sm"
                 onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
