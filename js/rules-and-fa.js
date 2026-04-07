@@ -243,8 +243,17 @@ const DLRFreeAgents = (() => {
     const el = document.getElementById("dtab-freeagents");
 
     // Get all rostered player IDs in this league
-    const rosters = await SleeperAPI.getRosters(leagueId);
+    const [rosters, users] = await Promise.all([
+      SleeperAPI.getRosters(leagueId),
+      SleeperAPI.getLeagueUsers(leagueId).catch(() => [])
+    ]);
     if (token !== _initToken) return;
+
+    // Build user map: owner_id → teamName
+    const userMap = {};
+    (users||[]).forEach(u => {
+      userMap[u.user_id] = u.metadata?.team_name || u.display_name || u.user_id;
+    });
 
     // Get player database
     const players = await DLRPlayers.load();
@@ -274,7 +283,7 @@ const DLRFreeAgents = (() => {
     _rosterLookup = {};
     const rostered = new Set();
     (rosters||[]).forEach(r => {
-      const tName = r.teamName || r.team_name || `Team ${r.roster_id}`;
+      const tName = userMap[r.owner_id] || r.metadata?.team_name || `Team ${r.roster_id}`;
       [...(r.players||[]), ...(r.reserve||[]), ...(r.taxi||[])].forEach(id => {
         rostered.add(id);
         _rosterLookup[String(id)] = tName;
