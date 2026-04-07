@@ -553,17 +553,25 @@ let _globalAucData      = {};   // stored in closure, not on DOM element
 // Never exposes proxy bid amounts.
 function _computeDisplayBid(a) {
   const MIN_BID = 100_000;
-  const MIN_INC = 100_000;
-  const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids || {});
-  if (!bids.length) return MIN_BID;
-  const maxByRoster = {};
-  bids.forEach(b => {
-    if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
-      maxByRoster[b.rosterId] = b.maxBid;
-  });
-  const sorted = Object.values(maxByRoster).sort((a, b) => b - a);
-  if (sorted.length === 1) return MIN_BID;
-  return Math.min(sorted[0], sorted[1] + MIN_INC);
+  // Use flat proxies map (new structure) — fall back to bids array for legacy auctions
+  let entries = [];
+  if (a.proxies && Object.keys(a.proxies).length) {
+    entries = Object.entries(a.proxies)
+      .map(([, v]) => Number(v))
+      .sort((x, y) => y - x);
+  } else {
+    const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids || {});
+    const maxByRoster = {};
+    bids.forEach(b => {
+      if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
+        maxByRoster[b.rosterId] = b.maxBid;
+    });
+    entries = Object.values(maxByRoster).sort((x, y) => y - x);
+  }
+  if (!entries.length) return MIN_BID;
+  if (entries.length === 1) return MIN_BID;
+  // Display = challenger's bid (not leader's proxy, not +increment)
+  return entries[1];
 }
 
 function _startGlobalAucMonitor(profile) {
