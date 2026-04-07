@@ -634,8 +634,11 @@ function _updateGlobalAucPill(liveByLeague) {
       drawerSection.style.display = "none";
     } else {
       drawerSection.style.display = "";
-      drawerList.innerHTML = Object.entries(liveByLeague).flatMap(([leagueKey, { league, live }]) =>
-        live.map(a => {
+      drawerList.innerHTML = Object.entries(liveByLeague)
+        .flatMap(([leagueKey, { league, live }]) => live.map(a => ({ ...a, leagueKey, league })))
+        .sort((a, b) => a.expiresAt - b.expiresAt)
+        .map(a => {
+          const { leagueKey, league } = a;
           const displayBid = _computeDisplayBid(a);
           const bidCount   = a.proxies ? Object.keys(a.proxies).length : (a.bidCount || 1);
           const mins    = Math.max(0, Math.floor((a.expiresAt - Date.now()) / 60000));
@@ -647,8 +650,7 @@ function _updateGlobalAucPill(liveByLeague) {
             </div>
             <span style="font-family:var(--font-display);font-weight:700;color:var(--color-green);font-size:.82rem;flex-shrink:0">$${(displayBid/1e6).toFixed(1)}M</span>
           </div>`;
-        })
-      ).join("");
+        }).join("");
     }
   }
 }
@@ -668,7 +670,7 @@ function _openGlobalAucModal() {
         ${_escHtml(league.leagueName || leagueKey)}
         <span style="font-size:.72rem;color:var(--color-text-dim);margin-left:var(--space-2)">${live.length} active →</span>
       </div>
-      ${live.map(a => {
+      ${[...live].sort((a, b) => a.expiresAt - b.expiresAt).map(a => {
         const timeLeft   = Math.max(0, a.expiresAt - Date.now());
         const mins       = Math.floor(timeLeft / 60000);
         const hrs        = Math.floor(mins / 60);
