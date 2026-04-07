@@ -1,0 +1,238 @@
+<!-- FULL LOCKER ROOM HTML (replace your existing file) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Locker Room</title>
+
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+
+  <style>
+    body {
+      margin:0;
+      font-family: Arial, sans-serif;
+      background:#111;
+      color:#fff;
+    }
+
+    .locker-container {
+      padding:16px;
+    }
+
+    .locker-visual {
+      position:relative;
+      height:420px;
+      border-radius:16px;
+      overflow:hidden;
+    }
+
+    .locker-bg {
+      position:absolute;
+      inset:0;
+      background:url('/mnt/data/lockerroom.png') center/cover no-repeat;
+      filter:brightness(0.85);
+    }
+
+    .locker-light {
+      position:absolute;
+      inset:0;
+      background:radial-gradient(circle at 50% 20%, rgba(255,255,255,0.15), transparent 60%);
+      animation:pulse 6s infinite;
+    }
+
+    @keyframes pulse {
+      0%,100%{opacity:.4}
+      50%{opacity:.7}
+    }
+class
+    .locker-jersey {
+      position:absolute;
+      left:50%;
+      top:55%;
+      transform:translate(-50%,-50%);
+      width:160px;
+      cursor:pointer;
+    }
+
+    svg { width:100%; }
+
+    .locker-helmet {
+      position:absolute;
+      right:10%;
+      top:55%;
+      width:90px;
+    }
+
+    .helmet-shell {
+      width:100%;
+      height:60px;
+      background:var(--team-primary);
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .helmet-shell img { width:40px; }
+
+    .player-cards {
+      position:absolute;
+      left:10%;
+      top:55%;
+      display:flex;
+      gap:8px;
+    }
+
+    .card {
+      width:60px;
+      height:90px;
+      background:#222;
+      border-radius:6px;
+      padding:4px;
+      font-size:10px;
+    }
+
+    .card img { width:100%; }
+
+    @media(max-width:768px){
+      .locker-visual{height:260px}
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="locker-container">
+  <div class="locker-visual">
+    <div class="locker-bg"></div>
+    <div class="locker-light"></div>
+
+    <div class="locker-jersey" id="locker-jersey">
+      <svg viewBox="0 0 200 220">
+        <path d="M40 20 L80 0 L120 0 L160 20 L180 60 L150 80 L150 200 L50 200 L50 80 L20 60 Z"
+              fill="var(--team-primary)"/>
+
+        <text id="jersey-number" x="100" y="130" text-anchor="middle" font-size="64" fill="var(--team-accent)">23</text>
+        <text id="jersey-name" x="100" y="190" text-anchor="middle" font-size="18" fill="var(--team-accent)">GENERAL</text>
+      </svg>
+    </div>
+
+    <div class="locker-helmet">
+      <div class="helmet-shell">
+        <img id="helmet-logo" />
+      </div>
+    </div>
+
+    <div class="player-cards" id="player-cards"></div>
+  </div>
+</div>
+
+<script>
+
+const TEAM_CONFIG = {
+  ARI:{p:"#97233F",s:"#000000",a:"#FFB612",logo:"ari"},
+  ATL:{p:"#A71930",s:"#000000",a:"#A5ACAF",logo:"atl"},
+  BAL:{p:"#241773",s:"#000000",a:"#9E7C0C",logo:"bal"},
+  BUF:{p:"#00338D",s:"#C60C30",a:"#FFFFFF",logo:"buf"},
+  CAR:{p:"#0085CA",s:"#101820",a:"#BFC0BF",logo:"car"},
+  CHI:{p:"#0B162A",s:"#C83803",a:"#FFFFFF",logo:"chi"},
+  CIN:{p:"#FB4F14",s:"#000000",a:"#FFFFFF",logo:"cin"},
+  CLE:{p:"#311D00",s:"#FF3C00",a:"#FFFFFF",logo:"cle"},
+  DAL:{p:"#041E42",s:"#869397",a:"#FFFFFF",logo:"dal"},
+  DEN:{p:"#FB4F14",s:"#002244",a:"#FFFFFF",logo:"den"},
+  DET:{p:"#0076B6",s:"#B0B7BC",a:"#FFFFFF",logo:"det"},
+  GB:{p:"#203731",s:"#FFB612",a:"#FFFFFF",logo:"gb"},
+  HOU:{p:"#03202F",s:"#A71930",a:"#FFFFFF",logo:"hou"},
+  IND:{p:"#002C5F",s:"#A2AAAD",a:"#FFFFFF",logo:"ind"},
+  JAX:{p:"#006778",s:"#9F792C",a:"#000000",logo:"jax"},
+  KC:{p:"#E31837",s:"#FFB81C",a:"#FFFFFF",logo:"kc"},
+  LV:{p:"#000000",s:"#A5ACAF",a:"#FFFFFF",logo:"lv"},
+  LAC:{p:"#0080C6",s:"#FFC20E",a:"#FFFFFF",logo:"lac"},
+  LAR:{p:"#003594",s:"#FFA300",a:"#FFFFFF",logo:"lar"},
+  MIA:{p:"#008E97",s:"#FC4C02",a:"#FFFFFF",logo:"mia"},
+  MIN:{p:"#4F2683",s:"#FFC62F",a:"#FFFFFF",logo:"min"},
+  NE:{p:"#002244",s:"#C60C30",a:"#FFFFFF",logo:"ne"},
+  NO:{p:"#101820",s:"#D3BC8D",a:"#FFFFFF",logo:"no"},
+  NYG:{p:"#0B2265",s:"#A71930",a:"#FFFFFF",logo:"nyg"},
+  NYJ:{p:"#125740",s:"#FFFFFF",a:"#000000",logo:"nyj"},
+  PHI:{p:"#004C54",s:"#A5ACAF",a:"#FFFFFF",logo:"phi"},
+  PIT:{p:"#FFB612",s:"#101820",a:"#FFFFFF",logo:"pit"},
+  SEA:{p:"#002244",s:"#69BE28",a:"#FFFFFF",logo:"sea"},
+  SF:{p:"#AA0000",s:"#B3995D",a:"#FFFFFF",logo:"sf"},
+  TB:{p:"#D50A0A",s:"#34302B",a:"#FFFFFF",logo:"tb"},
+  TEN:{p:"#0C2340",s:"#4B92DB",a:"#FFFFFF",logo:"ten"},
+  WAS:{p:"#5A1414",s:"#FFB612",a:"#FFFFFF",logo:"was"}
+};
+
+function applyTheme(team){
+  const t = TEAM_CONFIG[team] || TEAM_CONFIG.KC;
+
+  document.documentElement.style.setProperty('--team-primary', t.p);
+  document.documentElement.style.setProperty('--team-accent', t.a);
+
+  document.getElementById('helmet-logo').src =
+    `https://a.espncdn.com/i/teamlogos/nfl/500/${t.logo}.png`;
+}
+
+function renderJersey(profile){
+  document.getElementById('jersey-name').textContent = profile.jersey?.name || 'GENERAL';
+  document.getElementById('jersey-number').textContent = profile.jersey?.number || '23';
+}
+
+function bindJersey(profile){
+  document.getElementById('locker-jersey').onclick = async () => {
+    const name = prompt('Name:', profile.jersey?.name || 'GENERAL');
+    const num = prompt('Number:', profile.jersey?.number || '23');
+
+    profile.jersey = {name, number:num};
+    renderJersey(profile);
+
+    await firebase.database().ref('users/'+profile.username+'/jersey').set(profile.jersey);
+  }
+}
+
+function renderCards(players){
+  const container = document.getElementById('player-cards');
+  container.innerHTML = '';
+
+  if (!players || !players.length) {
+    container.innerHTML = `<div style="font-size:12px;color:#aaa;">No players</div>`;
+    return;
+  }
+
+  players.slice(0,4).forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'card';
+
+    div.innerHTML = `
+      <img src="https://sleepercdn.com/content/nfl/players/${p.player_id}.jpg"
+           onerror="this.style.display='none'"/>
+      <div style="margin-top:4px;">${p.name || 'Player'}</div>
+    `;
+
+    // 🔥 THIS is the important part
+    div.onclick = () => {
+      if (typeof DLRPlayerCard !== 'undefined') {
+        DLRPlayerCard.show(p.player_id, p.name);
+      }
+    };
+
+    container.appendChild(div);
+  });
+}
+
+// MOCK INIT (replace with your real profile load)
+const profile = await getUserProfile();
+
+applyTheme(profile.favoriteNflTeam);
+renderJersey(profile);
+bindJersey(profile);
+const players = await getTopExposedPlayers(userId);
+renderCards(players);
+
+</script>
+
+</body>
+</html>

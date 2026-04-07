@@ -42,6 +42,7 @@ const DLRAuction = (() => {
   const _listRef     = () => GMD.child(`auctions/${_leagueKey}/bids`);
   const _auctRef     = (id) => GMD.child(`auctions/${_leagueKey}/bids/${id}`);
   const _settingsRef = () => GMD.child(`auctions/${_leagueKey}/settings`);
+  const _logRef      = (id) => GMD.child(`auctions/${_leagueKey}/bidLog/${id}`);
 
   // ── Pre-init: load state so canNominate/isRostered work on all tabs ──
   async function preInit(leagueKey, leagueId, isCommish, myRosterId, myTeamName, platform, sleeperUserId, franchiseId) {
@@ -229,10 +230,11 @@ const DLRAuction = (() => {
       const d = snap.val() || {};
       _auctions = Object.values(d).filter(Boolean).map(a => ({
         ...a,
-        // Normalize to integers so comparisons always work regardless of Firebase type
         nominatedBy: a.nominatedBy != null ? Number(a.nominatedBy) : null,
         bids: Array.isArray(a.bids) ? a.bids : Object.values(a.bids || {})
       }));
+      // Auto-claim any expired auctions with a winner (commish only)
+      if (_isCommish) _autoClaimExpired();
       _render();
     };
     const onErr = err => {
@@ -249,6 +251,7 @@ const DLRAuction = (() => {
     _unsubFn = () => _listRef().off("value", onVal);
 
     _timerInterval = setInterval(() => {
+      if (_isCommish) _autoClaimExpired();
       if (_viewMode === "live") _renderView();
     }, 30_000);
   }
@@ -327,11 +330,16 @@ const DLRAuction = (() => {
       // Single bidder — show MIN_BID, proxy stays hidden
       return { rosterId: entries[0].rosterId, displayBid: MIN_BID() };
     }
-    // Proxy: winner pays one increment above second-highest
-    return {
-      rosterId:   entries[0].rosterId,
-      displayBid: Math.min(entries[0].maxBid, entries[1].maxBid + MIN_INC())
-    };
+    // Proxy: if leader's proxy > challenger's bid, display = challenger's bid (not +increment)
+    // This matches real auction behaviour: you pay what the challenger bid, not one increment over
+    const leaderMax     = entries[0].maxBid;
+    const challengerMax = entries[1].maxBid;
+    if (leaderMax > challengerMax) {
+      // Leader's proxy wins — display price is exactly what the challenger bid
+      return { rosterId: entries[0].rosterId, displayBid: challengerMax };
+    }
+    // Tied (shouldn't happen but handle gracefully — first bidder wins)
+    return { rosterId: entries[0].rosterId, displayBid: leaderMax };
   }
 
   function _myMaxBid(a) {
@@ -572,13 +580,10 @@ const DLRAuction = (() => {
         </div>
         <!-- Single-line actions row -->
         <div class="auc-actions">
-          <input type="number" id="bid-${a.id}" class="auc-bid-input"
-            value="${myBid || ""}" placeholder="Max bid" step="${MIN_INC()}" min="${MIN_BID()}"/>
           ${(() => {
             const noSpots = !winning && _myOpenSpots() <= 0;
-            return noSpots
-              ? `<button class="btn-secondary btn-sm" disabled title="Roster full" style="opacity:.4">Bid</button>`
-              : `<button class="btn-primary btn-sm" onclick="DLRAuction.placeBid('${a.id}','${_escA(name)}')">${myBid > 0 ? "Update" : "Bid"}</button>`;
+            if (noSpots) return `<button class="btn-secondary btn-sm" disabled title="Roster full" style="opacity:.4">Bid</button>`;
+            return `<button class="btn-primary btn-sm" onclick="DLRAuction.openBidModal('${a.id}','${_escA(name)}','${_escA(leader.displayBid)}','${_escA(myBid)}')">Bid</button>`;
           })()}
           ${_myHasPassed(a)
             ? `<span class="auc-passed-badge">✓ Passed</span>`
@@ -881,49 +886,48 @@ const DLRAuction = (() => {
         Max active roster: <strong>${maxRoster}</strong>
         ${_isCommish ? `<button class="btn-secondary btn-sm" onclick="DLRAuction.editRosterSize()">Edit</button>` : ""}
       </div>
-      <div class="auc-teams-grid">
+      <div class="auc-teams-list">
         ${sorted.map(t => {
           const isMe      = Number(t.roster_id) === Number(_myRosterId);
           const taxiSet   = new Set(t.taxi    || []);
           const irSet     = new Set(t.reserve || []);
           const active_   = (t.players||[]).filter(id => !taxiSet.has(id) && !irSet.has(id)).length;
 
-          // Leading auctions (winning bids only)
+          // Leading (currently winning active auctions)
           const leading = active.filter(a => {
             const l = _computeLeader(a);
             return Number(l.rosterId) === Number(t.roster_id);
           });
 
-          // Committed = sum of amounts on auctions this team is WINNING only
-          // Owner sees their proxy (maxBid), others see the display price
+          // Won (processed auctions this session)
+          const won = _auctions.filter(a =>
+            a.processed && Number(a.winner) === Number(t.roster_id)
+          );
+          // Don't double-count won players already on roster
+          const wonNotRostered = won.filter(a => !(t.players||[]).includes(String(a.playerId)));
+          const spentTotal = wonNotRostered.reduce((s, a) => s + (a.winningBid || 0), 0);
+
+          // Committed = proxy on winning active auctions
           const committed = leading.reduce((sum, a) => {
-            const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-            const isThisMe = Number(t.roster_id) === Number(_myRosterId);
-            if (isThisMe) {
-              // Show my own proxy bid
-              const mine = bids.filter(b => Number(b.rosterId) === Number(t.roster_id));
-              return sum + (mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0);
-            } else {
-              // Show display price only (never expose proxy to others)
-              return sum + _computeLeader(a).displayBid;
+            if (isMe) {
+              const myProxy = a.proxies
+                ? (Number(a.proxies[String(Number(t.roster_id))]) || 0)
+                : _myMaxBid(a);
+              return sum + myProxy;
             }
+            return sum + _computeLeader(a).displayBid;
           }, 0);
-          const openSpots = Math.max(0, maxRoster - active_ - leading.length);
+
+          // Available = balance - committed - spent
+          const baseCap   = t.remainingCap ?? t.faab ?? null;
+          const available = baseCap != null ? Math.max(0, baseCap - committed - spentTotal) : null;
+
+          // Open spots = maxRoster - active roster - winning - won (not yet on roster)
+          const openSpots  = Math.max(0, maxRoster - active_ - leading.length - wonNotRostered.length);
           const spotsColor = openSpots === 0 ? "var(--color-red)" : openSpots <= 2 ? "var(--color-gold)" : "var(--color-text)";
 
-          // Cap
-          const baseCap   = t.remainingCap ?? t.faab ?? null;
-          const available = baseCap != null ? Math.max(0, baseCap - committed) : null;
-          const maxBase   = Math.max(...sorted.map(x => x.remainingCap ?? x.faab ?? 0), 1);
-          const barPct    = baseCap != null ? Math.round(baseCap / maxBase * 100) : 0;
-
-          // DEBUG — remove once cap is confirmed working
-
-          // My active bids
-          const myBids = active.filter(a => {
-            const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-            return bids.some(b => Number(b.rosterId) === Number(t.roster_id));
-          });
+          const statVal = (val, clr) =>
+            `<span style="font-weight:700;color:${clr}">${val}</span>`;
 
           return `
             <div class="auc-team-card ${isMe ? "auc-team-card--me" : ""}">
@@ -931,7 +935,7 @@ const DLRAuction = (() => {
                 <div class="auc-team-card-name">${_esc(t.teamName)}</div>
                 ${isMe ? `<span class="auc-you-badge">You</span>` : ""}
               </div>
-              <div class="auc-team-stats-grid">
+              <div class="auc-team-stats-row">
                 <div class="auc-tstat">
                   <div class="auc-tstat-lbl">Balance</div>
                   <div class="auc-tstat-val" style="color:var(--color-green)">${baseCap != null ? _fmtSal(baseCap) : "—"}</div>
@@ -941,16 +945,22 @@ const DLRAuction = (() => {
                   <div class="auc-tstat-val" style="color:${committed > 0 ? "var(--color-gold)" : "var(--color-text-dim)"}">${_fmtSal(committed)}</div>
                 </div>
                 <div class="auc-tstat">
-                  <div class="auc-tstat-lbl">Available</div>
-                  <div class="auc-tstat-val" style="color:var(--color-green)">${available != null ? _fmtSal(available) : "—"}</div>
+                  <div class="auc-tstat-lbl">Spent</div>
+                  <div class="auc-tstat-val" style="color:${spentTotal > 0 ? "var(--color-blue)" : "var(--color-text-dim)"}">${_fmtSal(spentTotal)} <span style="font-size:.7rem">(${wonNotRostered.length})</span></div>
                 </div>
                 <div class="auc-tstat">
-                  <div class="auc-tstat-lbl">Active Bids</div>
-                  <div class="auc-tstat-val" style="color:${myBids.length > 0 ? "var(--color-gold)" : "var(--color-text-dim)"}">${myBids.length}</div>
+                  <div class="auc-tstat-lbl">Available</div>
+                  <div class="auc-tstat-val" style="color:${available != null && available < MIN_BID() ? "var(--color-red)" : "var(--color-green)"}">${available != null ? _fmtSal(available) : "—"}</div>
                 </div>
+              </div>
+              <div class="auc-team-stats-row" style="margin-top:var(--space-1)">
                 <div class="auc-tstat">
                   <div class="auc-tstat-lbl">Winning</div>
                   <div class="auc-tstat-val" style="color:${leading.length > 0 ? "var(--color-green)" : "var(--color-text-dim)"}">${leading.length}</div>
+                </div>
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Won</div>
+                  <div class="auc-tstat-val" style="color:${won.length > 0 ? "var(--color-blue)" : "var(--color-text-dim)"}">${won.length}</div>
                 </div>
                 <div class="auc-tstat">
                   <div class="auc-tstat-lbl">Open Spots</div>
@@ -966,9 +976,13 @@ const DLRAuction = (() => {
                   return `<span style="color:var(--color-green);font-weight:600">${_esc(pname)} ${_fmtSal(price)}</span>`;
                 }).join(", ")}
               </div>` : ""}
-              ${baseCap != null ? `
-              <div class="auc-team-bar-bg">
-                <div class="auc-team-bar-fill" style="width:${barPct}%"></div>
+              ${wonNotRostered.length > 0 ? `
+              <div class="auc-team-winning" style="color:var(--color-blue)">
+                Won: ${wonNotRostered.map(a => {
+                  const pp = _players[a.playerId] || {};
+                  const pname = pp.last_name || a.playerName || "?";
+                  return `<span style="font-weight:600">${_esc(pname)} ${_fmtSal(a.winningBid||0)}</span>`;
+                }).join(", ")}
               </div>` : ""}
             </div>`;
         }).join("")}
@@ -1188,11 +1202,102 @@ const DLRAuction = (() => {
     }
   }
 
-  // ── Bid / claim / cancel ───────────────────────────────────
-  async function placeBid(auctionId, playerName) {
-    const input  = document.getElementById(`bid-${auctionId}`);
+  function openBidModal(auctionId, playerName, displayBid, currentMax) {
+    document.getElementById("auc-bid-modal")?.remove();
+    const curDisplay = Number(displayBid) || MIN_BID();
+    const myMax      = Number(currentMax) || 0;
+    const minBid     = myMax > 0
+      ? Math.max(curDisplay + MIN_INC(), myMax + MIN_INC())  // raising existing
+      : curDisplay + MIN_INC();                               // new bid
+
+    const modal = document.createElement("div");
+    modal.id = "auc-bid-modal";
+    modal.className = "modal-overlay";
+    modal.style.zIndex = "855";
+    modal.innerHTML = `
+      <div class="modal-box modal-box--sm">
+        <div class="modal-header">
+          <h3>Place Bid — ${_esc(playerName)}</h3>
+          <button class="modal-close" onclick="document.getElementById('auc-bid-modal').remove()">✕</button>
+        </div>
+        <div class="modal-body" style="padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)">
+          <div style="font-size:.82rem;color:var(--color-text-dim)">
+            Current price: <strong style="color:var(--color-gold)">${_fmtSal(curDisplay)}</strong>
+            ${myMax > 0 ? ` · Your proxy: <strong style="color:var(--color-blue)">${_fmtSal(myMax)}</strong>` : ""}
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.78rem">Enter Max Bid</label>
+            <input type="number" id="auc-bid-input" class="form-input"
+              value="${minBid}" min="${minBid}" step="${MIN_INC()}"
+              style="font-size:1rem;font-weight:700;color:var(--color-gold)"/>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <button class="btn-secondary btn-sm" onclick="
+              const inp=document.getElementById('auc-bid-input');
+              inp.value=Math.max(${minBid},parseInt(inp.value)||0)+${MIN_INC()};
+            ">+ ${_fmtSal(MIN_INC())} (min increment)</button>
+            <button class="btn-secondary btn-sm" onclick="
+              const inp=document.getElementById('auc-bid-input');
+              inp.value=Math.max(${minBid},parseInt(inp.value)||0)+${MIN_INC()*5};
+            ">+ ${_fmtSal(MIN_INC()*5)} (5×)</button>
+            <button class="btn-secondary btn-sm" onclick="
+              const inp=document.getElementById('auc-bid-input');
+              inp.value=Math.max(${minBid},parseInt(inp.value)||0)+${MIN_INC()*10};
+            ">+ ${_fmtSal(MIN_INC()*10)} (10×)</button>
+          </div>
+          <div id="auc-bid-confirm-row" style="display:flex;gap:var(--space-2);margin-top:var(--space-2)">
+            <button class="btn-secondary" style="flex:1" onclick="document.getElementById('auc-bid-modal').remove()">Cancel</button>
+            <button class="btn-primary" style="flex:1" onclick="DLRAuction._confirmBid('${auctionId}','${_escA(playerName)}')">Confirm Bid</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+    document.getElementById("auc-bid-input")?.focus();
+    document.getElementById("auc-bid-input")?.select();
+  }
+
+  async function _confirmBid(auctionId, playerName) {
+    const input  = document.getElementById("auc-bid-input");
     const maxBid = parseInt(input?.value) || 0;
-    if (maxBid < MIN_BID()) { showToast(`Minimum bid is ${_fmtSal(MIN_BID())}`, "error"); return; }
+    const btn    = document.querySelector("#auc-bid-modal .btn-primary");
+    if (btn) { btn.textContent = "Placing…"; btn.disabled = true; }
+    await placeBid(auctionId, playerName, maxBid);
+    document.getElementById("auc-bid-modal")?.remove();
+  }
+
+  async function placeBid(auctionId, playerName, maxBid) {
+    if (!maxBid || maxBid < MIN_BID()) { showToast(`Minimum bid is ${_fmtSal(MIN_BID())}`, "error"); return; }
+
+    // ── Cap check ──────────────────────────────────────────────
+    if (typeof DLRSalaryCap !== "undefined") {
+      const capData = DLRSalaryCap.getCapData?.();
+      if (capData && Object.keys(capData).length > 0) {
+        const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+        if (myTeam) {
+          const d = capData[myTeam.username] || capData[myTeam.ownerId] || capData[String(myTeam.ownerId)];
+          if (d) {
+            const now   = Date.now();
+            const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+            // Committed = my proxy on all auctions I'm currently winning EXCEPT this one
+            const committedOther = active.reduce((sum, a) => {
+              if (a.id === auctionId) return sum; // exclude current auction
+              const leader = _computeLeader(a);
+              if (Number(leader.rosterId) !== Number(_myRosterId)) return sum;
+              const myProxy = a.proxies
+                ? (Number(a.proxies[String(Number(_myRosterId))]) || 0)
+                : _myMaxBid(a);
+              return sum + myProxy;
+            }, 0);
+            const totalIfWon = committedOther + maxBid;
+            if (totalIfWon > d.remaining) {
+              showToast(`Bid of ${_fmtSal(maxBid)} would exceed your remaining cap of ${_fmtSal(d.remaining)} (${_fmtSal(committedOther)} already committed).`, "error");
+              return;
+            }
+          }
+        }
+      }
+    }
 
     // Check roster space — bidding on a new player you're not already winning
     const auction = _auctions.find(a => a.id === auctionId);
@@ -1273,87 +1378,206 @@ const DLRAuction = (() => {
 
         return cur;
       });
-      showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
+
+      // Write bid log entry after successful transaction
+      const auctionAfter  = _auctions.find(a => a.id === auctionId);
+      const leaderAfter   = auctionAfter ? _computeLeader(auctionAfter) : null;
+      const myTeam        = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+      const isStillLeader = leaderAfter && Number(leaderAfter.rosterId) === Number(_myRosterId);
+
+      // Determine log note
+      let logNote = "";
+      if (!isStillLeader && leaderAfter) {
+        const leaderTeam = _rosterData.find(r => Number(r.roster_id) === Number(leaderAfter.rosterId));
+        logNote = `Did not exceed ${leaderTeam?.teamName || "current leader"}'s proxy bid`;
+        showToast(`Bid of ${_fmtSal(maxBid)} placed — current bid does not exceed owner's max bid`, "info");
+      } else {
+        showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
+      }
+
+      const logEntry = {
+        auctionId,
+        playerName,
+        rosterId:  Number(_myRosterId),
+        teamName:  myTeam?.teamName || `Team ${_myRosterId}`,
+        maxBid,
+        displayBid: leaderAfter?.displayBid ?? maxBid,
+        isLeader:   isStillLeader,
+        note:       logNote,
+        timestamp:  Date.now()
+      };
+      await _logRef(auctionId).push(logEntry).catch(() => {});
+
     } catch(e) { showToast("Bid failed: " + e.message, "error"); }
   }
 
-  function showBidHistory(auctionId) {
+  async function showBidHistory(auctionId) {
     const a = _auctions.find(x => x.id === auctionId);
     if (!a) return;
-
-    // Build entries from proxies map (new) or bids array (legacy)
-    let entries = [];
-    if (a.proxies && Object.keys(a.proxies).length) {
-      entries = Object.entries(a.proxies)
-        .map(([id, maxBid]) => ({ rosterId: Number(id), maxBid: Number(maxBid) }))
-        .sort((x, y) => y.maxBid - x.maxBid);
-    } else {
-      const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-      const maxByRoster = {};
-      bids.forEach(b => {
-        const rid = Number(b.rosterId);
-        if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid]) maxByRoster[rid] = b.maxBid;
-      });
-      entries = Object.entries(maxByRoster)
-        .map(([id, maxBid]) => ({ rosterId: Number(id), maxBid }))
-        .sort((x, y) => y.maxBid - x.maxBid);
-    }
-
-    const secondHighest = entries.length > 1 ? entries[1].maxBid : null;
-    const leader = _computeLeader(a);
-
-    const teamEntries = entries.map(({ rosterId, maxBid }, i) => {
-      const isMine   = rosterId === Number(_myRosterId);
-      const isLeader = i === 0;
-      let showAmount;
-      if (isMine) {
-        showAmount = maxBid; // always show your own proxy
-      } else if (_isCommish) {
-        // Commish sees display price only — never another team's proxy
-        showAmount = isLeader ? leader.displayBid : MIN_BID();
-      } else {
-        showAmount = isLeader ? leader.displayBid : MIN_BID();
-      }
-      return { rosterId, showAmount, isMine, isLeader };
-    });
-
     const p    = _players[a.playerId] || {};
     const name = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || "Player");
+
+    let logEntries = [];
+    try {
+      const snap = await _logRef(auctionId).once("value");
+      const raw  = snap.val() || {};
+      logEntries = Object.entries(raw)
+        .map(([key, entry]) => ({ ...entry, _key: key }))
+        .sort((x, y) => (y.timestamp || 0) - (x.timestamp || 0));
+    } catch(e) {}
+
+    const leader = _computeLeader(a);
+
+    const _renderLogRows = (entries) => entries.map(({ _key, rosterId, teamName, maxBid, displayBid, isLeader, note, timestamp }) => {
+      const isMine  = Number(rosterId) === Number(_myRosterId);
+      const timeStr = new Date(timestamp).toLocaleString([], { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+      const showAmt = isMine ? maxBid : (displayBid ?? MIN_BID());
+      return `
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);gap:var(--space-2)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:.85rem;font-weight:600">${_esc(teamName||`Team ${rosterId}`)}${isMine ? ` <span style="font-size:.7rem;color:var(--color-blue)">(you)</span>` : ""}</div>
+            <div style="font-size:.72rem;color:var(--color-text-dim)">${timeStr}${note ? ` · <em>${_esc(note)}</em>` : ""}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);flex-shrink:0">
+            <span style="font-family:var(--font-display);font-weight:700;color:${isLeader ? "var(--color-gold)" : "var(--color-text-muted)"}">${_fmtSal(showAmt)}</span>
+            ${_isCommish ? `<button style="font-size:.7rem;color:var(--color-red);background:none;border:1px solid var(--color-red);border-radius:3px;padding:1px 5px;cursor:pointer" onclick="DLRAuction._deleteLogEntry('${auctionId}','${_key}')">✕</button>` : ""}
+          </div>
+        </div>`;
+    }).join("") || `<div class="dim" style="padding:var(--space-3) 0">No bid history yet.</div>`;
+
     const modal = document.createElement("div");
+    modal.id = "auc-history-modal";
     modal.className = "modal-overlay";
     modal.style.zIndex = "860";
     modal.innerHTML = `
       <div class="modal-box modal-box--sm">
         <div class="modal-header">
-          <h3>📜 Bid Status — ${_esc(name)}</h3>
-          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+          <h3>📜 Bid History — ${_esc(name)}</h3>
+          <button class="modal-close" onclick="document.getElementById('auc-history-modal')?.remove()">✕</button>
         </div>
         <div class="modal-body" style="padding:var(--space-4)">
-          ${!teamEntries.length ? `<div class="dim">No bids yet.</div>` :
-            teamEntries.map(({ rosterId, showAmount, isMine, isLeader }) => {
-              const team  = _rosterData.find(r => Number(r.roster_id) === rosterId);
-              const tName = team?.teamName || `Team ${rosterId}`;
-              return `
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
-                  <div>
-                    <span style="font-weight:600">${_esc(tName)}</span>
-                    ${isLeader ? `<span style="font-size:.7rem;color:var(--color-gold);margin-left:4px">👑 Leading</span>` : ""}
-                    ${isMine   ? `<span style="font-size:.7rem;color:var(--color-blue);margin-left:4px">(you)</span>` : ""}
-                  </div>
-                  <span style="font-family:var(--font-display);font-weight:700;color:var(--color-gold)">${_fmtSal(showAmount)}</span>
-                </div>`;
-            }).join("")
-          }
-          <div class="dim" style="font-size:.72rem;margin-top:var(--space-3)">Current price shown. Proxy bids are hidden.</div>
+          <div style="margin-bottom:var(--space-3);font-size:.82rem">
+            <span style="color:var(--color-text-dim)">Current price:</span>
+            <strong style="color:var(--color-gold);margin-left:4px">${_fmtSal(leader.displayBid)}</strong>
+            ${leader.rosterId ? (() => {
+              const lt = _rosterData.find(r => Number(r.roster_id) === Number(leader.rosterId));
+              return `<span style="color:var(--color-text-dim);margin-left:8px">Leader: <strong>${_esc(lt?.teamName || `#${leader.rosterId}`)}</strong></span>`;
+            })() : ""}
+          </div>
+          <div id="auc-log-rows">${_renderLogRows(logEntries)}</div>
+          <div class="dim" style="font-size:.72rem;margin-top:var(--space-3)">Proxy bids hidden except your own.${_isCommish ? " Commish can delete entries." : ""}</div>
         </div>
       </div>`;
     document.body.appendChild(modal);
     modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
   }
 
+  async function _deleteLogEntry(auctionId, logKey) {
+    if (!_isCommish || !confirm("Delete this bid history entry?")) return;
+    try {
+      await _logRef(auctionId).child(logKey).remove();
+      // Refresh the rows in place
+      const snap    = await _logRef(auctionId).once("value");
+      const raw     = snap.val() || {};
+      const entries = Object.entries(raw)
+        .map(([key, e]) => ({ ...e, _key: key }))
+        .sort((x, y) => (y.timestamp||0) - (x.timestamp||0));
+      const rowsEl = document.getElementById("auc-log-rows");
+      if (rowsEl) {
+        rowsEl.innerHTML = entries.map(({ _key, rosterId, teamName, maxBid, displayBid, isLeader, note, timestamp }) => {
+          const isMine  = Number(rosterId) === Number(_myRosterId);
+          const timeStr = new Date(timestamp).toLocaleString([], { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+          const showAmt = isMine ? maxBid : (displayBid ?? MIN_BID());
+          return `
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);gap:var(--space-2)">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:.85rem;font-weight:600">${_esc(teamName||`Team ${rosterId}`)}${isMine ? ` <span style="font-size:.7rem;color:var(--color-blue)">(you)</span>` : ""}</div>
+                <div style="font-size:.72rem;color:var(--color-text-dim)">${timeStr}${note ? ` · <em>${_esc(note)}</em>` : ""}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:var(--space-2);flex-shrink:0">
+                <span style="font-family:var(--font-display);font-weight:700;color:${isLeader ? "var(--color-gold)" : "var(--color-text-muted)"}">${_fmtSal(showAmt)}</span>
+                <button style="font-size:.7rem;color:var(--color-red);background:none;border:1px solid var(--color-red);border-radius:3px;padding:1px 5px;cursor:pointer" onclick="DLRAuction._deleteLogEntry('${auctionId}','${_key}')">✕</button>
+              </div>
+            </div>`;
+        }).join("") || `<div class="dim">No bid history.</div>`;
+      }
+      showToast("Entry deleted");
+    } catch(e) { showToast("Delete failed: " + e.message, "error"); }
+  }
+
+  // Auto-claim expired auctions — runs on commish client only
+  async function _autoClaimExpired() {
+    const now = Date.now();
+    const expired = _auctions.filter(a =>
+      !a.cancelled && !a.processed && a.expiresAt <= now
+    );
+    for (const a of expired) {
+      const leader = _computeLeader(a);
+      if (!leader.rosterId) continue; // no bids — skip, commish can cancel manually
+
+      // Check if player is already on the winner's Sleeper roster (don't double-count)
+      const alreadyRostered = isRostered(a.playerId);
+
+      await _auctRef(a.id).update({
+        processed:  true,
+        claimedAt:  now,
+        winner:     leader.rosterId,
+        winningBid: leader.displayBid,
+        autoProcessed: true
+      });
+
+      // Persist salary only if not already on the roster
+      if (!alreadyRostered && typeof DLRSalaryCap !== "undefined") {
+        const winnerTeam = _rosterData.find(r => Number(r.roster_id) === Number(leader.rosterId));
+        if (winnerTeam) {
+          try {
+            await DLRSalaryCap.addAuctionWin?.({
+              playerId:   a.playerId,
+              playerName: a.playerName,
+              salary:     leader.displayBid,
+              rosterId:   String(leader.rosterId),
+              ownerId:    winnerTeam.ownerId || winnerTeam.owner_id,
+              username:   winnerTeam.username
+            });
+          } catch(e) {}
+        }
+      }
+    }
+  }
+
   async function claimAuction(auctionId, playerName) {
     if (!_isCommish || !confirm(`Claim ${playerName} for winning bidder?`)) return;
-    await _auctRef(auctionId).update({ processed: true, claimedAt: Date.now() });
+    const auction = _auctions.find(a => a.id === auctionId);
+    if (!auction) return;
+
+    const leader     = _computeLeader(auction);
+    const winnerId   = leader.rosterId;
+    const winningBid = leader.displayBid;
+
+    await _auctRef(auctionId).update({
+      processed:   true,
+      claimedAt:   Date.now(),
+      winner:      winnerId,
+      winningBid:  winningBid
+    });
+
+    // Persist salary to salaryCap so it shows on the winner's roster
+    if (winnerId && winningBid && typeof DLRSalaryCap !== "undefined") {
+      const winnerTeam = _rosterData.find(r => Number(r.roster_id) === Number(winnerId));
+      if (winnerTeam) {
+        try {
+          await DLRSalaryCap.addAuctionWin?.({
+            playerId:   auction.playerId,
+            playerName: playerName,
+            salary:     winningBid,
+            rosterId:   String(winnerId),
+            ownerId:    winnerTeam.ownerId || winnerTeam.owner_id,
+            username:   winnerTeam.username
+          });
+        } catch(e) { console.warn("Salary persist failed:", e.message); }
+      }
+    }
+
     showToast(`${playerName} claimed ✓`);
   }
 
@@ -1434,7 +1658,9 @@ const DLRAuction = (() => {
   return {
     init, preInit, reset, setView, setPos, setTeamFilter,
     openNominate, submitNomination,
-    placeBid, showBidHistory, claimAuction, cancelAuction, passAuction, isRostered,
+    openBidModal, _confirmBid, placeBid,
+    showBidHistory, _deleteLogEntry,
+    claimAuction, cancelAuction, passAuction, isRostered,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
     canNominate, isReady

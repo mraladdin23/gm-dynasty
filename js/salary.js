@@ -702,6 +702,23 @@ const DLRSalaryCap = (() => {
     modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
   }
 
+  // Called by auction.js claimAuction to persist winning salary automatically
+  async function addAuctionWin({ playerId, playerName, salary, rosterId, ownerId, username }) {
+    if (!_salaryData || !_storageKey) return; // module not loaded for this league
+    const key = username || String(ownerId);
+    if (!key) return;
+    if (!_salaryData[key]) _salaryData[key] = { players: [] };
+    const players = _salaryData[key].players || [];
+    const idx = players.findIndex(p => p.playerId === playerId);
+    const entry = { playerId, salary, years: 1, holdout: false, auctionWin: true };
+    if (idx >= 0) players[idx] = entry;
+    else players.push(entry);
+    _salaryData[key].players = players;
+    try {
+      await _saveSalaryData();
+    } catch(e) { console.warn("[Salary] addAuctionWin save failed:", e.message); }
+  }
+
   async function savePlayerSalary(pid, username) {
     const salary  = parseFloat(document.getElementById("sal-edit-amount")?.value) || 0;
     const years   = parseInt(document.getElementById("sal-edit-years")?.value)    || 1;
@@ -1010,7 +1027,7 @@ const DLRSalaryCap = (() => {
 
   return {
     init, preloadCap, reset, setView, setPos, selectTeam,
-    openEditModal, savePlayerSalary,
+    openEditModal, savePlayerSalary, addAuctionWin,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
     getCapData, getTeamSalaryEntries
