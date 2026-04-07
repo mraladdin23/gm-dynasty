@@ -629,6 +629,7 @@ function _updateGlobalAucPill(liveByLeague) {
       drawerList.innerHTML = Object.entries(liveByLeague).flatMap(([leagueKey, { league, live }]) =>
         live.map(a => {
           const displayBid = _computeDisplayBid(a);
+          const bidCount   = a.proxies ? Object.keys(a.proxies).length : (a.bidCount || 1);
           const mins    = Math.max(0, Math.floor((a.expiresAt - Date.now()) / 60000));
           const timeStr = mins > 60 ? `${Math.floor(mins/60)}h` : `${mins}m`;
           return `<div class="nav-drawer-item" onclick="DLRNav.close();Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},350)">
@@ -664,8 +665,7 @@ function _openGlobalAucModal() {
         const mins       = Math.floor(timeLeft / 60000);
         const hrs        = Math.floor(mins / 60);
         const timeStr    = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins}m`;
-        const bids       = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-        const bidCount   = [...new Set(bids.map(b => b.rosterId))].length;
+        const bidCount   = a.proxies ? Object.keys(a.proxies).length : (a.bidCount || 1);
         const displayBid = _computeDisplayBid(a);
         return `
           <div class="global-auc-row" onclick="${leagueClick}">

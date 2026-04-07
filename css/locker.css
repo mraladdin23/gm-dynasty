@@ -4270,9 +4270,9 @@ select option { background: var(--color-bg-2); }
   align-items: center;
   gap: var(--space-3);
 }
-.auc-teams-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+.auc-teams-list {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
 }
 .auc-team-card {
@@ -4281,6 +4281,8 @@ select option { background: var(--color-bg-2); }
   border-radius: var(--radius);
   padding: var(--space-3);
   transition: border-color var(--transition);
+  width: 100%;
+  box-sizing: border-box;
 }
 .auc-team-card:hover { border-color: var(--color-border-light); }
 .auc-team-card--me {
@@ -4310,6 +4312,13 @@ select option { background: var(--color-bg-2); }
   border-radius: 99px;
   padding: 1px 6px;
   flex-shrink: 0;
+}
+/* Two rows of stats, 4 columns each */
+.auc-team-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-bottom: 3px;
 }
 .auc-team-stats-grid {
   display: grid;
@@ -4531,7 +4540,7 @@ select option { background: var(--color-bg-2); }
   .tr-trophy-shelf::-webkit-scrollbar { display: none; }
 
   /* Auction teams grid — 2 cols on mobile */
-  .auc-teams-grid { grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
+  .auc-teams-list { gap: var(--space-1); }
   .auc-tstat-val { font-size: .75rem; }
   .auc-tstat-lbl { font-size: .5rem; }
 }
