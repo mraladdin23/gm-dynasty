@@ -946,7 +946,7 @@ const DLRAuction = (() => {
                 </div>
                 <div class="auc-tstat">
                   <div class="auc-tstat-lbl">Spent</div>
-                  <div class="auc-tstat-val" style="color:${spentTotal > 0 ? "var(--color-blue)" : "var(--color-text-dim)"}">${_fmtSal(spentTotal)} <span style="font-size:.7rem">(${wonNotRostered.length})</span></div>
+                  <div class="auc-tstat-val" style="color:${spentTotal > 0 ? "var(--color-blue)" : "var(--color-text-dim)"}">${_fmtSal(spentTotal)}</div>
                 </div>
                 <div class="auc-tstat">
                   <div class="auc-tstat-lbl">Available</div>
@@ -954,6 +954,10 @@ const DLRAuction = (() => {
                 </div>
               </div>
               <div class="auc-team-stats-row" style="margin-top:var(--space-1)">
+                <div class="auc-tstat">
+                  <div class="auc-tstat-lbl">Roster</div>
+                  <div class="auc-tstat-val" style="color:var(--color-text-muted)">${active_}</div>
+                </div>
                 <div class="auc-tstat">
                   <div class="auc-tstat-lbl">Winning</div>
                   <div class="auc-tstat-val" style="color:${leading.length > 0 ? "var(--color-green)" : "var(--color-text-dim)"}">${leading.length}</div>
@@ -1100,14 +1104,14 @@ const DLRAuction = (() => {
         const sColor  = a.cancelled ? "var(--color-text-dim)" : a.processed ? "var(--color-green)" : "var(--color-gold)";
         const date    = new Date(a.expiresAt||a.startTime).toLocaleDateString();
         return `
-          <div class="auc-history-row">
+          <div class="auc-history-row" onclick="DLRAuction.showBidHistory('${a.id}')" style="cursor:pointer" title="Click to view bid history">
             <img class="auc-hist-photo" src="https://sleepercdn.com/content/nfl/players/thumb/${a.playerId}.jpg" onerror="this.style.display='none'" loading="lazy"/>
             <div class="auc-hist-info">
               <div style="font-weight:600;font-size:.85rem">${_esc(name)}</div>
               <div class="dim" style="font-size:.72rem">${_esc(winTeam)}</div>
             </div>
             <div style="text-align:right;flex-shrink:0">
-              <div style="font-family:var(--font-display);font-weight:700">${leader.rosterId ? _fmtSal(leader.displayBid) : "—"}</div>
+              <div style="font-family:var(--font-display);font-weight:700">${a.winningBid ? _fmtSal(a.winningBid) : (leader.rosterId ? _fmtSal(leader.displayBid) : "—")}</div>
               <div style="font-size:.65rem;color:${sColor}">${status} · ${date}</div>
             </div>
           </div>`;
