@@ -1622,7 +1622,7 @@ const DLRAuction = (() => {
   }
 
   return {
-    init, preInit, reset, setView, setPos, setTeamFilter,
+    init, preInit, reset, setView,
     openNominate, submitNomination,
     openBidModal, _confirmBid, placeBid,
     showBidHistory, _deleteLogEntry,
