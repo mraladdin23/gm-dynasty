@@ -276,26 +276,70 @@ const DLRAuction = (() => {
   function _bidDurationMs() { return (_settings.bidDuration || 8) * 3_600_000; }
 
   function _nextExpiry(now = Date.now()) {
-    // If auction has a scheduled start in the future, use that as the base
-    const base = (_settings.scheduledStart && _settings.scheduledStart > now)
-      ? _settings.scheduledStart
-      : now;
-    if (_isNightPause(base)) {
-      const ct     = new Date(new Date(base).toLocaleString("en-US", { timeZone: "America/Chicago" }));
-      const resume = new Date(ct);
-      resume.setHours(_settings.pauseEnd, 0, 0, 0);
-      if (resume <= ct) resume.setDate(resume.getDate() + 1);
-      return +resume + _bidDurationMs();
+    const pauseStart = _settings.pauseStart ?? 0;  // hour CT, e.g. 0 = midnight
+    const pauseEnd   = _settings.pauseEnd   ?? 8;  // hour CT, e.g. 8 = 8am
+    const duration   = _bidDurationMs();
+
+    // Helper: given a timestamp, return the next pause-start and pause-end in ms
+    function _nextPauseWindow(ts) {
+      const ct = new Date(new Date(ts).toLocaleString("en-US", { timeZone: "America/Chicago" }));
+      const ps = new Date(ct); ps.setHours(pauseStart, 0, 0, 0);
+      if (+ps <= ts) ps.setDate(ps.getDate() + 1); // next occurrence
+      const pe = new Date(ps);
+      pe.setHours(pe.getHours() + ((pauseEnd - pauseStart + 24) % 24));
+      return { start: +ps, end: +pe };
     }
-    return base + _bidDurationMs();
+
+    // If bid placed during pause, start counting from pause end
+    let start = now;
+    if (_isNightPause(now)) {
+      const ct = new Date(new Date(now).toLocaleString("en-US", { timeZone: "America/Chicago" }));
+      const resume = new Date(ct);
+      resume.setHours(pauseEnd, 0, 0, 0);
+      if (resume <= ct) resume.setDate(resume.getDate() + 1);
+      start = +resume;
+    }
+
+    // Walk forward: accumulate `duration` ms of non-pause time
+    // Each time we hit a pause window, skip over it
+    let remaining = duration;
+    let cursor    = start;
+
+    for (let i = 0; i < 10; i++) {
+      const { start: ps, end: pe } = _nextPauseWindow(cursor);
+      const rawEnd = cursor + remaining;
+
+      if (rawEnd <= ps) {
+        // Expiry is before next pause — done
+        cursor = rawEnd;
+        break;
+      } else {
+        // Expiry crosses into the pause window
+        // Consume time up to pause start
+        const consumed = ps - cursor;
+        remaining -= consumed;
+        // Jump to pause end and continue
+        cursor = pe;
+        // remaining duration still needs to run after the pause
+      }
+    }
+
+    return cursor;
   }
 
   function _timeLeft(a, now = Date.now()) {
     if (!a || a.cancelled || a.processed) return 0;
+    // During night pause, time is frozen — don't count down
+    if (_isNightPause(now)) return Math.max(0, a.expiresAt - now);
     return Math.max(0, a.expiresAt - now);
   }
 
-  function _fmtTime(ms) {
+  function _isPaused(now = Date.now()) {
+    return _isNightPause(now);
+  }
+
+  function _fmtTime(ms, isPaused) {
+    if (isPaused) return "⏸ Paused";
     if (ms <= 0) return "Expired";
     const h = Math.floor(ms / 3_600_000);
     const m = Math.floor((ms % 3_600_000) / 60_000);
@@ -545,7 +589,8 @@ const DLRAuction = (() => {
   function _auctionCard(a) {
     const now     = Date.now();
     const left    = _timeLeft(a, now);
-    const urgent  = left < 3_600_000;
+    const paused  = _isPaused(now);
+    const urgent  = !paused && left < 3_600_000;
     const leader  = _computeLeader(a);
     const p       = _players[a.playerId] || {};
     const name    = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
@@ -567,7 +612,7 @@ const DLRAuction = (() => {
             <div class="auc-nom-line dim">Nom: ${_esc(nomTeam)}</div>
           </div>
           <div class="auc-timer ${urgent ? "auc-timer--urgent" : ""}">
-            <div class="auc-time-val">${_fmtTime(left)}</div>
+            <div class="auc-time-val">${_fmtTime(left, paused)}</div>
             <div class="auc-time-lbl dim">${uniqueBidders} bid${uniqueBidders !== 1 ? "s" : ""}</div>
           </div>
           <button class="auc-history-btn" onclick="event.stopPropagation();DLRAuction.showBidHistory('${a.id}')" title="Bid history">📜</button>
@@ -1467,6 +1512,8 @@ const DLRAuction = (() => {
   // Auto-claim expired auctions — runs on commish client only
   async function _autoClaimExpired() {
     const now = Date.now();
+    // Don't process anything during the pause window
+    if (_isPaused(now)) return;
     const expired = _auctions.filter(a =>
       !a.cancelled && !a.processed && a.expiresAt <= now
     );
