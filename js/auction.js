@@ -1233,7 +1233,7 @@ const DLRAuction = (() => {
             <label style="font-size:.78rem">Enter Max Bid</label>
             <input type="number" id="auc-bid-input" class="form-input"
               value="${minBid}" min="${minBid}" step="${MIN_INC()}"
-              style="font-size:1rem;font-weight:700;color:var(--color-black)"/>
+              style="font-size:1rem;font-weight:700;color:#000 !important"/>
           </div>
           <div style="display:flex;flex-direction:column;gap:var(--space-2)">
             <button class="btn-secondary btn-sm" onclick="
