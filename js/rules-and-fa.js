@@ -420,11 +420,11 @@ const DLRFreeAgents = (() => {
           let nomBtn = "";
           if (_auctionEnabled) {
             if (p.isWon) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.72rem">Claimed</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.7rem">Claimed</span>`;
             } else if (p.activeNom) {
-              nomBtn = `<span class="fa-nom-badge">Active bid</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="font-size:.7rem">Active bid</span>`;
             } else if (p.isRostered) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.7rem">${_esc(p.rosterTeam||"Rostered")}</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.7rem">Rostered</span>`;
             } else if (canNom) {
               nomBtn = `<button class="fa-nom-btn btn-primary btn-sm"
                 onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
@@ -448,7 +448,7 @@ const DLRFreeAgents = (() => {
               <div class="fa-pos-dot" style="background:${color}22;color:${color};border-color:${color}55">${p.pos}</div>
               <div class="fa-info">
                 <div class="fa-name">${_esc(p.name)}${p.status ? ` <span class="fa-injury">${p.status}</span>` : ""}</div>
-                <div class="fa-meta">${p.team !== "FA" ? p.team : "Free Agent"}${p.age ? ` · Age ${p.age}` : ""}</div>
+                <div class="fa-meta">${p.team !== "FA" ? p.team : "Free Agent"}${p.age ? ` · Age ${p.age}` : ""}${p.isRostered ? ` · <span style="color:var(--color-text-dim)">${_esc(p.rosterTeam||"Rostered")}</span>` : ""}</div>
               </div>
               <div class="fa-stats">
                 <div class="fa-stat-val">${_sortMode === "pts" ? pts : rank}</div>
