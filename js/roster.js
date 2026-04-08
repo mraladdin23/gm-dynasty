@@ -37,12 +37,17 @@ const DLRRoster = (() => {
     if (!el) return;
 
     if (_platform !== "sleeper") {
-      el.innerHTML = _loadingHTML("Loading MFL rosters…");
+      const loadMsg = _platform === "yahoo" ? "Loading Yahoo rosters…" : "Loading MFL rosters…";
+      el.innerHTML = _loadingHTML(loadMsg);
       try {
-        await _loadMFLData(leagueId, token);
+        if (_platform === "mfl") {
+          await _loadMFLData(leagueId, token);
+        } else {
+          await _loadYahooData(leagueId, token);
+        }
       } catch(e) {
         if (token !== _initToken) return;
-        el.innerHTML = _errorHTML("Could not load MFL rosters: " + e.message);
+        el.innerHTML = _errorHTML(`Could not load ${_platform.toUpperCase()} rosters: ` + e.message);
       }
       return;
     }
@@ -269,6 +274,66 @@ const DLRRoster = (() => {
   }
 
   // ── Helpers ────────────────────────────────────────────
+  async function _loadYahooData(leagueId, token) {
+    const el = document.getElementById("dtab-roster");
+
+    // Need leagueKey (e.g. "nfl.l.12345") not just leagueId
+    const leagueEntry = Object.values(
+      typeof _allLeagues !== "undefined" ? _allLeagues : {}
+    ).find(l => l.leagueId === leagueId && l.platform === "yahoo");
+    const leagueKey = leagueEntry?.leagueKey || leagueId;
+
+    const bundle = await YahooAPI.getLeagueBundle(leagueKey);
+    if (token !== _initToken) return;
+
+    const teams     = bundle.teams     || [];
+    const rosters   = bundle.rosters   || [];
+    const standings = bundle.standings || [];
+
+    const standingsMap = {};
+    standings.forEach(s => { standingsMap[s.team_id] = s; });
+
+    const rosterMap = {};
+    rosters.forEach(r => { rosterMap[r.team_id] = r.player || []; });
+
+    const mappedTeams = teams.map(t => {
+      const s       = standingsMap[t.id] || {};
+      const players = rosterMap[t.id]    || [];
+      return {
+        roster_id: t.id,
+        owner_id:  t.id,
+        teamName:  t.name       || `Team ${t.id}`,
+        username:  (t.owner_name || "").toLowerCase(),
+        avatar:    null,
+        players:   players.map(pid => `yahoo_${pid}`),
+        reserve:   [],
+        taxi:      [],
+        wins:      s.wins       || 0,
+        losses:    s.losses     || 0,
+        fpts:      s.points_for || 0
+      };
+    }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
+
+    // Yahoo player IDs don't match Sleeper — show name as ID for now
+    const yahooPlayerLookup = {};
+    mappedTeams.forEach(t => {
+      t.players.forEach(pid => {
+        yahooPlayerLookup[pid] = {
+          first_name: pid.replace("yahoo_", "Player "),
+          last_name: "",
+          position: "?",
+          fantasy_positions: ["?"],
+          team: "—",
+          search_rank: 9999
+        };
+      });
+    });
+    Object.assign(_players, yahooPlayerLookup);
+
+    _rosterData = { teams: mappedTeams, league: bundle.league || {} };
+    _render();
+  }
+
   async function _loadMFLData(leagueId, token) {
     const el     = document.getElementById("dtab-roster");
     const season = _season || new Date().getFullYear().toString();
@@ -277,10 +342,12 @@ const DLRRoster = (() => {
     if (token !== _initToken) return;
 
     // Single bundle fetch — contains everything
+    // getLeagueBundle accepts positional args (leagueId, year) or object
     const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
-    const bundleTeams = bundle.teams || [];
+    // Use MFLAPI helpers to normalize the raw worker response
+    const bundleTeams  = MFLAPI.getTeams(bundle);
     const standingsMap = MFLAPI.getStandingsMap(bundle);
 
     const teams = bundleTeams.map(t => {
@@ -326,7 +393,7 @@ const DLRRoster = (() => {
     // Merge into _players
     Object.assign(_players, mflPlayerLookup);
 
-    _rosterData = { teams, league: leagueData };
+    _rosterData = { teams, league: MFLAPI.getLeagueInfo(bundle) };
     _render();
   }
 

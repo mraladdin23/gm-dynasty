@@ -178,10 +178,12 @@ const Profile = (() => {
     const leaguesMap = {};
     for (const l of yahooLeagues) {
       const key = `yahoo_${l.season}_${l.leagueId}`;
+      const normalizedName = (l.leagueName || `league_${l.leagueId}`)
+        .toLowerCase().replace(/[^a-z0-9]/g, "");
       leaguesMap[key] = {
         platform:      "yahoo",
         leagueId:      String(l.leagueId),
-        franchiseId:   `yahoo__${l.leagueId}`,
+        franchiseId:   `yahoo__${normalizedName}`,
         leagueName:    l.leagueName || `League ${l.leagueId}`,
         season:        String(l.season || new Date().getFullYear()),
         leagueType:    _detectLeagueType(l.leagueName || ""),

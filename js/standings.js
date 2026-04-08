@@ -53,8 +53,9 @@ const DLRStandings = (() => {
         const season = _season || new Date().getFullYear().toString();
         const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
         if (token !== _initToken) return;
-        const standings = MFLAPI.normalizeStandings(bundle);
-        _renderMFLStandings(el, bundle.league, standings, leagueId, season);
+        const standings  = MFLAPI.normalizeStandings(bundle);
+        const leagueInfo = MFLAPI.getLeagueInfo(bundle);
+        _renderMFLStandings(el, bundle.league?.league, standings, leagueId, season, leagueInfo);
       } catch(e) {
         if (token !== _initToken) return;
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
@@ -63,6 +64,27 @@ const DLRStandings = (() => {
           <div style="font-size:.85rem;color:var(--color-text-dim);">${e.message}<br>
           <a href="https://www42.myfantasyleague.com/${_season||new Date().getFullYear()}/home/${leagueId}"
             target="_blank" style="color:var(--color-gold);">View on MFL ↗</a></div>
+        </div>`;
+      }
+      return;
+    }
+
+    // Yahoo standings via worker bundle
+    if (_platform === "yahoo") {
+      try {
+        const leagueEntry = Object.values(
+          typeof _allLeagues !== "undefined" ? _allLeagues : {}
+        ).find(l => l.leagueId === leagueId && l.platform === "yahoo");
+        const leagueKey = leagueEntry?.leagueKey || leagueId;
+        const bundle = await YahooAPI.getLeagueBundle(leagueKey);
+        if (token !== _initToken) return;
+        _renderYahooStandings(el, bundle, leagueId);
+      } catch(e) {
+        if (token !== _initToken) return;
+        el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
+          <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
+          <div style="font-weight:600;margin-bottom:var(--space-2);">Could not load Yahoo standings</div>
+          <div style="font-size:.85rem;color:var(--color-text-dim);">${e.message}</div>
         </div>`;
       }
       return;
@@ -210,12 +232,33 @@ const DLRStandings = (() => {
     const el = document.getElementById("dtab-matchups");
     if (!el) return;
 
+    if (_platform === "yahoo") {
+      el.innerHTML = _loadingHTML("Loading Yahoo matchups…");
+      try {
+        const leagueEntry = Object.values(
+          typeof _allLeagues !== "undefined" ? _allLeagues : {}
+        ).find(l => l.leagueId === _leagueId && l.platform === "yahoo");
+        const leagueKey = leagueEntry?.leagueKey || _leagueId;
+        const bundle = await YahooAPI.getLeagueBundle(leagueKey);
+        _renderYahooMatchups(el, bundle);
+      } catch(e) {
+        el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
+          Could not load Yahoo matchups: ${e.message}
+        </div>`;
+      }
+      return;
+    }
     if (_platform === "mfl") {
       el.innerHTML = _loadingHTML("Loading MFL matchups…");
       try {
         const season = _season || new Date().getFullYear().toString();
         const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
-        _renderMFLMatchups(el, bundle, season);
+        // Normalize both matchups and teams via helpers
+        const normalizedBundle = {
+          matchups: MFLAPI.normalizeMatchups(bundle),
+          teams:    MFLAPI.getTeams(bundle)
+        };
+        _renderMFLMatchups(el, normalizedBundle, season);
       } catch(e) {
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
           <div style="margin-bottom:var(--space-2)">Could not load MFL matchups: ${e.message}</div>
@@ -621,23 +664,115 @@ const DLRStandings = (() => {
   }
 
   // ── Helpers ────────────────────────────────────────────
-  function _renderMFLStandings(el, leagueData, standings, leagueId, season) {
+  function _renderYahooStandings(el, bundle, leagueId) {
+    const teams     = bundle.teams     || [];
+    const standings = bundle.standings || [];
+    if (!standings.length) {
+      el.innerHTML = `<div class="empty-state">No Yahoo standings data available.</div>`;
+      return;
+    }
+
+    const teamMap = {};
+    teams.forEach(t => { teamMap[t.id] = t.name || `Team ${t.id}`; });
+
+    const sorted = [...standings].sort((a, b) =>
+      b.wins !== a.wins ? b.wins - a.wins : b.points_for - a.points_for
+    );
+    const totalTeams   = sorted.length;
+    const playoffSpots = Math.floor(totalTeams / 2);
+
+    el.innerHTML = `
+      <div class="standings-meta">
+        <span>${bundle.league?.name || "Yahoo League"}</span>
+      </div>
+      <div class="standings-table-wrap">
+        <table class="standings-table">
+          <thead><tr>
+            <th>#</th><th class="team-col">Team</th><th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>
+          </tr></thead>
+          <tbody>
+            ${sorted.map((s, i) => {
+              const rank   = i + 1;
+              const inPO   = rank <= playoffSpots;
+              const bubble = rank === playoffSpots;
+              const name   = teamMap[s.team_id] || `Team ${s.team_id}`;
+              return `<tr class="${inPO ? "standings-row--playoff" : ""}"
+                style="${inPO ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}` : "border-left:3px solid transparent"}">
+                <td class="standings-rank">${rank}</td>
+                <td class="team-col">
+                  <div class="standings-team-cell">
+                    <div class="st-av">${name[0]?.toUpperCase() || "?"}</div>
+                    <div class="standings-team-name">${_esc(name)}</div>
+                  </div>
+                </td>
+                <td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
+                <td>${s.points_for?.toFixed(1) || "—"}</td>
+                <td class="dim">${s.points_against?.toFixed(1) || "—"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function _renderYahooMatchups(el, bundle) {
+    const matchups = bundle.matchups || [];
+    const teams    = bundle.teams    || [];
+    const nameMap  = {};
+    teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+
+    if (!matchups.length) {
+      el.innerHTML = `<div class="empty-state">No matchup data available.</div>`;
+      return;
+    }
+
+    const week = matchups[0]?.week || "—";
+    const cards = matchups.map(m => {
+      const h    = m.home_team || {};
+      const a    = m.away_team || {};
+      const hSc  = parseFloat(h.score || 0);
+      const aSc  = parseFloat(a.score || 0);
+      const hWin = hSc > aSc;
+      const aWin = aSc > hSc;
+      return `
+        <div class="matchup-card">
+          <div class="matchup-team ${hWin ? "matchup-team--winner" : ""}">
+            <span class="matchup-name">${_esc(nameMap[h.team_id] || h.team_id || "TBD")}</span>
+            <span class="matchup-score">${hSc > 0 ? hSc.toFixed(2) : "—"}</span>
+          </div>
+          <div class="matchup-vs">vs</div>
+          <div class="matchup-team ${aWin ? "matchup-team--winner" : ""}">
+            <span class="matchup-name">${_esc(nameMap[a.team_id] || a.team_id || "TBD")}</span>
+            <span class="matchup-score">${aSc > 0 ? aSc.toFixed(2) : "—"}</span>
+          </div>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = `
+      <div class="matchups-week-bar">
+        <span class="matchups-week-label">Week ${week}</span>
+      </div>
+      <div class="matchups-grid">${cards}</div>`;
+  }
+
+  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo) {
     if (!standings.length) {
       el.innerHTML = `<div class="empty-state">No standings data available.</div>`;
       return;
     }
-    const franchises = leagueData?.franchises?.franchise || [];
+    // rawLeague = bundle.league.league — has franchises.franchise[]
+    const franchises = rawLeague?.franchises?.franchise || [];
     const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
     const teamName = (fid) => franchiseArr.find(f => f.id === fid)?.name || `Team ${fid}`;
 
-    const totalTeams = standings.length;
-    const playoffSpots = leagueData?.settings?.playoffTeams
-      ? parseInt(leagueData.settings.playoffTeams)
-      : Math.floor(totalTeams / 2);
+    const totalTeams   = standings.length;
+    const playoffSpots = leagueInfo?.playoffTeams
+      || (rawLeague?.playoffTeams ? parseInt(rawLeague.playoffTeams) : null)
+      || Math.floor(totalTeams / 2);
 
     el.innerHTML = `
       <div class="standings-meta">
-        <span>${leagueData?.name || "MFL League"} · ${season}</span>
+        <span>${leagueInfo?.name || rawLeague?.name || "MFL League"} · ${season}</span>
         <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
           style="font-size:.75rem;color:var(--color-gold);">View on MFL ↗</a>
       </div>
