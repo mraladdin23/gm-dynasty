@@ -380,7 +380,7 @@ if (_isNightPause(now)) {
   // ── Proxy bid computation ─────────────────────────────────
   // Core proxy logic — works with flat proxies map {rosterId: maxBid}
   // Falls back to bids array for backward compat with older auctions
-  function _computeLeader(a) {
+function _computeLeader(a) {
   const proxies = a.proxies || {};
   let entries = Object.entries(proxies)
     .map(([id, maxBid]) => ({ rosterId: Number(id), maxBid: Number(maxBid) }));
@@ -407,10 +407,12 @@ if (_isNightPause(now)) {
     // Only one bidder
     return { rosterId: leader.rosterId, displayBid: MIN_BID() };
   }
-
-  // New display bid logic:
-  // displayBid = min(leaderMax, challengerMax + MIN_INC())
-  const displayBid = Math.min(leader.maxBid, challenger.maxBid + MIN_INC());
+  let displayBid;
+  if (leader.maxBid > challenger.maxBid) {
+    displayBid = challenger.maxBid; 
+  } else {
+    displayBid = challenger.maxBid + MIN_INC();
+  }
 
   return { rosterId: leader.rosterId, displayBid };
 }
