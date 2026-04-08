@@ -400,19 +400,25 @@ function _computeLeader(a) {
 
   entries.sort((a, b) => b.maxBid - a.maxBid);
 
-  const leader = entries[0];
+  const leader     = entries[0];
   const challenger = entries[1];
 
+  // Use stored displayBid from transaction if available (most accurate)
+  if (a.displayBid != null && a.leaderId != null) {
+    return { rosterId: Number(a.leaderId), displayBid: Number(a.displayBid) };
+  }
+
   if (!challenger) {
-    // Only one bidder
+    // Only one bidder — show MIN_BID, proxy stays hidden
     return { rosterId: leader.rosterId, displayBid: MIN_BID() };
   }
-  let displayBid;
-  if (leader.maxBid > challenger.maxBid) {
-    displayBid = challenger.maxBid; 
-  } else {
-    displayBid = challenger.maxBid + MIN_INC();
-  }
+
+  // Two bidders:
+  // Leader proxy > challenger proxy → leader wins, display = challenger's bid
+  // Challenger proxy >= leader proxy → challenger wins, display = old leader proxy + MIN_INC
+  const displayBid = leader.maxBid > challenger.maxBid
+    ? challenger.maxBid                    // leader's proxy beats challenger — challenger pays their own bid
+    : challenger.maxBid + MIN_INC();       // should not happen (challenger would be leader) — fallback
 
   return { rosterId: leader.rosterId, displayBid };
 }
@@ -474,54 +480,41 @@ function _computeLeader(a) {
   // ── Pass refs ─────────────────────────────────────────────
   const _passRef = (id) => GMD.child(`auctions/${_leagueKey}/bids/${id}/passes`);
 
-  // ── Pass logic (matches SleeperBid exactly) ───────────────
+  // ── Pass logic ────────────────────────────────────────────
   async function passAuction(auctionId, playerName) {
     if (!_myRosterId) return;
     try {
       // Remove this team's proxy bid and record their pass atomically
       await _auctRef(auctionId).transaction(cur => {
-  if (!cur || cur.cancelled || cur.processed) return;
+        if (!cur || cur.cancelled || cur.processed) return;
 
-  if (!cur.proxies) cur.proxies = {};
+        // Record pass
+        cur.passes = cur.passes || {};
+        cur.passes[String(_myRosterId)] = Date.now();
 
-  // Update proxy
-  const myKey = String(Number(_myRosterId));
-  cur.proxies[myKey] = maxBid;
+        // Remove proxy if they had one
+        if (cur.proxies) {
+          delete cur.proxies[String(Number(_myRosterId))];
+          cur.bidCount = Object.keys(cur.proxies).length;
 
-  // Sort entries by proxy
-  const entries = Object.entries(cur.proxies)
-    .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
-    .sort((a, b) => b.maxBid - a.maxBid);
+          // Recompute displayBid/leaderId after proxy removal
+          const entries = Object.entries(cur.proxies)
+            .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
+            .sort((a, b) => b.maxBid - a.maxBid);
+          if (entries.length === 0) {
+            cur.leaderId   = null;
+            cur.displayBid = MIN_BID();
+          } else if (entries.length === 1) {
+            cur.leaderId   = entries[0].rosterId;
+            cur.displayBid = MIN_BID();
+          } else {
+            cur.leaderId   = entries[0].rosterId;
+            cur.displayBid = entries[1].maxBid; // challenger's bid
+          }
+        }
 
-  const leader = entries[0];
-  const challenger = entries[1];
-
-  // Compute displayBid based on leader/challenger
-  let displayBid;
-  if (!challenger) {
-    displayBid = MIN_BID();
-  } else if (leader.maxBid > challenger.maxBid) {
-    // Leader proxy higher → pay challenger bid
-    displayBid = challenger.maxBid;
-  } else {
-    // Leader exceeds previous proxy → pay one increment above challenger
-    displayBid = challenger.maxBid + MIN_INC();
-  }
-
-  // Store in Firebase
-  cur.leaderId = leader.rosterId;
-  cur.displayBid = displayBid;
-
-  // Reset timer only if leader changed
-  const previousLeaderId = entries.length > 1 ? entries[1].rosterId : null;
-  if (cur.leaderId !== previousLeaderId) {
-    cur.expiresAt = _nextExpiry(Date.now());
-  }
-
-  cur.bidCount = Object.keys(cur.proxies).length;
-
-  return cur;
-});
+        return cur;
+      });
 
       // Read back to check if all eligible teams have passed
       const snap    = await _auctRef(auctionId).once("value");
@@ -1414,32 +1407,55 @@ function _computeLeader(a) {
 
         const myKey = String(Number(_myRosterId));
 
-        // Compute current state BEFORE this update
-        const entries = Object.entries(cur.proxies)
+        // State BEFORE this update
+        const entriesBefore = Object.entries(cur.proxies)
           .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
           .sort((a, b) => b.maxBid - a.maxBid);
-        const currentLeaderId  = entries.length > 0 ? entries[0].rosterId : null;
-        const isCurrentLeader  = currentLeaderId === Number(_myRosterId);
-        const currentLeaderMax = entries.length > 0 ? entries[0].maxBid : 0;
+        const currentLeaderId  = entriesBefore.length > 0 ? entriesBefore[0].rosterId : null;
+        const currentLeaderMax = entriesBefore.length > 0 ? entriesBefore[0].maxBid : 0;
 
         // Set/update proxy
         cur.proxies[myKey] = maxBid;
 
-        // Recompute leader AFTER this update to see if it changed
-        const newEntries = Object.entries(cur.proxies)
+        // State AFTER this update
+        const entriesAfter = Object.entries(cur.proxies)
           .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
           .sort((a, b) => b.maxBid - a.maxBid);
-        const newLeaderId = newEntries.length > 0 ? newEntries[0].rosterId : null;
+        const newLeader     = entriesAfter[0];
+        const newChallenger = entriesAfter[1];
+        const newLeaderId   = newLeader.rosterId;
 
-        // Reset timer only when the lead actually changes hands
-        // — proxy updates by current leader: no reset
-        // — new bid that doesn't beat proxy: no reset (proxy still leads)
-        // — bid that takes the lead: reset
+        // Compute correct displayBid:
+        // - 1 bidder: MIN_BID
+        // - New bidder's proxy > old leader's proxy → new leader wins,
+        //   display = old leader's proxy + MIN_INC (they bid up to their max)
+        // - New bidder's proxy <= old leader's proxy → old leader still wins,
+        //   display = new bidder's proxy (what the challenger bid)
+        let displayBid;
+        if (!newChallenger) {
+          displayBid = MIN_BID();
+        } else if (newLeaderId !== Number(myKey) && currentLeaderId !== null) {
+          // My bid didn't take the lead — old leader's proxy still wins
+          // Display = what I just bid (my proxy, since I'm the challenger)
+          displayBid = maxBid;
+        } else if (newLeaderId === Number(myKey) && currentLeaderId !== null &&
+                   currentLeaderId !== Number(myKey)) {
+          // I took the lead from someone else
+          // Display = old leader's proxy + MIN_INC
+          displayBid = currentLeaderMax + MIN_INC();
+        } else {
+          // I was already leading and updated my proxy, or first two bids
+          displayBid = newChallenger ? newChallenger.maxBid : MIN_BID();
+        }
+
+        cur.leaderId   = newLeaderId;
+        cur.displayBid = displayBid;
+
+        // Reset timer only when lead changes hands
         if (newLeaderId !== currentLeaderId) {
           cur.expiresAt = _nextExpiry(Date.now());
         }
 
-        // Track bid count for display (how many unique bidders)
         cur.bidCount = Object.keys(cur.proxies).length;
 
         return cur;
