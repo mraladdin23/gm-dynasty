@@ -403,22 +403,14 @@ function _computeLeader(a) {
   const leader     = entries[0];
   const challenger = entries[1];
 
-  // Use stored displayBid from transaction if available (most accurate)
-  if (a.displayBid != null && a.leaderId != null) {
-    return { rosterId: Number(a.leaderId), displayBid: Number(a.displayBid) };
-  }
-
   if (!challenger) {
     // Only one bidder — show MIN_BID, proxy stays hidden
     return { rosterId: leader.rosterId, displayBid: MIN_BID() };
   }
 
-  // Two bidders:
   // Leader proxy > challenger proxy → leader wins, display = challenger's bid
-  // Challenger proxy >= leader proxy → challenger wins, display = old leader proxy + MIN_INC
-  const displayBid = leader.maxBid > challenger.maxBid
-    ? challenger.maxBid                    // leader's proxy beats challenger — challenger pays their own bid
-    : challenger.maxBid + MIN_INC();       // should not happen (challenger would be leader) — fallback
+  // displayBid can never exceed the leader's own proxy
+  const displayBid = Math.min(leader.maxBid, challenger.maxBid);
 
   return { rosterId: leader.rosterId, displayBid };
 }

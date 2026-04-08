@@ -570,8 +570,8 @@ function _computeDisplayBid(a) {
   }
   if (!entries.length) return MIN_BID;
   if (entries.length === 1) return MIN_BID;
-  // Display = challenger's bid (not leader's proxy, not +increment)
-  return entries[1];
+  // Display = challenger's bid, but never more than leader's proxy
+  return Math.min(entries[0], entries[1]);
 }
 
 function _startGlobalAucMonitor(profile) {
