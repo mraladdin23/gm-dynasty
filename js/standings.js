@@ -8,7 +8,8 @@ const DLRStandings = (() => {
 
   let _leagueId   = null;
   let _platform   = "sleeper";
-  let _season     = null;   // actual league season year (from stored data)
+  let _season     = null;
+  let _leagueKey  = null;   // Yahoo full league key e.g. "nfl.l.12345"
   let _leagueData = null;
   let _matchCache = {};
   let _historyLeagues = [];
@@ -20,27 +21,26 @@ const DLRStandings = (() => {
     _leagueId    = null;
     _platform    = "sleeper";
     _leagueData  = null;
+    _leagueKey   = null;
     _matchCache  = {};
     _historyLeagues = [];
     _viewingId   = null;
     _initToken++;
   }
 
-  // Called when any tab in this league opens — sets context without loading data
-  function setLeague(leagueId, platform, season) {
-    if (_leagueId !== leagueId) {
-      // Different league — reset state
-      reset();
-    }
-    _leagueId = leagueId;
-    _platform = platform || "sleeper";
-    _season   = season   || null;
+  function setLeague(leagueId, platform, season, leagueKey) {
+    if (_leagueId !== leagueId) reset();
+    _leagueId  = leagueId;
+    _platform  = platform  || "sleeper";
+    _season    = season    || null;
+    _leagueKey = leagueKey || null;
   }
-  async function init(leagueId, platform, season) {
+  async function init(leagueId, platform, season, leagueKey) {
     reset();
     _leagueId  = leagueId;
-    _platform  = platform || "sleeper";
-    _season    = season   || null;
+    _platform  = platform  || "sleeper";
+    _season    = season    || null;
+    _leagueKey = leagueKey || null;
     const token = ++_initToken;
 
     const el = document.getElementById("dtab-standings");
@@ -72,10 +72,7 @@ const DLRStandings = (() => {
     // Yahoo standings via worker bundle
     if (_platform === "yahoo") {
       try {
-        const leagueEntry = Object.values(
-          typeof _allLeagues !== "undefined" ? _allLeagues : {}
-        ).find(l => l.leagueId === leagueId && l.platform === "yahoo");
-        const leagueKey = leagueEntry?.leagueKey || leagueId;
+        const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
         const bundle = await YahooAPI.getLeagueBundle(leagueKey);
         if (token !== _initToken) return;
         _renderYahooStandings(el, bundle, leagueId);
@@ -235,10 +232,7 @@ const DLRStandings = (() => {
     if (_platform === "yahoo") {
       el.innerHTML = _loadingHTML("Loading Yahoo matchups…");
       try {
-        const leagueEntry = Object.values(
-          typeof _allLeagues !== "undefined" ? _allLeagues : {}
-        ).find(l => l.leagueId === _leagueId && l.platform === "yahoo");
-        const leagueKey = leagueEntry?.leagueKey || _leagueId;
+        const leagueKey = _leagueKey || `nfl.l.${_leagueId}`;
         const bundle = await YahooAPI.getLeagueBundle(leagueKey);
         _renderYahooMatchups(el, bundle);
       } catch(e) {

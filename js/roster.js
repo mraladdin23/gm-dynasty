@@ -14,6 +14,7 @@ const DLRRoster = (() => {
   let _players    = {};
   let _initToken  = 0;
   let _filter     = "all";
+  let _leagueKey  = null;   // Yahoo full league key e.g. "nfl.l.12345"
 
   const POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DEF"];
   const POS_COLOR = {
@@ -24,10 +25,11 @@ const DLRRoster = (() => {
   let _season = null;
 
   // ── Init ─────────────────────────────────────────────────
-  async function init(leagueId, platform, season) {
+  async function init(leagueId, platform, season, leagueKey) {
     _leagueId   = leagueId;
     _platform   = platform || "sleeper";
     _season     = season   || new Date().getFullYear().toString();
+    _leagueKey  = leagueKey || null;
     _rosterData = null;
     _filter     = "all";
     _initToken++;
@@ -66,6 +68,7 @@ const DLRRoster = (() => {
     _leagueId   = null;
     _rosterData = null;
     _filter     = "all";
+    _leagueKey  = null;
     _initToken++;
   }
 
@@ -275,14 +278,8 @@ const DLRRoster = (() => {
 
   // ── Helpers ────────────────────────────────────────────
   async function _loadYahooData(leagueId, token) {
-    const el = document.getElementById("dtab-roster");
-
-    // Need leagueKey (e.g. "nfl.l.12345") not just leagueId
-    const leagueEntry = Object.values(
-      typeof _allLeagues !== "undefined" ? _allLeagues : {}
-    ).find(l => l.leagueId === leagueId && l.platform === "yahoo");
-    const leagueKey = leagueEntry?.leagueKey || leagueId;
-
+    // Use stored leagueKey (full "nfl.l.XXXXX" format required by Yahoo API)
+    const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
     const bundle = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
 
