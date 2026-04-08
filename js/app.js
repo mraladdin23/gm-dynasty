@@ -541,6 +541,7 @@ Auth.onAuthStateChanged(async (user, profile) => {
   } else {
     AppState.showApp(profile);
     _startGlobalAucMonitor(profile);
+    _startGlobalChatMonitor(profile);
   }
 });
 
@@ -602,6 +603,108 @@ function _startGlobalAucMonitor(profile) {
     });
     _globalAucListeners.push(() => ref.off("value", handler));
   });
+}
+
+// ── Global chat notification monitor ──────────────────────
+let _globalChatListeners = [];
+let _chatUnreadCounts    = {};  // leagueKey → unread count
+
+function _chatLastSeenKey(leagueKey) {
+  return `dlr_chat_seen_${leagueKey}`;
+}
+function _getChatLastSeen(leagueKey) {
+  return Number(localStorage.getItem(_chatLastSeenKey(leagueKey)) || 0);
+}
+function markChatSeen(leagueKey) {
+  localStorage.setItem(_chatLastSeenKey(leagueKey), Date.now());
+  delete _chatUnreadCounts[leagueKey];
+  _updateChatBadges();
+}
+
+function _startGlobalChatMonitor(profile) {
+  // Clean up old listeners
+  _globalChatListeners.forEach(fn => fn());
+  _globalChatListeners = [];
+  _chatUnreadCounts    = {};
+
+  const leagues = profile.leagues || {};
+
+  Object.entries(leagues).forEach(([leagueKey, league]) => {
+    if (league.archived) return;
+    const lastSeen = _getChatLastSeen(leagueKey);
+    const ref = GMD.child(`leagueChats/${leagueKey}`).orderByChild("ts").startAfter(lastSeen);
+    let initialized = false;
+
+    const handler = ref.on("child_added", snap => {
+      // Skip initial load burst — only notify after first sync
+      if (!initialized) return;
+
+      const msg = snap.val() || {};
+      const me  = (Auth.getCurrentProfile()?.username || "").toLowerCase();
+      // Don't notify for own messages
+      if ((msg.user || "").toLowerCase() === me) return;
+
+      // Check if this league's chat tab is currently open
+      const detailOpen   = !!document.querySelector(".league-detail-panel.active, #league-detail-panel.active, .league-detail.active");
+      const chatTabOpen  = document.getElementById("detail-tab-select")?.value === "chat";
+      const thisLeague   = window._detailLeagueKey === leagueKey;
+
+      if (detailOpen && chatTabOpen && thisLeague) {
+        // Panel is open on this league's chat — mark seen immediately
+        markChatSeen(leagueKey);
+        return;
+      }
+
+      // Increment unread count
+      _chatUnreadCounts[leagueKey] = (_chatUnreadCounts[leagueKey] || 0) + 1;
+      _updateChatBadges();
+
+      // Toast notification
+      const lName = league.leagueName || leagueKey;
+      const sender = msg.user || "Someone";
+      showToast(`💬 ${lName}: ${sender} sent a message`, "info", 4000);
+    });
+
+    // Mark initialized after a short delay to skip the initial data burst
+    setTimeout(() => { initialized = true; }, 2000);
+
+    _globalChatListeners.push(() => ref.off("child_added", handler));
+  });
+}
+
+function _updateChatBadges() {
+  const total = Object.values(_chatUnreadCounts).reduce((s, n) => s + n, 0);
+
+  // Update badge on each league card that has unread messages
+  document.querySelectorAll(".league-card[data-key]").forEach(card => {
+    const key = card.dataset.key;
+    const count = _chatUnreadCounts[key] || 0;
+    let badge = card.querySelector(".chat-unread-badge");
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement("span");
+        badge.className = "chat-unread-badge";
+        badge.style.cssText = "position:absolute;top:6px;right:6px;background:var(--color-red,#ef4444);color:#fff;border-radius:999px;font-size:.65rem;font-weight:700;padding:1px 5px;min-width:16px;text-align:center;pointer-events:none;";
+        card.style.position = "relative";
+        card.appendChild(badge);
+      }
+      badge.textContent = count > 9 ? "9+" : count;
+    } else if (badge) {
+      badge.remove();
+    }
+  });
+
+  // Update Chat option in the detail tab dropdown if it's visible
+  const sel = document.getElementById("detail-tab-select");
+  if (sel) {
+    const leagueKey = window._detailLeagueKey;
+    const unread = leagueKey ? (_chatUnreadCounts[leagueKey] || 0) : 0;
+    [...sel.options].forEach(o => {
+      if (o.value === "chat") {
+        o.text = unread > 0 ? `Chat 🔴` : "Chat";
+      }
+    });
+  }
 }
 
 function _updateGlobalAucPill(liveByLeague) {

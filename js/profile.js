@@ -112,56 +112,35 @@ const Profile = (() => {
       });
 
       // Extract basic info
-      const leagueInfo  = bundle?.league?.league || {};
-      const standingsRaw = bundle?.standings?.leagueStandings?.franchise || [];
-      const franchisesRaw = leagueInfo?.franchises?.franchise || [];
+      const leagueInfo = bundle?.league?.league || {};
+      const standings  = bundle?.standings?.leagueStandings?.franchise || [];
 
-      // Normalize to arrays (MFL returns single object when only 1 entry)
-      const franchiseArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
-      const standingsArr = Array.isArray(standingsRaw)  ? standingsRaw  : [standingsRaw];
-
-      // Standings keyed by franchise id for fast lookup
-      const standingsById = {};
-      standingsArr.forEach(s => { standingsById[s.id] = s; });
-
-      // Find user's franchise by owner_name in the franchises list
-      const mflUserLower = mflUsername.toLowerCase();
-      let myFranchise = franchiseArr.find(f =>
-        (f.owner_name || f.ownerName || "").toLowerCase().includes(mflUserLower)
+      // Try to find user's franchise
+      let myTeam = standings.find(f =>
+        f.name?.toLowerCase().includes(mflUsername.toLowerCase())
       );
-      // Fallback: try matching team name
-      if (!myFranchise) {
-        myFranchise = franchiseArr.find(f =>
-          (f.name || "").toLowerCase().includes(mflUserLower)
-        );
-      }
-
-      const myStandings = myFranchise ? (standingsById[myFranchise.id] || {}) : {};
-
-      const leagueName     = leagueInfo?.name || `League ${leagueId}`;
-      const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "");
 
       const key = `mfl_${season}_${leagueId}`;
 
       leaguesMap[key] = {
-        platform:       "mfl",
-        leagueId:       String(leagueId),
-        franchiseId:    `mfl__${normalizedName}`,
-        leagueName,
-        season:         String(season),
-        leagueType:     _detectMFLLeagueType(leagueName),
-        totalTeams:     franchiseArr.length || Number(leagueInfo?.franchises) || 12,
-        teamName:       myFranchise?.name || "My Team",
-        isCommissioner: myFranchise?.is_commish === "1",
-        myRosterId:     myFranchise?.id || null,
-        wins:           Number(myStandings.wins)   || 0,
-        losses:         Number(myStandings.losses) || 0,
-        ties:           Number(myStandings.ties)   || 0,
-        pointsFor:      Number(myStandings.pf)     || 0,
-        pointsAgainst:  Number(myStandings.pa)     || 0,
-        standing:       Number(myStandings.rank)   || null,
-        playoffFinish:  null,
-        isChampion:     false
+        platform: "mfl",
+        leagueId: String(leagueId),
+        franchiseId: `mfl__${leagueId}`,
+        leagueName: leagueInfo?.name || `League ${leagueId}`,
+        season: String(season),
+        leagueType: _detectMFLLeagueType(leagueInfo?.name || ""),
+        totalTeams: Number(leagueInfo?.franchises) || 12,
+        teamName: myTeam?.name || "My Team",
+        isCommissioner: myTeam?.is_commish === "1",
+        myRosterId: myTeam?.id || null,
+        wins: Number(myTeam?.wins) || 0,
+        losses: Number(myTeam?.losses) || 0,
+        ties: Number(myTeam?.ties) || 0,
+        pointsFor: Number(myTeam?.pf) || 0,
+        pointsAgainst: Number(myTeam?.pa) || 0,
+        standing: Number(myTeam?.rank) || null,
+        playoffFinish: null,
+        isChampion: false
       };
 
     } catch (err) {
@@ -198,54 +177,21 @@ const Profile = (() => {
 
     const leaguesMap = {};
     for (const l of yahooLeagues) {
-      const key            = `yahoo_${l.season}_${l.leagueId}`;
-      const leagueKey      = l.leagueKey || `nfl.l.${l.leagueId}`;
-      const normalizedName = (l.leagueName || `league_${l.leagueId}`)
-        .toLowerCase().replace(/[^a-z0-9]/g, "");
-
+      const key = `yahoo_${l.season}_${l.leagueId}`;
       leaguesMap[key] = {
-        platform:       "yahoo",
-        leagueId:       String(l.leagueId),
-        leagueKey,
-        franchiseId:    `yahoo__${normalizedName}`,
-        leagueName:     l.leagueName || `League ${l.leagueId}`,
-        season:         String(l.season || new Date().getFullYear()),
-        leagueType:     _detectLeagueType(l.leagueName || ""),
-        totalTeams:     l.numTeams || 12,
-        teamName:       "",
+        platform:      "yahoo",
+        leagueId:      String(l.leagueId),
+        franchiseId:   `yahoo__${l.leagueId}`,
+        leagueName:    l.leagueName || `League ${l.leagueId}`,
+        season:        String(l.season || new Date().getFullYear()),
+        leagueType:    _detectLeagueType(l.leagueName || ""),
+        totalTeams:    l.numTeams || 12,
+        teamName:      "",
         isCommissioner: false,
-        myRosterId:     null,
-        wins: 0, losses: 0, ties: 0,
+        myRosterId:    null,
+        wins:          0, losses: 0, ties: 0,
         pointsFor: 0, pointsAgainst: 0
       };
-
-      // Fetch bundle to get real team name + record
-      try {
-        const bundle    = await YahooAPI.getLeagueBundle(leagueKey);
-        const teams     = bundle.teams     || [];
-        const standings = bundle.standings || [];
-
-        // Try to identify the user's team by matching stored Yahoo display name
-        const yahooDisplayName = sessionStorage.getItem("dlr_yahoo_display_name") || "";
-        let myTeam = yahooDisplayName
-          ? teams.find(t => (t.owner_name || "").toLowerCase() === yahooDisplayName.toLowerCase())
-          : null;
-        // Fallback: only 1 team (shouldn't happen but safe)
-        if (!myTeam && teams.length === 1) myTeam = teams[0];
-
-        if (myTeam) {
-          const mySt = standings.find(s => String(s.team_id) === String(myTeam.id));
-          leaguesMap[key].teamName      = myTeam.name || "";
-          leaguesMap[key].wins          = mySt?.wins          || 0;
-          leaguesMap[key].losses        = mySt?.losses        || 0;
-          leaguesMap[key].ties          = mySt?.ties          || 0;
-          leaguesMap[key].pointsFor     = mySt?.points_for    || 0;
-          leaguesMap[key].pointsAgainst = mySt?.points_against || 0;
-        }
-        leaguesMap[key].totalTeams = teams.length || l.numTeams || 12;
-      } catch(e) {
-        console.warn(`[Yahoo] Could not enrich bundle for ${leagueKey}:`, e.message);
-      }
     }
 
     await GMDB.linkPlatform(gmdUsername, "yahoo", { linked: true });
@@ -1481,6 +1427,7 @@ const Profile = (() => {
 
     _detailLeagueKey = leagueKey;
     _detailLeague    = league;
+    window._detailLeagueKey = leagueKey;
     DLRStandings.reset();
 
     // Header
@@ -1548,6 +1495,11 @@ const Profile = (() => {
     document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
     document.getElementById(`dtab-${tabName}`)?.classList.add("active");
     _renderDetailTab(tabName, _detailLeagueKey, _detailLeague);
+    // Expose current league key for chat monitor, clear badge when chat opens
+    window._detailLeagueKey = _detailLeagueKey;
+    if (tabName === "chat" && _detailLeagueKey) {
+      if (typeof markChatSeen === "function") markChatSeen(_detailLeagueKey);
+    }
   }
 
   // Build the tab dropdown based on league type and settings
@@ -1638,6 +1590,7 @@ const Profile = (() => {
     DLRAuction.reset();
     _detailLeagueKey = null;
     _detailLeague    = null;
+    window._detailLeagueKey = null;
   }
 
   function _renderDetailTab(tab, leagueKey, league) {
