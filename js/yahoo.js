@@ -47,15 +47,23 @@ const YahooAPI = (() => {
   }
 
   /**
-   * Fetch a full normalized bundle for a given Yahoo league
+   * Fetch a full normalized bundle for a given Yahoo league key
    */
   async function getLeagueBundle(leagueKey) {
-    try {
-      // Yahoo API: fetch league info + everything
-      const res = await fetch(`${BASE}/yahoo/leagueBundle?leagueKey=${leagueKey}`, { credentials: "include" });
-      if (!res.ok) throw new Error(`Yahoo worker error ${res.status}`);
-      const raw = await res.json();
+    const token = sessionStorage.getItem("dlr_yahoo_access_token");
+    if (!token) throw new Error("No Yahoo access token — please reconnect Yahoo.");
 
+    try {
+      const res = await fetch(`${BASE}/yahoo/leagueBundle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: token, league_key: leagueKey })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Yahoo worker error ${res.status}`);
+      }
+      const raw = await res.json();
       return normalizeBundle(raw);
     } catch (err) {
       console.error("YahooAPI getLeagueBundle error:", err.message);
