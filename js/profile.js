@@ -120,13 +120,16 @@ const Profile = (() => {
         f.name?.toLowerCase().includes(mflUsername.toLowerCase())
       );
 
+      const leagueName     = leagueInfo?.name || `League ${leagueId}`;
+      const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "");
+
       const key = `mfl_${season}_${leagueId}`;
 
       leaguesMap[key] = {
         platform: "mfl",
         leagueId: String(leagueId),
-        franchiseId: `mfl__${leagueId}`,
-        leagueName: leagueInfo?.name || `League ${leagueId}`,
+        franchiseId: `mfl__${normalizedName}`,
+        leagueName: leagueName,
         season: String(season),
         leagueType: _detectMFLLeagueType(leagueInfo?.name || ""),
         totalTeams: Number(leagueInfo?.franchises) || 12,
@@ -183,6 +186,7 @@ const Profile = (() => {
       leaguesMap[key] = {
         platform:      "yahoo",
         leagueId:      String(l.leagueId),
+        leagueKey:     l.leagueKey  || `nfl.l.${l.leagueId}`,  // full key for API calls
         franchiseId:   `yahoo__${normalizedName}`,
         leagueName:    l.leagueName || `League ${l.leagueId}`,
         season:        String(l.season || new Date().getFullYear()),
@@ -1592,9 +1596,9 @@ const Profile = (() => {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
     // Always set the league context so matchups/playoffs work independently
-    DLRStandings.setLeague(league.leagueId, league.platform, league.season);
+    DLRStandings.setLeague(league.leagueId, league.platform, league.season, league.leagueKey);
     if (tab === "overview")    _renderOverview(el, leagueKey, league);
-    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season);
+    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season, league.leagueKey);
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster") {
@@ -1610,7 +1614,7 @@ const Profile = (() => {
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
         DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2);
       } else {
-        DLRRoster.init(league.leagueId, league.platform, league.season);
+        DLRRoster.init(league.leagueId, league.platform, league.season, league.leagueKey);
       }
     }
     if (tab === "salary") {
