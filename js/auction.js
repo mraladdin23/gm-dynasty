@@ -381,39 +381,39 @@ if (_isNightPause(now)) {
   // Core proxy logic — works with flat proxies map {rosterId: maxBid}
   // Falls back to bids array for backward compat with older auctions
   function _computeLeader(a) {
-    // Prefer flat proxies map (new structure)
-    const proxies = a.proxies || {};
-    let entries = Object.entries(proxies).map(([id, maxBid]) => ({ rosterId: Number(id), maxBid: Number(maxBid) }));
+  const proxies = a.proxies || {};
+  let entries = Object.entries(proxies)
+    .map(([id, maxBid]) => ({ rosterId: Number(id), maxBid: Number(maxBid) }));
 
-    // Fall back to bids array for old auctions
-    if (!entries.length && a.bids) {
-      const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-      const maxByRoster = {};
-      bids.forEach(b => {
-        const rid = Number(b.rosterId);
-        if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid]) maxByRoster[rid] = b.maxBid;
-      });
-      entries = Object.entries(maxByRoster).map(([id, maxBid]) => ({ rosterId: Number(id), maxBid }));
-    }
-
-    if (!entries.length) return { rosterId: null, displayBid: MIN_BID() };
-    entries.sort((a, b) => b.maxBid - a.maxBid);
-
-    if (entries.length === 1) {
-      // Single bidder — show MIN_BID, proxy stays hidden
-      return { rosterId: entries[0].rosterId, displayBid: MIN_BID() };
-    }
-    // Proxy: if leader's proxy > challenger's bid, display = challenger's bid (not +increment)
-    // This matches real auction behaviour: you pay what the challenger bid, not one increment over
-    const leaderMax     = entries[0].maxBid;
-    const challengerMax = entries[1].maxBid;
-    if (leaderMax > challengerMax) {
-      // Leader's proxy wins — display price is exactly what the challenger bid
-      return { rosterId: entries[0].rosterId, displayBid: challengerMax };
-    }
-    // Tied (shouldn't happen but handle gracefully — first bidder wins)
-    return { rosterId: entries[0].rosterId, displayBid: leaderMax };
+  // Fallback to old bids array
+  if (!entries.length && a.bids) {
+    const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
+    const maxByRoster = {};
+    bids.forEach(b => {
+      const rid = Number(b.rosterId);
+      if (!maxByRoster[rid] || b.maxBid > maxByRoster[rid]) maxByRoster[rid] = b.maxBid;
+    });
+    entries = Object.entries(maxByRoster).map(([id, maxBid]) => ({ rosterId: Number(id), maxBid }));
   }
+
+  if (!entries.length) return { rosterId: null, displayBid: MIN_BID() };
+
+  entries.sort((a, b) => b.maxBid - a.maxBid);
+
+  const leader = entries[0];
+  const challenger = entries[1];
+
+  if (!challenger) {
+    // Only one bidder
+    return { rosterId: leader.rosterId, displayBid: MIN_BID() };
+  }
+
+  // New display bid logic:
+  // displayBid = min(leaderMax, challengerMax + MIN_INC())
+  const displayBid = Math.min(leader.maxBid, challenger.maxBid + MIN_INC());
+
+  return { rosterId: leader.rosterId, displayBid };
+}
 
   function _myMaxBid(a) {
     // Check flat proxies first
