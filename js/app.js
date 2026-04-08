@@ -641,7 +641,7 @@ function _startGlobalChatMonitor(profile) {
     const handler = ref.on("child_added", snap => {
       const msg = snap.val() || {};
 
-      // Extra guard: skip anything older than session start (shouldn't happen with startAfter)
+      // Extra guard: skip anything older than session start
       if ((msg.ts || 0) <= startedAt) return;
 
       const me = (Auth.getCurrentProfile()?.username || "").toLowerCase();
@@ -655,22 +655,21 @@ function _startGlobalChatMonitor(profile) {
       const thisLeague   = window._detailLeagueKey === leagueKey;
 
       if (detailOpen && chatTabOpen && thisLeague) {
-        // Panel is open on this league's chat — mark seen immediately
         markChatSeen(leagueKey);
         return;
       }
 
-      // Increment unread count
       _chatUnreadCounts[leagueKey] = (_chatUnreadCounts[leagueKey] || 0) + 1;
       _updateChatBadges();
 
-      // Toast notification
       const lName  = league.leagueName || leagueKey;
       const sender = msg.user || "Someone";
-      const preview = msg.type === "gif" ? "sent a GIF" :
+      const preview = msg.type === "gif"  ? "sent a GIF" :
                       msg.type === "poll" ? `created a poll: ${msg.question || ""}` :
                       `"${(msg.text || "").slice(0, 40)}${(msg.text || "").length > 40 ? "…" : ""}"`;
       showToast(`💬 ${lName} · ${sender}: ${preview}`, "info", 5000);
+    }, err => {
+      console.warn(`[Chat monitor] Could not watch ${leagueKey}:`, err.message);
     });
 
     _globalChatListeners.push(() => ref.off("child_added", handler));
