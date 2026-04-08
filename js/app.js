@@ -554,7 +554,8 @@ let _globalAucData      = {};   // stored in closure, not on DOM element
 // Never exposes proxy bid amounts.
 function _computeDisplayBid(a) {
   const MIN_BID = 100_000;
-  // Use flat proxies map (new structure) — fall back to bids array for legacy auctions
+  // Use stored displayBid from transaction if available (captures bid direction)
+  // Sanity cap: can never exceed the leader's proxy
   let entries = [];
   if (a.proxies && Object.keys(a.proxies).length) {
     entries = Object.entries(a.proxies)
@@ -569,10 +570,11 @@ function _computeDisplayBid(a) {
     });
     entries = Object.values(maxByRoster).sort((x, y) => y - x);
   }
+  const leaderProxy = entries[0] || MIN_BID;
+  if (a.displayBid != null) return Math.min(Number(a.displayBid), leaderProxy);
   if (!entries.length) return MIN_BID;
   if (entries.length === 1) return MIN_BID;
-  // Display = challenger's bid, but never more than leader's proxy
-  return Math.min(entries[0], entries[1]);
+  return entries[1]; // fallback: challenger's proxy
 }
 
 function _startGlobalAucMonitor(profile) {

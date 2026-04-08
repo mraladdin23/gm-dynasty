@@ -408,9 +408,18 @@ function _computeLeader(a) {
     return { rosterId: leader.rosterId, displayBid: MIN_BID() };
   }
 
-  // Leader proxy > challenger proxy → leader wins, display = challenger's bid
-  // displayBid can never exceed the leader's own proxy
-  const displayBid = Math.min(leader.maxBid, challenger.maxBid);
+  // Prefer the stored displayBid written by the transaction — it captured
+  // the direction of the bid (who outbid whom) which can't be recovered from
+  // proxies alone after the fact.
+  if (a.displayBid != null) {
+    // Sanity cap: displayBid can never exceed the leader's own proxy
+    const safeBid = Math.min(Number(a.displayBid), leader.maxBid);
+    return { rosterId: leader.rosterId, displayBid: safeBid };
+  }
+
+  // Fallback for legacy auctions without stored displayBid:
+  // Show challenger's proxy (best we can do without bid direction)
+  const displayBid = challenger.maxBid;
 
   return { rosterId: leader.rosterId, displayBid };
 }
@@ -1383,6 +1392,9 @@ function _computeLeader(a) {
     }
 
     try {
+      // Capture transaction result so we don't race against Firebase listener
+      let txResult = null;
+
       await _auctRef(auctionId).transaction(cur => {
         if (!cur || cur.cancelled || cur.processed) return;
 
@@ -1405,6 +1417,7 @@ function _computeLeader(a) {
           .sort((a, b) => b.maxBid - a.maxBid);
         const currentLeaderId  = entriesBefore.length > 0 ? entriesBefore[0].rosterId : null;
         const currentLeaderMax = entriesBefore.length > 0 ? entriesBefore[0].maxBid : 0;
+        const prevDisplayBid   = cur.displayBid ?? MIN_BID();
 
         // Set/update proxy
         cur.proxies[myKey] = maxBid;
@@ -1418,26 +1431,22 @@ function _computeLeader(a) {
         const newLeaderId   = newLeader.rosterId;
 
         // Compute correct displayBid:
-        // - 1 bidder: MIN_BID
-        // - New bidder's proxy > old leader's proxy → new leader wins,
-        //   display = old leader's proxy + MIN_INC (they bid up to their max)
-        // - New bidder's proxy <= old leader's proxy → old leader still wins,
-        //   display = new bidder's proxy (what the challenger bid)
+        // - 1 bidder:                                 MIN_BID (proxy hidden)
+        // - I bid but didn't take lead:               my bid amount (what I paid up to)
+        // - I took lead from someone else:            old leader's proxy + MIN_INC
+        // - I was already leading, updated proxy:     challenger's current proxy (unchanged)
         let displayBid;
         if (!newChallenger) {
           displayBid = MIN_BID();
-        } else if (newLeaderId !== Number(myKey) && currentLeaderId !== null) {
-          // My bid didn't take the lead — old leader's proxy still wins
-          // Display = what I just bid (my proxy, since I'm the challenger)
+        } else if (newLeaderId !== Number(myKey)) {
+          // I didn't take the lead — I'm the challenger, show my bid
           displayBid = maxBid;
-        } else if (newLeaderId === Number(myKey) && currentLeaderId !== null &&
-                   currentLeaderId !== Number(myKey)) {
-          // I took the lead from someone else
-          // Display = old leader's proxy + MIN_INC
+        } else if (currentLeaderId !== null && currentLeaderId !== Number(myKey)) {
+          // I took the lead from someone — show old leader proxy + MIN_INC
           displayBid = currentLeaderMax + MIN_INC();
         } else {
-          // I was already leading and updated my proxy, or first two bids
-          displayBid = newChallenger ? newChallenger.maxBid : MIN_BID();
+          // I was already leading — challenger's proxy hasn't changed
+          displayBid = newChallenger.maxBid;
         }
 
         cur.leaderId   = newLeaderId;
@@ -1450,37 +1459,51 @@ function _computeLeader(a) {
 
         cur.bidCount = Object.keys(cur.proxies).length;
 
+        // Capture for use after transaction (avoids race with Firebase listener)
+        txResult = {
+          newLeaderId,
+          displayBid,
+          leaderChanged:    newLeaderId !== currentLeaderId,
+          displayBidChanged: displayBid !== prevDisplayBid,
+          iAmLeader:        newLeaderId === Number(myKey)
+        };
+
         return cur;
       });
 
-      // Write bid log entry after successful transaction
-      const auctionAfter  = _auctions.find(a => a.id === auctionId);
-      const leaderAfter   = auctionAfter ? _computeLeader(auctionAfter) : null;
-      const myTeam        = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
-      const isStillLeader = leaderAfter && Number(leaderAfter.rosterId) === Number(_myRosterId);
+      if (!txResult) return; // transaction aborted
 
-      // Determine log note
-      let logNote = "";
-      if (!isStillLeader && leaderAfter) {
-        const leaderTeam = _rosterData.find(r => Number(r.roster_id) === Number(leaderAfter.rosterId));
-        logNote = `Did not exceed ${leaderTeam?.teamName || "current leader"}'s proxy bid`;
-        showToast(`Bid of ${_fmtSal(maxBid)} placed — current bid does not exceed owner's max bid`, "info");
+      // Only write to bid log when the displayed price changed or leadership changed
+      // — NOT for silent proxy updates that don't affect the auction state visibly
+      const shouldLog = txResult.displayBidChanged || txResult.leaderChanged;
+
+      if (shouldLog) {
+        const myTeam   = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+        let logNote    = "";
+        if (!txResult.iAmLeader) {
+          const leaderTeam = _rosterData.find(r => Number(r.roster_id) === Number(txResult.newLeaderId));
+          logNote = `Did not exceed ${leaderTeam?.teamName || "current leader"}'s proxy`;
+        }
+        const logEntry = {
+          auctionId,
+          playerName,
+          rosterId:   Number(_myRosterId),
+          teamName:   myTeam?.teamName || `Team ${_myRosterId}`,
+          maxBid,
+          displayBid: txResult.displayBid,
+          isLeader:   txResult.iAmLeader,
+          note:       logNote,
+          timestamp:  Date.now()
+        };
+        await _logRef(auctionId).push(logEntry).catch(() => {});
+      }
+
+      // Toast feedback
+      if (!txResult.iAmLeader) {
+        showToast(`Proxy of ${_fmtSal(maxBid)} set — does not exceed current leader's max bid`, "info");
       } else {
         showToast(`Max bid of ${_fmtSal(maxBid)} placed on ${playerName} ✓`);
       }
-
-      const logEntry = {
-        auctionId,
-        playerName,
-        rosterId:  Number(_myRosterId),
-        teamName:  myTeam?.teamName || `Team ${_myRosterId}`,
-        maxBid,
-        displayBid: leaderAfter?.displayBid ?? maxBid,
-        isLeader:   isStillLeader,
-        note:       logNote,
-        timestamp:  Date.now()
-      };
-      await _logRef(auctionId).push(logEntry).catch(() => {});
 
     } catch(e) { showToast("Bid failed: " + e.message, "error"); }
   }
