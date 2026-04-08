@@ -667,11 +667,15 @@ const DLRStandings = (() => {
     }
 
     const teamMap = {};
-    teams.forEach(t => { teamMap[t.id] = t.name || `Team ${t.id}`; });
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    const sorted = [...standings].sort((a, b) =>
-      b.wins !== a.wins ? b.wins - a.wins : b.points_for - a.points_for
-    );
+    // normalizeBundle uses teamId/ptsFor/ptsAgainst
+    const sorted = [...standings].sort((a, b) => {
+      const aw = a.wins ?? 0, bw = b.wins ?? 0;
+      const ap = a.ptsFor ?? a.points_for ?? 0;
+      const bp = b.ptsFor ?? b.points_for ?? 0;
+      return bw !== aw ? bw - aw : bp - ap;
+    });
     const totalTeams   = sorted.length;
     const playoffSpots = Math.floor(totalTeams / 2);
 
@@ -689,7 +693,10 @@ const DLRStandings = (() => {
               const rank   = i + 1;
               const inPO   = rank <= playoffSpots;
               const bubble = rank === playoffSpots;
-              const name   = teamMap[s.team_id] || `Team ${s.team_id}`;
+              const tid    = String(s.teamId ?? s.team_id ?? "");
+              const name   = teamMap[tid] || `Team ${tid}`;
+              const pf     = s.ptsFor     ?? s.points_for     ?? 0;
+              const pa     = s.ptsAgainst ?? s.points_against ?? 0;
               return `<tr class="${inPO ? "standings-row--playoff" : ""}"
                 style="${inPO ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}` : "border-left:3px solid transparent"}">
                 <td class="standings-rank">${rank}</td>
@@ -699,9 +706,9 @@ const DLRStandings = (() => {
                     <div class="standings-team-name">${_esc(name)}</div>
                   </div>
                 </td>
-                <td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
-                <td>${s.points_for?.toFixed(1) || "—"}</td>
-                <td class="dim">${s.points_against?.toFixed(1) || "—"}</td>
+                <td>${s.wins}</td><td>${s.losses}</td><td>${s.ties ?? 0}</td>
+                <td>${pf ? pf.toFixed(1) : "—"}</td>
+                <td class="dim">${pa ? pa.toFixed(1) : "—"}</td>
               </tr>`;
             }).join("")}
           </tbody>
@@ -713,7 +720,7 @@ const DLRStandings = (() => {
     const matchups = bundle.matchups || [];
     const teams    = bundle.teams    || [];
     const nameMap  = {};
-    teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+    teams.forEach(t => { nameMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
     if (!matchups.length) {
       el.innerHTML = `<div class="empty-state">No matchup data available.</div>`;
@@ -722,8 +729,11 @@ const DLRStandings = (() => {
 
     const week = matchups[0]?.week || "—";
     const cards = matchups.map(m => {
-      const h    = m.home_team || {};
-      const a    = m.away_team || {};
+      // normalizeBundle uses home/away with teamId (not home_team/away_team with team_id)
+      const h    = m.home || m.home_team || {};
+      const a    = m.away || m.away_team || {};
+      const hId  = String(h.teamId ?? h.team_id ?? "");
+      const aId  = String(a.teamId ?? a.team_id ?? "");
       const hSc  = parseFloat(h.score || 0);
       const aSc  = parseFloat(a.score || 0);
       const hWin = hSc > aSc;
@@ -731,12 +741,12 @@ const DLRStandings = (() => {
       return `
         <div class="matchup-card">
           <div class="matchup-team ${hWin ? "matchup-team--winner" : ""}">
-            <span class="matchup-name">${_esc(nameMap[h.team_id] || h.team_id || "TBD")}</span>
+            <span class="matchup-name">${_esc(nameMap[hId] || hId || "TBD")}</span>
             <span class="matchup-score">${hSc > 0 ? hSc.toFixed(2) : "—"}</span>
           </div>
           <div class="matchup-vs">vs</div>
           <div class="matchup-team ${aWin ? "matchup-team--winner" : ""}">
-            <span class="matchup-name">${_esc(nameMap[a.team_id] || a.team_id || "TBD")}</span>
+            <span class="matchup-name">${_esc(nameMap[aId] || aId || "TBD")}</span>
             <span class="matchup-score">${aSc > 0 ? aSc.toFixed(2) : "—"}</span>
           </div>
         </div>`;

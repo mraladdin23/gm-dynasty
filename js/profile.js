@@ -121,12 +121,16 @@ const Profile = (() => {
       );
 
       const key = `mfl_${season}_${leagueId}`;
+      const leagueName = leagueInfo?.name || `League ${leagueId}`;
+      // Chain by normalized league name so same dynasty across seasons links together
+      const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+      const franchiseId = `mfl__${normalizedName}`;
 
       leaguesMap[key] = {
         platform: "mfl",
         leagueId: String(leagueId),
-        franchiseId: `mfl__${leagueId}`,
-        leagueName: leagueInfo?.name || `League ${leagueId}`,
+        franchiseId,
+        leagueName,
         season: String(season),
         leagueType: _detectMFLLeagueType(leagueInfo?.name || ""),
         totalTeams: Number(leagueInfo?.franchises) || 12,
@@ -177,14 +181,19 @@ const Profile = (() => {
 
     const leaguesMap = {};
     for (const l of yahooLeagues) {
-      const key = `yahoo_${l.season}_${l.leagueId}`;
+      const key        = `yahoo_${l.season}_${l.leagueId}`;
+      const leagueName = l.leagueName || `League ${l.leagueId}`;
+      // Chain by normalized league name so same dynasty across seasons links together
+      const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+      const franchiseId = `yahoo__${normalizedName}`;
       leaguesMap[key] = {
         platform:      "yahoo",
         leagueId:      String(l.leagueId),
-        franchiseId:   `yahoo__${l.leagueId}`,
-        leagueName:    l.leagueName || `League ${l.leagueId}`,
+        leagueKey:     l.leagueKey || `nfl.l.${l.leagueId}`,  // full Yahoo key e.g. "423.l.12345"
+        franchiseId,
+        leagueName,
         season:        String(l.season || new Date().getFullYear()),
-        leagueType:    _detectLeagueType(l.leagueName || ""),
+        leagueType:    _detectLeagueType(leagueName),
         totalTeams:    l.numTeams || 12,
         teamName:      "",
         isCommissioner: false,
@@ -1597,9 +1606,9 @@ const Profile = (() => {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
     // Always set the league context so matchups/playoffs work independently
-    DLRStandings.setLeague(league.leagueId, league.platform, league.season);
+    DLRStandings.setLeague(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
     if (tab === "overview")    _renderOverview(el, leagueKey, league);
-    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season);
+    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster") {
@@ -1615,7 +1624,7 @@ const Profile = (() => {
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
         DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2);
       } else {
-        DLRRoster.init(league.leagueId, league.platform, league.season);
+        DLRRoster.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
       }
     }
     if (tab === "salary") {
