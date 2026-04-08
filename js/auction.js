@@ -480,17 +480,48 @@ function _computeLeader(a) {
     try {
       // Remove this team's proxy bid and record their pass atomically
       await _auctRef(auctionId).transaction(cur => {
-        if (!cur || cur.cancelled || cur.processed) return;
-        // Record pass
-        cur.passes = cur.passes || {};
-        cur.passes[String(_myRosterId)] = Date.now();
-        // Remove proxy if they had one
-        if (cur.proxies) {
-          delete cur.proxies[String(Number(_myRosterId))];
-          cur.bidCount = Object.keys(cur.proxies).length;
-        }
-        return cur;
-      });
+  if (!cur || cur.cancelled || cur.processed) return;
+
+  if (!cur.proxies) cur.proxies = {};
+
+  // Update proxy
+  const myKey = String(Number(_myRosterId));
+  cur.proxies[myKey] = maxBid;
+
+  // Sort entries by proxy
+  const entries = Object.entries(cur.proxies)
+    .map(([id, m]) => ({ rosterId: Number(id), maxBid: Number(m) }))
+    .sort((a, b) => b.maxBid - a.maxBid);
+
+  const leader = entries[0];
+  const challenger = entries[1];
+
+  // Compute displayBid based on leader/challenger
+  let displayBid;
+  if (!challenger) {
+    displayBid = MIN_BID();
+  } else if (leader.maxBid > challenger.maxBid) {
+    // Leader proxy higher → pay challenger bid
+    displayBid = challenger.maxBid;
+  } else {
+    // Leader exceeds previous proxy → pay one increment above challenger
+    displayBid = challenger.maxBid + MIN_INC();
+  }
+
+  // Store in Firebase
+  cur.leaderId = leader.rosterId;
+  cur.displayBid = displayBid;
+
+  // Reset timer only if leader changed
+  const previousLeaderId = entries.length > 1 ? entries[1].rosterId : null;
+  if (cur.leaderId !== previousLeaderId) {
+    cur.expiresAt = _nextExpiry(Date.now());
+  }
+
+  cur.bidCount = Object.keys(cur.proxies).length;
+
+  return cur;
+});
 
       // Read back to check if all eligible teams have passed
       const snap    = await _auctRef(auctionId).once("value");
