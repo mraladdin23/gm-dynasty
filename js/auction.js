@@ -408,18 +408,15 @@ function _computeLeader(a) {
     return { rosterId: leader.rosterId, displayBid: MIN_BID() };
   }
 
-  // Prefer the stored displayBid written by the transaction — it captured
-  // the direction of the bid (who outbid whom) which can't be recovered from
-  // proxies alone after the fact.
-  if (a.displayBid != null) {
-    // Sanity cap: displayBid can never exceed the leader's own proxy
-    const safeBid = Math.min(Number(a.displayBid), leader.maxBid);
-    return { rosterId: leader.rosterId, displayBid: safeBid };
-  }
-
-  // Fallback for legacy auctions without stored displayBid:
-  // Show challenger's proxy (best we can do without bid direction)
-  const displayBid = challenger.maxBid;
+  // Display = challenger's proxy + MIN_INC
+  // The leader always beat the challenger by at least MIN_INC (enforced at bid time),
+  // so the price the leader is paying is challenger's max + one increment.
+  // This is computable purely from the proxies map without needing bid direction.
+  // Cap at leader's own proxy so we never show more than they bid.
+  const displayBid = Math.min(
+    challenger.maxBid + MIN_INC(),
+    leader.maxBid
+  );
 
   return { rosterId: leader.rosterId, displayBid };
 }
