@@ -246,10 +246,9 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
 
     if (accessToken) {
       // Store token for pickup after auth loads
-      sessionStorage.setItem("dlr_yahoo_access_token",  accessToken);
-      sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken);
-      sessionStorage.setItem("dlr_yahoo_expires_in",    String(expiresIn));
-      sessionStorage.setItem("dlr_yahoo_pending",       "1");
+      // Store tokens — YahooAPI handles localStorage + auto-refresh going forward
+      YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
+      sessionStorage.setItem("dlr_yahoo_pending", "1");
     }
 
     // Clean the hash from the URL immediately so token isn't visible
@@ -629,25 +628,31 @@ function _startGlobalChatMonitor(profile) {
   _globalChatListeners = [];
   _chatUnreadCounts    = {};
 
-  const leagues = profile.leagues || {};
+  const leagues   = profile.leagues || {};
+  const startedAt = Date.now(); // only notify messages sent AFTER app loaded
 
   Object.entries(leagues).forEach(([leagueKey, league]) => {
     if (league.archived) return;
-    const lastSeen = _getChatLastSeen(leagueKey);
-    const ref = GMD.child(`leagueChats/${leagueKey}`).orderByChild("ts").startAfter(lastSeen);
-    let initialized = false;
+
+    // Only listen for messages newer than when this session started
+    // This avoids the initialized-flag race with the existing-message burst
+    const ref = GMD.child(`leagueChats/${leagueKey}`)
+      .orderByChild("ts")
+      .startAfter(startedAt);
 
     const handler = ref.on("child_added", snap => {
-      // Skip initial load burst — only notify after first sync
-      if (!initialized) return;
-
       const msg = snap.val() || {};
-      const me  = (Auth.getCurrentProfile()?.username || "").toLowerCase();
+
+      // Extra guard: skip anything older than session start (shouldn't happen with startAfter)
+      if ((msg.ts || 0) <= startedAt) return;
+
+      const me = (Auth.getCurrentProfile()?.username || "").toLowerCase();
       // Don't notify for own messages
       if ((msg.user || "").toLowerCase() === me) return;
 
       // Check if this league's chat tab is currently open
-      const detailOpen   = !!document.querySelector(".league-detail-panel.active, #league-detail-panel.active, .league-detail.active");
+      const detailPanel  = document.getElementById("league-detail-panel");
+      const detailOpen   = detailPanel && !detailPanel.classList.contains("hidden");
       const chatTabOpen  = document.getElementById("detail-tab-select")?.value === "chat";
       const thisLeague   = window._detailLeagueKey === leagueKey;
 
@@ -662,13 +667,13 @@ function _startGlobalChatMonitor(profile) {
       _updateChatBadges();
 
       // Toast notification
-      const lName = league.leagueName || leagueKey;
+      const lName  = league.leagueName || leagueKey;
       const sender = msg.user || "Someone";
-      showToast(`💬 ${lName}: ${sender} sent a message`, "info", 4000);
+      const preview = msg.type === "gif" ? "sent a GIF" :
+                      msg.type === "poll" ? `created a poll: ${msg.question || ""}` :
+                      `"${(msg.text || "").slice(0, 40)}${(msg.text || "").length > 40 ? "…" : ""}"`;
+      showToast(`💬 ${lName} · ${sender}: ${preview}`, "info", 5000);
     });
-
-    // Mark initialized after a short delay to skip the initial data burst
-    setTimeout(() => { initialized = true; }, 2000);
 
     _globalChatListeners.push(() => ref.off("child_added", handler));
   });

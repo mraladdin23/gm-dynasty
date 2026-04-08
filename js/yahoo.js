@@ -6,6 +6,62 @@
 const YahooAPI = (() => {
   const BASE = "https://mfl-proxy.mraladdin23.workers.dev";
 
+  // ── Token storage keys ────────────────────────────────────
+  const KEY_ACCESS    = "dlr_yahoo_access_token";
+  const KEY_REFRESH   = "dlr_yahoo_refresh_token";
+  const KEY_EXPIRES   = "dlr_yahoo_expires_at";   // absolute ms timestamp
+
+  /**
+   * Stores tokens after OAuth callback. Call this from app.js when
+   * the #yahoo_token= hash is received.
+   */
+  function storeTokens(accessToken, refreshToken, expiresIn) {
+    localStorage.setItem(KEY_ACCESS,  accessToken);
+    if (refreshToken) localStorage.setItem(KEY_REFRESH, refreshToken);
+    localStorage.setItem(KEY_EXPIRES, String(Date.now() + (Number(expiresIn) || 3600) * 1000));
+    // Also keep sessionStorage copy for backward compat
+    sessionStorage.setItem("dlr_yahoo_access_token",  accessToken);
+    sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken || "");
+  }
+
+  /**
+   * Returns a valid access token, refreshing if needed.
+   * Throws if no tokens are stored or refresh fails.
+   */
+  async function _getValidToken() {
+    const access    = localStorage.getItem(KEY_ACCESS)  || sessionStorage.getItem("dlr_yahoo_access_token");
+    const refresh   = localStorage.getItem(KEY_REFRESH) || sessionStorage.getItem("dlr_yahoo_refresh_token");
+    const expiresAt = Number(localStorage.getItem(KEY_EXPIRES) || 0);
+
+    if (!access) throw new Error("No Yahoo access token — please reconnect Yahoo.");
+
+    // If token is still valid (with 2-minute buffer), use it
+    if (expiresAt && Date.now() < expiresAt - 120_000) return access;
+
+    // Token expired or expiry unknown — try to refresh
+    if (!refresh) {
+      throw new Error("Yahoo token expired — please reconnect Yahoo.");
+    }
+
+    try {
+      const res = await fetch(`${BASE}/auth/yahoo/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refresh })
+      });
+      if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+      const data = await res.json();
+      if (!data.access_token) throw new Error("No access token in refresh response");
+
+      // Store refreshed tokens
+      storeTokens(data.access_token, data.refresh_token || refresh, data.expires_in || 3600);
+      return data.access_token;
+    } catch(e) {
+      console.error("[Yahoo] Token refresh failed:", e.message);
+      throw new Error("Yahoo token expired — please reconnect Yahoo.");
+    }
+  }
+
   /**
    * Redirects user to Yahoo login
    */
@@ -17,8 +73,7 @@ const YahooAPI = (() => {
    * Fetches all leagues for logged-in user using stored access token
    */
   async function getLeagues() {
-    const token = sessionStorage.getItem("dlr_yahoo_access_token");
-    if (!token) throw new Error("No Yahoo access token — please reconnect Yahoo.");
+    const token = await _getValidToken();
 
     try {
       const res = await fetch(`${BASE}/yahoo/leagues`, {
@@ -56,8 +111,7 @@ const YahooAPI = (() => {
    * Fetch a full normalized bundle for a given Yahoo league key
    */
   async function getLeagueBundle(leagueKey) {
-    const token = sessionStorage.getItem("dlr_yahoo_access_token");
-    if (!token) throw new Error("No Yahoo access token — please reconnect Yahoo.");
+    const token = await _getValidToken();
 
     try {
       const res = await fetch(`${BASE}/yahoo/leagueBundle`, {
@@ -181,5 +235,5 @@ const YahooAPI = (() => {
     return bundle;
   }
 
-  return { login, getLeagues, getLeagueBundle };
+  return { login, getLeagues, getLeagueBundle, storeTokens };
 })();

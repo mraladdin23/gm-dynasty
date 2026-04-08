@@ -278,7 +278,7 @@ const DLRRoster = (() => {
 
   // ── Helpers ────────────────────────────────────────────
   async function _loadYahooData(leagueId, token) {
-    // Use stored leagueKey (full "nfl.l.XXXXX" format required by Yahoo API)
+    // Use stored leagueKey (full "423.l.XXXXX" format required by Yahoo API)
     const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
     const bundle = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
@@ -287,41 +287,56 @@ const DLRRoster = (() => {
     const rosters   = bundle.rosters   || [];
     const standings = bundle.standings || [];
 
+    // normalizeBundle uses teamId (not team_id)
     const standingsMap = {};
-    standings.forEach(s => { standingsMap[s.team_id] = s; });
+    standings.forEach(s => { standingsMap[String(s.teamId ?? s.team_id)] = s; });
 
     const rosterMap = {};
-    rosters.forEach(r => { rosterMap[r.team_id] = r.player || []; });
+    rosters.forEach(r => {
+      // normalizeBundle: rosters[].teamId, rosters[].players (array of pid strings)
+      const tid = String(r.teamId ?? r.team_id);
+      rosterMap[tid] = r.players || r.player || [];
+    });
+
+    // Load player names from bundle if available
+    const playerInfoMap = {};
+    (bundle.players || []).forEach(p => {
+      const pid = String(p.id ?? p.player_id);
+      playerInfoMap[pid] = p;
+    });
 
     const mappedTeams = teams.map(t => {
-      const s       = standingsMap[t.id] || {};
-      const players = rosterMap[t.id]    || [];
+      const tid     = String(t.id);
+      const s       = standingsMap[tid] || {};
+      const players = rosterMap[tid]    || [];
       return {
-        roster_id: t.id,
-        owner_id:  t.id,
-        teamName:  t.name       || `Team ${t.id}`,
-        username:  (t.owner_name || "").toLowerCase(),
+        roster_id: tid,
+        owner_id:  tid,
+        teamName:  t.name       || `Team ${tid}`,
+        username:  (t.owner_name || t.ownerName || "").toLowerCase(),
         avatar:    null,
         players:   players.map(pid => `yahoo_${pid}`),
         reserve:   [],
         taxi:      [],
         wins:      s.wins       || 0,
         losses:    s.losses     || 0,
-        fpts:      s.points_for || 0
+        fpts:      s.ptsFor ?? s.points_for ?? 0
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Yahoo player IDs don't match Sleeper — show name as ID for now
+    // Build player lookup from bundle player data if available, else placeholder
     const yahooPlayerLookup = {};
     mappedTeams.forEach(t => {
-      t.players.forEach(pid => {
-        yahooPlayerLookup[pid] = {
-          first_name: pid.replace("yahoo_", "Player "),
-          last_name: "",
-          position: "?",
-          fantasy_positions: ["?"],
-          team: "—",
-          search_rank: 9999
+      t.players.forEach(prefixedPid => {
+        const rawPid = prefixedPid.replace("yahoo_", "");
+        const info   = playerInfoMap[rawPid] || {};
+        yahooPlayerLookup[prefixedPid] = {
+          first_name:        info.name?.split(", ")[1] || info.name || `Player`,
+          last_name:         info.name?.split(", ")[0] || rawPid,
+          position:          info.position || "?",
+          fantasy_positions: [info.position || "?"],
+          team:              info.team || "—",
+          search_rank:       9999
         };
       });
     });
