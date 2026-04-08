@@ -632,21 +632,21 @@ function _startGlobalChatMonitor(profile) {
   Object.entries(leagues).forEach(([leagueKey, league]) => {
     if (league.archived) return;
 
-    // Only listen for messages newer than when this session started
-    // This avoids the initialized-flag race with the existing-message burst
     const ref = GMD.child(`leagueChats/${leagueKey}`)
       .orderByChild("ts")
       .startAfter(startedAt);
 
+    console.log(`[Chat] Watching ${leagueKey} from ts=${startedAt}`);
+
     const handler = ref.on("child_added", snap => {
       const msg = snap.val() || {};
+      console.log(`[Chat] New message on ${leagueKey}:`, msg.user, msg.ts, msg.text?.slice(0,30));
 
       // Extra guard: skip anything older than session start
-      if ((msg.ts || 0) <= startedAt) return;
+      if ((msg.ts || 0) <= startedAt) { console.log(`[Chat] Skipped old ts=${msg.ts}`); return; }
 
       const me = (Auth.getCurrentProfile()?.username || "").toLowerCase();
-      // Don't notify for own messages
-      if ((msg.user || "").toLowerCase() === me) return;
+      if ((msg.user || "").toLowerCase() === me) { console.log(`[Chat] Skipped own message`); return; }
 
       // Check if this league's chat tab is currently open
       const detailPanel  = document.getElementById("league-detail-panel");
