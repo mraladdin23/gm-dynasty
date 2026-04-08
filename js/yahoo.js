@@ -31,14 +31,20 @@ const YahooAPI = (() => {
         throw new Error(err.error || `Yahoo worker error ${res.status}`);
       }
       const data = await res.json();
-      if (!Array.isArray(data)) return [];
+      // Response is either array (old) or {leagues, displayName} (new)
+      const leagueArr   = Array.isArray(data) ? data : (data.leagues || []);
+      const displayName = data.displayName || "";
+      if (displayName) sessionStorage.setItem("dlr_yahoo_display_name", displayName);
 
-      return data.map(league => ({
-        platform:  "yahoo",
-        leagueId:  league.league_id  || league.leagueId,
-        leagueName:league.name       || league.leagueName,
-        season:    league.season,
-        numTeams:  league.num_teams  || league.numTeams || 12,
+      if (!Array.isArray(leagueArr)) return [];
+
+      return leagueArr.map(league => ({
+        platform:   "yahoo",
+        leagueId:   league.league_id  || league.leagueId,
+        leagueKey:  league.league_key || league.leagueKey,
+        leagueName: league.name       || league.leagueName,
+        season:     league.season,
+        numTeams:   league.num_teams  || league.numTeams || 12,
       }));
     } catch (err) {
       console.error("YahooAPI.getLeagues error:", err.message);
