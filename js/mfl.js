@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────
 
 const MFLAPI = (() => {
-  const BASE_URL = "https://api.dynastylockerroom.com";
+  const BASE_URL = "https://mfl-proxy.mraladdin23.workers.dev";
 
   // ───────── GENERIC POST HELPER ─────────
   async function post(endpoint, body) {
