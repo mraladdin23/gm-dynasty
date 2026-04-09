@@ -127,7 +127,7 @@ const YahooAPI = (() => {
       return normalizeBundle(raw);
     } catch (err) {
       console.error("YahooAPI getLeagueBundle error:", err.message);
-      return {};
+      throw err;  // re-throw so callers can show error UI
     }
   }
 

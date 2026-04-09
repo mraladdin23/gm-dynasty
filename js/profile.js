@@ -1472,14 +1472,14 @@ const Profile = (() => {
 
     // Pre-initialize auction module so canNominate/isRostered work on all tabs
     const meta3       = _leagueMeta[leagueKey] || {};
-    const isSalary3   = (league.leagueType === "dynasty" && league.platform === "sleeper") || meta3.leagueTypeOverride === "dynasty";
+    const isSalary3   = meta3.leagueTypeOverride === "salary" || league.leagueType === "salary";
     const auctionOn3  = meta3.auctionEnabled || isSalary3;
 
     // Compute franchiseId once — used by both auction preInit and salary preloadCap
     const franchise4   = Object.values(_buildFranchises()).find(f => f.seasons.some(s => s.key === leagueKey));
     const franchiseId4 = franchise4?.franchiseId || leagueKey;
 
-    if (auctionOn3 && league.platform === "sleeper") {
+    if (auctionOn3) {
       const sleeperUid = league.sleeperUserId
         || _currentProfile?.platforms?.sleeper?.sleeperUserId
         || null;
@@ -1525,7 +1525,7 @@ const Profile = (() => {
     ) || league.leagueType || "";
 
     const isSalary    = effectiveType === "salary";
-    const auctionOn   = meta.auctionEnabled || isSalary; // salary cap always has auction
+    const auctionOn   = meta.auctionEnabled || isSalary; // commish can enable for any platform
 
     const tabs = [
       { val: "overview",     label: "Overview" },
@@ -1643,8 +1643,8 @@ const Profile = (() => {
       DLRFreeAgents.init(league.leagueId, leagueKey, auctionOn, incPicks,
         league.myRosterId || null, league.teamName || "My Team");
     }
-    if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform);
-    if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season);
+    if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
+    if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
     if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
     if (tab === "rules")         DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
