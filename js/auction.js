@@ -368,7 +368,15 @@ if (_isNightPause(now)) {
   }
 
   function _fmtTime(ms, isPaused) {
-    if (isPaused) return "⏸ Paused";
+    if (isPaused) {
+      // Show when auction resumes/expires, not just "Paused"
+      if (ms <= 0) return "⏸ Resuming…";
+      const h = Math.floor(ms / 3_600_000);
+      const m = Math.floor((ms % 3_600_000) / 60_000);
+      if (h >= 24) return `⏸ ${Math.floor(h/24)}d ${h%24}h`;
+      if (h >= 1)  return `⏸ ${h}h ${m}m`;
+      return `⏸ ${m}m`;
+    }
     if (ms <= 0) return "Expired";
     const h = Math.floor(ms / 3_600_000);
     const m = Math.floor((ms % 3_600_000) / 60_000);
@@ -1066,12 +1074,12 @@ function _computeLeader(a) {
 
     const now    = Date.now();
     const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
-    const won    = _auctions.filter(a => a.processed && a.winner === rosterId);
+    const won    = _auctions.filter(a => a.processed && Number(a.winner) === Number(rosterId));
 
     // Active bids this team has placed
     const activeBids = active.filter(a => {
-      const bs = Array.isArray(a.bids) ? a.bids : Object.values(a.bids||{});
-      return bs.some(b => b.rosterId === rosterId);
+      const proxies = a.proxies || {};
+      return String(rosterId) in proxies || Object.keys(proxies).map(Number).includes(Number(rosterId));
     });
 
     // Players won this auction session
@@ -1146,16 +1154,29 @@ function _computeLeader(a) {
       return;
     }
     el.innerHTML = `<div class="auc-history-list">
-      ${ended.sort((a, b) => (b.expiresAt||0) - (a.expiresAt||0)).slice(0, 60).map(a => {
+      ${ended.sort((a, b) => (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)).slice(0, 60).map(a => {
         const p      = _players[a.playerId] || {};
         const name   = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
-        const leader = _computeLeader(a);
-        const winTeam= leader.rosterId
-          ? (_rosterData.find(r => r.roster_id === leader.rosterId)?.teamName || `#${leader.rosterId}`)
+
+        // Always prefer stored winner/winningBid — these are set at claim time and are authoritative.
+        // Fall back to _computeLeader only for unprocessed expired auctions.
+        let winRosterId = a.winner != null ? Number(a.winner) : null;
+        let winPrice    = a.winningBid || 0;
+        if (!winRosterId && !a.cancelled) {
+          const leader = _computeLeader(a);
+          winRosterId  = leader.rosterId;
+          winPrice     = leader.displayBid;
+        }
+
+        const winTeam = winRosterId
+          ? (_rosterData.find(r => Number(r.roster_id) === winRosterId)?.teamName || `#${winRosterId}`)
           : "—";
+
         const status  = a.cancelled ? "Cancelled" : a.processed ? "Claimed" : "Expired";
         const sColor  = a.cancelled ? "var(--color-text-dim)" : a.processed ? "var(--color-green)" : "var(--color-gold)";
-        const date    = new Date(a.expiresAt||a.startTime).toLocaleDateString();
+        const dateTs  = a.claimedAt || a.expiresAt || a.startTime;
+        const date    = dateTs ? new Date(dateTs).toLocaleDateString() : "—";
+
         return `
           <div class="auc-history-row" onclick="DLRAuction.showBidHistory('${a.id}')" style="cursor:pointer" title="Click to view bid history">
             <img class="auc-hist-photo" src="https://sleepercdn.com/content/nfl/players/thumb/${a.playerId}.jpg" onerror="this.style.display='none'" loading="lazy"/>
@@ -1164,8 +1185,12 @@ function _computeLeader(a) {
               <div class="dim" style="font-size:.72rem">${_esc(winTeam)}</div>
             </div>
             <div style="text-align:right;flex-shrink:0">
-              <div style="font-family:var(--font-display);font-weight:700">${a.winningBid ? _fmtSal(a.winningBid) : (leader.rosterId ? _fmtSal(leader.displayBid) : "—")}</div>
+              <div style="font-family:var(--font-display);font-weight:700">${winPrice ? _fmtSal(winPrice) : "—"}</div>
               <div style="font-size:.65rem;color:${sColor}">${status} · ${date}</div>
+              ${!a.processed && !a.cancelled && winRosterId && _isCommish
+                ? `<button class="btn-secondary btn-sm" style="font-size:.65rem;margin-top:4px"
+                    onclick="event.stopPropagation();DLRAuction.claimAuction('${a.id}','${_escA(name)}')">Claim</button>`
+                : ""}
             </div>
           </div>`;
       }).join("")}
@@ -1596,27 +1621,28 @@ function _computeLeader(a) {
   // Auto-claim expired auctions — runs on commish client only
   async function _autoClaimExpired() {
     const now = Date.now();
-    // Don't process anything during the pause window
-    if (_isPaused(now)) return;
-    const expired = _auctions.filter(a =>
-      !a.cancelled && !a.processed && a.expiresAt <= now
-    );
+    // During the pause window, only skip if the auction hasn't actually expired yet.
+    // Auctions that expired BEFORE the pause window started (expiresAt < pause start)
+    // should still be claimed. Only skip truly-live auctions that expire after the pause.
+    const expired = _auctions.filter(a => {
+      if (a.cancelled || a.processed) return false;
+      if (a.expiresAt > now) return false;
+      return true;  // expired regardless of whether we're currently paused
+    });
     for (const a of expired) {
       const leader = _computeLeader(a);
       if (!leader.rosterId) continue; // no bids — skip, commish can cancel manually
 
-      // Check if player is already on the winner's Sleeper roster (don't double-count)
       const alreadyRostered = isRostered(a.playerId);
 
       await _auctRef(a.id).update({
-        processed:  true,
-        claimedAt:  now,
-        winner:     leader.rosterId,
-        winningBid: leader.displayBid,
+        processed:     true,
+        claimedAt:     now,
+        winner:        leader.rosterId,
+        winningBid:    leader.displayBid,
         autoProcessed: true
       });
 
-      // Persist salary only if not already on the roster
       if (!alreadyRostered && typeof DLRSalaryCap !== "undefined") {
         const winnerTeam = _rosterData.find(r => Number(r.roster_id) === Number(leader.rosterId));
         if (winnerTeam) {
