@@ -172,6 +172,9 @@ const DLRFreeAgents = (() => {
   let _watchlistOnly      = false;
   let _searchQuery        = "";
   let _watchlist          = null;
+  let _platform           = "sleeper";
+  let _season             = null;
+  let _platformLeagueKey  = null;
   let _cachedData         = null;
   let _rosterLookup       = {};   // playerId → teamName
   let _wonIds             = new Set(); // playerIds claimed this auction session
@@ -182,9 +185,12 @@ const DLRFreeAgents = (() => {
   };
   const SKILL_POS = ["QB","RB","WR","TE"];
 
-  async function init(leagueId, leagueKey, auctionEnabled, auctionIncludePicks, myRosterId, myTeamName) {
+  async function init(leagueId, leagueKey, auctionEnabled, auctionIncludePicks, myRosterId, myTeamName, platform, platformLeagueKey, season) {
     _leagueId           = leagueId;
     _leagueKey          = leagueKey || null;
+    _platform           = platform || "sleeper";
+    _platformLeagueKey  = platformLeagueKey || null;
+    _season             = season || new Date().getFullYear().toString();
     _auctionEnabled     = !!auctionEnabled;
     _auctionIncludePicks= !!auctionIncludePicks;
     _myRosterId         = myRosterId || null;
@@ -248,7 +254,17 @@ const DLRFreeAgents = (() => {
   async function _loadData(leagueId, token) {
     const el = document.getElementById("dtab-freeagents");
 
-    // Get all rostered player IDs in this league
+    // MFL/Yahoo: get roster data from their bundle instead of Sleeper
+    if (_platform === "mfl") {
+      await _loadMFLRosterData(leagueId, token);
+      return;
+    }
+    if (_platform === "yahoo") {
+      await _loadYahooRosterData(leagueId, token);
+      return;
+    }
+
+    // Sleeper: get all rostered player IDs in this league
     const [rosters, users] = await Promise.all([
       SleeperAPI.getRosters(leagueId),
       SleeperAPI.getLeagueUsers(leagueId).catch(() => [])
@@ -334,6 +350,100 @@ const DLRFreeAgents = (() => {
       }));
 
     _cachedData = allPlayers;
+    if (token !== _initToken) return;
+    _render();
+  }
+
+  // ── MFL Players tab ───────────────────────────────────────
+  async function _loadMFLRosterData(leagueId, token) {
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, _season);
+    if (token !== _initToken) return;
+
+    const teams = MFLAPI.getTeams(bundle);
+    const teamMap = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    _rosterLookup = {};
+    const rostered = new Set();
+    teams.forEach(t => {
+      const mflPlayers = MFLAPI.getRoster(bundle, t.id);
+      mflPlayers.forEach(p => {
+        rostered.add(`mfl_${p.id}`);
+        _rosterLookup[`mfl_${p.id}`] = t.name || `Team ${t.id}`;
+      });
+    });
+
+    // Build player list from MFL bundle
+    const playerLookup = {};
+    const raw = bundle?.players?.players?.player;
+    if (raw) {
+      const arr = Array.isArray(raw) ? raw : [raw];
+      arr.forEach(p => {
+        if (p.id) {
+          const nameParts = (p.name || "").split(", ");
+          playerLookup[`mfl_${p.id}`] = {
+            pid:        `mfl_${p.id}`,
+            name:       nameParts.length > 1 ? `${nameParts[1]} ${nameParts[0]}` : p.name || `Player ${p.id}`,
+            pos:        (p.position || "?").toUpperCase(),
+            nflTeam:    p.team || "FA",
+            rank:       9999,
+            pts:        null,
+            age:        p.age ? parseInt(p.age) : null,
+            status:     null,
+            isRostered: rostered.has(`mfl_${p.id}`),
+            rosterTeam: _rosterLookup[`mfl_${p.id}`] || null,
+            isWon:      false
+          };
+        }
+      });
+    }
+
+    const SKILL = ["QB","RB","WR","TE"];
+    _cachedData = Object.values(playerLookup).filter(p => SKILL.includes(p.pos));
+    if (token !== _initToken) return;
+    _render();
+  }
+
+  // ── Yahoo Players tab ──────────────────────────────────────
+  async function _loadYahooRosterData(leagueId, token) {
+    const key    = _platformLeagueKey || `nfl.l.${leagueId}`;
+    const bundle = await YahooAPI.getLeagueBundle(key);
+    if (token !== _initToken) return;
+
+    const teams   = bundle.teams   || [];
+    const rosters = bundle.rosters || [];
+
+    _rosterLookup = {};
+    const rostered = new Set();
+    const teamNameMap = {};
+    teams.forEach(t => { teamNameMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    rosters.forEach(r => {
+      const tid  = String(r.teamId ?? r.team_id);
+      const name = teamNameMap[tid] || `Team ${tid}`;
+      (r.players || []).forEach(pid => {
+        const key = `yahoo_${pid}`;
+        rostered.add(key);
+        _rosterLookup[key] = name;
+      });
+    });
+
+    // Yahoo doesn't have a bulk player list — show rostered players only
+    const SKILL = ["QB","RB","WR","TE","K"];
+    _cachedData = [...rostered].map(key => ({
+      pid:        key,
+      name:       key.replace("yahoo_", "Player "),
+      pos:        "?",
+      nflTeam:    "—",
+      rank:       9999,
+      pts:        null,
+      age:        null,
+      status:     null,
+      isRostered: true,
+      rosterTeam: _rosterLookup[key] || null,
+      isWon:      false
+    }));
+
     if (token !== _initToken) return;
     _render();
   }
@@ -438,11 +548,11 @@ const DLRFreeAgents = (() => {
           let nomBtn = "";
           if (_auctionEnabled) {
             if (p.isWon) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.76rem">Claimed</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-blue);font-size:.72rem">Claimed</span>`;
             } else if (p.activeNom) {
-              nomBtn = `<span class="fa-nom-badge" style="font-size:.64rem">Active bid</span>`;
+              nomBtn = `<span class="fa-nom-badge">Active bid</span>`;
             } else if (p.isRostered) {
-              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.68rem">Rostered</span>`;
+              nomBtn = `<span class="fa-nom-badge" style="color:var(--color-text-dim);font-size:.7rem">Rostered</span>`;
             } else if (canNom) {
               nomBtn = `<button class="fa-nom-btn btn-primary btn-sm"
                 onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"

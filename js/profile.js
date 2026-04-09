@@ -113,12 +113,35 @@ const Profile = (() => {
 
       // Extract basic info
       const leagueInfo = bundle?.league?.league || {};
-      const standings  = bundle?.standings?.leagueStandings?.franchise || [];
+      const standingsRaw = bundle?.standings?.leagueStandings?.franchise || [];
+      const standingsArr = Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw];
 
-      // Try to find user's franchise
-      let myTeam = standings.find(f =>
-        f.name?.toLowerCase().includes(mflUsername.toLowerCase())
+      // Also check league franchises for owner info
+      const franchisesRaw = leagueInfo?.franchises?.franchise || [];
+      const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
+
+      // Try to find user's franchise — match by owner name, username, or email
+      let myTeam = standingsArr.find(f =>
+        f.name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
+        f.owner_name?.toLowerCase().includes(mflUsername.toLowerCase())
       );
+
+      // Also try matching franchise owner from league franchises list
+      if (!myTeam) {
+        const myFranchise = franchisesArr.find(f =>
+          f.owner_name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
+          f.username?.toLowerCase() === mflUsername.toLowerCase() ||
+          f.is_owner === "1"
+        );
+        if (myFranchise) {
+          myTeam = standingsArr.find(f => String(f.id) === String(myFranchise.id));
+        }
+      }
+
+      // Last resort: commish
+      if (!myTeam) {
+        myTeam = standingsArr.find(f => f.is_commish === "1");
+      }
 
       const key = `mfl_${season}_${leagueId}`;
       const leagueName = leagueInfo?.name || `League ${leagueId}`;
@@ -137,12 +160,12 @@ const Profile = (() => {
         teamName: myTeam?.name || "My Team",
         isCommissioner: myTeam?.is_commish === "1",
         myRosterId: myTeam?.id || null,
-        wins: Number(myTeam?.wins) || 0,
-        losses: Number(myTeam?.losses) || 0,
-        ties: Number(myTeam?.ties) || 0,
-        pointsFor: Number(myTeam?.pf) || 0,
-        pointsAgainst: Number(myTeam?.pa) || 0,
-        standing: Number(myTeam?.rank) || null,
+        wins:         Number(myTeam?.h2hw  || myTeam?.wins        || 0),
+        losses:       Number(myTeam?.h2hl  || myTeam?.losses      || 0),
+        ties:         Number(myTeam?.h2ht  || myTeam?.ties        || 0),
+        pointsFor:    Number(myTeam?.pf    || myTeam?.PF          || 0),
+        pointsAgainst:Number(myTeam?.pa    || myTeam?.PA          || 0),
+        standing:     Number(myTeam?.rank  || null),
         playoffFinish: null,
         isChampion: false
       };
@@ -1641,7 +1664,8 @@ const Profile = (() => {
       const auctionOn = meta2.auctionEnabled || isSalary3;
       const incPicks  = meta2.auctionIncludePicks || false;
       DLRFreeAgents.init(league.leagueId, leagueKey, auctionOn, incPicks,
-        league.myRosterId || null, league.teamName || "My Team");
+        league.myRosterId || null, league.teamName || "My Team",
+        league.platform || "sleeper", league.leagueKey || leagueKey, league.season);
     }
     if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
     if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
