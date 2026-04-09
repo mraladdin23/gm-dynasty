@@ -98,11 +98,11 @@ const MFLAPI = (() => {
     const arr = Array.isArray(raw) ? raw : [raw];
     return arr.map((s, i) => ({
       franchiseId: s.id,
-      wins:        parseInt(s.wins   || s.W || 0),
-      losses:      parseInt(s.losses || s.L || 0),
-      ties:        parseInt(s.ties   || s.T || 0),
-      ptsFor:      parseFloat(s.pf   || s.PF || s.ptsFor || 0),
-      ptsAgainst:  parseFloat(s.pa   || s.PA || s.ptsAgainst || 0),
+      wins:        parseInt(s.wins   || s.W || s.h2hw || s.allPlayW || 0),
+      losses:      parseInt(s.losses || s.L || s.h2hl || s.allPlayL || 0),
+      ties:        parseInt(s.ties   || s.T || s.h2ht || s.allPlayT || 0),
+      ptsFor:      parseFloat(s.pf   || s.PF || s.ptsFor  || s.pointsFor  || 0),
+      ptsAgainst:  parseFloat(s.pa   || s.PA || s.ptsAgainst || s.pointsAgainst || 0),
       rank:        parseInt(s.rank || i + 1)
     })).sort((a, b) => b.wins - a.wins || b.ptsFor - a.ptsFor);
   }
