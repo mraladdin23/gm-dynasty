@@ -148,7 +148,7 @@ const Profile = (() => {
       };
 
     } catch (err) {
-      console.warn(`[MFL] Failed to fetch league ${leagueId}:`, err);
+
     }
   }
 
@@ -285,7 +285,7 @@ const Profile = (() => {
       isCommissioner:  league?.isCommissioner  || false
     };
     try { await GMDB.saveLeagueMetaEntry(username, leagueKey, withMeta); } catch(e) {
-      console.warn("[DLR] Firebase meta save failed (localStorage backup saved):", e.message);
+
     }
   }
 

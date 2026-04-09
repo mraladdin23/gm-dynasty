@@ -1427,23 +1427,17 @@ function _computeLeader(a) {
         const newChallenger = entriesAfter[1];
         const newLeaderId   = newLeader.rosterId;
 
-        // Compute correct displayBid:
-        // - 1 bidder:                                 MIN_BID (proxy hidden)
-        // - I bid but didn't take lead:               my bid amount (what I paid up to)
-        // - I took lead from someone else:            old leader's proxy + MIN_INC
-        // - I was already leading, updated proxy:     challenger's current proxy (unchanged)
+        // Compute displayBid — must match _computeLeader's formula exactly:
+        // challenger.maxBid + MIN_INC, capped at leader.maxBid
+        // This is always correct regardless of who placed the bid.
         let displayBid;
         if (!newChallenger) {
           displayBid = MIN_BID();
-        } else if (newLeaderId !== Number(myKey)) {
-          // I didn't take the lead — I'm the challenger, show my bid
-          displayBid = maxBid;
-        } else if (currentLeaderId !== null && currentLeaderId !== Number(myKey)) {
-          // I took the lead from someone — show old leader proxy + MIN_INC
-          displayBid = currentLeaderMax + MIN_INC();
         } else {
-          // I was already leading — challenger's proxy hasn't changed
-          displayBid = newChallenger.maxBid;
+          displayBid = Math.min(
+            newChallenger.maxBid + MIN_INC(),
+            newLeader.maxBid
+          );
         }
 
         cur.leaderId   = newLeaderId;
