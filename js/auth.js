@@ -98,27 +98,41 @@ const Auth = (() => {
   // ── Auth state observer ────────────────────────────────
   function onAuthStateChanged(callback) {
     _onAuthChange = callback;
+
+    // Safety net: if Firebase auth never fires (blocked network, slow mobile),
+    // redirect to auth screen after 8 seconds rather than hanging on loading
+    const authTimeout = setTimeout(() => {
+      console.warn("[Auth] Auth state timeout — showing login screen");
+      callback(null, null);
+    }, 8000);
+
     auth.onAuthStateChanged(async (fbUser) => {
-      // Skip if registration is in progress — that flow sets
-      // _currentProfile itself and calls the screen transition directly
+      clearTimeout(authTimeout);
+      // Skip if registration is in progress
       if (_isRegistering) return;
 
       if (fbUser) {
         _currentUser = fbUser;
         try {
-          // Don't force-refresh token — that blocks on slow/blocked networks.
-          // The token is still valid; Firebase will refresh it lazily in the background.
-          await Promise.race([
-            fbUser.getIdToken(false),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("token timeout")), 5000))
-          ]);
+          // Use a tight timeout for both token fetch and profile load.
+          // On blocked networks these can hang indefinitely.
+          const tokenPromise   = fbUser.getIdToken(false);
+          const timeoutPromise = new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 5000));
+          await Promise.race([tokenPromise, timeoutPromise]);
+        } catch(err) {
+          console.warn("[Auth] Token fetch failed/timed out:", err.message);
+          // Continue anyway — token may still be cached locally
+        }
+        try {
           if (!_currentProfile) {
-            _currentProfile = await GMDB.getUserByUid(fbUser.uid);
+            const profileTimeout = new Promise((_, r) => setTimeout(() => r(new Error("profile timeout")), 5000));
+            _currentProfile = await Promise.race([
+              GMDB.getUserByUid(fbUser.uid),
+              profileTimeout
+            ]);
           }
-        } catch (err) {
-          console.warn("[Auth] Profile load failed:", err.message);
-          // Still set the user even if token/profile fetch timed out —
-          // lets the app show the auth screen rather than hanging forever
+        } catch(err) {
+          console.warn("[Auth] Profile load failed/timed out:", err.message);
           _currentProfile = null;
         }
       } else {
