@@ -371,7 +371,7 @@ const DLRDraft = (() => {
       pArr.forEach(p => {
         if (p.id) {
           const displayName = MFLAPI.mflNameToDisplay(p.name);
-          const sleeperId   = MFLAPI.mflNameToSleeperId(p.name);
+          const sleeperId   = MFLAPI.mflNameToSleeperId(p.name, p.position);
           playerLookup[p.id] = {
             name:      displayName || `Player ${p.id}`,
             pos:       (p.position || "?").toUpperCase(),

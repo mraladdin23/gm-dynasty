@@ -289,6 +289,7 @@ const DLRRoster = (() => {
             <span class="roster-nfl-team">${nflTeam}</span>
             ${p.years_exp === 0 ? '<span class="roster-rookie-badge">R</span>' : ""}
             ${p.injury_status ? `<span class="roster-injury-badge">${p.injury_status}</span>` : ""}
+            ${p.pts_season ? `<span class="roster-pts dim" style="margin-left:auto;font-size:.7rem">${p.pts_season.toFixed(1)} pts</span>` : ""}
           </div>
         </div>
       </div>`;
@@ -364,6 +365,7 @@ const DLRRoster = (() => {
     // Use MFLAPI helpers to normalize the raw worker response
     const bundleTeams  = MFLAPI.getTeams(bundle);
     const standingsMap = MFLAPI.getStandingsMap(bundle);
+    const playerScores = MFLAPI.getPlayerScores(bundle);  // { mflId: ytdPoints }
 
     const teams = bundleTeams.map(t => {
       const s = standingsMap[t.id] || {};
@@ -395,7 +397,7 @@ const DLRRoster = (() => {
     teams.forEach(t => {
       (t.mflPlayers || []).forEach(p => {
         const displayName = MFLAPI.mflNameToDisplay(p.name);
-        const sleeperId   = MFLAPI.mflNameToSleeperId(p.name);
+        const sleeperId   = MFLAPI.mflNameToSleeperId(p.name, p.position);
         mflPlayerLookup[`mfl_${p.id}`] = {
           first_name:        displayName.split(" ")[0] || "",
           last_name:         displayName.split(" ").slice(1).join(" ") || "",
@@ -403,7 +405,8 @@ const DLRRoster = (() => {
           fantasy_positions: [p.position || "?"],
           team:              p.team || "FA",
           search_rank:       9999,
-          _sleeperId:        sleeperId,   // for photo + player card
+          pts_season:        playerScores[p.id] || 0,  // MFL YTD points
+          _sleeperId:        sleeperId,
           _mflId:            p.id,
         };
       });

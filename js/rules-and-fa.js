@@ -359,8 +359,9 @@ const DLRFreeAgents = (() => {
     const bundle = await MFLAPI.getLeagueBundle(leagueId, _season);
     if (token !== _initToken) return;
 
-    const teams = MFLAPI.getTeams(bundle);
-    const teamMap = {};
+    const teams        = MFLAPI.getTeams(bundle);
+    const playerScores = MFLAPI.getPlayerScores(bundle);
+    const teamMap      = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
     _rosterLookup = {};
@@ -373,33 +374,40 @@ const DLRFreeAgents = (() => {
       });
     });
 
-    // Build player list from MFL bundle
+    // Build player list from MFL bundle with Sleeper ID mapping for photos/cards
+    const SKILL = ["QB","RB","WR","TE"];
     const playerLookup = {};
     const raw = bundle?.players?.players?.player;
     if (raw) {
       const arr = Array.isArray(raw) ? raw : [raw];
       arr.forEach(p => {
-        if (p.id) {
-          const nameParts = (p.name || "").split(", ");
-          playerLookup[`mfl_${p.id}`] = {
-            pid:        `mfl_${p.id}`,
-            name:       nameParts.length > 1 ? `${nameParts[1]} ${nameParts[0]}` : p.name || `Player ${p.id}`,
-            pos:        (p.position || "?").toUpperCase(),
-            nflTeam:    p.team || "FA",
-            rank:       9999,
-            pts:        null,
-            age:        p.age ? parseInt(p.age) : null,
-            status:     null,
-            isRostered: rostered.has(`mfl_${p.id}`),
-            rosterTeam: _rosterLookup[`mfl_${p.id}`] || null,
-            isWon:      false
-          };
-        }
+        if (!p.id) return;
+        const pos = (p.position || "?").toUpperCase();
+        if (!SKILL.includes(pos)) return;  // only skill positions
+        const displayName = MFLAPI.mflNameToDisplay(p.name);
+        const sleeperId   = MFLAPI.mflNameToSleeperId(p.name, pos);
+        const mflPts      = playerScores[p.id] || 0;
+        // Use Sleeper stats if available, else MFL score
+        const sleeperP    = sleeperId ? DLRPlayers.get(sleeperId) : null;
+        playerLookup[`mfl_${p.id}`] = {
+          pid:        `mfl_${p.id}`,
+          name:       displayName || `Player ${p.id}`,
+          pos,
+          nflTeam:    p.team || "FA",
+          rank:       sleeperP?.search_rank || 9999,
+          pts:        mflPts > 0 ? mflPts : null,
+          age:        p.age ? parseInt(p.age) : (sleeperP?.age || null),
+          status:     sleeperP?.injury_status || null,
+          isRostered: rostered.has(`mfl_${p.id}`),
+          rosterTeam: _rosterLookup[`mfl_${p.id}`] || null,
+          isWon:      false,
+          _sleeperId: sleeperId,
+          _mflId:     p.id,
+        };
       });
     }
 
-    const SKILL = ["QB","RB","WR","TE"];
-    _cachedData = Object.values(playerLookup).filter(p => SKILL.includes(p.pos));
+    _cachedData = Object.values(playerLookup);
     if (token !== _initToken) return;
     _render();
   }

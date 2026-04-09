@@ -178,8 +178,12 @@ const MFLAPI = (() => {
   function buildMFLToSleeperIndex() {
     if (_mflToSleeperCache) return _mflToSleeperCache;
     const sleeperPlayers = DLRPlayers.all();
+    const SKILL = new Set(["QB", "RB", "WR", "TE"]);
     const index = {};  // normalized name → sleeperId
     Object.entries(sleeperPlayers).forEach(([sid, p]) => {
+      // Only index skill position players to avoid wrong matches (K, DEF, DL, LB etc.)
+      const pos = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
+      if (!SKILL.has(pos)) return;
       if (p.search_full_name) {
         index[p.search_full_name] = sid;
       } else if (p.first_name && p.last_name) {
@@ -191,8 +195,11 @@ const MFLAPI = (() => {
     return index;
   }
 
-  function mflNameToSleeperId(mflName) {
+  function mflNameToSleeperId(mflName, position) {
     if (!mflName) return null;
+    // Only match skill positions
+    const SKILL = new Set(["QB", "RB", "WR", "TE"]);
+    if (position && !SKILL.has(position.toUpperCase())) return null;
     // MFL format: "Last, First" or "First Last"
     let normalized;
     if (mflName.includes(",")) {
@@ -231,6 +238,21 @@ const MFLAPI = (() => {
   }
 
   /**
+   * Returns player scores map: { mflPlayerId: totalPoints }
+   * from bundle.playerScores (YTD season total)
+   */
+  function getPlayerScores(bundle) {
+    const raw = bundle?.playerScores?.playerScores?.playerScore;
+    if (!raw) return {};
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const map = {};
+    arr.forEach(p => {
+      if (p.id) map[String(p.id)] = parseFloat(p.score || 0);
+    });
+    return map;
+  }
+
+  /**
    * Extracts top-level league info from bundle:
    * { name, numTeams, season, playoffTeams }
    */
@@ -257,5 +279,6 @@ const MFLAPI = (() => {
     buildMFLToSleeperIndex,
     mflNameToSleeperId,
     mflNameToDisplay,
+    getPlayerScores,
   };
 })();

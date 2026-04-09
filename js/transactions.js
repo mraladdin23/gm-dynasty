@@ -260,18 +260,18 @@ const DLRTransactions = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build player name lookup from bundle
-    const playerMap = {};
+    // Build player name/pos lookup from bundle
+    const mflPlayerMap = {};
     const rawPlayers = bundle?.players?.players?.player;
     if (rawPlayers) {
       const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
       pArr.forEach(p => {
-        if (p.id) playerMap[p.id] = MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`;
+        if (p.id) mflPlayerMap[p.id] = {
+          name:     MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`,
+          position: (p.position || "").toUpperCase()
+        };
       });
     }
-
-    // Also try Sleeper DB for any missing names
-    const sleeperPlayers = DLRPlayers.all();
 
     const raw = bundle?.transactions?.transactions?.transaction;
     if (!raw) {
@@ -284,69 +284,77 @@ const DLRTransactions = (() => {
     }
     const txArr = Array.isArray(raw) ? raw : [raw];
 
-    // Parse MFL transaction format: "playerId|franchiseId,playerId|franchiseId"
-    function parseMFLTxPlayers(txStr) {
-      if (!txStr) return [];
-      return txStr.split(",").map(part => {
-        const [pid] = part.split("|");
-        const name = playerMap[pid]
-          || (() => {
-            const sid = MFLAPI.mflNameToSleeperId(playerMap[pid]);
-            if (sid && sleeperPlayers[sid]) {
-              return `${sleeperPlayers[sid].first_name} ${sleeperPlayers[sid].last_name}`;
-            }
-            return pid ? `Player ${pid}` : null;
-          })();
-        return name;
-      }).filter(Boolean);
+    // MFL franchises as rosters (for team filter dropdown)
+    _rosters = teams.map(t => ({
+      roster_id: t.id,
+      teamName:  t.name || `Team ${t.id}`,
+      username:  ""
+    })).sort((a,b) => a.teamName.localeCompare(b.teamName));
+
+    // Resolve a MFL player ID to a display name and synthetic Sleeper-style ID
+    function mflPid(pid) {
+      const entry = mflPlayerMap[pid] || {};
+      const name  = entry.name || `Player ${pid}`;
+      const pos   = entry.position || "";
+      // Try to find a Sleeper ID for the chip renderer
+      const sid   = MFLAPI.mflNameToSleeperId(name, pos);
+      // Store in _players so _chip() can find it
+      const synId = sid || `mfl_${pid}`;
+      if (!_players[synId]) {
+        const sp = sid ? DLRPlayers.get(sid) : null;
+        _players[synId] = sp && sp.first_name ? sp : {
+          first_name: name.split(" ")[0] || name,
+          last_name:  name.split(" ").slice(1).join(" ") || "",
+          position:   pos,
+          fantasy_positions: [pos],
+        };
+      }
+      return synId;
     }
 
-    const TYPE_ICONS = {
-      "BBID_WAIVER": "🏷",
-      "FREE_AGENT":  "➕",
-      "TRADE":       "🔄",
-      "IR":          "🏥",
-      "TAXI":        "🚕",
-      "AUCTION_WON": "🎯",
+    // Normalize MFL transactions into the same shape _txRow expects
+    const MFL_TYPE_MAP = {
+      "BBID_WAIVER":    "waiver",
+      "FREE_AGENT":     "free_agent",
+      "TRADE":          "trade",
+      "IR":             "waiver",
+      "TAXI":           "waiver",
+      "AUCTION_WON":    "waiver",
     };
 
-    const sorted = [...txArr].sort((a, b) => Number(b.timestamp||0) - Number(a.timestamp||0));
+    _allTx = txArr.map(tx => {
+      const type       = MFL_TYPE_MAP[tx.type] || "free_agent";
+      const franchId   = tx.franchise || tx.franchises || "";
+      const ts         = Number(tx.timestamp || 0) * 1000;
 
-    el.innerHTML = `
-      <div class="tx-toolbar">
-        <span class="dim" style="font-size:.82rem">${txArr.length} transactions · ${_season}</span>
-        <a href="https://www42.myfantasyleague.com/${_season}/home/${_leagueId}"
-          target="_blank" style="font-size:.75rem;color:var(--color-gold)">View on MFL ↗</a>
-      </div>
-      <div class="tx-list">
-        ${sorted.slice(0, 150).map(tx => {
-          const date  = tx.timestamp
-            ? new Date(Number(tx.timestamp) * 1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
-            : "—";
-          const type  = (tx.type || "").replace(/_/g, " ");
-          const icon  = TYPE_ICONS[tx.type] || "📋";
-          const team  = teamMap[String(tx.franchise || tx.franchises)] || "—";
+      // Parse "pid|fid,pid|fid" strings
+      function parsePairs(str) {
+        if (!str) return [];
+        return str.split(",").map(p => { const [pid] = p.split("|"); return pid; }).filter(Boolean);
+      }
+      const addedPids   = parsePairs(tx.transaction);
+      const droppedPids = parsePairs(tx.dropped);
 
-          // Parse adds/drops
-          const added   = parseMFLTxPlayers(tx.transaction);
-          const dropped = parseMFLTxPlayers(tx.dropped);
+      const adds  = {};
+      const drops = {};
+      addedPids.forEach(pid  => { adds[mflPid(pid)]  = franchId; });
+      droppedPids.forEach(pid => { drops[mflPid(pid)] = franchId; });
 
-          let descHTML = "";
-          if (added.length)   descHTML += added.map(n  => `<span class="tx-chip tx-chip--add">+${_esc(n)}</span>`).join(" ");
-          if (dropped.length) descHTML += dropped.map(n => `<span class="tx-chip tx-chip--drop">-${_esc(n)}</span>`).join(" ");
-          if (!descHTML && tx.comments) descHTML = `<span class="dim">${_esc(tx.comments)}</span>`;
+      return {
+        type,
+        created:    ts,
+        status:     "complete",
+        roster_ids: [franchId],
+        adds,
+        drops,
+        draft_picks: [],
+        settings:   { waiver_bid: tx.bid ? Number(tx.bid) : undefined },
+        _mflType:   tx.type,   // keep raw MFL type for display
+      };
+    }).sort((a,b) => b.created - a.created);
 
-          return `
-            <div class="tx-item">
-              <div class="tx-item-header">
-                <span class="tx-type-badge">${icon} ${_esc(type)}</span>
-                <span class="tx-team dim">${_esc(team)}</span>
-                <span class="tx-date dim">${date}</span>
-              </div>
-              ${descHTML ? `<div class="tx-players" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">${descHTML}</div>` : ""}
-            </div>`;
-        }).join("")}
-      </div>`;
+    _players = { ..._players, ...DLRPlayers.all() };
+    _renderView(el);
   }
 
   // ── Yahoo transactions ─────────────────────────────────────
@@ -360,35 +368,53 @@ const DLRTransactions = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
+    _rosters = teams.map(t => ({
+      roster_id: t.id,
+      teamName:  t.name || `Team ${t.id}`,
+      username:  ""
+    })).sort((a,b) => a.teamName.localeCompare(b.teamName));
+
     const txArr = bundle.transactions || [];
     if (!txArr.length) {
       el.innerHTML = `<div class="tx-empty">No transaction data available for this Yahoo league.</div>`;
       return;
     }
 
-    el.innerHTML = `
-      <div class="tx-toolbar">
-        <span class="dim" style="font-size:.82rem">${txArr.length} transactions</span>
-      </div>
-      <div class="tx-list">
-        ${txArr.slice(0, 100).map(tx => {
-          const date  = tx.timestamp
-            ? new Date(Number(tx.timestamp) * 1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
-            : "—";
-          const type  = (tx.type || "transaction").replace(/_/g, " ");
-          const team  = teamMap[String(tx.teamId || tx.team_id || "")] || "—";
-          const desc  = tx.description || tx.player_name || "";
-          return `
-            <div class="tx-item">
-              <div class="tx-item-header">
-                <span class="tx-type-badge">${_esc(type)}</span>
-                <span class="tx-team dim">${_esc(team)}</span>
-                <span class="tx-date dim">${date}</span>
-              </div>
-              ${desc ? `<div class="tx-desc dim" style="font-size:.78rem;margin-top:2px">${_esc(desc)}</div>` : ""}
-            </div>`;
-        }).join("")}
-      </div>`;
+    _players = _players && Object.keys(_players).length > 100 ? _players : DLRPlayers.all();
+
+    // Normalize Yahoo transactions into Sleeper format
+    const YAHOO_TYPE_MAP = { "add": "free_agent", "drop": "free_agent", "trade": "trade", "waiver": "waiver" };
+
+    _allTx = txArr.map(tx => {
+      const type    = YAHOO_TYPE_MAP[tx.type] || "free_agent";
+      const teamId  = String(tx.teamId || "");
+      const ts      = Number(tx.timestamp || 0) * 1000;
+      // Yahoo description is pre-formatted, store as a synthetic single add
+      const adds = {}, drops = {};
+      if (tx.description) {
+        // description like "+Patrick Mahomes, -Dak Prescott"
+        tx.description.split(",").forEach(part => {
+          const p = part.trim();
+          if (p.startsWith("+")) adds[`yahoo_${p.slice(1)}`]  = teamId;
+          if (p.startsWith("-")) drops[`yahoo_${p.slice(1)}`] = teamId;
+          if (p.startsWith("~")) adds[`yahoo_${p.slice(1)}`]  = teamId;
+        });
+      }
+      // Inject display names into _players
+      Object.keys({...adds,...drops}).forEach(synId => {
+        if (!_players[synId]) {
+          const pname = synId.replace("yahoo_", "");
+          _players[synId] = {
+            first_name: pname.split(" ")[0] || pname,
+            last_name:  pname.split(" ").slice(1).join(" ") || "",
+            position: "?", fantasy_positions: ["?"]
+          };
+        }
+      });
+      return { type, created: ts, status: "complete", roster_ids: [teamId], adds, drops, draft_picks: [], settings: {} };
+    }).sort((a,b) => b.created - a.created);
+
+    _renderView(el);
   }
 
   function _teamName(rosterId) {
