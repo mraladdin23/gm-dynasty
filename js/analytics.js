@@ -37,7 +37,16 @@ const DLRAnalytics = (() => {
     if (!el) return;
 
     if (_platform !== "sleeper") {
-      el.innerHTML = `<div class="az-placeholder">Analytics for MFL leagues coming soon.</div>`;
+      el.innerHTML = _loadingHTML("Loading analytics…");
+      try {
+        if (_platform === "mfl") {
+          await _renderMFLAnalytics(el, leagueId, token);
+        } else {
+          el.innerHTML = `<div class="az-placeholder">Analytics for Yahoo leagues coming soon.</div>`;
+        }
+      } catch(e) {
+        el.innerHTML = `<div class="az-placeholder">Could not load analytics: ${e.message}</div>`;
+      }
       return;
     }
 
@@ -128,6 +137,9 @@ const DLRAnalytics = (() => {
     return results.flat();
   }
 
+  function _loadingHTML(msg) {
+    return `<div class="detail-loading"><div class="spinner"></div><span>${msg}</span></div>`;
+  }
   function _esc(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -645,8 +657,8 @@ const DLRAnalytics = (() => {
 
       if (!waivers.length) { el.innerHTML = _noData("No waiver activity found this season."); return; }
 
-      let players = {};
-      try { players = JSON.parse(localStorage.getItem("dlr_players") || "{}"); } catch(e) {}
+      // Use DLRPlayers module (IndexedDB-backed, no quota issues)
+      const players = DLRPlayers.all() || {};
 
       const teamPickups = {}, playerClaims = {};
       waivers.forEach(t => {
@@ -695,6 +707,71 @@ const DLRAnalytics = (() => {
     } catch(e) {
       el.innerHTML = _errMsg("Could not load waiver data: " + e.message);
     }
+  }
+
+  // ── MFL Analytics ─────────────────────────────────────────
+  async function _renderMFLAnalytics(el, leagueId, token) {
+    const season = new Date().getFullYear().toString();
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
+    if (token !== _initToken) return;
+
+    const teams    = MFLAPI.getTeams(bundle);
+    const standings = MFLAPI.normalizeStandings(bundle);
+    const teamMap  = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    // Sort for power rankings by win% then pts
+    const ranked = [...standings].sort((a, b) =>
+      (b.wins/(b.wins+b.losses+b.ties||1)) - (a.wins/(a.wins+a.losses+a.ties||1)) ||
+      b.ptsFor - a.ptsFor
+    );
+
+    const maxPts = Math.max(...standings.map(s => s.ptsFor), 1);
+
+    el.innerHTML = `
+      <div style="padding:var(--space-4)">
+        <div class="az-section-title" style="margin-bottom:var(--space-3)">🏆 Power Rankings</div>
+        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+          ${ranked.map((s, i) => {
+            const name    = teamMap[String(s.franchiseId)] || `Team ${s.franchiseId}`;
+            const record  = `${s.wins}–${s.losses}${s.ties ? `–${s.ties}` : ""}`;
+            const pct     = ((s.ptsFor / maxPts) * 100).toFixed(0);
+            const rankColor = i === 0 ? "var(--color-gold)" : i < 3 ? "#94a3b8" : "var(--color-text-dim)";
+            return `
+              <div style="display:grid;grid-template-columns:28px 1fr auto;gap:var(--space-2);align-items:center;padding:var(--space-2) var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">
+                <span style="font-weight:700;color:${rankColor};font-family:var(--font-display)">${i+1}</span>
+                <div>
+                  <div style="font-weight:600;font-size:.88rem">${_esc(name)}</div>
+                  <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:2px">
+                    <span style="font-size:.72rem;color:var(--color-text-dim)">${record}</span>
+                    <div style="flex:1;height:4px;background:var(--color-border);border-radius:2px;max-width:120px">
+                      <div style="height:100%;width:${pct}%;background:var(--color-gold);border-radius:2px"></div>
+                    </div>
+                    <span style="font-size:.72rem;color:var(--color-text-dim)">${s.ptsFor.toFixed(1)} pts</span>
+                  </div>
+                </div>
+                <span style="font-size:.75rem;color:var(--color-text-dim)">${s.ptsFor > 0 ? (s.ptsFor/(s.wins+s.losses+s.ties||1)).toFixed(1)+"/wk" : ""}</span>
+              </div>`;
+          }).join("")}
+        </div>
+        <div style="margin-top:var(--space-5)">
+          <div class="az-section-title" style="margin-bottom:var(--space-3)">📊 Points Leaders</div>
+          <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+            ${[...standings].sort((a,b) => b.ptsFor - a.ptsFor).slice(0,5).map((s,i) => {
+              const name = teamMap[String(s.franchiseId)] || `Team ${s.franchiseId}`;
+              return `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">
+                  <span style="font-size:.85rem">${i+1}. ${_esc(name)}</span>
+                  <span style="font-weight:700;color:var(--color-gold);font-family:var(--font-display)">${s.ptsFor.toFixed(1)}</span>
+                </div>`;
+            }).join("")}
+          </div>
+        </div>
+        <div style="margin-top:var(--space-4);text-align:center">
+          <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
+            style="font-size:.78rem;color:var(--color-gold)">View full analytics on MFL ↗</a>
+        </div>
+      </div>`;
   }
 
   return { init, reset, showTab };

@@ -18,23 +18,12 @@ const firebaseConfig = {
   measurementId: "G-ZKZ73PRXVS"
 };
 
-// Initialize Firebase (compat v9 SDK — matches SleeperBid)
+// Initialize Firebase (compat v9 SDK)
 firebase.initializeApp(firebaseConfig);
-
-// ── Force long-polling — stops WebSocket ERR_INTERNET_DISCONNECTED ──
-// Must be called before any .ref() listeners are attached.
-// experimentalForceLongPolling skips WebSocket entirely and uses
-// HTTP long-polling, which works on all networks including those
-// that block wss:// connections.
-const db = firebase.database();
-db.settings({
-  experimentalForceLongPolling: true,
-  useFetchStreams: false
-});
 
 // Exported handles — used throughout the app
 const auth = firebase.auth();
+const db   = firebase.database();
 
-// All GM Dynasty data lives under gmd/ — completely separate
-// from your existing SleeperBid nodes (leagues/, users/, etc.)
+// All GM Dynasty data lives under gmd/
 const GMD = db.ref("gmd");
