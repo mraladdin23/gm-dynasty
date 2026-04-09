@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────
 
 const YahooAPI = (() => {
-  const BASE = "https://mfl-proxy.mraladdin23.workers.dev";
+  const BASE = "https://api.dynastylockerroom.com";
 
   // ── Token storage keys ────────────────────────────────────
   const KEY_ACCESS    = "dlr_yahoo_access_token";
