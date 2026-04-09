@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dynasty Locker Room — Your Fantasy Legacy</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
-  <link rel="stylesheet" href="css/base.css?v=17" />
+  <link rel="stylesheet" href="css/base.css?v=18" />
   <link rel="stylesheet" href="css/auth.css?v=5" />
-  <link rel="stylesheet" href="css/locker.css?v=17" />
+  <link rel="stylesheet" href="css/locker.css?v=18" />
 
   <!-- Firebase v9 compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -736,6 +736,25 @@
   <script src="js/playercard.js"></script>
   <script src="js/profile.js"></script>
   <script src="js/app.js"></script>
+
+  <script>
+    // Global safety net: if loading overlay is still visible after 10 seconds,
+    // something silently failed (Firebase SDK blocked, auth never fired, etc).
+    // Force-show the auth/login screen so the user isn't stuck on a spinner.
+    setTimeout(() => {
+      const overlay = document.getElementById("loading-overlay");
+      if (overlay && !overlay.classList.contains("hidden")) {
+        console.warn("[DLR] Loading timeout — forcing auth screen");
+        overlay.classList.add("hidden");
+        // Try to show auth screen; fall back to just hiding the overlay
+        try {
+          document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+          const authScreen = document.getElementById("auth-screen");
+          if (authScreen) authScreen.classList.add("active");
+        } catch(e) {}
+      }
+    }, 10000);
+  </script>
 
 </body>
 </html>
