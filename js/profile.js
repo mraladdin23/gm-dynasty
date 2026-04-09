@@ -1691,7 +1691,67 @@ const Profile = (() => {
     if (tab === "chat")        _renderChat(el, leagueKey, league);
   }
 
-  function _renderOverview(el, leagueKey, league) {
+  async function _renderOverview(el, leagueKey, league) {
+    // For MFL leagues with missing teamName/wins, live-fetch from bundle
+    if (league.platform === "mfl" && (!league.wins && !league.teamName || league.teamName === "My Team")) {
+      el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
+      try {
+        const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+        const standingsMap = MFLAPI.getStandingsMap(bundle);
+        const teams        = MFLAPI.getTeams(bundle);
+        const mflUsername  = _currentProfile?.platforms?.mfl?.username || "";
+
+        // Try to find user's team
+        let myTeamId = league.myRosterId;
+        if (!myTeamId && mflUsername) {
+          const matched = teams.find(t =>
+            t.name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
+            t.owner_name?.toLowerCase().includes(mflUsername.toLowerCase())
+          );
+          if (matched) myTeamId = matched.id;
+        }
+        // Commish fallback
+        if (!myTeamId) {
+          const raw = bundle?.league?.league?.franchises?.franchise;
+          const arr = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+          const commish = arr.find(f => f.is_commish === "1");
+          if (commish) myTeamId = commish.id;
+        }
+
+        if (myTeamId) {
+          const myTeam  = teams.find(t => String(t.id) === String(myTeamId)) || {};
+          const mySt    = standingsMap[String(myTeamId)] || {};
+          // Patch league object with live data
+          league = {
+            ...league,
+            teamName:      myTeam.name     || league.teamName,
+            myRosterId:    myTeamId,
+            wins:          mySt.wins       || 0,
+            losses:        mySt.losses     || 0,
+            ties:          mySt.ties       || 0,
+            pointsFor:     mySt.ptsFor     || 0,
+            pointsAgainst: mySt.ptsAgainst || 0,
+            standing:      mySt.rank       || null,
+          };
+          // Save back to Firebase so next load has it
+          if (_currentUsername && mySt.wins) {
+            saveLeagueMeta(_currentUsername, leagueKey, {
+              teamName:   league.teamName,
+              myRosterId: myTeamId,
+              wins:       league.wins,
+              losses:     league.losses,
+              pointsFor:  league.pointsFor,
+              standing:   league.standing
+            }).catch(() => {});
+          }
+        }
+      } catch(e) { /* render with what we have */ }
+    }
+
+    _renderOverviewHTML(el, leagueKey, league);
+  }
+
+  function _renderOverviewHTML(el, leagueKey, league) {
     const finish      = league.playoffFinish;
     const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 5:"5th Place", 6:"6th Place", 7:"Made Playoffs" }[finish] || (league.status === "complete" ? "Missed Playoffs" : "Season in Progress");
     const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";

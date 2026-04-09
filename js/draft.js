@@ -363,7 +363,23 @@ const DLRDraft = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Draft picks — bundle.draft.draftResults.draftUnit[].draftPick[]
+    // Build player name/pos lookup from bundle
+    const playerLookup = {};
+    const rawPlayers = bundle?.players?.players?.player;
+    if (rawPlayers) {
+      const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
+      pArr.forEach(p => {
+        if (p.id) {
+          const parts = (p.name || "").split(", ");
+          playerLookup[p.id] = {
+            name: parts.length > 1 ? `${parts[1]} ${parts[0]}` : (p.name || `Player ${p.id}`),
+            pos:  (p.position || "?").toUpperCase()
+          };
+        }
+      });
+    }
+
+    // ── Regular draft picks ──────────────────────────────────
     const units = bundle?.draft?.draftResults?.draftUnit;
     const unitArr = units ? (Array.isArray(units) ? units : [units]) : [];
     const allPicks = [];
@@ -372,17 +388,18 @@ const DLRDraft = (() => {
       picks.forEach(p => allPicks.push(p));
     });
 
-    // Auction results — bundle.draft.draftResults could also have auction data
-    // MFL auction picks have a "bidAmount" field
-    const auctionPicks = allPicks.filter(p => p.bidAmount != null);
-    const draftPicks   = allPicks.filter(p => p.bidAmount == null);
-    const hasAuction   = auctionPicks.length > 0;
-    const hasDraft     = draftPicks.length > 0 || (!hasAuction && allPicks.length > 0);
+    // ── Salary/auction data from salaries endpoint ───────────
+    const salaryRaw = bundle?.salaries?.salaries?.leagueUnit?.player
+                   || bundle?.salaries?.salaries?.player;
+    const salaryArr = salaryRaw ? (Array.isArray(salaryRaw) ? salaryRaw : [salaryRaw]) : [];
 
-    _renderMFLDraftBoard(el, allPicks, auctionPicks, teamMap, hasAuction, hasDraft, season, leagueId);
+    const hasAuction = salaryArr.length > 0;
+    const hasDraft   = allPicks.length > 0;
+
+    _renderMFLDraftBoard(el, allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId);
   }
 
-  function _renderMFLDraftBoard(el, allPicks, auctionPicks, teamMap, hasAuction, hasDraft, season, leagueId) {
+  function _renderMFLDraftBoard(el, allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId) {
     const showAuction = _viewMode === "auction" && hasAuction;
 
     const toggleBar = (hasAuction && hasDraft) ? `
@@ -390,59 +407,69 @@ const DLRDraft = (() => {
         <button class="draft-toggle-btn ${!showAuction ? "draft-toggle-btn--active" : ""}"
           onclick="DLRDraft.setViewMode('draft')">📋 Draft Picks</button>
         <button class="draft-toggle-btn ${showAuction ? "draft-toggle-btn--active" : ""}"
-          onclick="DLRDraft.setViewMode('auction')">🏷 Auction Results</button>
-      </div>` : hasAuction ? `<div class="draft-meta-bar"><span class="draft-type-label">Auction Results</span></div>` : "";
+          onclick="DLRDraft.setViewMode('auction')">🏷 Salary / Auction</button>
+      </div>` :
+      hasAuction ? `<div class="draft-toggle-bar"><span style="font-size:.82rem;color:var(--color-text-dim)">🏷 Salary / Auction Data</span></div>` :
+      hasDraft   ? `<div class="draft-toggle-bar"><span style="font-size:.82rem;color:var(--color-text-dim)">📋 Draft Results</span></div>` : "";
 
     if (showAuction) {
-      const sorted = [...auctionPicks].sort((a, b) => Number(b.bidAmount||0) - Number(a.bidAmount||0));
-      el.innerHTML = `
-        ${toggleBar}
+      const sorted = [...salaryArr].sort((a, b) => Number(b.salary||b.amount||0) - Number(a.salary||a.amount||0));
+      el.innerHTML = toggleBar + `
         <div class="draft-auction-list">
-          <div class="draft-auction-header">
-            <span>Player</span><span>Team</span><span>Bid</span>
+          <div class="draft-auction-header" style="grid-template-columns:40px 44px 1fr 1fr auto">
+            <span>#</span><span>Pos</span><span>Player</span><span>Team</span><span>Salary</span>
           </div>
           ${sorted.map((p, i) => {
-            const pos   = (p.pos || "?").toUpperCase();
+            const info  = playerLookup[p.id] || {};
+            const pos   = (info.pos || p.position || "?").toUpperCase();
             const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-            const name  = p.playerName || p.player || `Player ${p.player}`;
-            const team  = teamMap[String(p.franchise)] || `Team ${p.franchise}`;
-            const bid   = Number(p.bidAmount || 0);
+            const name  = info.name || p.name || `Player ${p.id}`;
+            const tid   = String(p.franchise || p.franchiseId || "");
+            const team  = teamMap[tid] || "—";
+            const sal   = Number(p.salary || p.amount || 0);
+            const salFmt = sal >= 1000000 ? `$${(sal/1000000).toFixed(sal%1000000===0?0:2)}M`
+                         : sal > 0 ? `$${sal.toLocaleString()}` : "—";
             return `
-              <div class="draft-auction-row">
+              <div class="draft-auction-row" style="grid-template-columns:40px 44px 1fr 1fr auto">
                 <span class="draft-auction-rank dim">${i+1}</span>
                 <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
                 <span class="draft-auction-name">${_esc(name)}</span>
                 <span class="draft-auction-team dim">${_esc(team)}</span>
-                <span class="draft-auction-bid" style="color:var(--color-gold);font-family:var(--font-display);font-weight:700">
-                  $${(bid/1000).toFixed(bid%1000===0?0:1)}K
-                </span>
+                <span class="draft-auction-bid" style="color:var(--color-gold);font-family:var(--font-display);font-weight:700">${salFmt}</span>
               </div>`;
           }).join("")}
         </div>`;
       return;
     }
 
-    // Draft picks view
-    const picks = allPicks.filter(p => p.bidAmount == null || allPicks.every(x => x.bidAmount == null));
-    if (!picks.length) {
-      el.innerHTML = toggleBar + `<div class="draft-empty"><div style="font-size:2.5rem">📋</div><div>No draft data found for ${season}.</div>
-        <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
-          style="color:var(--color-gold)">View on MFL ↗</a></div>`;
+    if (!allPicks.length) {
+      el.innerHTML = toggleBar + `
+        <div class="draft-empty">
+          <div style="font-size:2.5rem">📋</div>
+          <div style="font-weight:700;margin-bottom:var(--space-2)">No draft data for ${season}</div>
+          <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
+            style="color:var(--color-gold)">View on MFL ↗</a>
+        </div>`;
       return;
     }
-    const sorted = [...picks].sort((a, b) => Number(a.pick||a.overall||0) - Number(b.pick||b.overall||0));
+
+    const sorted = [...allPicks].sort((a, b) => Number(a.pick||a.overall||0) - Number(b.pick||b.overall||0));
     el.innerHTML = toggleBar + `
       <div class="draft-auction-list">
-        <div class="draft-auction-header"><span>Pick</span><span>Player</span><span>Team</span></div>
+        <div class="draft-auction-header" style="grid-template-columns:50px 44px 1fr 1fr">
+          <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
+        </div>
         ${sorted.map(p => {
-          const pos   = (p.pos || "?").toUpperCase();
+          const pid   = p.player || p.playerId || "";
+          const info  = playerLookup[pid] || {};
+          const pos   = (info.pos || p.pos || "?").toUpperCase();
           const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-          const name  = p.playerName || p.player || "—";
-          const team  = teamMap[String(p.franchise)] || `Team ${p.franchise}`;
+          const name  = info.name || p.playerName || "—";
+          const team  = teamMap[String(p.franchise||"")] || "—";
           const pick  = p.pick || p.overall || "—";
           return `
-            <div class="draft-auction-row">
-              <span class="draft-auction-rank" style="color:var(--color-text-dim)">${pick}</span>
+            <div class="draft-auction-row" style="grid-template-columns:50px 44px 1fr 1fr">
+              <span class="draft-auction-rank" style="color:var(--color-text-dim);font-weight:600">${pick}</span>
               <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
               <span class="draft-auction-name">${_esc(name)}</span>
               <span class="draft-auction-team dim">${_esc(team)}</span>
@@ -451,7 +478,7 @@ const DLRDraft = (() => {
       </div>`;
   }
 
-  // ── Yahoo draft + auction history ──────────────────────────
+    // ── Yahoo draft + auction history ──────────────────────────
   async function _loadYahooDraft(leagueId, leagueKey, token) {
     const el  = document.getElementById("dtab-draft");
     const key = leagueKey || `nfl.l.${leagueId}`;

@@ -249,21 +249,34 @@ const DLRRoster = (() => {
 
   function _playerRowHTML(playerId, slot) {
     const p       = _players[playerId] || {};
-    const name    = p.first_name ? `${p.first_name} ${p.last_name}` : playerId;
+    const name    = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : (p.name || playerId);
     const pos     = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
     const nflTeam = p.team || "FA";
     const color   = POS_COLOR[pos] || "#9ca3af";
     const dim     = slot === "ir" || slot === "taxi";
 
+    // Only Sleeper IDs (pure numbers) get CDN photos and player card clicks
+    const isSleeperPlayer = /^\d+$/.test(playerId);
+    const isMFLPlayer     = playerId.startsWith("mfl_");
+    const mflId           = isMFLPlayer ? playerId.replace("mfl_", "") : null;
+
+    const photoHTML = isSleeperPlayer
+      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+           loading="lazy" />
+         <div class="roster-player-photo-fallback" style="display:none;color:${color};">${pos}</div>`
+      : `<div class="roster-player-photo-fallback" style="display:flex;color:${color};">${pos}</div>`;
+
+    const clickAttr = isSleeperPlayer
+      ? `onclick="DLRPlayerCard.show('${playerId}', '${_escAttr(name)}')" style="cursor:pointer;"`
+      : isMFLPlayer
+        ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${mflId}','_blank')" style="cursor:pointer;"`
+        : "";
+
     return `
-      <div class="roster-player-row ${dim ? "roster-player-row--dim" : ""}"
-        onclick="DLRPlayerCard.show('${playerId}', '${_escAttr(name)}')"
-        style="cursor:pointer;">
+      <div class="roster-player-row ${dim ? "roster-player-row--dim" : ""}" ${clickAttr}>
         <div class="roster-player-photo">
-          <img src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg"
-            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
-            loading="lazy" />
-          <div class="roster-player-photo-fallback" style="display:none;color:${color};">${pos}</div>
+          ${photoHTML}
         </div>
         <div class="roster-player-info">
           <div class="roster-player-name">${_esc(name)}</div>
@@ -278,7 +291,7 @@ const DLRRoster = (() => {
 
   // ── Helpers ────────────────────────────────────────────
   async function _loadYahooData(leagueId, token) {
-    // Use stored leagueKey (full "423.l.XXXXX" format required by Yahoo API)
+    // Use stored leagueKey (full "nfl.l.XXXXX" format required by Yahoo API)
     const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
     const bundle = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
@@ -287,56 +300,41 @@ const DLRRoster = (() => {
     const rosters   = bundle.rosters   || [];
     const standings = bundle.standings || [];
 
-    // normalizeBundle uses teamId (not team_id)
     const standingsMap = {};
-    standings.forEach(s => { standingsMap[String(s.teamId ?? s.team_id)] = s; });
+    standings.forEach(s => { standingsMap[s.team_id] = s; });
 
     const rosterMap = {};
-    rosters.forEach(r => {
-      // normalizeBundle: rosters[].teamId, rosters[].players (array of pid strings)
-      const tid = String(r.teamId ?? r.team_id);
-      rosterMap[tid] = r.players || r.player || [];
-    });
-
-    // Load player names from bundle if available
-    const playerInfoMap = {};
-    (bundle.players || []).forEach(p => {
-      const pid = String(p.id ?? p.player_id);
-      playerInfoMap[pid] = p;
-    });
+    rosters.forEach(r => { rosterMap[r.team_id] = r.player || []; });
 
     const mappedTeams = teams.map(t => {
-      const tid     = String(t.id);
-      const s       = standingsMap[tid] || {};
-      const players = rosterMap[tid]    || [];
+      const s       = standingsMap[t.id] || {};
+      const players = rosterMap[t.id]    || [];
       return {
-        roster_id: tid,
-        owner_id:  tid,
-        teamName:  t.name       || `Team ${tid}`,
-        username:  (t.owner_name || t.ownerName || "").toLowerCase(),
+        roster_id: t.id,
+        owner_id:  t.id,
+        teamName:  t.name       || `Team ${t.id}`,
+        username:  (t.owner_name || "").toLowerCase(),
         avatar:    null,
         players:   players.map(pid => `yahoo_${pid}`),
         reserve:   [],
         taxi:      [],
         wins:      s.wins       || 0,
         losses:    s.losses     || 0,
-        fpts:      s.ptsFor ?? s.points_for ?? 0
+        fpts:      s.points_for || 0
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Build player lookup from bundle player data if available, else placeholder
+    // Yahoo player IDs don't match Sleeper — show name as ID for now
     const yahooPlayerLookup = {};
     mappedTeams.forEach(t => {
-      t.players.forEach(prefixedPid => {
-        const rawPid = prefixedPid.replace("yahoo_", "");
-        const info   = playerInfoMap[rawPid] || {};
-        yahooPlayerLookup[prefixedPid] = {
-          first_name:        info.name?.split(", ")[1] || info.name || `Player`,
-          last_name:         info.name?.split(", ")[0] || rawPid,
-          position:          info.position || "?",
-          fantasy_positions: [info.position || "?"],
-          team:              info.team || "—",
-          search_rank:       9999
+      t.players.forEach(pid => {
+        yahooPlayerLookup[pid] = {
+          first_name: pid.replace("yahoo_", "Player "),
+          last_name: "",
+          position: "?",
+          fantasy_positions: ["?"],
+          team: "—",
+          search_rank: 9999
         };
       });
     });
