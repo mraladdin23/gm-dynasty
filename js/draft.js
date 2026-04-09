@@ -10,10 +10,13 @@ const DLRDraft = (() => {
 
   let _leagueId   = null;
   let _platform   = "sleeper";
+  let _leagueKey  = null;
+  let _season     = null;
   let _initToken  = 0;
-  let _draftData  = null;  // { draft, picks, teams, players }
-  let _seasons    = [];    // [{ leagueId, season, current }]
-  let _viewingId  = null;  // null = current league
+  let _draftData  = null;
+  let _seasons    = [];
+  let _viewingId  = null;
+  let _viewMode   = "draft";
 
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
@@ -21,11 +24,14 @@ const DLRDraft = (() => {
   };
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueId, platform) {
+  async function init(leagueId, platform, season, leagueKey) {
     _leagueId  = leagueId;
     _platform  = platform || "sleeper";
+    _season    = season   || new Date().getFullYear().toString();
+    _leagueKey = leagueKey || null;
     _draftData = null;
     _viewingId = null;
+    _viewMode  = "draft";
     _seasons   = [];
     _initToken++;
     const token = _initToken;
@@ -33,11 +39,23 @@ const DLRDraft = (() => {
     const el = document.getElementById("dtab-draft");
     if (!el) return;
 
-    if (_platform !== "sleeper") {
-      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
-        <div style="font-size:2rem;margin-bottom:var(--space-3);">📋</div>
-        <div style="font-weight:600;">MFL draft board coming soon</div>
-      </div>`;
+    if (_platform === "mfl") {
+      el.innerHTML = _loadingHTML("Loading MFL draft & auction history…");
+      try { await _loadMFLDraft(leagueId, season, token); }
+      catch(e) {
+        if (token !== _initToken) return;
+        el.innerHTML = _errorHTML("Could not load MFL draft: " + e.message);
+      }
+      return;
+    }
+
+    if (_platform === "yahoo") {
+      el.innerHTML = _loadingHTML("Loading Yahoo draft & auction history…");
+      try { await _loadYahooDraft(leagueId, leagueKey, token); }
+      catch(e) {
+        if (token !== _initToken) return;
+        el.innerHTML = _errorHTML("Could not load Yahoo draft: " + e.message);
+      }
       return;
     }
 
@@ -335,6 +353,175 @@ const DLRDraft = (() => {
       </div>`;
   }
 
+  // ── MFL draft + auction history ───────────────────────────
+  async function _loadMFLDraft(leagueId, season, token) {
+    const el = document.getElementById("dtab-draft");
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
+    if (token !== _initToken) return;
+
+    const teams = MFLAPI.getTeams(bundle);
+    const teamMap = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    // Draft picks — bundle.draft.draftResults.draftUnit[].draftPick[]
+    const units = bundle?.draft?.draftResults?.draftUnit;
+    const unitArr = units ? (Array.isArray(units) ? units : [units]) : [];
+    const allPicks = [];
+    unitArr.forEach(u => {
+      const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
+      picks.forEach(p => allPicks.push(p));
+    });
+
+    // Auction results — bundle.draft.draftResults could also have auction data
+    // MFL auction picks have a "bidAmount" field
+    const auctionPicks = allPicks.filter(p => p.bidAmount != null);
+    const draftPicks   = allPicks.filter(p => p.bidAmount == null);
+    const hasAuction   = auctionPicks.length > 0;
+    const hasDraft     = draftPicks.length > 0 || (!hasAuction && allPicks.length > 0);
+
+    _renderMFLDraftBoard(el, allPicks, auctionPicks, teamMap, hasAuction, hasDraft, season, leagueId);
+  }
+
+  function _renderMFLDraftBoard(el, allPicks, auctionPicks, teamMap, hasAuction, hasDraft, season, leagueId) {
+    const showAuction = _viewMode === "auction" && hasAuction;
+
+    const toggleBar = (hasAuction && hasDraft) ? `
+      <div class="draft-toggle-bar">
+        <button class="draft-toggle-btn ${!showAuction ? "draft-toggle-btn--active" : ""}"
+          onclick="DLRDraft.setViewMode('draft')">📋 Draft Picks</button>
+        <button class="draft-toggle-btn ${showAuction ? "draft-toggle-btn--active" : ""}"
+          onclick="DLRDraft.setViewMode('auction')">🏷 Auction Results</button>
+      </div>` : hasAuction ? `<div class="draft-meta-bar"><span class="draft-type-label">Auction Results</span></div>` : "";
+
+    if (showAuction) {
+      const sorted = [...auctionPicks].sort((a, b) => Number(b.bidAmount||0) - Number(a.bidAmount||0));
+      el.innerHTML = `
+        ${toggleBar}
+        <div class="draft-auction-list">
+          <div class="draft-auction-header">
+            <span>Player</span><span>Team</span><span>Bid</span>
+          </div>
+          ${sorted.map((p, i) => {
+            const pos   = (p.pos || "?").toUpperCase();
+            const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+            const name  = p.playerName || p.player || `Player ${p.player}`;
+            const team  = teamMap[String(p.franchise)] || `Team ${p.franchise}`;
+            const bid   = Number(p.bidAmount || 0);
+            return `
+              <div class="draft-auction-row">
+                <span class="draft-auction-rank dim">${i+1}</span>
+                <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+                <span class="draft-auction-name">${_esc(name)}</span>
+                <span class="draft-auction-team dim">${_esc(team)}</span>
+                <span class="draft-auction-bid" style="color:var(--color-gold);font-family:var(--font-display);font-weight:700">
+                  $${(bid/1000).toFixed(bid%1000===0?0:1)}K
+                </span>
+              </div>`;
+          }).join("")}
+        </div>`;
+      return;
+    }
+
+    // Draft picks view
+    const picks = allPicks.filter(p => p.bidAmount == null || allPicks.every(x => x.bidAmount == null));
+    if (!picks.length) {
+      el.innerHTML = toggleBar + `<div class="draft-empty"><div style="font-size:2.5rem">📋</div><div>No draft data found for ${season}.</div>
+        <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
+          style="color:var(--color-gold)">View on MFL ↗</a></div>`;
+      return;
+    }
+    const sorted = [...picks].sort((a, b) => Number(a.pick||a.overall||0) - Number(b.pick||b.overall||0));
+    el.innerHTML = toggleBar + `
+      <div class="draft-auction-list">
+        <div class="draft-auction-header"><span>Pick</span><span>Player</span><span>Team</span></div>
+        ${sorted.map(p => {
+          const pos   = (p.pos || "?").toUpperCase();
+          const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+          const name  = p.playerName || p.player || "—";
+          const team  = teamMap[String(p.franchise)] || `Team ${p.franchise}`;
+          const pick  = p.pick || p.overall || "—";
+          return `
+            <div class="draft-auction-row">
+              <span class="draft-auction-rank" style="color:var(--color-text-dim)">${pick}</span>
+              <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+              <span class="draft-auction-name">${_esc(name)}</span>
+              <span class="draft-auction-team dim">${_esc(team)}</span>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  // ── Yahoo draft + auction history ──────────────────────────
+  async function _loadYahooDraft(leagueId, leagueKey, token) {
+    const el  = document.getElementById("dtab-draft");
+    const key = leagueKey || `nfl.l.${leagueId}`;
+    const bundle = await YahooAPI.getLeagueBundle(key);
+    if (token !== _initToken) return;
+
+    const teams    = bundle.teams    || [];
+    const draft    = bundle.draft    || [];
+    const teamMap  = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    if (!draft.length) {
+      el.innerHTML = `<div class="draft-empty">
+        <div style="font-size:2.5rem">📋</div>
+        <div style="font-weight:700;margin-bottom:var(--space-2)">No draft data available</div>
+        <div class="dim" style="font-size:.85rem">Yahoo draft data may not be accessible for this league.</div>
+      </div>`;
+      return;
+    }
+
+    // Yahoo draft picks have a "cost" field for auction leagues
+    const auctionPicks = draft.filter(p => p.cost != null && Number(p.cost) > 0);
+    const hasAuction   = auctionPicks.length > 0;
+    const showAuction  = _viewMode === "auction" && hasAuction;
+
+    const toggleBar = hasAuction ? `
+      <div class="draft-toggle-bar">
+        <button class="draft-toggle-btn ${!showAuction ? "draft-toggle-btn--active" : ""}"
+          onclick="DLRDraft.setViewMode('draft')">📋 Draft Order</button>
+        <button class="draft-toggle-btn ${showAuction ? "draft-toggle-btn--active" : ""}"
+          onclick="DLRDraft.setViewMode('auction')">🏷 Auction Results</button>
+      </div>` : "";
+
+    const displayPicks = showAuction
+      ? [...auctionPicks].sort((a, b) => Number(b.cost||0) - Number(a.cost||0))
+      : [...draft].sort((a, b) => Number(a.pick||a.round||0) - Number(b.pick||b.round||0));
+
+    el.innerHTML = toggleBar + `
+      <div class="draft-auction-list">
+        <div class="draft-auction-header">
+          ${showAuction
+            ? `<span>Player</span><span>Team</span><span>Cost</span>`
+            : `<span>Pick</span><span>Player</span><span>Team</span>`}
+        </div>
+        ${displayPicks.map((p, i) => {
+          const pos   = (p.position || "?").toUpperCase();
+          const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+          const pid   = String(p.playerId || p.player_id || "");
+          const name  = p.name || p.player_name || `Player ${pid}`;
+          const team  = teamMap[String(p.teamId || p.team_id || "")] || "—";
+          return `
+            <div class="draft-auction-row">
+              <span class="draft-auction-rank dim">${showAuction ? i+1 : (p.pick || `${p.round}.${p.pick_in_round||"?"}`)}</span>
+              <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+              <span class="draft-auction-name">${_esc(name)}</span>
+              <span class="draft-auction-team dim">${_esc(team)}</span>
+              ${showAuction ? `<span class="draft-auction-bid" style="color:var(--color-gold);font-family:var(--font-display);font-weight:700">$${Number(p.cost||0)}</span>` : ""}
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  function setViewMode(mode) {
+    _viewMode = mode;
+    // Re-trigger current platform's render
+    const token = _initToken;
+    if (_platform === "mfl")   _loadMFLDraft(_leagueId, _season, token);
+    else if (_platform === "yahoo") _loadYahooDraft(_leagueId, _leagueKey, token);
+  }
+
   // ── Helpers ────────────────────────────────────────────
   function _loadingHTML(msg) {
     return `<div class="detail-loading"><div class="spinner"></div><span>${msg}</span></div>`;
@@ -349,6 +536,6 @@ const DLRDraft = (() => {
     return String(s || "").replace(/'/g,"\\'").replace(/"/g,"&quot;");
   }
 
-  return { init, reset, switchSeason };
+  return { init, reset, switchSeason, setViewMode };
 
 })();

@@ -5,15 +5,16 @@
 
 const DLRTransactions = (() => {
 
-  let _leagueId  = null;
-  let _platform  = null;
-  let _season    = null;
-  let _token     = 0;
-  let _allTx     = [];      // all loaded transactions
-  let _rosters   = [];      // {roster_id, teamName, username}
-  let _players   = {};
+  let _leagueId   = null;
+  let _leagueKey  = null;
+  let _platform   = null;
+  let _season     = null;
+  let _token      = 0;
+  let _allTx      = [];
+  let _rosters    = [];
+  let _players    = {};
   let _typeFilter = "all";
-  let _teamFilter = "all";  // roster_id as string, or "all"
+  let _teamFilter = "all";
 
   const TYPE_LABELS = {
     trade:      "🔄 Trades",
@@ -22,8 +23,9 @@ const DLRTransactions = (() => {
   };
 
   // ── Public: init ─────────────────────────────────────────
-  async function init(leagueId, platform, season) {
+  async function init(leagueId, platform, season, leagueKey) {
     _leagueId    = leagueId;
+    _leagueKey   = leagueKey || null;
     _platform    = platform || "sleeper";
     _season      = season   || new Date().getFullYear().toString();
     _typeFilter  = "all";
@@ -36,8 +38,17 @@ const DLRTransactions = (() => {
     const el = document.getElementById("dtab-transactions");
     if (!el) return;
 
-    if (_platform !== "sleeper") {
-      el.innerHTML = `<div class="tx-empty">Transactions available for Sleeper leagues only.</div>`;
+    if (_platform === "mfl") {
+      el.innerHTML = _loadHTML("Loading MFL transactions…");
+      try { await _loadMFLData(tok); }
+      catch(e) { if (tok === _token) el.innerHTML = `<div class="tx-empty">⚠️ ${_esc(e.message)}</div>`; }
+      return;
+    }
+
+    if (_platform === "yahoo") {
+      el.innerHTML = _loadHTML("Loading Yahoo transactions…");
+      try { await _loadYahooData(tok); }
+      catch(e) { if (tok === _token) el.innerHTML = `<div class="tx-empty">⚠️ ${_esc(e.message)}</div>`; }
       return;
     }
 
@@ -237,6 +248,100 @@ const DLRTransactions = (() => {
     const posColor = {QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d"}[pos] || "#9ca3af";
     const cls  = `tx-chip tx-chip--${chipType}`;
     return `<span class="${cls}" style="${chipType==="trade"?`border-color:${posColor}44`:""}" title="${pos}">${_esc(name)}</span>`;
+  }
+
+  // ── MFL transactions ──────────────────────────────────────
+  async function _loadMFLData(tok) {
+    const el = document.getElementById("dtab-transactions");
+    const bundle = await MFLAPI.getLeagueBundle(_leagueId, _season);
+    if (tok !== _token) return;
+
+    const teams = MFLAPI.getTeams(bundle);
+    const teamMap = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    // MFL transactions: bundle.transactions.transactions.transaction[]
+    const raw = bundle?.transactions?.transactions?.transaction;
+    if (!raw) {
+      el.innerHTML = `<div class="tx-empty">No transactions found for this season.</div>`;
+      return;
+    }
+    const txArr = Array.isArray(raw) ? raw : [raw];
+
+    el.innerHTML = `
+      <div class="tx-toolbar">
+        <span class="dim" style="font-size:.82rem">${txArr.length} transactions · ${_season}</span>
+        <a href="https://www42.myfantasyleague.com/${_season}/home/${_leagueId}" target="_blank"
+          style="font-size:.75rem;color:var(--color-gold)">View on MFL ↗</a>
+      </div>
+      <div class="tx-list">
+        ${txArr.sort((a, b) => Number(b.timestamp||0) - Number(a.timestamp||0))
+          .slice(0, 100)
+          .map(tx => {
+            const date = tx.timestamp
+              ? new Date(Number(tx.timestamp) * 1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
+              : "—";
+            const type = (tx.type || "transaction").replace(/_/g, " ");
+            const team = teamMap[String(tx.franchise)] || `Team ${tx.franchise}`;
+            // Build description from drop/add arrays
+            const adds  = tx.transaction?.split(",").filter(Boolean) || [];
+            const drops = tx.traded?.split(",").filter(Boolean) || [];
+            const desc  = adds.length  ? `Added: ${adds.join(", ")}` :
+                          drops.length ? `Traded: ${drops.join(", ")}` :
+                          tx.type || "Transaction";
+            return `
+              <div class="tx-item">
+                <div class="tx-item-header">
+                  <span class="tx-type-badge">${_esc(type)}</span>
+                  <span class="tx-team dim">${_esc(team)}</span>
+                  <span class="tx-date dim">${date}</span>
+                </div>
+                <div class="tx-desc dim" style="font-size:.78rem;margin-top:2px">${_esc(desc)}</div>
+              </div>`;
+          }).join("")}
+      </div>`;
+  }
+
+  // ── Yahoo transactions ─────────────────────────────────────
+  async function _loadYahooData(tok) {
+    const el  = document.getElementById("dtab-transactions");
+    const key = _leagueKey || `nfl.l.${_leagueId}`;
+    const bundle = await YahooAPI.getLeagueBundle(key);
+    if (tok !== _token) return;
+
+    const teams = bundle.teams || [];
+    const teamMap = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+
+    const txArr = bundle.transactions || [];
+    if (!txArr.length) {
+      el.innerHTML = `<div class="tx-empty">No transaction data available for this Yahoo league.</div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="tx-toolbar">
+        <span class="dim" style="font-size:.82rem">${txArr.length} transactions</span>
+      </div>
+      <div class="tx-list">
+        ${txArr.slice(0, 100).map(tx => {
+          const date  = tx.timestamp
+            ? new Date(Number(tx.timestamp) * 1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
+            : "—";
+          const type  = (tx.type || "transaction").replace(/_/g, " ");
+          const team  = teamMap[String(tx.teamId || tx.team_id || "")] || "—";
+          const desc  = tx.description || tx.player_name || "";
+          return `
+            <div class="tx-item">
+              <div class="tx-item-header">
+                <span class="tx-type-badge">${_esc(type)}</span>
+                <span class="tx-team dim">${_esc(team)}</span>
+                <span class="tx-date dim">${date}</span>
+              </div>
+              ${desc ? `<div class="tx-desc dim" style="font-size:.78rem;margin-top:2px">${_esc(desc)}</div>` : ""}
+            </div>`;
+        }).join("")}
+      </div>`;
   }
 
   function _teamName(rosterId) {
