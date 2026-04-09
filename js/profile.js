@@ -1155,7 +1155,10 @@ const Profile = (() => {
     const finish     = league.playoffFinish;
     const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish && finish <= 7 ? "🏅" : "");
 
-    // Tags
+    // Best teamName: prefer latest season that actually has one
+    const bestTeamName = seasons.reduce((found, s) =>
+      found || (s.league.teamName && s.league.teamName !== "My Team" ? s.league.teamName : null)
+    , null) || league.teamName || "";
     const tags = [];
     if (isCommish)         tags.push(`<span class="lrow-tag lrow-tag--commish">👑</span>`);
     if (meta.pinned)       tags.push(`<span class="lrow-tag">📌</span>`);
@@ -1188,7 +1191,7 @@ const Profile = (() => {
             ${_escHtml(league.leagueName)}
           </div>
           <div class="lrow-team-row">
-            <span class="lrow-team">${_escHtml(league.teamName || "")}</span>
+            <span class="lrow-team">${_escHtml(bestTeamName)}</span>
             ${champBadges}
           </div>
         </div>
@@ -1625,12 +1628,12 @@ const Profile = (() => {
     window._detailLeagueKey = null;
   }
 
-  function _renderDetailTab(tab, leagueKey, league) {
+  async function _renderDetailTab(tab, leagueKey, league) {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
     // Always set the league context so matchups/playoffs work independently
     DLRStandings.setLeague(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
-    if (tab === "overview")    _renderOverview(el, leagueKey, league);
+    if (tab === "overview")    await _renderOverview(el, leagueKey, league);
     if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
@@ -1692,8 +1695,15 @@ const Profile = (() => {
   }
 
   async function _renderOverview(el, leagueKey, league) {
-    // For MFL leagues with missing teamName/wins, live-fetch from bundle
-    if (league.platform === "mfl" && (!league.wins && !league.teamName || league.teamName === "My Team")) {
+    // For MFL: always live-fetch if we don't have good standing data stored
+    const needsLiveFetch = league.platform === "mfl" && (
+      !league.wins ||
+      !league.teamName ||
+      league.teamName === "My Team" ||
+      league.teamName === ""
+    );
+
+    if (needsLiveFetch) {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
         const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
@@ -1701,30 +1711,36 @@ const Profile = (() => {
         const teams        = MFLAPI.getTeams(bundle);
         const mflUsername  = _currentProfile?.platforms?.mfl?.username || "";
 
-        // Try to find user's team
-        let myTeamId = league.myRosterId;
+        // Try to find user's team by owner name, username, or commish flag
+        let myTeamId = league.myRosterId || null;
+
         if (!myTeamId && mflUsername) {
           const matched = teams.find(t =>
             t.name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
-            t.owner_name?.toLowerCase().includes(mflUsername.toLowerCase())
+            (t.owner_name || "").toLowerCase().includes(mflUsername.toLowerCase())
           );
           if (matched) myTeamId = matched.id;
         }
-        // Commish fallback
+
+        // Try franchise owner data from bundle
         if (!myTeamId) {
-          const raw = bundle?.league?.league?.franchises?.franchise;
-          const arr = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
-          const commish = arr.find(f => f.is_commish === "1");
-          if (commish) myTeamId = commish.id;
+          const rawFranchises = bundle?.league?.league?.franchises?.franchise;
+          const franchArr = rawFranchises ? (Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises]) : [];
+          const myFranchise = franchArr.find(f =>
+            mflUsername && (
+              (f.owner_name || "").toLowerCase().includes(mflUsername.toLowerCase()) ||
+              (f.username   || "").toLowerCase() === mflUsername.toLowerCase()
+            )
+          ) || franchArr.find(f => f.is_commish === "1");
+          if (myFranchise) myTeamId = myFranchise.id;
         }
 
         if (myTeamId) {
-          const myTeam  = teams.find(t => String(t.id) === String(myTeamId)) || {};
-          const mySt    = standingsMap[String(myTeamId)] || {};
-          // Patch league object with live data
+          const myTeam = teams.find(t => String(t.id) === String(myTeamId)) || {};
+          const mySt   = standingsMap[String(myTeamId)] || {};
           league = {
             ...league,
-            teamName:      myTeam.name     || league.teamName,
+            teamName:      myTeam.name     || league.teamName || "",
             myRosterId:    myTeamId,
             wins:          mySt.wins       || 0,
             losses:        mySt.losses     || 0,
@@ -1733,16 +1749,24 @@ const Profile = (() => {
             pointsAgainst: mySt.ptsAgainst || 0,
             standing:      mySt.rank       || null,
           };
-          // Save back to Firebase so next load has it
-          if (_currentUsername && mySt.wins) {
+          // Persist back to Firebase so next load is instant
+          if (_currentUsername && (mySt.wins || myTeam.name)) {
             saveLeagueMeta(_currentUsername, leagueKey, {
-              teamName:   league.teamName,
-              myRosterId: myTeamId,
-              wins:       league.wins,
-              losses:     league.losses,
-              pointsFor:  league.pointsFor,
-              standing:   league.standing
+              teamName:    league.teamName,
+              myRosterId:  myTeamId,
+              wins:        league.wins,
+              losses:      league.losses,
+              pointsFor:   league.pointsFor,
+              standing:    league.standing,
             }).catch(() => {});
+            // Also update _allLeagues in memory so card refreshes
+            if (_allLeagues[leagueKey]) {
+              _allLeagues[leagueKey].teamName  = league.teamName;
+              _allLeagues[leagueKey].wins      = league.wins;
+              _allLeagues[leagueKey].losses    = league.losses;
+              _allLeagues[leagueKey].standing  = league.standing;
+              _allLeagues[leagueKey].pointsFor = league.pointsFor;
+            }
           }
         }
       } catch(e) { /* render with what we have */ }
@@ -1822,7 +1846,7 @@ const Profile = (() => {
             <div class="detail-history-row ${key === leagueKey ? "detail-history-row--current" : ""}"
               onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;">
               <span class="detail-history-season">${s.season}</span>
-              <span class="detail-history-team">${_escHtml(s.teamName || "")}</span>
+              <span class="detail-history-team">${_escHtml(s.teamName && s.teamName !== "My Team" ? s.teamName : (s.leagueName || ""))}</span>
               <span class="detail-history-record">${s.wins}–${s.losses}</span>
               <span class="detail-history-finish">${icon} ${s.playoffResult || (s.status === "complete" ? "—" : "active")}</span>
             </div>`;
@@ -1852,7 +1876,7 @@ const Profile = (() => {
           return `
             <div class="detail-history-row ${isCurrent ? "detail-history-row--current" : ""}">
               <span class="detail-history-season">${s.season}</span>
-              <span class="detail-history-team">${_escHtml(s.teamName || "")}</span>
+              <span class="detail-history-team">${_escHtml(s.teamName && s.teamName !== "My Team" ? s.teamName : (s.leagueName || ""))}</span>
               <span class="detail-history-record">${s.wins}–${s.losses}</span>
               <span class="detail-history-finish">${icon} ${s.playoffResult || "—"}</span>
             </div>`;
