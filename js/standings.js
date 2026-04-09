@@ -292,12 +292,7 @@ const DLRStandings = (() => {
     const nameMap  = {};
     teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
 
-    // Find current/latest week
-    const weeks    = [...new Set(matchups.map(m => Number(m.week)))].sort((a,b) => b-a);
-    const curWeek  = weeks[0] || 1;
-    const weekMatchups = matchups.filter(m => Number(m.week) === curWeek);
-
-    if (!weekMatchups.length) {
+    if (!matchups.length) {
       el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
         No matchup data yet for ${season}.<br>
         <a href="https://www42.myfantasyleague.com/${season}/home/${_leagueId}"
@@ -306,8 +301,22 @@ const DLRStandings = (() => {
       return;
     }
 
+    const weeks = [...new Set(matchups.map(m => Number(m.week)))].sort((a,b) => b-a);
+
+    // Find the most recent week that has actual scores (not all zeros)
+    let curWeek = weeks[0] || 1;
+    for (const w of weeks) {
+      const wMatches = matchups.filter(m => Number(m.week) === w);
+      const hasScores = wMatches.some(m =>
+        (m.home?.score || 0) > 0 || (m.away?.score || 0) > 0
+      );
+      if (hasScores) { curWeek = w; break; }
+    }
+
+    const weekMatchups = matchups.filter(m => Number(m.week) === curWeek);
+
     // Week selector pills
-    const weekPills = weeks.slice(0, 17).reverse().map(w =>
+    const weekPills = weeks.slice(0, 18).reverse().map(w =>
       `<button class="season-pill ${w === curWeek ? "season-pill--current" : ""}"
         onclick="DLRStandings._renderMFLWeek(${w})">${w}</button>`
     ).join("");
@@ -321,8 +330,7 @@ const DLRStandings = (() => {
         ${_mflMatchupCards(weekMatchups, nameMap)}
       </div>`;
 
-    // Store bundle on module for week switching
-    _mflBundle = bundle;
+    _mflBundle  = bundle;
     _mflNameMap = nameMap;
   }
 

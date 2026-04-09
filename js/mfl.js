@@ -169,7 +169,50 @@ const MFLAPI = (() => {
     });
   }
 
-  // Internal: build { playerId: { name, position, team } } from bundle.players
+  // ── MFL → Sleeper player ID mapper ──────────────────────
+  // Builds a name-based index from Sleeper DB to match MFL players.
+  // MFL names: "Mahomes, Patrick" → normalize → "patrickmahomes"
+  // Sleeper: search_full_name = "patrickmahomes"
+  let _mflToSleeperCache = null;
+
+  function buildMFLToSleeperIndex() {
+    if (_mflToSleeperCache) return _mflToSleeperCache;
+    const sleeperPlayers = DLRPlayers.all();
+    const index = {};  // normalized name → sleeperId
+    Object.entries(sleeperPlayers).forEach(([sid, p]) => {
+      if (p.search_full_name) {
+        index[p.search_full_name] = sid;
+      } else if (p.first_name && p.last_name) {
+        const key = (p.first_name + p.last_name).toLowerCase().replace(/[^a-z]/g, "");
+        index[key] = sid;
+      }
+    });
+    _mflToSleeperCache = index;
+    return index;
+  }
+
+  function mflNameToSleeperId(mflName) {
+    if (!mflName) return null;
+    // MFL format: "Last, First" or "First Last"
+    let normalized;
+    if (mflName.includes(",")) {
+      const [last, first] = mflName.split(",").map(s => s.trim());
+      normalized = (first + last).toLowerCase().replace(/[^a-z]/g, "");
+    } else {
+      normalized = mflName.toLowerCase().replace(/[^a-z]/g, "");
+    }
+    const index = buildMFLToSleeperIndex();
+    return index[normalized] || null;
+  }
+
+  function mflNameToDisplay(mflName) {
+    if (!mflName) return "";
+    if (mflName.includes(",")) {
+      const [last, first] = mflName.split(",").map(s => s.trim());
+      return `${first} ${last}`;
+    }
+    return mflName;
+  }
   function _buildPlayerLookup(bundle) {
     const raw = bundle?.players?.players?.player;
     if (!raw) return {};
@@ -205,12 +248,14 @@ const MFLAPI = (() => {
   return {
     getUserLeagues,
     getLeagueBundle,
-    // Bundle helpers used by standings.js, roster.js, matchups
     getTeams,
     normalizeStandings,
     getStandingsMap,
     getRoster,
     normalizeMatchups,
-    getLeagueInfo
+    getLeagueInfo,
+    buildMFLToSleeperIndex,
+    mflNameToSleeperId,
+    mflNameToDisplay,
   };
 })();
