@@ -260,45 +260,92 @@ const DLRTransactions = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // MFL transactions: bundle.transactions.transactions.transaction[]
+    // Build player name lookup from bundle
+    const playerMap = {};
+    const rawPlayers = bundle?.players?.players?.player;
+    if (rawPlayers) {
+      const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
+      pArr.forEach(p => {
+        if (p.id) playerMap[p.id] = MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`;
+      });
+    }
+
+    // Also try Sleeper DB for any missing names
+    const sleeperPlayers = DLRPlayers.all();
+
     const raw = bundle?.transactions?.transactions?.transaction;
     if (!raw) {
-      el.innerHTML = `<div class="tx-empty">No transactions found for this season.</div>`;
+      el.innerHTML = `<div class="tx-empty">
+        <div>No transactions found for ${_season}.</div>
+        <a href="https://www42.myfantasyleague.com/${_season}/home/${_leagueId}"
+          target="_blank" style="color:var(--color-gold);font-size:.82rem">View on MFL ↗</a>
+      </div>`;
       return;
     }
     const txArr = Array.isArray(raw) ? raw : [raw];
 
+    // Parse MFL transaction format: "playerId|franchiseId,playerId|franchiseId"
+    function parseMFLTxPlayers(txStr) {
+      if (!txStr) return [];
+      return txStr.split(",").map(part => {
+        const [pid] = part.split("|");
+        const name = playerMap[pid]
+          || (() => {
+            const sid = MFLAPI.mflNameToSleeperId(playerMap[pid]);
+            if (sid && sleeperPlayers[sid]) {
+              return `${sleeperPlayers[sid].first_name} ${sleeperPlayers[sid].last_name}`;
+            }
+            return pid ? `Player ${pid}` : null;
+          })();
+        return name;
+      }).filter(Boolean);
+    }
+
+    const TYPE_ICONS = {
+      "BBID_WAIVER": "🏷",
+      "FREE_AGENT":  "➕",
+      "TRADE":       "🔄",
+      "IR":          "🏥",
+      "TAXI":        "🚕",
+      "AUCTION_WON": "🎯",
+    };
+
+    const sorted = [...txArr].sort((a, b) => Number(b.timestamp||0) - Number(a.timestamp||0));
+
     el.innerHTML = `
       <div class="tx-toolbar">
         <span class="dim" style="font-size:.82rem">${txArr.length} transactions · ${_season}</span>
-        <a href="https://www42.myfantasyleague.com/${_season}/home/${_leagueId}" target="_blank"
-          style="font-size:.75rem;color:var(--color-gold)">View on MFL ↗</a>
+        <a href="https://www42.myfantasyleague.com/${_season}/home/${_leagueId}"
+          target="_blank" style="font-size:.75rem;color:var(--color-gold)">View on MFL ↗</a>
       </div>
       <div class="tx-list">
-        ${txArr.sort((a, b) => Number(b.timestamp||0) - Number(a.timestamp||0))
-          .slice(0, 100)
-          .map(tx => {
-            const date = tx.timestamp
-              ? new Date(Number(tx.timestamp) * 1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
-              : "—";
-            const type = (tx.type || "transaction").replace(/_/g, " ");
-            const team = teamMap[String(tx.franchise)] || `Team ${tx.franchise}`;
-            // Build description from drop/add arrays
-            const adds  = tx.transaction?.split(",").filter(Boolean) || [];
-            const drops = tx.traded?.split(",").filter(Boolean) || [];
-            const desc  = adds.length  ? `Added: ${adds.join(", ")}` :
-                          drops.length ? `Traded: ${drops.join(", ")}` :
-                          tx.type || "Transaction";
-            return `
-              <div class="tx-item">
-                <div class="tx-item-header">
-                  <span class="tx-type-badge">${_esc(type)}</span>
-                  <span class="tx-team dim">${_esc(team)}</span>
-                  <span class="tx-date dim">${date}</span>
-                </div>
-                <div class="tx-desc dim" style="font-size:.78rem;margin-top:2px">${_esc(desc)}</div>
-              </div>`;
-          }).join("")}
+        ${sorted.slice(0, 150).map(tx => {
+          const date  = tx.timestamp
+            ? new Date(Number(tx.timestamp) * 1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
+            : "—";
+          const type  = (tx.type || "").replace(/_/g, " ");
+          const icon  = TYPE_ICONS[tx.type] || "📋";
+          const team  = teamMap[String(tx.franchise || tx.franchises)] || "—";
+
+          // Parse adds/drops
+          const added   = parseMFLTxPlayers(tx.transaction);
+          const dropped = parseMFLTxPlayers(tx.dropped);
+
+          let descHTML = "";
+          if (added.length)   descHTML += added.map(n  => `<span class="tx-chip tx-chip--add">+${_esc(n)}</span>`).join(" ");
+          if (dropped.length) descHTML += dropped.map(n => `<span class="tx-chip tx-chip--drop">-${_esc(n)}</span>`).join(" ");
+          if (!descHTML && tx.comments) descHTML = `<span class="dim">${_esc(tx.comments)}</span>`;
+
+          return `
+            <div class="tx-item">
+              <div class="tx-item-header">
+                <span class="tx-type-badge">${icon} ${_esc(type)}</span>
+                <span class="tx-team dim">${_esc(team)}</span>
+                <span class="tx-date dim">${date}</span>
+              </div>
+              ${descHTML ? `<div class="tx-players" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">${descHTML}</div>` : ""}
+            </div>`;
+        }).join("")}
       </div>`;
   }
 

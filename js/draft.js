@@ -363,17 +363,19 @@ const DLRDraft = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build player name/pos lookup from bundle
+    // Build player name/pos lookup from bundle, with Sleeper ID mapping
     const playerLookup = {};
     const rawPlayers = bundle?.players?.players?.player;
     if (rawPlayers) {
       const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
       pArr.forEach(p => {
         if (p.id) {
-          const parts = (p.name || "").split(", ");
+          const displayName = MFLAPI.mflNameToDisplay(p.name);
+          const sleeperId   = MFLAPI.mflNameToSleeperId(p.name);
           playerLookup[p.id] = {
-            name: parts.length > 1 ? `${parts[1]} ${parts[0]}` : (p.name || `Player ${p.id}`),
-            pos:  (p.position || "?").toUpperCase()
+            name:      displayName || `Player ${p.id}`,
+            pos:       (p.position || "?").toUpperCase(),
+            sleeperId,
           };
         }
       });
@@ -453,23 +455,34 @@ const DLRDraft = (() => {
       return;
     }
 
-    const sorted = [...allPicks].sort((a, b) => Number(a.pick||a.overall||0) - Number(b.pick||b.overall||0));
+    const sorted = [...allPicks].sort((a, b) => {
+      // Sort by round first, then pick within round
+      const ra = Number(a.round || 0), rb = Number(b.round || 0);
+      if (ra !== rb) return ra - rb;
+      return Number(a.pick || a.overall || 0) - Number(b.pick || b.overall || 0);
+    });
     el.innerHTML = toggleBar + `
       <div class="draft-auction-list">
-        <div class="draft-auction-header" style="grid-template-columns:50px 44px 1fr 1fr">
+        <div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
           <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
         </div>
         ${sorted.map(p => {
-          const pid   = p.player || p.playerId || "";
-          const info  = playerLookup[pid] || {};
-          const pos   = (info.pos || p.pos || "?").toUpperCase();
-          const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-          const name  = info.name || p.playerName || "—";
-          const team  = teamMap[String(p.franchise||"")] || "—";
-          const pick  = p.pick || p.overall || "—";
+          const pid      = p.player || p.playerId || "";
+          const info     = playerLookup[pid] || {};
+          const pos      = (info.pos || p.pos || "?").toUpperCase();
+          const color    = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+          const name     = info.name || p.playerName || "—";
+          const team     = teamMap[String(p.franchise||"")] || "—";
+          const round    = Number(p.round || 0);
+          const pickNum  = Number(p.pick || 0);
+          const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
+          const sid      = info.sleeperId;
+          const clickAttr = sid
+            ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer;"`
+            : pid ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${pid}','_blank')" style="cursor:pointer;"` : "";
           return `
-            <div class="draft-auction-row" style="grid-template-columns:50px 44px 1fr 1fr">
-              <span class="draft-auction-rank" style="color:var(--color-text-dim);font-weight:600">${pick}</span>
+            <div class="draft-auction-row" style="grid-template-columns:60px 44px 1fr 1fr" ${clickAttr}>
+              <span class="draft-auction-rank" style="color:var(--color-text-dim);font-weight:600;font-size:.75rem">${pickLabel}</span>
               <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
               <span class="draft-auction-name">${_esc(name)}</span>
               <span class="draft-auction-team dim">${_esc(team)}</span>

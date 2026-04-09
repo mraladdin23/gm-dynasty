@@ -248,28 +248,33 @@ const DLRRoster = (() => {
   }
 
   function _playerRowHTML(playerId, slot) {
-    const p       = _players[playerId] || {};
-    const name    = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : (p.name || playerId);
-    const pos     = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
-    const nflTeam = p.team || "FA";
-    const color   = POS_COLOR[pos] || "#9ca3af";
-    const dim     = slot === "ir" || slot === "taxi";
+    const p        = _players[playerId] || {};
+    const name     = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : (p.name || playerId);
+    const pos      = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
+    const nflTeam  = p.team || "FA";
+    const color    = POS_COLOR[pos] || "#9ca3af";
+    const dim      = slot === "ir" || slot === "taxi";
 
-    // Only Sleeper IDs (pure numbers) get CDN photos and player card clicks
-    const isSleeperPlayer = /^\d+$/.test(playerId);
-    const isMFLPlayer     = playerId.startsWith("mfl_");
-    const mflId           = isMFLPlayer ? playerId.replace("mfl_", "") : null;
+    // Resolve best photo/card ID
+    const isMFL        = playerId.startsWith("mfl_");
+    const isYahoo      = playerId.startsWith("yahoo_");
+    const mappedId     = p._sleeperId || null;  // Sleeper ID found via name match
+    const mflId        = p._mflId || playerId.replace("mfl_", "");
+    const photoId      = isMFL ? mappedId : (isYahoo ? null : playerId);
+    const isSleeperNative = !isMFL && !isYahoo && /^\d+$/.test(playerId);
 
-    const photoHTML = isSleeperPlayer
-      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg"
+    const photoHTML = photoId
+      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${photoId}.jpg"
            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
            loading="lazy" />
          <div class="roster-player-photo-fallback" style="display:none;color:${color};">${pos}</div>`
       : `<div class="roster-player-photo-fallback" style="display:flex;color:${color};">${pos}</div>`;
 
-    const clickAttr = isSleeperPlayer
-      ? `onclick="DLRPlayerCard.show('${playerId}', '${_escAttr(name)}')" style="cursor:pointer;"`
-      : isMFLPlayer
+    // Player card: use Sleeper card if we have a mapped ID, else MFL link, else nothing
+    const cardId  = isSleeperNative ? playerId : mappedId;
+    const clickAttr = cardId
+      ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"`
+      : isMFL
         ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${mflId}','_blank')" style="cursor:pointer;"`
         : "";
 
@@ -385,17 +390,21 @@ const DLRRoster = (() => {
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Build a local player lookup from MFL data
+    // Build a local player lookup from MFL data, mapping to Sleeper IDs where possible
     const mflPlayerLookup = {};
     teams.forEach(t => {
       (t.mflPlayers || []).forEach(p => {
+        const displayName = MFLAPI.mflNameToDisplay(p.name);
+        const sleeperId   = MFLAPI.mflNameToSleeperId(p.name);
         mflPlayerLookup[`mfl_${p.id}`] = {
-          first_name: p.name?.split(", ")[1] || p.name || "",
-          last_name:  p.name?.split(", ")[0] || "",
-          position:   p.position || "?",
+          first_name:        displayName.split(" ")[0] || "",
+          last_name:         displayName.split(" ").slice(1).join(" ") || "",
+          position:          p.position || "?",
           fantasy_positions: [p.position || "?"],
-          team:       p.team || "FA",
-          search_rank: 9999
+          team:              p.team || "FA",
+          search_rank:       9999,
+          _sleeperId:        sleeperId,   // for photo + player card
+          _mflId:            p.id,
         };
       });
     });
