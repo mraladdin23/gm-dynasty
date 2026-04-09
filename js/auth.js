@@ -78,10 +78,21 @@ const Auth = (() => {
       throw new Error(_friendlyAuthError(err.code, username));
     }
 
-    // Load profile
-    _currentProfile = await GMDB.getUserByUid(_currentUser.uid);
+    // Load profile with timeout — Firebase DB can hang on mobile
+    try {
+      const profilePromise = GMDB.getUserByUid(_currentUser.uid);
+      const timeoutPromise = new Promise((_, r) =>
+        setTimeout(() => r(new Error("connection_timeout")), 8000)
+      );
+      _currentProfile = await Promise.race([profilePromise, timeoutPromise]);
+    } catch(err) {
+      if (err.message === "connection_timeout") {
+        throw new Error("Connected but couldn't load your profile — check your internet connection and try again.");
+      }
+      throw new Error("Profile not found. Please contact support.");
+    }
+
     if (!_currentProfile) {
-      // Edge case: Auth account exists but no profile — treat as new
       throw new Error("Profile not found. Please contact support.");
     }
 
