@@ -78,10 +78,18 @@ const DLRStandings = (() => {
         _renderYahooStandings(el, bundle, leagueId);
       } catch(e) {
         if (token !== _initToken) return;
+        const isNetwork = e.message?.includes("fetch") || e.message?.includes("network") || e.message?.includes("disconnected");
+        const isToken   = e.message?.includes("token") || e.message?.includes("reconnect");
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
           <div style="font-size:2rem;margin-bottom:var(--space-3);">🏈</div>
           <div style="font-weight:600;margin-bottom:var(--space-2);">Could not load Yahoo standings</div>
-          <div style="font-size:.85rem;color:var(--color-text-dim);">${e.message}</div>
+          <div style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-3);">
+            ${isToken ? "Yahoo token expired — reconnect Yahoo in Edit Profile." :
+              isNetwork ? "Network error — check your connection and try again." :
+              e.message}
+          </div>
+          ${isNetwork ? `<button class="btn-secondary" onclick="DLRStandings.init('${leagueId}','yahoo','${_season || ""}','${_leagueKey||""}')">↻ Retry</button>` : ""}
+          ${isToken ? `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:var(--space-2)">Go to your profile → Edit → reconnect Yahoo</div>` : ""}
         </div>`;
       }
       return;
