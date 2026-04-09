@@ -46,11 +46,26 @@ const GMDB = (() => {
     return user.getIdToken();
   }
 
+  // Timeout wrapper for fetch — prevents hanging on slow/blocked networks
+  async function _fetchWithTimeout(url, options = {}, ms = 8000) {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), ms);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(tid);
+      return res;
+    } catch(err) {
+      clearTimeout(tid);
+      if (err.name === "AbortError") throw new Error(`Request timed out (${ms/1000}s)`);
+      throw err;
+    }
+  }
+
   async function _restPut(path, data) {
     const token = await _getAuthToken();
     const auth  = token ? `?auth=${token}` : "";
     const url   = `https://sleeperbid-default-rtdb.firebaseio.com/${path}.json${auth}`;
-    const res   = await fetch(url, {
+    const res   = await _fetchWithTimeout(url, {
       method:  "PUT",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify(data)
@@ -63,7 +78,7 @@ const GMDB = (() => {
     const token = await _getAuthToken();
     const auth  = token ? `?auth=${token}` : "";
     const url   = `https://sleeperbid-default-rtdb.firebaseio.com/${path}.json${auth}`;
-    const res   = await fetch(url);
+    const res   = await _fetchWithTimeout(url);
     if (!res.ok) throw new Error(`REST read failed: ${res.status} at ${path}`);
     return res.json();
   }
