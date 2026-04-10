@@ -1648,7 +1648,7 @@ const Profile = (() => {
         document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
         document.getElementById("dtab-salary")?.classList.add("active");
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
-        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2);
+        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2, league.platform, league.season, league.leagueKey || leagueKey);
       } else {
         DLRRoster.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
       }
