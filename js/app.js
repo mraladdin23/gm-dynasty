@@ -433,16 +433,23 @@ document.getElementById("relink-yahoo-btn")?.addEventListener("click", async () 
   YahooAPI.login();
 });
 document.getElementById("relink-mfl-btn")?.addEventListener("click", async () => {
-  const email    = prompt("Enter your MFL email address:");
-  if (!email) return;
-  const password = prompt("Enter your MFL password:");
-  if (!password) return;
   const profile = Auth.getCurrentProfile();
+  const alreadyLinked = profile?.platforms?.mfl?.mflEmail || profile?.platforms?.mfl?.mflUsername;
+
+  const promptMsg = alreadyLinked
+    ? `Resync MFL leagues\n\nEnter your MFL email address to re-import all leagues and fix team matching.\nYour password is used only to fetch leagues and is never stored.`
+    : `Connect MFL\n\nEnter your MFL email address.`;
+
+  const email = prompt(promptMsg);
+  if (!email) return;
+  const password = prompt("Enter your MFL password:\n(Never stored — used only to fetch your leagues)");
+  if (!password) return;
+
   try {
-    setLoading(true, "Relinking MFL...");
+    setLoading(true, alreadyLinked ? "Resyncing MFL leagues…" : "Connecting MFL…");
     const result = await Profile.linkMFL(profile.username, email, password);
     setLoading(false);
-    showToast(`MFL relinked — ${Object.keys(result.leagues).length} leagues`);
+    showToast(`MFL ${alreadyLinked ? "resynced" : "connected"} — ${Object.keys(result.leagues).length} leagues`);
     const updated = await Auth.refreshProfile();
     Profile.renderLocker(updated);
     Profile.openEditProfileModal(updated);
