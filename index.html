@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dynasty Locker Room — Your Fantasy Legacy</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
-  <link rel="stylesheet" href="css/base.css?v=18" />
+  <link rel="stylesheet" href="css/base.css?v=19" />
   <link rel="stylesheet" href="css/auth.css?v=5" />
-  <link rel="stylesheet" href="css/locker.css?v=18" />
+  <link rel="stylesheet" href="css/locker.css?v=19" />
 
   <!-- Firebase v9 compat — loaded async to avoid blocking page render on mobile -->
   <script>
@@ -147,10 +147,11 @@
   <div class="platform-body">
     <input type="email" id="mfl-email-input" placeholder="MFL Email Address" required autocomplete="email" />
     <input type="password" id="mfl-password-input" placeholder="MFL Password" required autocomplete="current-password" />
+    <input type="text" id="mfl-additional-emails-input" placeholder="Previous MFL email(s) — optional, comma separated" autocomplete="off" />
 
     <!-- Field hint -->
     <span class="field-hint">
-      Enter your MFL email address and password to connect your leagues. Your password is only used to import your leagues and is <strong>never saved</strong>.
+      Enter your current MFL email and password to connect. If you've used different email addresses in past leagues, add them in the third field so those leagues match correctly. Your password is only used to import your leagues and is <strong>never saved</strong>.
     </span>
 
     <!-- Connect / Import Button -->
@@ -167,8 +168,10 @@
 <!-- JS to handle Connect button -->
   <script>
     document.getElementById("connect-mfl").addEventListener("click", async () => {
-      const email    = document.getElementById("mfl-email-input").value.trim();
-      const password = document.getElementById("mfl-password-input").value.trim();
+      const email            = document.getElementById("mfl-email-input").value.trim();
+      const password         = document.getElementById("mfl-password-input").value.trim();
+      const additionalRaw    = document.getElementById("mfl-additional-emails-input")?.value.trim() || "";
+      const additionalEmails = additionalRaw ? additionalRaw.split(/[\s,;]+/).map(e => e.trim()).filter(Boolean) : [];
 
       const messageEl       = document.getElementById("mfl-message");
       const statusEl        = document.getElementById("mfl-connection-status");
@@ -199,7 +202,7 @@
           return;
         }
 
-        const result = await Profile.linkMFL(profile.username, email, password);
+        const result = await Profile.linkMFL(profile.username, email, password, [], additionalEmails);
         const count  = Object.keys(result.leagues).length;
         statusEl.textContent = `✓ Connected — ${count} league(s) saved`;
 
@@ -763,8 +766,8 @@
   <script src="js/hallway.js"></script>
   <script src="js/trophy-room.js"></script>
   <script src="js/playercard.js"></script>
-  <script src="js/profile.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/profile.js?v=19"></script>
+  <script src="js/app.js?v=19"></script>
 
   <script>
     // Global safety net: if loading overlay is still visible after 10 seconds,
