@@ -3291,6 +3291,11 @@ select option { background: var(--color-bg-2); }
 .sal-player-row:hover { background: var(--color-bg-3); }
 .sal-player-row--holdout { border-left: 2px solid var(--color-red); }
 
+/* Taxi promotion badges */
+.sal-badge { display:inline-flex; align-items:center; gap:2px; font-size:.62rem; font-weight:700; padding:1px 5px; border-radius:var(--radius-sm); border:1px solid; white-space:nowrap; }
+.sal-badge--promote-now  { background:rgba(248,113,113,.15); color:#f87171; border-color:rgba(248,113,113,.35); }
+.sal-badge--promote-soon { background:rgba(251,191,36,.12);  color:var(--color-gold); border-color:rgba(251,191,36,.3); }
+
 .sal-player-photo {
   width: 30px; height: 30px;
   border-radius: 50%;

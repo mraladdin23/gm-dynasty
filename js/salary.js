@@ -44,6 +44,7 @@ const DLRSalaryCap = (() => {
     contracts:       false,
     faabMultiplier:  100000,   // $1 FAAB = $100,000 salary by default
     autoTrack:       true,     // auto-apply salary on waiver/FA adds
+    taxiYears:       3,        // max years a player can remain on taxi squad
   };
 
   const POS_COLOR = {
@@ -650,6 +651,27 @@ const DLRSalaryCap = (() => {
       const sal   = entry.salary || 0;
       const isHoldout = entry.holdout || false;
 
+      // Taxi promotion warning — uses Sleeper years_exp via player DB
+      // For MFL/Yahoo players with mfl_/yahoo_ prefix, try to find Sleeper mapping
+      let taxiBadge = "";
+      if (slot === "taxi") {
+        const maxYears  = _settings.taxiYears ?? DEFAULT_SETTINGS.taxiYears;
+        // Resolve years_exp — for Sleeper IDs use directly,
+        // for MFL/Yahoo use the _sleeperId mapping stored at load time
+        const rawPlayer = _players[pid] || {};
+        const sleeperP  = rawPlayer._sleeperId ? (_players[rawPlayer._sleeperId] || rawPlayer) : rawPlayer;
+        const yearsExp  = sleeperP.years_exp ?? null;
+
+        if (yearsExp != null) {
+          const nextYear = yearsExp + 1;
+          if (nextYear >= maxYears) {
+            taxiBadge = `<span class="sal-badge sal-badge--promote-now" title="Must promote — ${nextYear} seasons completed, max is ${maxYears}">🚨 Promote Now</span>`;
+          } else if (nextYear === maxYears - 1) {
+            taxiBadge = `<span class="sal-badge sal-badge--promote-soon" title="Last eligible year on taxi — promote before next season">⚠️ Last Year</span>`;
+          }
+        }
+      }
+
       const editBtn = _isCommish
         ? `<button class="sal-edit-btn" onclick="DLRSalaryCap.openEditModal('${pid}','${team.username}','${_escAttr(name)}')" title="Edit salary">✏</button>`
         : "";
@@ -664,8 +686,7 @@ const DLRSalaryCap = (() => {
           <div class="sal-player-name-col">
             <span class="sal-player-name-text sal-player-link"
               onclick="DLRPlayerCard.show('${pid}','${_escAttr(name)}')">${_esc(name)}</span>
-            ${slot==="ir"   ? `<span class="sal-badge sal-badge--slot">IR ${_settings.irCapPct}%</span>` : ""}
-            ${slot==="taxi" ? `<span class="sal-badge sal-badge--taxi">Taxi ${_settings.taxiCapPct}%</span>` : ""}
+            ${taxiBadge}
           </div>
           <div class="sal-salary-right">
             ${isHoldout ? `<span class="sal-holdout-icon" title="Holdout">🔥</span>` : ""}
@@ -878,7 +899,10 @@ const DLRSalaryCap = (() => {
           </label>
         </div>
         <div class="form-group">
-          <label>FAAB → Salary Multiplier</label>
+          <label>Taxi Squad Max Years</label>
+          <input type="number" id="sal-taxi-years" value="${s.taxiYears ?? 3}" min="1" max="10" step="1" style="width:80px"/>
+          <span class="field-hint">Max seasons a player can stay on taxi. Rookies are year 0 — a player in year ${(s.taxiYears ?? 3) - 1} will be flagged as needing promotion.</span>
+        </div>
           <div style="display:flex;align-items:center;gap:var(--space-2)">
             <span style="font-size:.85rem;color:var(--color-text-dim)">$1 FAAB =</span>
             <input type="number" id="sal-faab-mult" value="${s.faabMultiplier ?? 100000}" step="1000" min="0" style="width:140px"/>
@@ -907,8 +931,9 @@ const DLRSalaryCap = (() => {
       taxiCapPct:     parseFloat(document.getElementById("sal-taxi")?.value) ?? DEFAULT_SETTINGS.taxiCapPct,
       holdouts:       document.getElementById("sal-holdouts")?.checked  ?? true,
       contracts:      document.getElementById("sal-contracts")?.checked ?? false,
-      faabMultiplier: parseFloat(document.getElementById("sal-faab-mult")?.value) ?? DEFAULT_SETTINGS.faabMultiplier,
-      autoTrack:      document.getElementById("sal-autotrack")?.checked ?? true,
+      faabMultiplier: parseFloat(document.getElementById("sal-faab-mult")?.value)  ?? DEFAULT_SETTINGS.faabMultiplier,
+      autoTrack:      document.getElementById("sal-autotrack")?.checked             ?? true,
+      taxiYears:      parseInt(document.getElementById("sal-taxi-years")?.value)    || DEFAULT_SETTINGS.taxiYears,
     };
     const btn = document.querySelector(".sal-settings-wrap .btn-primary");
     const status = document.getElementById("sal-settings-status");
