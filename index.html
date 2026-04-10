@@ -145,16 +145,12 @@
 
   <!-- Body -->
   <div class="platform-body">
-    <!-- Username / Password Inputs -->
-    <input type="text" id="mfl-email-input" placeholder="MFL Username" required />
-    <input type="password" id="mfl-password-input" placeholder="MFL Password" required />
-
-    <!-- Optional League IDs -->
-    <input type="text" id="mfl-league-ids-input" placeholder="Optional: League IDs from MFL URL — e.g. 21600, 18432" />
+    <input type="email" id="mfl-email-input" placeholder="MFL Email Address" required autocomplete="email" />
+    <input type="password" id="mfl-password-input" placeholder="MFL Password" required autocomplete="current-password" />
 
     <!-- Field hint -->
     <span class="field-hint">
-      Enter your MFL username and password to connect. Optionally, you can also paste your league ID(s) from the MFL URL to pre-link specific leagues.
+      Enter your MFL email address and password to connect your leagues. Your password is only used to import your leagues and is <strong>never saved</strong>.
     </span>
 
     <!-- Connect / Import Button -->
@@ -171,21 +167,24 @@
 <!-- JS to handle Connect button -->
   <script>
     document.getElementById("connect-mfl").addEventListener("click", async () => {
-      const username   = document.getElementById("mfl-email-input").value.trim();
-      const password   = document.getElementById("mfl-password-input").value.trim();
-      const leagueIdsRaw = document.getElementById("mfl-league-ids-input").value.trim();
-      const leagueIds  = leagueIdsRaw ? leagueIdsRaw.split(/[\s,]+/).filter(Boolean) : [];
+      const email    = document.getElementById("mfl-email-input").value.trim();
+      const password = document.getElementById("mfl-password-input").value.trim();
 
-      const messageEl = document.getElementById("mfl-message");
-      const statusEl  = document.getElementById("mfl-connection-status");
+      const messageEl       = document.getElementById("mfl-message");
+      const statusEl        = document.getElementById("mfl-connection-status");
       const leagueContainer = document.getElementById("league-container");
 
       messageEl.classList.add("hidden");
       leagueContainer.classList.add("hidden");
       leagueContainer.innerHTML = "";
 
-      if (!username) {
-        messageEl.textContent = "Username is required.";
+      if (!email) {
+        messageEl.textContent = "MFL email address is required.";
+        messageEl.classList.remove("hidden");
+        return;
+      }
+      if (!password) {
+        messageEl.textContent = "MFL password is required.";
         messageEl.classList.remove("hidden");
         return;
       }
@@ -200,7 +199,7 @@
           return;
         }
 
-        const result = await Profile.linkMFL(profile.username, username, password, leagueIds);
+        const result = await Profile.linkMFL(profile.username, email, password);
         const count  = Object.keys(result.leagues).length;
         statusEl.textContent = `✓ Connected — ${count} league(s) saved`;
 
@@ -325,6 +324,12 @@
         <!-- Platform badges -->
         <div class="platforms-summary" id="platforms-summary">
           <div class="platforms-list" id="platforms-list"></div>
+        </div>
+
+        <!-- MFL resync nudge — shown when username stored but no email -->
+        <div id="mfl-resync-banner" class="mfl-resync-banner hidden">
+          <span>⚠️ <strong>Action needed:</strong> Please resync your MFL connection using your email address for better league matching.</span>
+          <button class="btn-secondary btn-sm" id="mfl-resync-banner-btn">Resync MFL</button>
         </div>
 
         <!-- League filter bar -->

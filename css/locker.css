@@ -369,6 +369,22 @@
   flex-wrap: wrap;
 }
 
+/* MFL resync nudge banner */
+.mfl-resync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(251,191,36,.1);
+  border: 1px solid rgba(251,191,36,.3);
+  border-radius: var(--radius-md);
+  margin: var(--space-3) 0 0;
+  font-size: .83rem;
+  flex-wrap: wrap;
+}
+.mfl-resync-banner.hidden { display: none; }
+
 .platform-badge {
   display: flex;
   align-items: center;
