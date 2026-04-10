@@ -552,26 +552,9 @@ let _globalAucData      = {};   // stored in closure, not on DOM element
 // Single bidder = MIN_BID. Multi-bidder = second-highest + increment.
 // Never exposes proxy bid amounts.
 function _computeDisplayBid(a) {
-  const MIN_BID = 100_000;
-  const MIN_INC = 100_000;
-  let entries = [];
-  if (a.proxies && Object.keys(a.proxies).length) {
-    entries = Object.entries(a.proxies)
-      .map(([, v]) => Number(v))
-      .sort((x, y) => y - x);
-  } else {
-    const bids = Array.isArray(a.bids) ? a.bids : Object.values(a.bids || {});
-    const maxByRoster = {};
-    bids.forEach(b => {
-      if (!maxByRoster[b.rosterId] || b.maxBid > maxByRoster[b.rosterId])
-        maxByRoster[b.rosterId] = b.maxBid;
-    });
-    entries = Object.values(maxByRoster).sort((x, y) => y - x);
-  }
-  if (!entries.length) return MIN_BID;
-  if (entries.length === 1) return MIN_BID;
-  // Display = challenger proxy + MIN_INC, capped at leader proxy
-  return Math.min(entries[1] + MIN_INC, entries[0]);
+  // Trust the stored displayBid — it is set correctly by placeBid's transaction.
+  if (a.displayBid != null) return Number(a.displayBid);
+  return 100_000; // MIN_BID fallback
 }
 
 function _startGlobalAucMonitor(profile) {
