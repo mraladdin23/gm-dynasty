@@ -14,6 +14,7 @@ const DLRStandings = (() => {
   let _matchCache = {};
   let _historyLeagues = [];
   let _viewingId  = null;
+  let _myRosterId = null;   // current user's franchise/roster ID
   let _initToken  = 0; // increment on each init to cancel stale async ops
 
   // ── Reset (call when closing or switching leagues) ───────
@@ -25,6 +26,7 @@ const DLRStandings = (() => {
     _matchCache  = {};
     _historyLeagues = [];
     _viewingId   = null;
+    _myRosterId  = null;
     _initToken++;
   }
 
@@ -35,12 +37,13 @@ const DLRStandings = (() => {
     _season    = season    || null;
     _leagueKey = leagueKey || null;
   }
-  async function init(leagueId, platform, season, leagueKey) {
+  async function init(leagueId, platform, season, leagueKey, myRosterId) {
     reset();
-    _leagueId  = leagueId;
-    _platform  = platform  || "sleeper";
-    _season    = season    || null;
-    _leagueKey = leagueKey || null;
+    _leagueId    = leagueId;
+    _platform    = platform  || "sleeper";
+    _season      = season    || null;
+    _leagueKey   = leagueKey || null;
+    _myRosterId  = myRosterId || null;
     const token = ++_initToken;
 
     const el = document.getElementById("dtab-standings");
@@ -55,7 +58,7 @@ const DLRStandings = (() => {
         if (token !== _initToken) return;
         const standings  = MFLAPI.normalizeStandings(bundle);
         const leagueInfo = MFLAPI.getLeagueInfo(bundle);
-        _renderMFLStandings(el, bundle.league?.league, standings, leagueId, season, leagueInfo);
+        _renderMFLStandings(el, bundle.league?.league, standings, leagueId, season, leagueInfo, _myRosterId);
       } catch(e) {
         if (token !== _initToken) return;
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
@@ -775,7 +778,7 @@ const DLRStandings = (() => {
       <div class="matchups-grid">${cards}</div>`;
   }
 
-  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo) {
+  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo, myRosterId) {
     if (!standings.length) {
       el.innerHTML = `<div class="empty-state">No standings data available.</div>`;
       return;
@@ -807,14 +810,15 @@ const DLRStandings = (() => {
               const inPO    = rank <= playoffSpots;
               const bubble  = rank === playoffSpots;
               const name    = teamName(s.franchiseId);
-              return `<tr class="${inPO ? "standings-row--playoff" : ""}"
+              const isMe    = myRosterId && String(s.franchiseId) === String(myRosterId);
+              return `<tr class="${inPO ? "standings-row--playoff" : ""} ${isMe ? "standings-row--me" : ""}"
                 style="${inPO ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}` : "border-left:3px solid transparent"}">
                 <td class="standings-rank">${rank}</td>
                 <td class="team-col">
                   <div class="standings-team-cell">
-                    <div class="st-av">${name[0]?.toUpperCase() || "?"}</div>
+                    <div class="st-av" style="${isMe ? "background:var(--color-gold);color:#000;" : ""}">${name[0]?.toUpperCase() || "?"}</div>
                     <div>
-                      <div class="standings-team-name">${_esc(name)}</div>
+                      <div class="standings-team-name">${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}</div>
                     </div>
                   </div>
                 </td>

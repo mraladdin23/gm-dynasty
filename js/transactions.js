@@ -13,8 +13,9 @@ const DLRTransactions = (() => {
   let _allTx      = [];
   let _rosters    = [];
   let _players    = {};
-  let _typeFilter = "all";
-  let _teamFilter = "all";
+  let _typeFilter  = "all";
+  let _teamFilter  = "all";
+  let _myRosterId  = null;   // current user's team ID — used to default-filter
 
   const TYPE_LABELS = {
     trade:      "🔄 Trades",
@@ -23,11 +24,12 @@ const DLRTransactions = (() => {
   };
 
   // ── Public: init ─────────────────────────────────────────
-  async function init(leagueId, platform, season, leagueKey) {
+  async function init(leagueId, platform, season, leagueKey, myRosterId) {
     _leagueId    = leagueId;
     _leagueKey   = leagueKey || null;
     _platform    = platform || "sleeper";
     _season      = season   || new Date().getFullYear().toString();
+    _myRosterId  = myRosterId || null;
     _typeFilter  = "all";
     _teamFilter  = "all";
     _allTx       = [];
@@ -366,6 +368,12 @@ const DLRTransactions = (() => {
         _mflType:   tx.type,   // keep raw MFL type for display
       };
     }).sort((a,b) => b.created - a.created);
+
+    // Default team filter to the user's own team if we know it
+    if (_myRosterId && _teamFilter === "all") {
+      const myRoster = _rosters.find(r => String(r.roster_id) === String(_myRosterId));
+      if (myRoster) _teamFilter = String(_myRosterId);
+    }
 
     _renderView(el);
   }
