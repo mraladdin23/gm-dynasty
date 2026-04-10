@@ -15,6 +15,7 @@ const DLRRoster = (() => {
   let _initToken  = 0;
   let _filter     = "all";
   let _leagueKey  = null;   // Yahoo full league key e.g. "nfl.l.12345"
+  let _myRosterId = null;   // current user's team ID — used to default-filter
 
   const POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DEF"];
   const POS_COLOR = {
@@ -25,11 +26,12 @@ const DLRRoster = (() => {
   let _season = null;
 
   // ── Init ─────────────────────────────────────────────────
-  async function init(leagueId, platform, season, leagueKey) {
+  async function init(leagueId, platform, season, leagueKey, myRosterId) {
     _leagueId   = leagueId;
     _platform   = platform || "sleeper";
     _season     = season   || new Date().getFullYear().toString();
     _leagueKey  = leagueKey || null;
+    _myRosterId = myRosterId || null;
     _rosterData = null;
     _filter     = "all";
     _initToken++;
@@ -65,9 +67,10 @@ const DLRRoster = (() => {
   }
 
   function reset() {
-    _leagueId   = null;
-    _rosterData = null;
-    _filter     = "all";
+    _leagueId    = null;
+    _rosterData  = null;
+    _myRosterId  = null;
+    _filter      = "all";
     _leagueKey  = null;
     _initToken++;
   }
@@ -416,6 +419,11 @@ const DLRRoster = (() => {
     Object.assign(_players, mflPlayerLookup);
 
     _rosterData = { teams, league: MFLAPI.getLeagueInfo(bundle) };
+    // Default filter to user's own team if we know it
+    if (_myRosterId) {
+      const myTeam = teams.find(t => String(t.roster_id) === String(_myRosterId));
+      if (myTeam) _filter = myTeam.roster_id;
+    }
     _render();
   }
 

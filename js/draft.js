@@ -14,6 +14,7 @@ const DLRDraft = (() => {
   let _season     = null;
   let _initToken  = 0;
   let _draftData  = null;
+  let _myRosterId = null;   // current user's team ID
   let _seasons    = [];
   let _viewingId  = null;
   let _viewMode   = "draft";    // "draft" | "auction"
@@ -29,11 +30,12 @@ const DLRDraft = (() => {
   };
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueId, platform, season, leagueKey) {
-    _leagueId  = leagueId;
-    _platform  = platform || "sleeper";
-    _season    = season   || new Date().getFullYear().toString();
-    _leagueKey = leagueKey || null;
+  async function init(leagueId, platform, season, leagueKey, myRosterId) {
+    _leagueId    = leagueId;
+    _platform    = platform || "sleeper";
+    _season      = season   || new Date().getFullYear().toString();
+    _leagueKey   = leagueKey || null;
+    _myRosterId  = myRosterId || null;
     _draftData = null;
     _viewingId = null;
     _viewMode  = "draft";
@@ -78,6 +80,7 @@ const DLRDraft = (() => {
   function reset() {
     _leagueId    = null;
     _draftData   = null;
+    _myRosterId  = null;
     _seasons     = [];
     _viewingId   = null;
     _mflCache    = null;

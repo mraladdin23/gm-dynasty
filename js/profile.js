@@ -301,6 +301,66 @@ const Profile = (() => {
     }
   }
 
+  // ── Eager MFL identity resolution ────────────────────────
+  // Runs non-blocking after renderLocker. Finds all MFL leagues that are
+  // missing myRosterId (never had Overview visited) and resolves them in
+  // parallel, then persists to Firebase so every tab has it from now on.
+  async function _resolveMFLIdentities(username, mflPlatform) {
+    if (!mflPlatform?.linked) return;
+
+    const { allEmails, allUsernames } = MFLAPI.buildEmailList(mflPlatform);
+    if (!allEmails.length && !allUsernames.length) return;
+
+    // Find MFL leagues that still need resolution
+    const unresolved = Object.entries(_allLeagues).filter(([, l]) =>
+      l.platform === "mfl" && !l.myRosterId
+    );
+    if (!unresolved.length) return;
+
+    // Fetch bundles in parallel (max 4 concurrent to avoid hammering the worker)
+    const CONCURRENCY = 4;
+    for (let i = 0; i < unresolved.length; i += CONCURRENCY) {
+      const batch = unresolved.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
+        try {
+          const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+          const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
+          if (!myMatch) return;
+
+          const standingsMap = MFLAPI.getStandingsMap(bundle);
+          const teams        = MFLAPI.getTeams(bundle);
+          const mySt  = standingsMap[String(myMatch.franchiseId)] || {};
+          const myTeam = teams.find(t => String(t.id) === String(myMatch.franchiseId)) || {};
+
+          // Update in-memory _allLeagues
+          if (_allLeagues[leagueKey]) {
+            _allLeagues[leagueKey].myRosterId    = myMatch.franchiseId;
+            _allLeagues[leagueKey].teamName      = myTeam.name || myMatch.teamName || _allLeagues[leagueKey].teamName;
+            _allLeagues[leagueKey].wins          = mySt.wins    || _allLeagues[leagueKey].wins    || 0;
+            _allLeagues[leagueKey].losses        = mySt.losses  || _allLeagues[leagueKey].losses  || 0;
+            _allLeagues[leagueKey].standing      = mySt.rank    || _allLeagues[leagueKey].standing || null;
+            _allLeagues[leagueKey].pointsFor     = mySt.ptsFor  || _allLeagues[leagueKey].pointsFor || 0;
+          }
+
+          // Persist to Firebase (fire-and-forget)
+          saveLeagueMeta(username, leagueKey, {
+            myRosterId: myMatch.franchiseId,
+            teamName:   _allLeagues[leagueKey]?.teamName,
+            wins:       _allLeagues[leagueKey]?.wins,
+            losses:     _allLeagues[leagueKey]?.losses,
+            standing:   _allLeagues[leagueKey]?.standing,
+            pointsFor:  _allLeagues[leagueKey]?.pointsFor,
+          }).catch(() => {});
+        } catch(e) {
+          // Silently skip — network issue or blocked; will retry next load
+        }
+      }));
+    }
+
+    // Re-render cards once after all batches complete so all names update together
+    _renderLeagues();
+  }
+
   // ── Main locker render ─────────────────────────────────
 
   async function renderLocker(profile) {
@@ -361,6 +421,11 @@ const Profile = (() => {
     _renderLeagueFilters();
     _renderLeagues();
     _renderCareerSummary(profile);
+
+    // Non-blocking: resolve MFL team identities in the background for any
+    // leagues that are missing myRosterId (never had Overview opened).
+    // Cards re-render automatically when resolution completes.
+    _resolveMFLIdentities(profile.username, profile.platforms?.mfl).catch(() => {});
   }
 
   function _renderAvatar(profile) {
@@ -1620,7 +1685,7 @@ const Profile = (() => {
     // Always set the league context so matchups/playoffs work independently
     DLRStandings.setLeague(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
     if (tab === "overview")    await _renderOverview(el, leagueKey, league);
-    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
+    if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
     if (tab === "matchups")    DLRStandings.initMatchups();
     if (tab === "playoffs")    DLRStandings.initPlayoffs();
     if (tab === "roster") {
@@ -1636,7 +1701,7 @@ const Profile = (() => {
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
         DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2, league.platform, league.season, league.leagueKey || leagueKey);
       } else {
-        DLRRoster.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
+        DLRRoster.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
       }
     }
     if (tab === "salary") {
@@ -1656,9 +1721,9 @@ const Profile = (() => {
         league.myRosterId || null, league.teamName || "My Team",
         league.platform || "sleeper", league.leagueKey || leagueKey, league.season);
     }
-    if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
-    if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
-    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername);
+    if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
+    if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
+    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername, league.myRosterId || null);
     if (tab === "rules")         DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
       const sleeperUid2 = league.sleeperUserId
@@ -1718,29 +1783,31 @@ const Profile = (() => {
             pointsAgainst: mySt.ptsAgainst || 0,
             standing:      mySt.rank       || null,
           };
-          // Persist back to Firebase so next load is instant
+          // Always update _allLeagues and _detailLeague in memory first —
+          // _renderLeagues() reads from _allLeagues, so this must happen before it fires.
+          if (_allLeagues[leagueKey]) {
+            _allLeagues[leagueKey].teamName   = league.teamName;
+            _allLeagues[leagueKey].myRosterId = myTeamId;
+            _allLeagues[leagueKey].wins       = league.wins;
+            _allLeagues[leagueKey].losses     = league.losses;
+            _allLeagues[leagueKey].standing   = league.standing;
+            _allLeagues[leagueKey].pointsFor  = league.pointsFor;
+          }
+          // Keep _detailLeague in sync so tab switches use the resolved myRosterId
+          if (_detailLeagueKey === leagueKey) {
+            _detailLeague = { ..._detailLeague, ...league };
+          }
           if (_currentUsername) {
-            // Always re-render cards so teamName updates immediately
             _renderLeagues();
-            if (mySt.wins || myTeam.name) {
-              saveLeagueMeta(_currentUsername, leagueKey, {
-                teamName:    league.teamName,
-                myRosterId:  myTeamId,
-                wins:        league.wins,
-                losses:      league.losses,
-                pointsFor:   league.pointsFor,
-                standing:    league.standing,
-              }).catch(() => {});
-              // Update _allLeagues in memory
-              if (_allLeagues[leagueKey]) {
-                _allLeagues[leagueKey].teamName   = league.teamName;
-                _allLeagues[leagueKey].myRosterId = myTeamId;
-                _allLeagues[leagueKey].wins       = league.wins;
-                _allLeagues[leagueKey].losses     = league.losses;
-                _allLeagues[leagueKey].standing   = league.standing;
-                _allLeagues[leagueKey].pointsFor  = league.pointsFor;
-              }
-            }
+            // Persist to Firebase (fire-and-forget)
+            saveLeagueMeta(_currentUsername, leagueKey, {
+              teamName:    league.teamName,
+              myRosterId:  myTeamId,
+              wins:        league.wins,
+              losses:      league.losses,
+              pointsFor:   league.pointsFor,
+              standing:    league.standing,
+            }).catch(() => {});
           }
         }
       } catch(e) { /* render with what we have */ }

@@ -25,7 +25,7 @@ const DLRAnalytics = (() => {
   const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d" };
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueId, platform, myUsername) {
+  async function init(leagueId, platform, myUsername, myRosterId) {
     _leagueId  = leagueId;
     _platform  = platform || "sleeper";
     _activeTab = 0;
@@ -40,6 +40,8 @@ const DLRAnalytics = (() => {
       el.innerHTML = _loadingHTML("Loading analytics…");
       try {
         if (_platform === "mfl") {
+          // For MFL we already know the roster ID — pass it directly
+          _myRosterId = myRosterId || null;
           await _renderMFLAnalytics(el, leagueId, token);
         } else {
           el.innerHTML = `<div class="az-placeholder">Analytics for Yahoo leagues coming soon.</div>`;
@@ -737,11 +739,12 @@ const DLRAnalytics = (() => {
             const record  = `${s.wins}–${s.losses}${s.ties ? `–${s.ties}` : ""}`;
             const pct     = ((s.ptsFor / maxPts) * 100).toFixed(0);
             const rankColor = i === 0 ? "var(--color-gold)" : i < 3 ? "#94a3b8" : "var(--color-text-dim)";
+            const isMe    = _myRosterId && String(s.franchiseId) === String(_myRosterId);
             return `
-              <div style="display:grid;grid-template-columns:28px 1fr auto;gap:var(--space-2);align-items:center;padding:var(--space-2) var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">
+              <div style="display:grid;grid-template-columns:28px 1fr auto;gap:var(--space-2);align-items:center;padding:var(--space-2) var(--space-3);background:${isMe ? "var(--color-surface-raised)" : "var(--color-surface)"};border-radius:var(--radius-sm);${isMe ? "border:1px solid var(--color-gold-dim);" : ""}">
                 <span style="font-weight:700;color:${rankColor};font-family:var(--font-display)">${i+1}</span>
                 <div>
-                  <div style="font-weight:600;font-size:.88rem">${_esc(name)}</div>
+                  <div style="font-weight:600;font-size:.88rem">${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}</div>
                   <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:2px">
                     <span style="font-size:.72rem;color:var(--color-text-dim)">${record}</span>
                     <div style="flex:1;height:4px;background:var(--color-border);border-radius:2px;max-width:120px">
@@ -758,10 +761,11 @@ const DLRAnalytics = (() => {
           <div class="az-section-title" style="margin-bottom:var(--space-3)">📊 Points Leaders</div>
           <div style="display:flex;flex-direction:column;gap:var(--space-2)">
             ${[...standings].sort((a,b) => b.ptsFor - a.ptsFor).slice(0,5).map((s,i) => {
-              const name = teamMap[String(s.franchiseId)] || `Team ${s.franchiseId}`;
+              const name  = teamMap[String(s.franchiseId)] || `Team ${s.franchiseId}`;
+              const isMe  = _myRosterId && String(s.franchiseId) === String(_myRosterId);
               return `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">
-                  <span style="font-size:.85rem">${i+1}. ${_esc(name)}</span>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) var(--space-3);background:${isMe ? "var(--color-surface-raised)" : "var(--color-surface)"};border-radius:var(--radius-sm);${isMe ? "border:1px solid var(--color-gold-dim);" : ""}">
+                  <span style="font-size:.85rem">${i+1}. ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}</span>
                   <span style="font-weight:700;color:var(--color-gold);font-family:var(--font-display)">${s.ptsFor.toFixed(1)}</span>
                 </div>`;
             }).join("")}
