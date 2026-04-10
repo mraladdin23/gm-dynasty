@@ -16,8 +16,11 @@
 const DLRSalaryCap = (() => {
 
   let _leagueKey  = null;
-  let _storageKey = null;  // franchiseId or leagueKey — stable across seasons
+  let _storageKey = null;
   let _leagueId   = null;
+  let _platform   = "sleeper";
+  let _season     = null;
+  let _platformLeagueKey = null;
   let _isCommish  = false;
   let _settings   = null;
   let _rosterData = null;  // from Sleeper
@@ -28,13 +31,19 @@ const DLRSalaryCap = (() => {
   let _selectedTeam = null;   // username string, null = all teams
   let _topPaidPos   = "ALL";  // position filter for top paid
 
+  // Transaction auto-tracking
+  let _txMonitorInterval = null;
+  let _lastTxProcessed   = 0;  // timestamp of last processed tx batch
+
   const DEFAULT_SETTINGS = {
-    cap:        300000000,
-    minSalary:  100000,
-    irCapPct:   75,   // IR counts at 75% of salary toward cap
-    taxiCapPct: 0,    // Taxi counts at 0% (free)
-    holdouts:   true,
-    contracts:  false
+    cap:             300000000,
+    minSalary:       100000,
+    irCapPct:        75,
+    taxiCapPct:      0,
+    holdouts:        true,
+    contracts:       false,
+    faabMultiplier:  100000,   // $1 FAAB = $100,000 salary by default
+    autoTrack:       true,     // auto-apply salary on waiver/FA adds
   };
 
   const POS_COLOR = {
@@ -54,12 +63,13 @@ const DLRSalaryCap = (() => {
   }
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueKey, leagueId, isCommish, franchiseId) {
+  async function init(leagueKey, leagueId, isCommish, franchiseId, platform, season, platformLeagueKey) {
     _leagueKey  = leagueKey;
     _leagueId   = leagueId;
     _isCommish  = !!isCommish;
-    // Use franchiseId as storage key so salary data persists across seasons
-    // franchiseId is stable (oldest leagueId in chain), leagueKey changes each year
+    _platform   = platform || "sleeper";
+    _season     = season   || new Date().getFullYear().toString();
+    _platformLeagueKey = platformLeagueKey || null;
     _storageKey = franchiseId || leagueKey;
     _settings   = null;
     _salaryData = null;
@@ -81,45 +91,105 @@ const DLRSalaryCap = (() => {
       ]);
       if (token !== _initToken) return;
 
-      // Load player DB via IndexedDB-backed module
       _players = DLRPlayers.all();
-      if (Object.keys(_players).length < 100) {
-        _players = await DLRPlayers.load();
-      }
+      if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
       if (token !== _initToken) return;
 
-      // Load Sleeper roster data
-      if (_leagueId) {
-        const [rosters, users] = await Promise.all([
-          SleeperAPI.getRosters(_leagueId),
-          SleeperAPI.getLeagueUsers(_leagueId)
-        ]);
-        if (token !== _initToken) return;
-        const userMap = {};
-        (users||[]).forEach(u => { userMap[u.user_id] = u; });
-        _rosterData = (rosters||[]).map(r => {
-          const u = userMap[r.owner_id] || {};
-          return {
-            roster_id: r.roster_id,
-            ownerId:   r.owner_id,
-            username:  (u.username || u.user_id || `team_${r.roster_id}`).toLowerCase(),
-            teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
-            avatar:    u.avatar || null,
-            players:   r.players  || [],
-            reserve:   r.reserve  || [],
-            taxi:      r.taxi     || [],
-            wins:      r.settings?.wins   || 0,
-            losses:    r.settings?.losses || 0
-          };
-        });
-      }
-
+      // Load roster data — platform-aware, normalized to same shape
+      _rosterData = await _loadRosterData();
       if (token !== _initToken) return;
+
       _render();
+      _startTxMonitor();
     } catch(e) {
       if (token !== _initToken) return;
       el.innerHTML = _errorHTML("Could not load salary data: " + e.message);
     }
+  }
+
+  // ── Platform-aware roster loader ──────────────────────────
+  // Returns: [{ roster_id, username, teamName, players[], reserve[], taxi[] }]
+  // roster_id is the stable team identifier used as salary key
+  async function _loadRosterData() {
+    if (!_leagueId) return [];
+
+    if (_platform === "sleeper") {
+      const [rosters, users] = await Promise.all([
+        SleeperAPI.getRosters(_leagueId),
+        SleeperAPI.getLeagueUsers(_leagueId)
+      ]);
+      const userMap = {};
+      (users||[]).forEach(u => { userMap[u.user_id] = u; });
+      return (rosters||[]).map(r => {
+        const u = userMap[r.owner_id] || {};
+        return {
+          roster_id: r.roster_id,
+          ownerId:   r.owner_id,
+          username:  (u.username || u.user_id || `team_${r.roster_id}`).toLowerCase(),
+          teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
+          avatar:    u.avatar || null,
+          players:   r.players  || [],
+          reserve:   r.reserve  || [],
+          taxi:      r.taxi     || [],
+          wins:      r.settings?.wins   || 0,
+          losses:    r.settings?.losses || 0
+        };
+      });
+    }
+
+    if (_platform === "mfl") {
+      const bundle = await MFLAPI.getLeagueBundle(_leagueId, _season);
+      const teams    = MFLAPI.getTeams(bundle);
+      const standings = MFLAPI.getStandingsMap(bundle);
+      return teams.map(t => {
+        const players  = MFLAPI.getRoster(bundle, t.id);
+        const s        = standings[t.id] || {};
+        const username = (t.name || `team_${t.id}`).toLowerCase().replace(/[^a-z0-9]/g, "_");
+        return {
+          roster_id: t.id,
+          ownerId:   t.id,
+          username,
+          teamName:  t.name || `Team ${t.id}`,
+          avatar:    null,
+          players:   players.filter(p => p.status !== "IR" && p.status !== "TAXI").map(p => `mfl_${p.id}`),
+          reserve:   players.filter(p => p.status === "IR").map(p => `mfl_${p.id}`),
+          taxi:      players.filter(p => p.status === "TAXI").map(p => `mfl_${p.id}`),
+          wins:      s.wins   || 0,
+          losses:    s.losses || 0
+        };
+      });
+    }
+
+    if (_platform === "yahoo") {
+      const key    = _platformLeagueKey || `nfl.l.${_leagueId}`;
+      const bundle = await YahooAPI.getLeagueBundle(key);
+      const teams    = bundle.teams    || [];
+      const rosters  = bundle.rosters  || [];
+      const standings = bundle.standings || [];
+      const standMap = {};
+      standings.forEach(s => { standMap[String(s.teamId || s.team_id)] = s; });
+      const rosterMap = {};
+      rosters.forEach(r => { rosterMap[String(r.teamId || r.team_id)] = r.players || []; });
+      return teams.map(t => {
+        const tid     = String(t.id);
+        const s       = standMap[tid] || {};
+        const username = (t.name || `team_${tid}`).toLowerCase().replace(/[^a-z0-9]/g, "_");
+        return {
+          roster_id: tid,
+          ownerId:   tid,
+          username,
+          teamName:  t.name || `Team ${tid}`,
+          avatar:    null,
+          players:   rosterMap[tid] || [],
+          reserve:   [],
+          taxi:      [],
+          wins:      s.wins   || 0,
+          losses:    s.losses || 0
+        };
+      });
+    }
+
+    return [];
   }
 
   function reset() {
@@ -128,6 +198,196 @@ const DLRSalaryCap = (() => {
     _rosterData = null;
     _settings   = null;
     _initToken++;
+    _stopTxMonitor();
+  }
+
+  // ── Transaction monitor ───────────────────────────────────
+  function _startTxMonitor() {
+    _stopTxMonitor();
+    if (!_leagueId || !(_settings?.autoTrack)) return;
+    _txMonitorInterval = setInterval(_checkTransactions, 5 * 60 * 1000);
+    _checkTransactions();
+  }
+
+  function _stopTxMonitor() {
+    if (_txMonitorInterval) { clearInterval(_txMonitorInterval); _txMonitorInterval = null; }
+  }
+
+  async function _checkTransactions() {
+    if (!_leagueId || !_salaryData || !_settings?.autoTrack) return;
+    try {
+      const normalized = await _fetchNormalizedTransactions();
+      const newTx = normalized.filter(tx => tx.ts > _lastTxProcessed);
+      if (!newTx.length) return;
+
+      let changed = false;
+      for (const tx of newTx) {
+        if (_applyNormalizedTransaction(tx)) changed = true;
+      }
+
+      const maxTs = Math.max(...newTx.map(tx => tx.ts));
+      if (maxTs > _lastTxProcessed) _lastTxProcessed = maxTs;
+
+      if (changed) {
+        await _saveSalaryData();
+        _renderView();
+      }
+    } catch(e) {
+      console.warn("[Salary] Transaction check failed:", e.message);
+    }
+  }
+
+  // Returns normalized transactions: [{ type, ts, adds, drops, faabBid }]
+  // adds/drops: { playerId: teamKey } where teamKey matches roster username
+  async function _fetchNormalizedTransactions() {
+    const rosterMap = {};  // rosterId/teamId → username
+    (_rosterData || []).forEach(r => { rosterMap[String(r.roster_id)] = r.username; });
+
+    if (_platform === "sleeper") {
+      // Fetch last 3 weeks of Sleeper transactions
+      const stateRes = await fetch("https://api.sleeper.app/v1/state/nfl").catch(() => null);
+      const week = stateRes?.ok ? (await stateRes.json()).week || 1 : 1;
+      const weeks = Array.from({ length: Math.min(week, 3) }, (_, i) => week - i);
+      const arrays = await Promise.all(weeks.map(w =>
+        fetch(`https://api.sleeper.app/v1/league/${_leagueId}/transactions/${w}`)
+          .then(r => r.ok ? r.json() : []).catch(() => [])
+      ));
+      return arrays.flat().filter(tx => tx?.status === "complete").map(tx => {
+        const adds = {}, drops = {};
+        Object.entries(tx.adds  || {}).forEach(([pid, rid]) => { if (rosterMap[rid]) adds[pid]  = rosterMap[rid]; });
+        Object.entries(tx.drops || {}).forEach(([pid, rid]) => { if (rosterMap[rid]) drops[pid] = rosterMap[rid]; });
+        return {
+          type:    tx.type === "trade" ? "trade" : tx.type === "waiver" ? "waiver" : "free_agent",
+          ts:      tx.created || tx.status_updated || 0,
+          adds,
+          drops,
+          faabBid: tx.settings?.waiver_bid ?? 0
+        };
+      });
+    }
+
+    if (_platform === "mfl") {
+      const bundle = await MFLAPI.getLeagueBundle(_leagueId, _season);
+      const raw = bundle?.transactions?.transactions?.transaction;
+      if (!raw) return [];
+      const arr = Array.isArray(raw) ? raw : [raw];
+      return arr.map(tx => {
+        const ts    = Number(tx.timestamp || 0) * 1000;
+        const adds  = {}, drops = {};
+        // MFL format: "playerId|franchiseId,playerId|franchiseId"
+        function parsePairs(str, dest) {
+          if (!str) return;
+          str.split(",").forEach(part => {
+            const [pid, fid] = part.split("|");
+            if (pid && fid && rosterMap[fid]) dest[`mfl_${pid}`] = rosterMap[fid];
+          });
+        }
+        parsePairs(tx.transaction, adds);
+        parsePairs(tx.dropped,     drops);
+        const type = tx.type === "TRADE" ? "trade"
+          : (tx.type === "BBID_WAIVER" || tx.type === "AUCTION_WON") ? "waiver"
+          : "free_agent";
+        return { type, ts, adds, drops, faabBid: Number(tx.bid || 0) };
+      });
+    }
+
+    if (_platform === "yahoo") {
+      const key    = _platformLeagueKey || `nfl.l.${_leagueId}`;
+      const bundle = await YahooAPI.getLeagueBundle(key);
+      return (bundle.transactions || []).map(tx => {
+        const adds = {}, drops = {};
+        const tid  = String(tx.teamId || tx.team_id || "");
+        if (tx.description && rosterMap[tid]) {
+          tx.description.split(",").forEach(part => {
+            const p = part.trim();
+            const pid = `yahoo_${p.replace(/^[+\-~]/, "")}`;
+            if (p.startsWith("+") || p.startsWith("~")) adds[pid]  = rosterMap[tid];
+            if (p.startsWith("-"))                       drops[pid] = rosterMap[tid];
+          });
+        }
+        const type = tx.type === "trade" ? "trade" : tx.type === "waiver" ? "waiver" : "free_agent";
+        return { type, ts: Number(tx.timestamp || 0) * 1000, adds, drops, faabBid: 0 };
+      });
+    }
+
+    return [];
+  }
+
+  // Apply a single normalized transaction — returns true if salary data changed
+  function _applyNormalizedTransaction(tx) {
+    const { type, adds, drops, faabBid } = tx;
+    let changed = false;
+    const mult   = _settings?.faabMultiplier ?? DEFAULT_SETTINGS.faabMultiplier;
+    const minSal = _settings?.minSalary      ?? DEFAULT_SETTINGS.minSalary;
+
+    if (type === "waiver" || type === "free_agent") {
+      // Drops first — clear salary when player is cut
+      for (const [playerId, username] of Object.entries(drops)) {
+        changed = _clearPlayerSalary(username, playerId) || changed;
+      }
+      // Adds — set salary based on FAAB bid × multiplier
+      for (const [playerId, username] of Object.entries(adds)) {
+        if (_getPlayerSalary(username, playerId)) continue; // don't overwrite existing
+        const salary = type === "waiver" && faabBid > 0
+          ? Math.max(Math.round(faabBid * mult), minSal)
+          : minSal;
+        changed = _setPlayerSalary(username, playerId, salary) || changed;
+      }
+    } else if (type === "trade") {
+      // Build movements: playerId → { from, to }
+      const moves = {};
+      Object.entries(drops).forEach(([pid, username]) => {
+        moves[pid] = moves[pid] || {};
+        moves[pid].from = username;
+      });
+      Object.entries(adds).forEach(([pid, username]) => {
+        moves[pid] = moves[pid] || {};
+        moves[pid].to = username;
+      });
+      for (const [playerId, { from, to }] of Object.entries(moves)) {
+        if (from && to && from !== to) {
+          const salary = _getPlayerSalary(from, playerId);
+          if (salary) {
+            _clearPlayerSalary(from, playerId);
+            _setPlayerSalary(to, playerId, salary);
+            changed = true;
+          }
+        }
+      }
+    }
+    return changed;
+  }
+
+  // ── Salary data helpers ───────────────────────────────────
+  function _getPlayerSalary(username, playerId) {
+    const entry = (_salaryData[username]?.players || [])
+      .find(p => String(p.playerId) === String(playerId));
+    return entry?.salary || 0;
+  }
+
+  function _setPlayerSalary(username, playerId, salary) {
+    if (!_salaryData[username]) _salaryData[username] = { players: [] };
+    const players = _salaryData[username].players || [];
+    const idx = players.findIndex(p => String(p.playerId) === String(playerId));
+    const entry = {
+      playerId:   String(playerId),
+      salary:     Math.round(salary),
+      years:      1,
+      holdout:    false,
+      autoAdded:  true
+    };
+    if (idx >= 0) players[idx] = { ...players[idx], ...entry };
+    else players.push(entry);
+    _salaryData[username].players = players;
+    return true;
+  }
+
+  function _clearPlayerSalary(username, playerId) {
+    if (!_salaryData[username]?.players) return false;
+    const before = _salaryData[username].players.length;
+    _salaryData[username].players = _salaryData[username].players
+      .filter(p => String(p.playerId) !== String(playerId));
+    return _salaryData[username].players.length !== before;
   }
 
   // ── Firebase — all use SDK refs to avoid 401 auth issues ──
@@ -617,6 +877,23 @@ const DLRSalaryCap = (() => {
             <span>Track contract years per player</span>
           </label>
         </div>
+        <div class="form-group">
+          <label>FAAB → Salary Multiplier</label>
+          <div style="display:flex;align-items:center;gap:var(--space-2)">
+            <span style="font-size:.85rem;color:var(--color-text-dim)">$1 FAAB =</span>
+            <input type="number" id="sal-faab-mult" value="${s.faabMultiplier ?? 100000}" step="1000" min="0" style="width:140px"/>
+            <span style="font-size:.85rem;color:var(--color-text-dim)">salary</span>
+            <span style="font-size:.78rem;color:var(--color-text-dim)">(= ${_fmtMoney(s.faabMultiplier ?? 100000)} per $1 bid)</span>
+          </div>
+          <span class="field-hint">When a player is claimed via waivers, their salary = FAAB bid × this multiplier. Set to 0 to disable auto-tracking.</span>
+        </div>
+        <div class="form-group">
+          <label class="label-checkbox">
+            <input type="checkbox" id="sal-autotrack" ${(s.autoTrack ?? true)?"checked":""}/>
+            <span>Auto-track acquisitions from Sleeper transactions</span>
+          </label>
+          <span class="field-hint">When enabled, waiver/FA claims automatically set salary. Trades carry salary to new team. Drops clear salary.</span>
+        </div>
         <button class="btn-primary" onclick="DLRSalaryCap.saveSettings()">Save Settings</button>
         <div id="sal-settings-status" style="margin-top:var(--space-3);font-size:.82rem;color:var(--color-text-dim);"></div>
       </div>`;
@@ -624,12 +901,14 @@ const DLRSalaryCap = (() => {
 
   async function saveSettings() {
     const settings = {
-      cap:        parseFloat(document.getElementById("sal-cap")?.value)  || DEFAULT_SETTINGS.cap,
-      minSalary:  parseFloat(document.getElementById("sal-min")?.value)  || DEFAULT_SETTINGS.minSalary,
-      irCapPct:   parseFloat(document.getElementById("sal-ir")?.value)   ?? DEFAULT_SETTINGS.irCapPct,
-      taxiCapPct: parseFloat(document.getElementById("sal-taxi")?.value) ?? DEFAULT_SETTINGS.taxiCapPct,
-      holdouts:   document.getElementById("sal-holdouts")?.checked  ?? true,
-      contracts:  document.getElementById("sal-contracts")?.checked ?? false
+      cap:            parseFloat(document.getElementById("sal-cap")?.value)  || DEFAULT_SETTINGS.cap,
+      minSalary:      parseFloat(document.getElementById("sal-min")?.value)  || DEFAULT_SETTINGS.minSalary,
+      irCapPct:       parseFloat(document.getElementById("sal-ir")?.value)   ?? DEFAULT_SETTINGS.irCapPct,
+      taxiCapPct:     parseFloat(document.getElementById("sal-taxi")?.value) ?? DEFAULT_SETTINGS.taxiCapPct,
+      holdouts:       document.getElementById("sal-holdouts")?.checked  ?? true,
+      contracts:      document.getElementById("sal-contracts")?.checked ?? false,
+      faabMultiplier: parseFloat(document.getElementById("sal-faab-mult")?.value) ?? DEFAULT_SETTINGS.faabMultiplier,
+      autoTrack:      document.getElementById("sal-autotrack")?.checked ?? true,
     };
     const btn = document.querySelector(".sal-settings-wrap .btn-primary");
     const status = document.getElementById("sal-settings-status");
@@ -638,6 +917,7 @@ const DLRSalaryCap = (() => {
       await _saveSettings(settings);
       if (btn)    { btn.textContent = "Save Settings"; btn.disabled = false; }
       if (status) status.textContent = `✓ Saved at ${new Date().toLocaleTimeString()}`;
+      _startTxMonitor();
       _render();
     } catch(e) {
       if (btn)    { btn.textContent = "Error — try again"; btn.disabled = false; }
@@ -1030,7 +1310,8 @@ const DLRSalaryCap = (() => {
     openEditModal, savePlayerSalary, addAuctionWin,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
-    getCapData, getTeamSalaryEntries
+    getCapData, getTeamSalaryEntries,
+    applyTransactions: _checkTransactions,  // exposed for manual trigger
   };
 
 })();
