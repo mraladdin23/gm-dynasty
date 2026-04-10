@@ -27,6 +27,8 @@ const DLRStandings = (() => {
     _historyLeagues = [];
     _viewingId   = null;
     _myRosterId  = null;
+    _mflBundle   = null;
+    _mflNameMap  = {};
     _initToken++;
   }
 
@@ -534,11 +536,25 @@ const DLRStandings = (() => {
   async function initPlayoffs() {
     const el = document.getElementById("dtab-playoffs");
     if (!el) return;
+    const token = ++_initToken;
 
     if (_platform === "mfl") {
-      el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
-        MFL playoff bracket not yet available. <a href="https://www42.myfantasyleague.com/${new Date().getFullYear()}/home/${_leagueId}" target="_blank" style="color:var(--color-gold);">View on MFL →</a>
-      </div>`;
+      el.innerHTML = _loadingHTML("Loading MFL standings…");
+      try {
+        const season = _season || new Date().getFullYear().toString();
+        const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
+        if (token !== _initToken) return;
+        const standings  = MFLAPI.normalizeStandings(bundle);
+        const leagueInfo = MFLAPI.getLeagueInfo(bundle);
+        _renderMFLStandings(el, bundle.league?.league, standings, _leagueId, season, leagueInfo, _myRosterId);
+      } catch(e) {
+        if (token !== _initToken) return;
+        el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
+          Could not load MFL standings.<br>
+          <a href="https://www42.myfantasyleague.com/${_season||new Date().getFullYear()}/home/${_leagueId}"
+            target="_blank" style="color:var(--color-gold);">View on MFL →</a>
+        </div>`;
+      }
       return;
     }
 

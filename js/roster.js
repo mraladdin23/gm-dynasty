@@ -153,14 +153,14 @@ const DLRRoster = (() => {
   }
 
   function setFilter(val) {
-    _filter = val === "all" ? "all" : parseInt(val);
+    _filter = val === "all" ? "all" : String(val);
     _applyFilter();
   }
 
   function _applyFilter() {
     document.querySelectorAll(".roster-team-card").forEach(card => {
-      const rid = parseInt(card.dataset.rosterId);
-      const show = _filter === "all" || _filter === rid;
+      const rid = String(card.dataset.rosterId);
+      const show = _filter === "all" || String(_filter) === rid;
       card.style.display = show ? "" : "none";
     });
   }
@@ -168,9 +168,10 @@ const DLRRoster = (() => {
   // ── Team card ─────────────────────────────────────────────
   function _teamCardHTML(team) {
     const initial = (team.teamName || "?")[0].toUpperCase();
+    const isMe    = _myRosterId && String(team.roster_id) === String(_myRosterId);
     const avatar  = team.avatar
       ? `<img src="https://sleepercdn.com/avatars/thumbs/${team.avatar}" class="roster-avatar" onerror="this.style.display='none'">`
-      : `<div class="roster-avatar-placeholder">${initial}</div>`;
+      : `<div class="roster-avatar-placeholder" style="${isMe ? "background:var(--color-gold);color:#000;" : ""}">${initial}</div>`;
 
     // Main roster = players minus reserve and taxi
     const reserveSet = new Set(team.reserve);
@@ -419,11 +420,7 @@ const DLRRoster = (() => {
     Object.assign(_players, mflPlayerLookup);
 
     _rosterData = { teams, league: MFLAPI.getLeagueInfo(bundle) };
-    // Default filter to user's own team if we know it
-    if (_myRosterId) {
-      const myTeam = teams.find(t => String(t.roster_id) === String(_myRosterId));
-      if (myTeam) _filter = myTeam.roster_id;
-    }
+    _filter = "all";
     _render();
   }
 

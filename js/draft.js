@@ -614,7 +614,9 @@ const DLRDraft = (() => {
     // Grid view — build round-by-round grid similar to Sleeper
     // Group picks by round and franchise
     const rounds = Math.max(...sorted.map(p => Number(p.round || 0)), 0);
-    const teamIds = teams ? Object.keys(teamMap) : [...new Set(sorted.map(p => String(p.franchise||"")))];
+    const teamIds = Object.keys(teamMap).length
+      ? Object.keys(teamMap)
+      : [...new Set(sorted.map(p => String(p.franchise||"")))];
     const numTeams = teamIds.length;
 
     // Build pick lookup: "round-franchise" → pick

@@ -302,62 +302,47 @@ const Profile = (() => {
   }
 
   // ── Eager MFL identity resolution ────────────────────────
-  // Runs non-blocking after renderLocker. Finds all MFL leagues that are
-  // missing myRosterId (never had Overview visited) and resolves them in
-  // parallel, then persists to Firebase so every tab has it from now on.
+  // Runs non-blocking after renderLocker. Finds all MFL leagues missing
+  // myRosterId and resolves them in the background, then persists to
+  // gmd/users/{u}/leagues/{key} so they load correctly on next visit.
   async function _resolveMFLIdentities(username, mflPlatform) {
     if (!mflPlatform?.linked) return;
 
     const { allEmails, allUsernames } = MFLAPI.buildEmailList(mflPlatform);
     if (!allEmails.length && !allUsernames.length) return;
 
-    // Find MFL leagues that still need resolution
     const unresolved = Object.entries(_allLeagues).filter(([, l]) =>
       l.platform === "mfl" && !l.myRosterId
     );
     if (!unresolved.length) return;
 
-    // Fetch bundles in parallel (max 4 concurrent to avoid hammering the worker)
     const CONCURRENCY = 4;
     for (let i = 0; i < unresolved.length; i += CONCURRENCY) {
       const batch = unresolved.slice(i, i + CONCURRENCY);
       await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
         try {
-          const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+          const bundle  = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
           const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
           if (!myMatch) return;
 
           const standingsMap = MFLAPI.getStandingsMap(bundle);
           const teams        = MFLAPI.getTeams(bundle);
-          const mySt  = standingsMap[String(myMatch.franchiseId)] || {};
+          const mySt   = standingsMap[String(myMatch.franchiseId)] || {};
           const myTeam = teams.find(t => String(t.id) === String(myMatch.franchiseId)) || {};
 
-          // Update in-memory _allLeagues
           if (_allLeagues[leagueKey]) {
-            _allLeagues[leagueKey].myRosterId    = myMatch.franchiseId;
-            _allLeagues[leagueKey].teamName      = myTeam.name || myMatch.teamName || _allLeagues[leagueKey].teamName;
-            _allLeagues[leagueKey].wins          = mySt.wins    || _allLeagues[leagueKey].wins    || 0;
-            _allLeagues[leagueKey].losses        = mySt.losses  || _allLeagues[leagueKey].losses  || 0;
-            _allLeagues[leagueKey].standing      = mySt.rank    || _allLeagues[leagueKey].standing || null;
-            _allLeagues[leagueKey].pointsFor     = mySt.ptsFor  || _allLeagues[leagueKey].pointsFor || 0;
+            _allLeagues[leagueKey].myRosterId = myMatch.franchiseId;
+            _allLeagues[leagueKey].teamName   = myTeam.name || myMatch.teamName || _allLeagues[leagueKey].teamName;
+            _allLeagues[leagueKey].wins       = mySt.wins    || _allLeagues[leagueKey].wins    || 0;
+            _allLeagues[leagueKey].losses     = mySt.losses  || _allLeagues[leagueKey].losses  || 0;
+            _allLeagues[leagueKey].standing   = mySt.rank    || _allLeagues[leagueKey].standing || null;
+            _allLeagues[leagueKey].pointsFor  = mySt.ptsFor  || _allLeagues[leagueKey].pointsFor || 0;
+            // Persist to the leagues path so it survives page reload
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
-
-          // Persist to Firebase (fire-and-forget)
-          saveLeagueMeta(username, leagueKey, {
-            myRosterId: myMatch.franchiseId,
-            teamName:   _allLeagues[leagueKey]?.teamName,
-            wins:       _allLeagues[leagueKey]?.wins,
-            losses:     _allLeagues[leagueKey]?.losses,
-            standing:   _allLeagues[leagueKey]?.standing,
-            pointsFor:  _allLeagues[leagueKey]?.pointsFor,
-          }).catch(() => {});
-        } catch(e) {
-          // Silently skip — network issue or blocked; will retry next load
-        }
+        } catch(e) { /* silently skip — network issue, will retry next load */ }
       }));
     }
-
-    // Re-render cards once after all batches complete so all names update together
     _renderLeagues();
   }
 
@@ -1058,10 +1043,17 @@ const Profile = (() => {
       _hidePagination();
       _updateJumpDropdown([]);
     } else {
+      const prevLen   = _filteredCache.length;
       _filteredCache  = filtered;
       _archivedCache  = archived;
-      _currentPage    = 0;
-      _archivedPage   = 0;
+      // Only reset to page 0 when the list composition changes, not on background re-renders.
+      if (filtered.length !== prevLen) {
+        _currentPage  = 0;
+        _archivedPage = 0;
+      }
+      // Clamp in case page is now out of bounds
+      const maxPage = Math.max(0, Math.ceil(filtered.length / _getPageSize()) - 1);
+      if (_currentPage > maxPage) _currentPage = maxPage;
       _renderPage(grid, _filteredCache, _currentPage, "leagues-pagination", "page-info", false);
       _updateJumpDropdown(wantArchived ? [..._filteredCache, ...archived] : _filteredCache);
     }
@@ -1799,15 +1791,12 @@ const Profile = (() => {
           }
           if (_currentUsername) {
             _renderLeagues();
-            // Persist to Firebase (fire-and-forget)
-            saveLeagueMeta(_currentUsername, leagueKey, {
-              teamName:    league.teamName,
-              myRosterId:  myTeamId,
-              wins:        league.wins,
-              losses:      league.losses,
-              pointsFor:   league.pointsFor,
-              standing:    league.standing,
-            }).catch(() => {});
+            // Persist to gmd/users/{u}/leagues/{key} so it survives reload
+            if (_allLeagues[leagueKey]) {
+              GMDB.saveLeague(_currentUsername, leagueKey, {
+                ..._allLeagues[leagueKey],
+              }).catch(() => {});
+            }
           }
         }
       } catch(e) { /* render with what we have */ }
