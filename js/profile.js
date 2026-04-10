@@ -53,8 +53,7 @@ const Profile = (() => {
     .map(s => String(s).trim()).filter(Boolean);
 
   // Build the full list of emails/usernames to match against — primary + additional
-  const allEmails = [mflEmail, ...additionalEmails.map(e => e.trim().toLowerCase()).filter(Boolean)];
-  const allUsernames = allEmails.map(e => e.includes("@") ? e.split("@")[0] : e);
+  const { allEmails, allUsernames } = MFLAPI.buildEmailList({ mflEmail, mflUsername, mflAdditionalEmails: additionalEmails });
 
 
   // ───────── STEP 1: TRY TO FETCH USER LEAGUES VIA CREDENTIALS ─────────
@@ -126,40 +125,10 @@ const Profile = (() => {
       const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
 
       // Try to find user's franchise — check all provided emails/usernames
-      let myTeam = null;
-
-      // 1. Standings: owner_name / name matches any of our usernames
-      myTeam = standingsArr.find(f =>
-        allUsernames.some(u =>
-          f.owner_name?.toLowerCase().includes(u) ||
-          f.name?.toLowerCase().includes(u)
-        )
-      );
-
-      // 2. Franchise list: exact email match first, then username/prefix
-      if (!myTeam) {
-        const myFranchise = franchisesArr.find(f => {
-          const fEmail = f.email?.toLowerCase() || "";
-          const fUser  = f.username?.toLowerCase() || "";
-          const fOwner = f.owner_name?.toLowerCase() || "";
-          return allEmails.some(e => fEmail === e || fEmail.split("@")[0] === e.split("@")[0]) ||
-                 allUsernames.some(u => fUser === u || fOwner.includes(u)) ||
-                 f.is_owner === "1";
-        });
-        if (myFranchise) {
-          myTeam = standingsArr.find(f => String(f.id) === String(myFranchise.id))
-                || myFranchise;
-        }
-      }
-
-      // 3. Commish fallback
-      if (!myTeam) {
-        const commishFranchise = franchisesArr.find(f => f.is_commish === "1");
-        if (commishFranchise) {
-          myTeam = standingsArr.find(f => String(f.id) === String(commishFranchise.id))
-                || commishFranchise;
-        }
-      }
+      const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
+      const myTeam  = myMatch
+        ? (standingsArr.find(f => String(f.id) === String(myMatch.franchiseId)) || { id: myMatch.franchiseId, name: myMatch.teamName })
+        : null;
 
       const key = `mfl_${season}_${leagueId}`;
       const leagueName = leagueInfo?.name || `League ${leagueId}`;
@@ -1726,43 +1695,13 @@ const Profile = (() => {
         const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
         const standingsMap = MFLAPI.getStandingsMap(bundle);
         const teams        = MFLAPI.getTeams(bundle);
-        const mflEmail            = _currentProfile?.platforms?.mfl?.mflEmail            || "";
-        const mflUsername         = _currentProfile?.platforms?.mfl?.mflUsername         || "";
-        const mflAdditionalEmails = _currentProfile?.platforms?.mfl?.mflAdditionalEmails || [];
-
         // Build full list of all emails/usernames to match against
-        const allEmails    = [mflEmail, ...mflAdditionalEmails].map(e => e.toLowerCase()).filter(Boolean);
-        const allUsernames = [...new Set([
-          ...allEmails.map(e => e.includes("@") ? e.split("@")[0] : e),
-          ...(mflUsername ? [mflUsername.toLowerCase()] : [])
-        ])];
+        const { allEmails, allUsernames } = MFLAPI.buildEmailList(_currentProfile?.platforms?.mfl);
 
         let myTeamId = league.myRosterId || null;
-
-        // 1. Teams list: any username matches owner_name or team name
-        if (!myTeamId && allUsernames.length) {
-          const matched = teams.find(t =>
-            allUsernames.some(u =>
-              (t.owner_name || "").toLowerCase().includes(u) ||
-              t.name?.toLowerCase().includes(u)
-            )
-          );
-          if (matched) myTeamId = matched.id;
-        }
-
-        // 2. Franchise list: any email/username matches
         if (!myTeamId) {
-          const rawFranchises = bundle?.league?.league?.franchises?.franchise;
-          const franchArr = rawFranchises ? (Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises]) : [];
-          const myFranchise = franchArr.find(f => {
-            const fEmail = f.email?.toLowerCase() || "";
-            const fUser  = f.username?.toLowerCase() || "";
-            const fOwner = f.owner_name?.toLowerCase() || "";
-            return allEmails.some(e => fEmail === e || fEmail.split("@")[0] === e.split("@")[0]) ||
-                   allUsernames.some(u => fUser === u || fOwner.includes(u)) ||
-                   f.is_owner === "1";
-          }) || franchArr.find(f => f.is_commish === "1");
-          if (myFranchise) myTeamId = myFranchise.id;
+          const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
+          if (myMatch) myTeamId = myMatch.franchiseId;
         }
 
         if (myTeamId) {
@@ -1780,27 +1719,28 @@ const Profile = (() => {
             standing:      mySt.rank       || null,
           };
           // Persist back to Firebase so next load is instant
-          if (_currentUsername && (mySt.wins || myTeam.name)) {
-            saveLeagueMeta(_currentUsername, leagueKey, {
-              teamName:    league.teamName,
-              myRosterId:  myTeamId,
-              wins:        league.wins,
-              losses:      league.losses,
-              pointsFor:   league.pointsFor,
-              standing:    league.standing,
-            }).catch(() => {});
-            // Update _allLeagues in memory
-            if (_allLeagues[leagueKey]) {
-              _allLeagues[leagueKey].teamName   = league.teamName;
-              _allLeagues[leagueKey].myRosterId = myTeamId;
-              _allLeagues[leagueKey].wins       = league.wins;
-              _allLeagues[leagueKey].losses     = league.losses;
-              _allLeagues[leagueKey].standing   = league.standing;
-              _allLeagues[leagueKey].pointsFor  = league.pointsFor;
-            }
-            // Re-render the league card grid so the card shows the new teamName
-            // without the user having to close and reopen
+          if (_currentUsername) {
+            // Always re-render cards so teamName updates immediately
             _renderLeagues();
+            if (mySt.wins || myTeam.name) {
+              saveLeagueMeta(_currentUsername, leagueKey, {
+                teamName:    league.teamName,
+                myRosterId:  myTeamId,
+                wins:        league.wins,
+                losses:      league.losses,
+                pointsFor:   league.pointsFor,
+                standing:    league.standing,
+              }).catch(() => {});
+              // Update _allLeagues in memory
+              if (_allLeagues[leagueKey]) {
+                _allLeagues[leagueKey].teamName   = league.teamName;
+                _allLeagues[leagueKey].myRosterId = myTeamId;
+                _allLeagues[leagueKey].wins       = league.wins;
+                _allLeagues[leagueKey].losses     = league.losses;
+                _allLeagues[leagueKey].standing   = league.standing;
+                _allLeagues[leagueKey].pointsFor  = league.pointsFor;
+              }
+            }
           }
         }
       } catch(e) { /* render with what we have */ }
