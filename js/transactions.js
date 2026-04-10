@@ -369,12 +369,6 @@ const DLRTransactions = (() => {
       };
     }).sort((a,b) => b.created - a.created);
 
-    // Default team filter to the user's own team if we know it
-    if (_myRosterId && _teamFilter === "all") {
-      const myRoster = _rosters.find(r => String(r.roster_id) === String(_myRosterId));
-      if (myRoster) _teamFilter = String(_myRosterId);
-    }
-
     _renderView(el);
   }
 
