@@ -497,9 +497,11 @@ async function _doSaveMFLAddlEmails() {
     return;
   }
   // Read from whichever input is populated — onboarding screen or edit profile modal
-  const addlInput = document.getElementById("mfl-additional-emails-modal-input")
-    || document.getElementById("mfl-additional-emails-input");
-  const addlRaw   = addlInput?.value.trim() || "";
+  // Both elements may exist in DOM simultaneously; pick the one that actually has a value
+  const modalInput = document.getElementById("mfl-additional-emails-modal-input");
+  const panelInput = document.getElementById("mfl-additional-emails-input");
+  const addlInput  = (modalInput?.value.trim()) ? modalInput : panelInput;
+  const addlRaw    = addlInput?.value.trim() || "";
   const additionalEmails = addlRaw
     ? addlRaw.split(/[\s,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean)
     : [];
