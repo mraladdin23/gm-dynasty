@@ -223,8 +223,15 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
   statusEl.textContent = leagueIds.length ? `Searching ${leagueIds.length} league(s)…` : "Searching…";
   statusEl.classList.remove("status-connected", "status-error");
 
+  // Read additional emails from input, falling back to whatever is already stored in Firebase
+  const addlRaw = document.getElementById("mfl-additional-emails-input")?.value.trim()
+    || (profile?.platforms?.mfl?.mflAdditionalEmails || []).join(", ");
+  const additionalEmails = addlRaw
+    ? addlRaw.split(/[\s,;]+/).map(e => e.trim()).filter(Boolean)
+    : [];
+
   try {
-    const result = await Profile.linkMFL(profile.username, email, password, leagueIds);
+    const result = await Profile.linkMFL(profile.username, email, password, leagueIds, additionalEmails);
     const count  = Object.keys(result.leagues).length;
     statusEl.textContent = `✓ Connected — ${count} league${count !== 1 ? "s" : ""}`;
     statusEl.classList.add("status-connected");
@@ -478,6 +485,40 @@ async function _doMFLResync() {
 
 document.getElementById("relink-mfl-btn")?.addEventListener("click", _doMFLResync);
 document.getElementById("mfl-resync-banner-btn")?.addEventListener("click", _doMFLResync);
+
+document.getElementById("save-mfl-addl-emails-btn")?.addEventListener("click", _doSaveMFLAddlEmails);
+document.getElementById("save-mfl-addl-emails-onboarding-btn")?.addEventListener("click", _doSaveMFLAddlEmails);
+
+// ── Save MFL additional emails without reconnecting ────────
+async function _doSaveMFLAddlEmails() {
+  const profile = Auth.getCurrentProfile();
+  if (!profile?.platforms?.mfl?.linked) {
+    showToast("MFL not connected yet.", "error");
+    return;
+  }
+  // Read from whichever input is populated — onboarding screen or edit profile modal
+  const addlInput = document.getElementById("mfl-additional-emails-modal-input")
+    || document.getElementById("mfl-additional-emails-input");
+  const addlRaw   = addlInput?.value.trim() || "";
+  const additionalEmails = addlRaw
+    ? addlRaw.split(/[\s,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  try {
+    // Merge with existing platform data — only update the additional emails field
+    const existing = profile.platforms.mfl;
+    await GMDB.linkPlatform(profile.username, "mfl", {
+      ...existing,
+      mflAdditionalEmails: additionalEmails
+    });
+    // Update in-memory profile so re-renders immediately use the new emails
+    profile.platforms.mfl.mflAdditionalEmails = additionalEmails;
+    AppState.currentProfile = profile;
+    showToast(`Additional emails saved (${additionalEmails.length} stored) ✓`);
+  } catch (err) {
+    showToast("Failed to save: " + err.message, "error");
+  }
+}
 
 // ── Manage leagues (go to onboarding to re-import) ────────
 document.getElementById("manage-leagues-btn")?.addEventListener("click", () => {

@@ -147,11 +147,14 @@
   <div class="platform-body">
     <input type="email" id="mfl-email-input" placeholder="MFL Email Address" required autocomplete="email" />
     <input type="password" id="mfl-password-input" placeholder="MFL Password" required autocomplete="current-password" />
-    <input type="text" id="mfl-additional-emails-input" placeholder="Previous MFL email(s) — optional, comma separated" autocomplete="off" />
+    <div style="display:flex;gap:var(--space-2);align-items:center;">
+      <input type="text" id="mfl-additional-emails-input" placeholder="Previous MFL email(s) — optional, comma separated" autocomplete="off" style="flex:1;margin-bottom:0;" />
+      <button class="btn-secondary btn-sm" id="save-mfl-addl-emails-onboarding-btn" title="Save additional emails without reconnecting" style="white-space:nowrap;flex-shrink:0;">Save Emails Only</button>
+    </div>
 
     <!-- Field hint -->
     <span class="field-hint">
-      Enter your current MFL email and password to connect. If you've used different email addresses in past leagues, add them in the third field so those leagues match correctly. Your password is only used to import your leagues and is <strong>never saved</strong>.
+      Enter your current MFL email and password to connect. If you've used different email addresses in past leagues, add them in the third field so those leagues match correctly. Use <strong>Save Emails Only</strong> to update that list at any time without re-entering your password. Your password is only used to import your leagues and is <strong>never saved</strong>.
     </span>
 
     <!-- Connect / Import Button -->
@@ -576,6 +579,13 @@
             <span id="mfl-linked-user" class="platform-relink-user"></span>
           </div>
           <button class="btn-secondary btn-sm" id="relink-mfl-btn">Reconnect</button>
+        </div>
+        <div class="platform-relink-row" style="flex-wrap:wrap;gap:var(--space-2);">
+          <input type="text" id="mfl-additional-emails-modal-input"
+            placeholder="Previous MFL email(s) — comma separated"
+            autocomplete="off"
+            style="flex:1;min-width:0;font-size:.8rem;" />
+          <button class="btn-secondary btn-sm" id="save-mfl-addl-emails-btn" style="white-space:nowrap;flex-shrink:0;">Save Emails Only</button>
         </div>
         <div class="platform-relink-row">
           <div class="platform-relink-info">

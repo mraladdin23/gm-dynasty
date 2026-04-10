@@ -1379,6 +1379,12 @@ const Profile = (() => {
       if (emailInput && !emailInput.value) emailInput.value = mfl.mflEmail || mfl.mflUsername;
     }
 
+    // Pre-populate additional emails in the modal input
+    const addlModalInput = document.getElementById("mfl-additional-emails-modal-input");
+    if (addlModalInput) {
+      addlModalInput.value = (mfl?.mflAdditionalEmails || []).join(", ");
+    }
+
     document.getElementById("edit-profile-modal").classList.remove("hidden");
   }
 
