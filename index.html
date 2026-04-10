@@ -9,10 +9,28 @@
   <link rel="stylesheet" href="css/auth.css?v=5" />
   <link rel="stylesheet" href="css/locker.css?v=18" />
 
-  <!-- Firebase v9 compat -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <!-- Firebase v9 compat — loaded async to avoid blocking page render on mobile -->
+  <script>
+    // If Firebase SDK fails to load (blocked CDN, offline, etc),
+    // show login screen immediately rather than hanging on blank page
+    window._fbLoadTimeout = setTimeout(() => {
+      if (typeof firebase === "undefined") {
+        console.error("[DLR] Firebase SDK failed to load");
+        document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+        const auth = document.getElementById("auth-screen");
+        if (auth) {
+          auth.classList.add("active");
+          const msg = auth.querySelector(".auth-error") || document.createElement("div");
+          msg.className = "auth-error";
+          msg.style.cssText = "text-align:center;padding:16px;color:#f87171;font-size:.85rem";
+          msg.textContent = "Could not connect. Check your internet connection and reload.";
+          const container = auth.querySelector(".auth-container");
+          if (container && !auth.querySelector(".auth-error")) container.prepend(msg);
+        }
+      }
+    }, 6000);
+  </script>
+
 </head>
 <body>
 
@@ -710,6 +728,12 @@
     <div id="pr-body" class="pr-panel-body"></div>
   </div>
   <div id="player-report-backdrop" class="chat-panel-backdrop hidden" onclick="DLRPlayerReport.close()"></div>
+
+  <!-- Firebase SDK — loaded here so HTML renders before SDK downloads -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script>clearTimeout(window._fbLoadTimeout);</script>
 
   <script src="firebase/config.js"></script>
   <script src="js/firebase-db.js"></script>

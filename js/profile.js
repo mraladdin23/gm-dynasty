@@ -44,11 +44,12 @@ const Profile = (() => {
   }
 
   async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
-  if (!emailOrUsername?.trim()) throw new Error("Enter your MFL username.");
+  if (!emailOrUsername?.trim()) throw new Error("Enter your MFL email address.");
 
-  const mflUsername = emailOrUsername.trim().split("@")[0];
+  const mflEmail    = emailOrUsername.trim().toLowerCase();
+  const mflUsername = mflEmail.includes("@") ? mflEmail.split("@")[0] : mflEmail;
   const hasPassword = !!password?.trim();
-  const extraIds = (Array.isArray(leagueIds) ? leagueIds : [])
+  const extraIds    = (Array.isArray(leagueIds) ? leagueIds : [])
     .map(s => String(s).trim()).filter(Boolean);
 
 
@@ -120,29 +121,30 @@ const Profile = (() => {
       const franchisesRaw = leagueInfo?.franchises?.franchise || [];
       const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
 
-      // Try to find user's franchise — try multiple field combinations
-      // MFL stores owner info inconsistently across leagues/seasons
-      const mflUserLower = mflUsername.toLowerCase();
+      // Try to find user's franchise — email is most reliable identifier
+      const mflUserLower  = mflUsername.toLowerCase();
+      const mflEmailLower = mflEmail.toLowerCase();
 
       let myTeam = null;
 
-      // 1. Check standings array for name/owner_name match
+      // 1. Standings: owner_name / name contains username
       myTeam = standingsArr.find(f =>
         f.owner_name?.toLowerCase().includes(mflUserLower) ||
         f.name?.toLowerCase().includes(mflUserLower)
       );
 
-      // 2. Check franchise list for username, owner_name, email, user_id
+      // 2. Franchise list: email exact match first, then username/prefix
       if (!myTeam) {
         const myFranchise = franchisesArr.find(f =>
+          (mflEmailLower && f.email?.toLowerCase() === mflEmailLower) ||
           f.username?.toLowerCase()   === mflUserLower ||
           f.owner_name?.toLowerCase().includes(mflUserLower) ||
-          f.email?.toLowerCase().split("@")[0] === mflUserLower ||
+          (mflEmailLower && f.email?.toLowerCase().split("@")[0] === mflUserLower) ||
           f.is_owner === "1"
         );
         if (myFranchise) {
           myTeam = standingsArr.find(f => String(f.id) === String(myFranchise.id))
-                || myFranchise;  // fall back to franchise data itself if not in standings
+                || myFranchise;
         }
       }
 
@@ -193,6 +195,7 @@ const Profile = (() => {
 
   // ───────── STEP 3: SAVE TO YOUR SYSTEM ─────────
   await GMDB.linkPlatform(gmdUsername, "mfl", {
+    mflEmail,
     mflUsername,
     linked: true
   });
@@ -1361,23 +1364,14 @@ const Profile = (() => {
     document.getElementById("sleeper-linked-user").textContent =
       sleeper?.sleeperUsername ? `@${sleeper.sleeperUsername}` : "Not connected";
     document.getElementById("mfl-linked-user").textContent =
-      mfl?.mflUsername ? `@${mfl.mflUsername}` : "Not connected";
+      mfl?.mflEmail ? mfl.mflEmail : (mfl?.mflUsername ? `@${mfl.mflUsername}` : "Not connected");
     const yahooEl = document.getElementById("yahoo-linked-user");
     if (yahooEl) yahooEl.textContent = yahoo?.linked ? "Connected" : "Not connected";
 
-    // Pre-populate MFL fields with known values
-    if (mfl?.mflUsername) {
+    // Pre-populate MFL email field
+    if (mfl?.mflEmail || mfl?.mflUsername) {
       const emailInput = document.getElementById("mfl-email-input");
-      if (emailInput && !emailInput.value) emailInput.value = mfl.mflUsername;
-    }
-    // Pre-populate known league IDs from already-imported MFL leagues
-    const mflIds = Object.values(_allLeagues)
-      .filter(l => l.platform === "mfl")
-      .map(l => l.leagueId)
-      .filter(Boolean);
-    const idsInput = document.getElementById("mfl-league-ids-input");
-    if (idsInput && !idsInput.value && mflIds.length) {
-      idsInput.value = [...new Set(mflIds)].join(", ");
+      if (emailInput && !emailInput.value) emailInput.value = mfl.mflEmail || mfl.mflUsername;
     }
 
     document.getElementById("edit-profile-modal").classList.remove("hidden");
@@ -1449,7 +1443,7 @@ const Profile = (() => {
   function _platformLabel(p) { return { sleeper: "Sleeper", mfl: "MFL" }[p] || p; }
   function _platformUser(p, d) {
     if (p === "sleeper") return d.sleeperUsername || d.displayName || "";
-    if (p === "mfl")     return d.mflUsername || "";
+    if (p === "mfl")     return d.mflEmail || d.mflUsername || "";
     return "";
   }
   function _escHtml(str) {
@@ -1721,14 +1715,15 @@ const Profile = (() => {
         const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
         const standingsMap = MFLAPI.getStandingsMap(bundle);
         const teams        = MFLAPI.getTeams(bundle);
-        const mflUsername  = _currentProfile?.platforms?.mfl?.username || "";
+        const mflEmail    = _currentProfile?.platforms?.mfl?.mflEmail    || "";
+        const mflUsername = _currentProfile?.platforms?.mfl?.mflUsername || "";
+        const mflUserLower  = mflUsername.toLowerCase();
+        const mflEmailLower = mflEmail.toLowerCase();
 
-        // Try to find user's team — same multi-field approach as import
         let myTeamId = league.myRosterId || null;
-        const mflUserLower = mflUsername.toLowerCase();
 
-        if (!myTeamId && mflUsername) {
-          // 1. Check teams list for name/owner_name match
+        // 1. Teams list: owner_name / name contains username
+        if (!myTeamId && (mflEmail || mflUsername)) {
           const matched = teams.find(t =>
             (t.owner_name || "").toLowerCase().includes(mflUserLower) ||
             t.name?.toLowerCase().includes(mflUserLower)
@@ -1736,14 +1731,15 @@ const Profile = (() => {
           if (matched) myTeamId = matched.id;
         }
 
-        // 2. Check franchise list in bundle for username, email, is_owner
-        if (!myTeamId && mflUsername) {
+        // 2. Franchise list: email exact match first, then username/prefix/commish
+        if (!myTeamId) {
           const rawFranchises = bundle?.league?.league?.franchises?.franchise;
           const franchArr = rawFranchises ? (Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises]) : [];
           const myFranchise = franchArr.find(f =>
+            (mflEmailLower && f.email?.toLowerCase() === mflEmailLower) ||
             f.username?.toLowerCase()  === mflUserLower ||
-            (f.owner_name || "").toLowerCase().includes(mflUserLower) ||
-            f.email?.toLowerCase().split("@")[0] === mflUserLower ||
+            (mflUserLower && (f.owner_name || "").toLowerCase().includes(mflUserLower)) ||
+            (mflEmailLower && f.email?.toLowerCase().split("@")[0] === mflUserLower) ||
             f.is_owner === "1"
           ) || franchArr.find(f => f.is_commish === "1");
           if (myFranchise) myTeamId = myFranchise.id;
