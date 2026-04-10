@@ -43,7 +43,7 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = []) {
+  async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = [], additionalEmails = []) {
   if (!emailOrUsername?.trim()) throw new Error("Enter your MFL email address.");
 
   const mflEmail    = emailOrUsername.trim().toLowerCase();
@@ -51,6 +51,10 @@ const Profile = (() => {
   const hasPassword = !!password?.trim();
   const extraIds    = (Array.isArray(leagueIds) ? leagueIds : [])
     .map(s => String(s).trim()).filter(Boolean);
+
+  // Build the full list of emails/usernames to match against — primary + additional
+  const allEmails = [mflEmail, ...additionalEmails.map(e => e.trim().toLowerCase()).filter(Boolean)];
+  const allUsernames = allEmails.map(e => e.includes("@") ? e.split("@")[0] : e);
 
 
   // ───────── STEP 1: TRY TO FETCH USER LEAGUES VIA CREDENTIALS ─────────
@@ -121,27 +125,27 @@ const Profile = (() => {
       const franchisesRaw = leagueInfo?.franchises?.franchise || [];
       const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
 
-      // Try to find user's franchise — email is most reliable identifier
-      const mflUserLower  = mflUsername.toLowerCase();
-      const mflEmailLower = mflEmail.toLowerCase();
-
+      // Try to find user's franchise — check all provided emails/usernames
       let myTeam = null;
 
-      // 1. Standings: owner_name / name contains username
+      // 1. Standings: owner_name / name matches any of our usernames
       myTeam = standingsArr.find(f =>
-        f.owner_name?.toLowerCase().includes(mflUserLower) ||
-        f.name?.toLowerCase().includes(mflUserLower)
+        allUsernames.some(u =>
+          f.owner_name?.toLowerCase().includes(u) ||
+          f.name?.toLowerCase().includes(u)
+        )
       );
 
-      // 2. Franchise list: email exact match first, then username/prefix
+      // 2. Franchise list: exact email match first, then username/prefix
       if (!myTeam) {
-        const myFranchise = franchisesArr.find(f =>
-          (mflEmailLower && f.email?.toLowerCase() === mflEmailLower) ||
-          f.username?.toLowerCase()   === mflUserLower ||
-          f.owner_name?.toLowerCase().includes(mflUserLower) ||
-          (mflEmailLower && f.email?.toLowerCase().split("@")[0] === mflUserLower) ||
-          f.is_owner === "1"
-        );
+        const myFranchise = franchisesArr.find(f => {
+          const fEmail = f.email?.toLowerCase() || "";
+          const fUser  = f.username?.toLowerCase() || "";
+          const fOwner = f.owner_name?.toLowerCase() || "";
+          return allEmails.some(e => fEmail === e || fEmail.split("@")[0] === e.split("@")[0]) ||
+                 allUsernames.some(u => fUser === u || fOwner.includes(u)) ||
+                 f.is_owner === "1";
+        });
         if (myFranchise) {
           myTeam = standingsArr.find(f => String(f.id) === String(myFranchise.id))
                 || myFranchise;
@@ -197,6 +201,7 @@ const Profile = (() => {
   await GMDB.linkPlatform(gmdUsername, "mfl", {
     mflEmail,
     mflUsername,
+    mflAdditionalEmails: additionalEmails.map(e => e.trim().toLowerCase()).filter(Boolean),
     linked: true
   });
 
@@ -1715,33 +1720,42 @@ const Profile = (() => {
         const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
         const standingsMap = MFLAPI.getStandingsMap(bundle);
         const teams        = MFLAPI.getTeams(bundle);
-        const mflEmail    = _currentProfile?.platforms?.mfl?.mflEmail    || "";
-        const mflUsername = _currentProfile?.platforms?.mfl?.mflUsername || "";
-        const mflUserLower  = mflUsername.toLowerCase();
-        const mflEmailLower = mflEmail.toLowerCase();
+        const mflEmail            = _currentProfile?.platforms?.mfl?.mflEmail            || "";
+        const mflUsername         = _currentProfile?.platforms?.mfl?.mflUsername         || "";
+        const mflAdditionalEmails = _currentProfile?.platforms?.mfl?.mflAdditionalEmails || [];
+
+        // Build full list of all emails/usernames to match against
+        const allEmails    = [mflEmail, ...mflAdditionalEmails].map(e => e.toLowerCase()).filter(Boolean);
+        const allUsernames = [...new Set([
+          ...allEmails.map(e => e.includes("@") ? e.split("@")[0] : e),
+          ...(mflUsername ? [mflUsername.toLowerCase()] : [])
+        ])];
 
         let myTeamId = league.myRosterId || null;
 
-        // 1. Teams list: owner_name / name contains username
-        if (!myTeamId && (mflEmail || mflUsername)) {
+        // 1. Teams list: any username matches owner_name or team name
+        if (!myTeamId && allUsernames.length) {
           const matched = teams.find(t =>
-            (t.owner_name || "").toLowerCase().includes(mflUserLower) ||
-            t.name?.toLowerCase().includes(mflUserLower)
+            allUsernames.some(u =>
+              (t.owner_name || "").toLowerCase().includes(u) ||
+              t.name?.toLowerCase().includes(u)
+            )
           );
           if (matched) myTeamId = matched.id;
         }
 
-        // 2. Franchise list: email exact match first, then username/prefix/commish
+        // 2. Franchise list: any email/username matches
         if (!myTeamId) {
           const rawFranchises = bundle?.league?.league?.franchises?.franchise;
           const franchArr = rawFranchises ? (Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises]) : [];
-          const myFranchise = franchArr.find(f =>
-            (mflEmailLower && f.email?.toLowerCase() === mflEmailLower) ||
-            f.username?.toLowerCase()  === mflUserLower ||
-            (mflUserLower && (f.owner_name || "").toLowerCase().includes(mflUserLower)) ||
-            (mflEmailLower && f.email?.toLowerCase().split("@")[0] === mflUserLower) ||
-            f.is_owner === "1"
-          ) || franchArr.find(f => f.is_commish === "1");
+          const myFranchise = franchArr.find(f => {
+            const fEmail = f.email?.toLowerCase() || "";
+            const fUser  = f.username?.toLowerCase() || "";
+            const fOwner = f.owner_name?.toLowerCase() || "";
+            return allEmails.some(e => fEmail === e || fEmail.split("@")[0] === e.split("@")[0]) ||
+                   allUsernames.some(u => fUser === u || fOwner.includes(u)) ||
+                   f.is_owner === "1";
+          }) || franchArr.find(f => f.is_commish === "1");
           if (myFranchise) myTeamId = myFranchise.id;
         }
 

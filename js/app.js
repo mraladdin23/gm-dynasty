@@ -444,7 +444,7 @@ async function _doMFLResync() {
   const alreadyLinked = profile?.platforms?.mfl?.mflEmail || profile?.platforms?.mfl?.mflUsername;
 
   const promptMsg = alreadyLinked
-    ? `Resync MFL Leagues\n\nEnter your MFL email address to re-import all leagues and improve team matching.\nYour password is only used to fetch your leagues — it is never stored.`
+    ? `Resync MFL Leagues\n\nEnter your current MFL email address.\nYour password is only used to fetch your leagues — it is never stored.`
     : `Connect MFL\n\nEnter your MFL email address.`;
 
   const email = prompt(promptMsg);
@@ -452,9 +452,15 @@ async function _doMFLResync() {
   const password = prompt("Enter your MFL password:\n(Never stored — used only to fetch your leagues)");
   if (!password) return;
 
+  // Ask for additional historical emails
+  const storedAddl = (profile?.platforms?.mfl?.mflAdditionalEmails || []).join(", ");
+  const addlPrompt = `Previous MFL email address(es) — optional\n\nIf you've used different emails in past leagues, enter them here (comma-separated).\nThis helps match historical league teams to your account.\n\nCurrent stored: ${storedAddl || "none"}`;
+  const addlRaw = prompt(addlPrompt) ?? storedAddl;
+  const additionalEmails = addlRaw ? addlRaw.split(/[\s,;]+/).map(e => e.trim()).filter(Boolean) : [];
+
   try {
     setLoading(true, alreadyLinked ? "Resyncing MFL leagues…" : "Connecting MFL…");
-    const result = await Profile.linkMFL(profile.username, email, password);
+    const result = await Profile.linkMFL(profile.username, email, password, [], additionalEmails);
     setLoading(false);
     const count = Object.keys(result.leagues).length;
     showToast(`MFL ${alreadyLinked ? "resynced" : "connected"} — ${count} league${count !== 1 ? "s" : ""}`);
@@ -463,7 +469,6 @@ async function _doMFLResync() {
     // Hide banner now that email is stored
     const banner = document.getElementById("mfl-resync-banner");
     if (banner) banner.classList.add("hidden");
-    // Re-open edit profile so user can see the updated connection
     Profile.openEditProfileModal(updated);
   } catch (err) {
     setLoading(false);
@@ -497,12 +502,16 @@ function _prefillOnboardingMFL() {
   if (!mfl) return;
 
   const emailInput = document.getElementById("mfl-email-input");
+  const addlInput  = document.getElementById("mfl-additional-emails-input");
   const msgEl      = document.getElementById("mfl-message");
   const statusEl   = document.getElementById("mfl-connection-status");
 
   // Pre-fill whatever we have
   if (emailInput && !emailInput.value) {
     emailInput.value = mfl.mflEmail || mfl.mflUsername || "";
+  }
+  if (addlInput && !addlInput.value && mfl.mflAdditionalEmails?.length) {
+    addlInput.value = mfl.mflAdditionalEmails.join(", ");
   }
 
   // Show inline notice if they only have a username stored (no email yet)
