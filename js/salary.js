@@ -663,11 +663,10 @@ const DLRSalaryCap = (() => {
         const yearsExp  = sleeperP.years_exp ?? null;
 
         if (yearsExp != null) {
-          const nextYear = yearsExp + 1;
-          if (nextYear >= maxYears) {
-            taxiBadge = `<span class="sal-badge sal-badge--promote-now" title="Must promote — ${nextYear} seasons completed, max is ${maxYears}">🚨 Promote Now</span>`;
-          } else if (nextYear === maxYears - 1) {
-            taxiBadge = `<span class="sal-badge sal-badge--promote-soon" title="Last eligible year on taxi — promote before next season">⚠️ Last Year</span>`;
+          if (yearsExp > maxYears) {
+            taxiBadge = `<span class="sal-badge sal-badge--promote-now" title="Must promote — ${yearsExp} yrs experience exceeds taxi limit of ${maxYears}">🚨 Promote Now</span>`;
+          } else if (yearsExp === maxYears) {
+            taxiBadge = `<span class="sal-badge sal-badge--promote-soon" title="Last eligible year on taxi — ${yearsExp} yrs experience, limit is ${maxYears}">⚠️ Last Year</span>`;
           }
         }
       }
