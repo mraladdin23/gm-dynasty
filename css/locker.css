@@ -3060,6 +3060,28 @@ select option { background: var(--color-bg-2); }
   overflow: hidden; /* prevent any child from expanding past row */
 }
 .fa-player-row:hover { background: var(--color-surface); }
+
+/* Fixed-width auction status column — keeps rank/pts columns aligned */
+.fa-auction-col {
+  width: 72px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.fa-status-badge {
+  font-size: .68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  text-align: center;
+  width: 100%;
+  display: inline-block;
+}
+.fa-status-badge--claimed  { background: rgba(96,165,250,.15); color: #60a5fa; border: 1px solid rgba(96,165,250,.3); }
+.fa-status-badge--active   { background: rgba(251,191,36,.12); color: var(--color-gold); border: 1px solid rgba(251,191,36,.3); }
+.fa-status-badge--rostered { background: var(--color-bg-3); color: var(--color-text-dim); border: 1px solid var(--color-border); }
 .fa-rank {
   font-size: .72rem;
   color: var(--color-text-dim);
@@ -5175,9 +5197,11 @@ select option { background: var(--color-bg-2); }
 
 
 /* ── Draft toggle bar (MFL/Yahoo) ────────────────────────── */
-.draft-toggle-bar { display:flex; gap:var(--space-2); padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--color-border); }
+.draft-toggle-bar { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--color-border); flex-wrap:wrap; }
 .draft-toggle-btn { padding:var(--space-1) var(--space-3); border-radius:var(--radius-sm); border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text-dim); cursor:pointer; font-size:.8rem; font-family:var(--font-body); transition:background .15s,color .15s; }
 .draft-toggle-btn--active { background:var(--color-gold); color:#000; border-color:var(--color-gold); font-weight:600; }
+.draft-header-bar { display:flex; align-items:center; justify-content:space-between; padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--color-border); gap:var(--space-3); }
+.draft-layout-toggle { display:flex; gap:4px; flex-shrink:0; }
 .draft-meta-bar { padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--color-border); }
 
 /* ── Draft/auction results list (MFL/Yahoo) ─────────────── */

@@ -120,27 +120,39 @@ const Profile = (() => {
       const franchisesRaw = leagueInfo?.franchises?.franchise || [];
       const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
 
-      // Try to find user's franchise — match by owner name, username, or email
-      let myTeam = standingsArr.find(f =>
-        f.name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
-        f.owner_name?.toLowerCase().includes(mflUsername.toLowerCase())
+      // Try to find user's franchise — try multiple field combinations
+      // MFL stores owner info inconsistently across leagues/seasons
+      const mflUserLower = mflUsername.toLowerCase();
+
+      let myTeam = null;
+
+      // 1. Check standings array for name/owner_name match
+      myTeam = standingsArr.find(f =>
+        f.owner_name?.toLowerCase().includes(mflUserLower) ||
+        f.name?.toLowerCase().includes(mflUserLower)
       );
 
-      // Also try matching franchise owner from league franchises list
+      // 2. Check franchise list for username, owner_name, email, user_id
       if (!myTeam) {
         const myFranchise = franchisesArr.find(f =>
-          f.owner_name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
-          f.username?.toLowerCase() === mflUsername.toLowerCase() ||
+          f.username?.toLowerCase()   === mflUserLower ||
+          f.owner_name?.toLowerCase().includes(mflUserLower) ||
+          f.email?.toLowerCase().split("@")[0] === mflUserLower ||
           f.is_owner === "1"
         );
         if (myFranchise) {
-          myTeam = standingsArr.find(f => String(f.id) === String(myFranchise.id));
+          myTeam = standingsArr.find(f => String(f.id) === String(myFranchise.id))
+                || myFranchise;  // fall back to franchise data itself if not in standings
         }
       }
 
-      // Last resort: commish
+      // 3. Commish fallback
       if (!myTeam) {
-        myTeam = standingsArr.find(f => f.is_commish === "1");
+        const commishFranchise = franchisesArr.find(f => f.is_commish === "1");
+        if (commishFranchise) {
+          myTeam = standingsArr.find(f => String(f.id) === String(commishFranchise.id))
+                || commishFranchise;
+        }
       }
 
       const key = `mfl_${season}_${leagueId}`;
@@ -1711,26 +1723,28 @@ const Profile = (() => {
         const teams        = MFLAPI.getTeams(bundle);
         const mflUsername  = _currentProfile?.platforms?.mfl?.username || "";
 
-        // Try to find user's team by owner name, username, or commish flag
+        // Try to find user's team — same multi-field approach as import
         let myTeamId = league.myRosterId || null;
+        const mflUserLower = mflUsername.toLowerCase();
 
         if (!myTeamId && mflUsername) {
+          // 1. Check teams list for name/owner_name match
           const matched = teams.find(t =>
-            t.name?.toLowerCase().includes(mflUsername.toLowerCase()) ||
-            (t.owner_name || "").toLowerCase().includes(mflUsername.toLowerCase())
+            (t.owner_name || "").toLowerCase().includes(mflUserLower) ||
+            t.name?.toLowerCase().includes(mflUserLower)
           );
           if (matched) myTeamId = matched.id;
         }
 
-        // Try franchise owner data from bundle
-        if (!myTeamId) {
+        // 2. Check franchise list in bundle for username, email, is_owner
+        if (!myTeamId && mflUsername) {
           const rawFranchises = bundle?.league?.league?.franchises?.franchise;
           const franchArr = rawFranchises ? (Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises]) : [];
           const myFranchise = franchArr.find(f =>
-            mflUsername && (
-              (f.owner_name || "").toLowerCase().includes(mflUsername.toLowerCase()) ||
-              (f.username   || "").toLowerCase() === mflUsername.toLowerCase()
-            )
+            f.username?.toLowerCase()  === mflUserLower ||
+            (f.owner_name || "").toLowerCase().includes(mflUserLower) ||
+            f.email?.toLowerCase().split("@")[0] === mflUserLower ||
+            f.is_owner === "1"
           ) || franchArr.find(f => f.is_commish === "1");
           if (myFranchise) myTeamId = myFranchise.id;
         }
@@ -1759,14 +1773,18 @@ const Profile = (() => {
               pointsFor:   league.pointsFor,
               standing:    league.standing,
             }).catch(() => {});
-            // Also update _allLeagues in memory so card refreshes
+            // Update _allLeagues in memory
             if (_allLeagues[leagueKey]) {
-              _allLeagues[leagueKey].teamName  = league.teamName;
-              _allLeagues[leagueKey].wins      = league.wins;
-              _allLeagues[leagueKey].losses    = league.losses;
-              _allLeagues[leagueKey].standing  = league.standing;
-              _allLeagues[leagueKey].pointsFor = league.pointsFor;
+              _allLeagues[leagueKey].teamName   = league.teamName;
+              _allLeagues[leagueKey].myRosterId = myTeamId;
+              _allLeagues[leagueKey].wins       = league.wins;
+              _allLeagues[leagueKey].losses     = league.losses;
+              _allLeagues[leagueKey].standing   = league.standing;
+              _allLeagues[leagueKey].pointsFor  = league.pointsFor;
             }
+            // Re-render the league card grid so the card shows the new teamName
+            // without the user having to close and reopen
+            _renderLeagues();
           }
         }
       } catch(e) { /* render with what we have */ }

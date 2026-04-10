@@ -16,7 +16,12 @@ const DLRDraft = (() => {
   let _draftData  = null;
   let _seasons    = [];
   let _viewingId  = null;
-  let _viewMode   = "draft";
+  let _viewMode   = "draft";    // "draft" | "auction"
+  let _layoutMode = "grid";     // "grid" | "list"
+  let _auctionSort = "salary";  // "salary" | "name"
+
+  // MFL data cache for re-renders without refetch
+  let _mflCache   = null;
 
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
@@ -71,10 +76,14 @@ const DLRDraft = (() => {
   }
 
   function reset() {
-    _leagueId  = null;
-    _draftData = null;
-    _seasons   = [];
-    _viewingId = null;
+    _leagueId    = null;
+    _draftData   = null;
+    _seasons     = [];
+    _viewingId   = null;
+    _mflCache    = null;
+    _viewMode    = "draft";
+    _layoutMode  = "grid";
+    _auctionSort = "salary";
     _initToken++;
   }
 
@@ -347,9 +356,54 @@ const DLRDraft = (() => {
           <span class="draft-status" style="color:${statusColor}">● ${statusLabel}</span>
           <span class="dim">${rounds} rounds · ${teams} teams</span>
         </div>
+        <div class="draft-layout-toggle">
+          <button class="draft-toggle-btn ${_layoutMode === "grid" ? "draft-toggle-btn--active" : ""}"
+            onclick="DLRDraft.setLayoutMode('grid')" title="Grid view">⊞</button>
+          <button class="draft-toggle-btn ${_layoutMode === "list" ? "draft-toggle-btn--active" : ""}"
+            onclick="DLRDraft.setLayoutMode('list')" title="List view">☰</button>
+        </div>
       </div>
-      <div class="draft-board-scroll">
-        <div class="draft-board">${boardHTML}</div>
+      ${_layoutMode === "grid"
+        ? `<div class="draft-board-scroll"><div class="draft-board">${boardHTML}</div></div>`
+        : _buildSleeperListHTML(picks, rounds, teams, isSnake, rosterMap)
+      }`;
+  }
+
+  function _buildSleeperListHTML(picks, rounds, teams, isSnake, rosterMap) {
+    const sorted = [...picks]
+      .filter(p => p.metadata?.first_name)
+      .sort((a, b) => {
+        if (a.round !== b.round) return a.round - b.round;
+        return a.draft_slot - b.draft_slot;
+      });
+
+    if (!sorted.length) return `<div class="draft-empty"><div>No picks made yet.</div></div>`;
+
+    return `
+      <div class="draft-auction-list">
+        <div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
+          <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
+        </div>
+        ${sorted.map(p => {
+          const display  = isSnake && p.round % 2 === 0 ? (teams + 1 - p.draft_slot) : p.draft_slot;
+          const overall  = (p.round - 1) * teams + display;
+          const pickLabel = isSnake ? overall : `${p.round}.${String(p.draft_slot).padStart(2,"0")}`;
+          const pos   = (p.metadata?.position || "—").toUpperCase();
+          const color = POS_COLOR[pos] || "#9ca3af";
+          const name  = `${p.metadata.first_name} ${p.metadata.last_name}`;
+          const nfl   = p.metadata?.team || "FA";
+          const picker = rosterMap[p.roster_id]?.teamName || "";
+          return `
+            <div class="draft-auction-row" onclick="DLRPlayerCard.show('${p.player_id}','${_escAttr(name)}')" style="cursor:pointer">
+              <span class="draft-auction-rank dim">${pickLabel}</span>
+              <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+              <div>
+                <div class="draft-auction-name">${_esc(name)}</div>
+                <div class="dim" style="font-size:.7rem">${nfl}</div>
+              </div>
+              <span class="draft-auction-team dim">${_esc(picker)}</span>
+            </div>`;
+        }).join("")}
       </div>`;
   }
 
@@ -387,52 +441,109 @@ const DLRDraft = (() => {
     const allPicks = [];
     unitArr.forEach(u => {
       const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
-      picks.forEach(p => allPicks.push(p));
+      picks.forEach(p => {
+        // Normalize franchise field — MFL uses different names across versions
+        const franchise = p.franchise || p.franchiseId || p.franchise_id || "";
+        allPicks.push({ ...p, franchise });
+      });
     });
 
     // ── Salary/auction data from salaries endpoint ───────────
     const salaryRaw = bundle?.salaries?.salaries?.leagueUnit?.player
                    || bundle?.salaries?.salaries?.player;
-    const salaryArr = salaryRaw ? (Array.isArray(salaryRaw) ? salaryRaw : [salaryRaw]) : [];
+    const salaryArr = salaryRaw
+      ? (Array.isArray(salaryRaw) ? salaryRaw : [salaryRaw]).map(p => ({
+          ...p,
+          franchise: p.franchise || p.franchiseId || p.franchise_id || ""
+        }))
+      : [];
 
     const hasAuction = salaryArr.length > 0;
     const hasDraft   = allPicks.length > 0;
 
-    _renderMFLDraftBoard(el, allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId);
+    // Cache for re-renders on toggle without refetch
+    _mflCache = { allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId };
+
+    // Default view: show auction if no draft data, else draft
+    if (!_viewMode || (_viewMode === "draft" && !hasDraft && hasAuction)) _viewMode = "auction";
+    if (!_viewMode || (_viewMode === "auction" && !hasAuction && hasDraft)) _viewMode = "draft";
+
+    _renderMFLDraftBoard(el);
   }
 
-  function _renderMFLDraftBoard(el, allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId) {
-    const showAuction = _viewMode === "auction" && hasAuction;
+  function _renderMFLDraftBoard(el) {
+    if (!el) el = document.getElementById("dtab-draft");
+    if (!el || !_mflCache) return;
+    const { allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId } = _mflCache;
 
-    const toggleBar = (hasAuction && hasDraft) ? `
-      <div class="draft-toggle-bar">
-        <button class="draft-toggle-btn ${!showAuction ? "draft-toggle-btn--active" : ""}"
-          onclick="DLRDraft.setViewMode('draft')">📋 Draft Picks</button>
-        <button class="draft-toggle-btn ${showAuction ? "draft-toggle-btn--active" : ""}"
-          onclick="DLRDraft.setViewMode('auction')">🏷 Salary / Auction</button>
-      </div>` :
-      hasAuction ? `<div class="draft-toggle-bar"><span style="font-size:.82rem;color:var(--color-text-dim)">🏷 Salary / Auction Data</span></div>` :
-      hasDraft   ? `<div class="draft-toggle-bar"><span style="font-size:.82rem;color:var(--color-text-dim)">📋 Draft Results</span></div>` : "";
+    const showAuction = _viewMode === "auction";
 
+    // Toggle bar: always show Draft Board / Auction Board buttons when both exist.
+    // Show only the relevant label when one type is absent.
+    let toggleBar = "";
+    if (hasAuction || hasDraft) {
+      toggleBar = `<div class="draft-toggle-bar">`;
+      if (hasDraft) {
+        toggleBar += `<button class="draft-toggle-btn ${!showAuction ? "draft-toggle-btn--active" : ""}"
+          onclick="DLRDraft.setViewMode('draft')">📋 Draft Board</button>`;
+      }
+      if (hasAuction) {
+        toggleBar += `<button class="draft-toggle-btn ${showAuction ? "draft-toggle-btn--active" : ""}"
+          onclick="DLRDraft.setViewMode('auction')">🏷 Auction Board</button>`;
+      }
+      // Grid/list toggle only shown for draft board view
+      if (!showAuction) {
+        toggleBar += `
+          <div style="margin-left:auto;display:flex;gap:4px">
+            <button class="draft-toggle-btn ${_layoutMode === "grid" ? "draft-toggle-btn--active" : ""}"
+              onclick="DLRDraft.setLayoutMode('grid')" title="Grid view">⊞</button>
+            <button class="draft-toggle-btn ${_layoutMode === "list" ? "draft-toggle-btn--active" : ""}"
+              onclick="DLRDraft.setLayoutMode('list')" title="List view">☰</button>
+          </div>`;
+      } else {
+        // Auction sort buttons
+        toggleBar += `
+          <div style="margin-left:auto;display:flex;gap:4px">
+            <button class="draft-toggle-btn ${_auctionSort === "salary" ? "draft-toggle-btn--active" : ""}"
+              onclick="DLRDraft.setAuctionSort('salary')">$ Salary</button>
+            <button class="draft-toggle-btn ${_auctionSort === "name" ? "draft-toggle-btn--active" : ""}"
+              onclick="DLRDraft.setAuctionSort('name')">A–Z Name</button>
+          </div>`;
+      }
+      toggleBar += `</div>`;
+    }
+
+    // ── Auction board ────────────────────────────────────────
     if (showAuction) {
-      const sorted = [...salaryArr].sort((a, b) => Number(b.salary||b.amount||0) - Number(a.salary||a.amount||0));
+      const sorted = [...salaryArr].sort((a, b) => {
+        if (_auctionSort === "name") {
+          const na = (playerLookup[a.id]?.name || "").toLowerCase();
+          const nb = (playerLookup[b.id]?.name || "").toLowerCase();
+          return na.localeCompare(nb);
+        }
+        return Number(b.salary || b.amount || 0) - Number(a.salary || a.amount || 0);
+      });
       el.innerHTML = toggleBar + `
         <div class="draft-auction-list">
           <div class="draft-auction-header" style="grid-template-columns:40px 44px 1fr 1fr auto">
             <span>#</span><span>Pos</span><span>Player</span><span>Team</span><span>Salary</span>
           </div>
           ${sorted.map((p, i) => {
-            const info  = playerLookup[p.id] || {};
-            const pos   = (info.pos || p.position || "?").toUpperCase();
-            const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-            const name  = info.name || p.name || `Player ${p.id}`;
-            const tid   = String(p.franchise || p.franchiseId || "");
-            const team  = teamMap[tid] || "—";
-            const sal   = Number(p.salary || p.amount || 0);
+            const info   = playerLookup[p.id] || {};
+            const pos    = (info.pos || p.position || "?").toUpperCase();
+            const color  = POS_COLOR[pos] || "#9ca3af";
+            const name   = info.name || p.name || `Player ${p.id}`;
+            const tid    = String(p.franchise || p.franchiseId || "");
+            const team   = teamMap[tid] || "—";
+            const sal    = Number(p.salary || p.amount || 0);
             const salFmt = sal >= 1000000 ? `$${(sal/1000000).toFixed(sal%1000000===0?0:2)}M`
                          : sal > 0 ? `$${sal.toLocaleString()}` : "—";
+            const sid    = info.sleeperId;
+            const clickAttr = sid
+              ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer"`
+              : "";
             return `
-              <div class="draft-auction-row" style="grid-template-columns:40px 44px 1fr 1fr auto">
+              <div class="draft-auction-row" ${clickAttr}>
                 <span class="draft-auction-rank dim">${i+1}</span>
                 <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
                 <span class="draft-auction-name">${_esc(name)}</span>
@@ -444,6 +555,7 @@ const DLRDraft = (() => {
       return;
     }
 
+    // ── Draft board ──────────────────────────────────────────
     if (!allPicks.length) {
       el.innerHTML = toggleBar + `
         <div class="draft-empty">
@@ -456,38 +568,101 @@ const DLRDraft = (() => {
     }
 
     const sorted = [...allPicks].sort((a, b) => {
-      // Sort by round first, then pick within round
       const ra = Number(a.round || 0), rb = Number(b.round || 0);
       if (ra !== rb) return ra - rb;
       return Number(a.pick || a.overall || 0) - Number(b.pick || b.overall || 0);
     });
-    el.innerHTML = toggleBar + `
-      <div class="draft-auction-list">
-        <div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
-          <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
-        </div>
-        ${sorted.map(p => {
-          const pid      = p.player || p.playerId || "";
-          const info     = playerLookup[pid] || {};
-          const pos      = (info.pos || p.pos || "?").toUpperCase();
-          const color    = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-          const name     = info.name || p.playerName || "—";
-          const team     = teamMap[String(p.franchise||"")] || "—";
-          const round    = Number(p.round || 0);
-          const pickNum  = Number(p.pick || 0);
-          const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
-          const sid      = info.sleeperId;
-          const clickAttr = sid
-            ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer;"`
-            : pid ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${pid}','_blank')" style="cursor:pointer;"` : "";
-          return `
-            <div class="draft-auction-row" style="grid-template-columns:60px 44px 1fr 1fr" ${clickAttr}>
-              <span class="draft-auction-rank" style="color:var(--color-text-dim);font-weight:600;font-size:.75rem">${pickLabel}</span>
-              <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
-              <span class="draft-auction-name">${_esc(name)}</span>
-              <span class="draft-auction-team dim">${_esc(team)}</span>
+
+    if (_layoutMode === "list") {
+      // List view
+      el.innerHTML = toggleBar + `
+        <div class="draft-auction-list">
+          <div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
+            <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
+          </div>
+          ${sorted.map(p => {
+            const pid      = p.player || p.playerId || "";
+            const info     = playerLookup[pid] || {};
+            const pos      = (info.pos || p.pos || "?").toUpperCase();
+            const color    = POS_COLOR[pos] || "#9ca3af";
+            const name     = info.name || p.playerName || "—";
+            const team     = teamMap[String(p.franchise||"")] || "—";
+            const round    = Number(p.round || 0);
+            const pickNum  = Number(p.pick || 0);
+            const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
+            const sid      = info.sleeperId;
+            const clickAttr = sid
+              ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer;"`
+              : pid ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${pid}','_blank')" style="cursor:pointer;"` : "";
+            return `
+              <div class="draft-auction-row" ${clickAttr}>
+                <span class="draft-auction-rank dim">${pickLabel}</span>
+                <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+                <div>
+                  <div class="draft-auction-name">${_esc(name)}</div>
+                </div>
+                <span class="draft-auction-team dim">${_esc(team)}</span>
+              </div>`;
+          }).join("")}
+        </div>`;
+      return;
+    }
+
+    // Grid view — build round-by-round grid similar to Sleeper
+    // Group picks by round and franchise
+    const rounds = Math.max(...sorted.map(p => Number(p.round || 0)), 0);
+    const teamIds = teams ? Object.keys(teamMap) : [...new Set(sorted.map(p => String(p.franchise||"")))];
+    const numTeams = teamIds.length;
+
+    // Build pick lookup: "round-franchise" → pick
+    const pickMap = {};
+    sorted.forEach(p => { pickMap[`${p.round}-${p.franchise}`] = p; });
+
+    let boardHTML = "";
+    for (let r = 1; r <= rounds; r++) {
+      boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${r}</div><div class="draft-picks-row">`;
+      // For MFL we don't have snake ordering info, just show picks in franchise order
+      sorted.filter(p => Number(p.round) === r).forEach(p => {
+        const pid   = p.player || p.playerId || "";
+        const info  = playerLookup[pid] || {};
+        const pos   = (info.pos || p.pos || "?").toUpperCase();
+        const color = POS_COLOR[pos] || "#9ca3af";
+        const name  = info.name || p.playerName || "—";
+        const team  = teamMap[String(p.franchise||"")] || "—";
+        const round = Number(p.round || 0);
+        const pickNum = Number(p.pick || 0);
+        const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
+        const sid   = info.sleeperId;
+        const clickAttr = sid
+          ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer;"`
+          : pid ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${pid}','_blank')" style="cursor:pointer;"` : "";
+
+        if (name && name !== "—") {
+          boardHTML += `
+            <div class="draft-pick draft-pick--filled" ${clickAttr} title="${_esc(name)} · ${pos}">
+              <div class="draft-pick-num">${pickLabel}</div>
+              <div class="draft-pick-player">
+                <div class="draft-pick-name">${_esc(name)}</div>
+                <div class="draft-pick-meta">
+                  <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+                </div>
+              </div>
+              <div class="draft-pick-team">${_esc(team)}</div>
             </div>`;
-        }).join("")}
+        } else {
+          boardHTML += `
+            <div class="draft-pick draft-pick--empty">
+              <div class="draft-pick-num">${pickLabel}</div>
+              <div class="draft-pick-owner">${_esc(team)}</div>
+            </div>`;
+        }
+      });
+      boardHTML += `</div></div>`;
+    }
+
+    el.innerHTML = toggleBar + `
+      <div class="draft-board-scroll">
+        <div class="draft-board">${boardHTML}</div>
       </div>`;
   }
 
@@ -556,10 +731,30 @@ const DLRDraft = (() => {
 
   function setViewMode(mode) {
     _viewMode = mode;
-    // Re-trigger current platform's render
-    const token = _initToken;
-    if (_platform === "mfl")   _loadMFLDraft(_leagueId, _season, token);
-    else if (_platform === "yahoo") _loadYahooDraft(_leagueId, _leagueKey, token);
+    if (_platform === "mfl" && _mflCache) {
+      _renderMFLDraftBoard();
+    } else if (_platform === "yahoo") {
+      const token = _initToken;
+      _loadYahooDraft(_leagueId, _leagueKey, token);
+    } else if (_platform === "sleeper" && _draftData) {
+      const el = document.getElementById("dtab-draft");
+      _render(el);
+    }
+  }
+
+  function setLayoutMode(mode) {
+    _layoutMode = mode;
+    if (_platform === "mfl" && _mflCache) {
+      _renderMFLDraftBoard();
+    } else if (_platform === "sleeper" && _draftData) {
+      const el = document.getElementById("dtab-draft");
+      _render(el);
+    }
+  }
+
+  function setAuctionSort(sort) {
+    _auctionSort = sort;
+    if (_platform === "mfl" && _mflCache) _renderMFLDraftBoard();
   }
 
   // ── Helpers ────────────────────────────────────────────
@@ -576,6 +771,6 @@ const DLRDraft = (() => {
     return String(s || "").replace(/'/g,"\\'").replace(/"/g,"&quot;");
   }
 
-  return { init, reset, switchSeason, setViewMode };
+  return { init, reset, switchSeason, setViewMode, setLayoutMode, setAuctionSort };
 
 })();

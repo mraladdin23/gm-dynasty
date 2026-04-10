@@ -92,8 +92,8 @@ const DLRTransactions = (() => {
       if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
       if (tok !== _token) return;
 
-      // Flatten + sort by date desc
-      _allTx = weekResults.flat().filter(Boolean);
+      // Flatten, filter to completed only, sort by date desc
+      _allTx = weekResults.flat().filter(tx => tx && tx.status === "complete");
       _allTx.sort((a,b) => (b.created||b.status_updated||0) - (a.created||a.status_updated||0));
 
       _renderView(el);
@@ -267,11 +267,17 @@ const DLRTransactions = (() => {
       const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
       pArr.forEach(p => {
         if (p.id) mflPlayerMap[p.id] = {
-          name:     MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`,
+          rawName:  p.name || "",                                        // "Last, First" — for Sleeper lookup
+          name:     MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`, // "First Last" — display fallback
           position: (p.position || "").toUpperCase()
         };
       });
     }
+
+    // Load Sleeper player DB first so mflPid() can resolve Sleeper data
+    if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
+    else _players = { ..._players, ...DLRPlayers.all() };
+    if (tok !== _token) return;
 
     const raw = bundle?.transactions?.transactions?.transaction;
     if (!raw) {
@@ -291,23 +297,31 @@ const DLRTransactions = (() => {
       username:  ""
     })).sort((a,b) => a.teamName.localeCompare(b.teamName));
 
-    // Resolve a MFL player ID to a display name and synthetic Sleeper-style ID
+    // Resolve a MFL player ID to a synthetic key, populating _players for the chip renderer
     function mflPid(pid) {
-      const entry = mflPlayerMap[pid] || {};
-      const name  = entry.name || `Player ${pid}`;
-      const pos   = entry.position || "";
-      // Try to find a Sleeper ID for the chip renderer
-      const sid   = MFLAPI.mflNameToSleeperId(name, pos);
-      // Store in _players so _chip() can find it
+      const entry   = mflPlayerMap[pid] || {};
+      const rawName = entry.rawName || entry.name || `Player ${pid}`;  // raw = "Last, First"
+      const pos     = entry.position || "";
+
+      // Use raw MFL name format for Sleeper lookup ("Last, First" → matched correctly)
+      const sid  = MFLAPI.mflNameToSleeperId(rawName, pos);
       const synId = sid || `mfl_${pid}`;
+
       if (!_players[synId]) {
         const sp = sid ? DLRPlayers.get(sid) : null;
-        _players[synId] = sp && sp.first_name ? sp : {
-          first_name: name.split(" ")[0] || name,
-          last_name:  name.split(" ").slice(1).join(" ") || "",
-          position:   pos,
-          fantasy_positions: [pos],
-        };
+        if (sp && sp.first_name) {
+          // Use full Sleeper player record — gives photo, pos color, injury status
+          _players[synId] = sp;
+        } else {
+          // Fallback: synthetic entry from MFL data
+          const displayName = MFLAPI.mflNameToDisplay(rawName);
+          _players[synId] = {
+            first_name:        displayName.split(" ")[0] || displayName,
+            last_name:         displayName.split(" ").slice(1).join(" ") || "",
+            position:          pos,
+            fantasy_positions: [pos],
+          };
+        }
       }
       return synId;
     }
@@ -353,7 +367,6 @@ const DLRTransactions = (() => {
       };
     }).sort((a,b) => b.created - a.created);
 
-    _players = { ..._players, ...DLRPlayers.all() };
     _renderView(el);
   }
 
