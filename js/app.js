@@ -503,6 +503,18 @@ document.getElementById("sync-mfl-teams-btn")?.addEventListener("click", async (
 
 document.getElementById("save-mfl-addl-emails-btn")?.addEventListener("click", _doSaveMFLAddlEmails);
 document.getElementById("save-mfl-addl-emails-onboarding-btn")?.addEventListener("click", _doSaveMFLAddlEmails);
+document.getElementById("sync-mfl-teams-onboarding-btn")?.addEventListener("click", async () => {
+  const btn = document.getElementById("sync-mfl-teams-onboarding-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Syncing..."; }
+  try {
+    const count = await Profile.syncMFLTeams();
+    showToast(`Teams synced - ${count} league${count !== 1 ? "s" : ""} matched`);
+  } catch(err) {
+    showToast("Sync failed: " + err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Sync Teams"; }
+  }
+});
 
 // ── Save MFL additional emails without reconnecting ────────
 async function _doSaveMFLAddlEmails() {

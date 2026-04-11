@@ -124,10 +124,16 @@ const Profile = (() => {
       const franchisesRaw = leagueInfo?.franchises?.franchise || [];
       const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
 
-      // Try to find user's franchise — check all provided emails/usernames
-      const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
+      // Use franchise_id from myleagues as primary match — it's the authoritative source.
+      // Fall back to findMyFranchise (email/name matching) only when not available.
+      const myleaguesFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
+      const myMatch = myleaguesFranchiseId
+        ? { franchiseId: myleaguesFranchiseId, teamName: null }
+        : MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
       const myTeam  = myMatch
-        ? (standingsArr.find(f => String(f.id) === String(myMatch.franchiseId)) || { id: myMatch.franchiseId, name: myMatch.teamName })
+        ? (standingsArr.find(f => String(f.id) === String(myMatch.franchiseId))
+           || franchisesArr.find(f => String(f.id) === String(myMatch.franchiseId))
+           || { id: myMatch.franchiseId, name: myMatch.teamName })
         : null;
 
       const key = `mfl_${season}_${leagueId}`;
