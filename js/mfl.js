@@ -400,31 +400,7 @@ const MFLAPI = (() => {
     return summary;
   }
 
-  return {
-    getUserLeagues,
-    getLeagueBundle,
-    getTeams,
-    normalizeStandings,
-    getStandingsMap,
-    getRoster,
-    normalizeMatchups,
-    getLeagueInfo,
-    getAuctionResults,
-    buildMFLToSleeperIndex,
-    mflNameToSleeperId,
-    mflNameToDisplay,
-    getPlayerScores,
-    buildEmailList,
-    findMyFranchise,
-    debugBundle,
-  };
-})();
-
-  /**
-   * Accepts either a platforms.mfl object or individual named args.
-   * Returns { allEmails: string[], allUsernames: string[] }
-   */
-  function buildEmailList({ mflEmail = "", mflUsername = "", mflAdditionalEmails = [] } = {}) {
+function buildEmailList({ mflEmail = "", mflUsername = "", mflAdditionalEmails = [] } = {}) {
     const primary  = mflEmail.trim().toLowerCase();
     const extras   = (Array.isArray(mflAdditionalEmails) ? mflAdditionalEmails : [])
       .map(e => e.trim().toLowerCase()).filter(Boolean);
@@ -482,11 +458,14 @@ const MFLAPI = (() => {
     getRoster,
     normalizeMatchups,
     getLeagueInfo,
+    getAuctionResults,
     buildMFLToSleeperIndex,
     mflNameToSleeperId,
     mflNameToDisplay,
     getPlayerScores,
     buildEmailList,
     findMyFranchise,
+    debugBundle,
   };
 })();
+
