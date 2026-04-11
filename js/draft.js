@@ -452,8 +452,9 @@ const DLRDraft = (() => {
     });
 
     // ── Salary/auction data from salaries endpoint ───────────
-    const salaryRaw = bundle?.salaries?.salaries?.leagueUnit?.player
-                   || bundle?.salaries?.salaries?.player;
+    // MFL TYPE=salaries returns: {salaries:{leagueUnit:{salary:[{id,salary,franchise}]}}}
+    const salaryRaw = bundle?.salaries?.salaries?.leagueUnit?.salary
+                   || bundle?.salaries?.salaries?.salary;
     const salaryArr = salaryRaw
       ? (Array.isArray(salaryRaw) ? salaryRaw : [salaryRaw]).map(p => ({
           ...p,

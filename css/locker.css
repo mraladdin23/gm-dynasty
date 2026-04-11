@@ -4807,7 +4807,7 @@ select option { background: var(--color-bg-2); }
   .tr-trophy-season { font-size: .88rem !important; }
   .tr-trophy-league { font-size: .65rem !important; }
 
-  /* Draft board: 4 cols, 3 rows visible */
+  /* Draft board: 4 cols for Sleeper (snake grid); MFL/Yahoo use horizontal scroll */
   .draft-picks-row {
     display: grid !important;
     grid-template-columns: repeat(4, 1fr) !important;
@@ -4820,10 +4820,18 @@ select option { background: var(--color-bg-2); }
     font-size: .55rem !important;
     padding: 4px 3px !important;
   }
-  .draft-board-scroll { overflow-x: hidden !important; }
-  .draft-board { width: 100% !important; }
+  /* Keep scroll enabled — MFL/Yahoo use horizontal scroll for their boards */
+  .draft-board-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
 }
 
+
+/* ── Draft auction list mobile ──────────────────────── */
+@media (max-width: 640px) {
+  .draft-auction-header { grid-template-columns: 36px 40px 1fr 1fr !important; }
+  .draft-auction-row    { grid-template-columns: 36px 40px 1fr 1fr !important; font-size:.75rem !important; padding: var(--space-2) var(--space-2) !important; }
+  .draft-toggle-bar     { gap: var(--space-1) !important; padding: var(--space-2) var(--space-2) !important; }
+  .draft-toggle-btn     { font-size:.72rem !important; padding: var(--space-1) var(--space-2) !important; }
+}
 
 /* ── Filter button UI ────────────────────────────────── */
 .league-filters-row {

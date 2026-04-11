@@ -13,6 +13,7 @@ const DLRAnalytics = (() => {
   let _activeTab  = 0;
   let _teamNames  = {};   // rosterId → display name
   let _myRosterId = null; // current user's roster id
+  let _season     = null; // league season year
 
   const TABS = [
     { id:"power",    label:"🏆 Power Rankings", fn: _renderPower      },
@@ -25,9 +26,10 @@ const DLRAnalytics = (() => {
   const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d" };
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueId, platform, myUsername, myRosterId) {
+  async function init(leagueId, platform, myUsername, myRosterId, season) {
     _leagueId  = leagueId;
     _platform  = platform || "sleeper";
+    _season    = season   || null;
     _activeTab = 0;
     _teamNames = {};
     _initToken++;
@@ -87,6 +89,7 @@ const DLRAnalytics = (() => {
     _leagueId   = null;
     _teamNames  = {};
     _myRosterId = null;
+    _season     = null;
     _initToken++;
   }
 
@@ -713,7 +716,7 @@ const DLRAnalytics = (() => {
 
   // ── MFL Analytics ─────────────────────────────────────────
   async function _renderMFLAnalytics(el, leagueId, token) {
-    const season = new Date().getFullYear().toString();
+    const season = _season || new Date().getFullYear().toString();
     const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
