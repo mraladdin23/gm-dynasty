@@ -391,11 +391,6 @@ const Profile = (() => {
     _renderLeagueFilters();
     _renderLeagues();
     _renderCareerSummary(profile);
-
-    // Non-blocking: resolve MFL team identities in the background for any
-    // leagues that are missing myRosterId (never had Overview opened).
-    // Cards re-render automatically when resolution completes.
-    _resolveMFLIdentities(profile.username, profile.platforms?.mfl).catch(() => {});
   }
 
   function _renderAvatar(profile) {
