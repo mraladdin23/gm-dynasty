@@ -43,149 +43,120 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, emailOrUsername, password, leagueIds = [], additionalEmails = []) {
-  if (!emailOrUsername?.trim()) throw new Error("Enter your MFL email address.");
+  async function linkMFL(gmdUsername, email, password) {
+    if (!email?.trim())    throw new Error("Enter your MFL email address.");
+    if (!password?.trim()) throw new Error("Enter your MFL password.");
 
-  const mflEmail    = emailOrUsername.trim().toLowerCase();
-  const mflUsername = mflEmail.includes("@") ? mflEmail.split("@")[0] : mflEmail;
-  const hasPassword = !!password?.trim();
-  const extraIds    = (Array.isArray(leagueIds) ? leagueIds : [])
-    .map(s => String(s).trim()).filter(Boolean);
+    const mflEmail    = email.trim().toLowerCase();
+    const mflUsername = mflEmail.includes("@") ? mflEmail.split("@")[0] : mflEmail;
 
-  // Build the full list of emails/usernames to match against — primary + additional
-  const { allEmails, allUsernames } = MFLAPI.buildEmailList({ mflEmail, mflUsername, mflAdditionalEmails: additionalEmails });
-
-
-  // ───────── STEP 1: TRY TO FETCH USER LEAGUES VIA CREDENTIALS ─────────
-  let leagues = [];
-
-  if (hasPassword) {
+    // ───────── STEP 1: FETCH ALL USER LEAGUES VIA CREDENTIALS ─────────
+    // myleagues returns { league_id, franchise_id, season, ... } for every
+    // league/season the user belongs to.  franchise_id is the 4-digit padded
+    // ID that links the user to their specific franchise — same value used as
+    // `id` in every other league-specific API call (rosters, standings, etc).
+    let leagues;
     try {
       leagues = await MFLAPI.getUserLeagues({ username: mflUsername, password });
     } catch (err) {
-      // Don't throw — fall through to league ID path
+      throw new Error("Could not connect to MFL. Check your email and password.");
     }
-  }
 
-  // ───────── STEP 2: MERGE IN ANY MANUALLY SPECIFIED LEAGUE IDs ─────────
-  // Build a set of already-found league IDs to avoid duplicates
-  const foundIds = new Set(leagues.map(l => String(l.league_id || l.id)));
-
-  // Add extra IDs as stub entries (bundle fetch will fill in the real data)
-  for (const id of extraIds) {
-    if (!foundIds.has(id)) {
-      const currentYear = new Date().getFullYear();
-      leagues.push({ league_id: id, season: String(currentYear) });
-      foundIds.add(id);
+    if (!leagues.length) {
+      throw new Error("No MFL leagues found. Check your email and password.");
     }
-  }
 
-  // Also add any already-imported MFL leagues so they get refreshed
-  const existingMflLeagues = Object.values(
-    typeof _allLeagues !== "undefined" ? _allLeagues : {}
-  ).filter(l => l.platform === "mfl");
-  for (const l of existingMflLeagues) {
-    if (l.leagueId && !foundIds.has(String(l.leagueId))) {
-      leagues.push({ league_id: l.leagueId, season: l.season || String(new Date().getFullYear()) });
-      foundIds.add(String(l.leagueId));
+    // ───────── STEP 2: FETCH BUNDLE PER LEAGUE AND BUILD MAP ─────────
+    const leaguesMap = {};
+
+    for (const l of leagues) {
+      const leagueId   = String(l.league_id || l.id || "");
+      const season     = String(l.season || new Date().getFullYear());
+      // franchise_id from myleagues is the authoritative user↔franchise link.
+      // It's a 4-digit zero-padded number e.g. "0035".  It matches the `id`
+      // field on every franchise object in every bundle for this league.
+      const myFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
+
+      if (!leagueId) continue;
+
+      try {
+        const bundle = await MFLAPI.getLeagueBundle({
+          leagueId,
+          year: season,
+          username: mflUsername,
+          password
+        });
+
+        const leagueInfo    = bundle?.league?.league || {};
+        const leagueName    = leagueInfo?.name || `League ${leagueId}`;
+
+        // Read team name from bundle.league.league.franchises.franchise[].name
+        const franchisesRaw = leagueInfo?.franchises?.franchise;
+        const franchisesArr = franchisesRaw
+          ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
+          : [];
+        const myFranchise   = myFranchiseId
+          ? franchisesArr.find(f => String(f.id) === myFranchiseId)
+          : null;
+
+        // Read record from standings using the same franchise id
+        const standingsRaw  = bundle?.standings?.leagueStandings?.franchise;
+        const standingsArr  = standingsRaw
+          ? (Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw])
+          : [];
+        const mySt          = myFranchiseId
+          ? (standingsArr.find(f => String(f.id) === myFranchiseId) || {})
+          : {};
+
+        // Dynasty chaining key: same league_id across seasons = same dynasty.
+        // All season entries for a given league_id roll up together.
+        const dynChainId = `mfl__${leagueId}`;
+        const key        = `mfl_${season}_${leagueId}`;
+
+        leaguesMap[key] = {
+          platform:       "mfl",
+          leagueId,
+          franchiseId:    dynChainId,           // dynasty chain key (stable across years)
+          leagueName,
+          season,
+          leagueType:     _detectMFLLeagueType(leagueName),
+          totalTeams:     Number(leagueInfo?.franchises) || 12,
+          teamName:       myFranchise?.name     || "",
+          isCommissioner: myFranchise?.is_commish === "1",
+          myRosterId:     myFranchiseId         || null,  // 4-digit franchise id e.g. "0035"
+          wins:           Number(mySt.h2hw      || mySt.wins   || 0),
+          losses:         Number(mySt.h2hl      || mySt.losses || 0),
+          ties:           Number(mySt.h2ht      || mySt.ties   || 0),
+          pointsFor:      Number(mySt.pf        || mySt.PF     || 0),
+          pointsAgainst:  Number(mySt.pa        || mySt.PA     || 0),
+          standing:       Number(mySt.rank)     || null,
+          playoffFinish:  null,
+          isChampion:     false
+        };
+
+      } catch (err) {
+        // Skip leagues that fail to fetch; don't abort the whole import
+        console.warn(`[MFL] Skipped league ${leagueId} (${season}):`, err.message);
+      }
     }
-  }
 
-  if (leagues.length === 0) {
-    throw new Error(
-      "No MFL leagues found.\n" +
-      (hasPassword ? "• Check your MFL username and password\n" : "• Enter your MFL password to auto-find leagues\n") +
-      "• Or paste your league ID(s) in the League IDs field (found in the MFL URL)"
-    );
-  }
-
-
-  // ───────── STEP 2: FETCH FULL DATA PER LEAGUE ─────────
-  const leaguesMap = {};
-
-  for (const l of leagues) {
-    const leagueId = l.league_id || l.id;
-    const season   = l.season || new Date().getFullYear();
-
-    try {
-      const bundle = await MFLAPI.getLeagueBundle({
-        leagueId,
-        year: season,
-        username: mflUsername,
-        password
-      });
-
-      // Extract basic info
-      const leagueInfo = bundle?.league?.league || {};
-      const standingsRaw = bundle?.standings?.leagueStandings?.franchise || [];
-      const standingsArr = Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw];
-
-      // Also check league franchises for owner info
-      const franchisesRaw = leagueInfo?.franchises?.franchise || [];
-      const franchisesArr = Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw];
-
-      // Use franchise_id from myleagues as primary match — it's the authoritative source.
-      // Fall back to findMyFranchise (email/name matching) only when not available.
-      const myleaguesFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
-      const myMatch = myleaguesFranchiseId
-        ? { franchiseId: myleaguesFranchiseId, teamName: null }
-        : MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
-      const myTeam  = myMatch
-        ? (standingsArr.find(f => String(f.id) === String(myMatch.franchiseId))
-           || franchisesArr.find(f => String(f.id) === String(myMatch.franchiseId))
-           || { id: myMatch.franchiseId, name: myMatch.teamName })
-        : null;
-
-      const key = `mfl_${season}_${leagueId}`;
-      const leagueName = leagueInfo?.name || `League ${leagueId}`;
-      // Chain by normalized league name so same dynasty across seasons links together
-      const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-      const franchiseId = `mfl__${normalizedName}`;
-
-      leaguesMap[key] = {
-        platform: "mfl",
-        leagueId: String(leagueId),
-        franchiseId,
-        leagueName,
-        season: String(season),
-        leagueType: _detectMFLLeagueType(leagueInfo?.name || ""),
-        totalTeams: Number(leagueInfo?.franchises) || 12,
-        teamName: myTeam?.name || "My Team",
-        isCommissioner: myTeam?.is_commish === "1",
-        myRosterId: myTeam?.id || null,
-        wins:         Number(myTeam?.h2hw  || myTeam?.wins        || 0),
-        losses:       Number(myTeam?.h2hl  || myTeam?.losses      || 0),
-        ties:         Number(myTeam?.h2ht  || myTeam?.ties        || 0),
-        pointsFor:    Number(myTeam?.pf    || myTeam?.PF          || 0),
-        pointsAgainst:Number(myTeam?.pa    || myTeam?.PA          || 0),
-        standing:     Number(myTeam?.rank  || null),
-        playoffFinish: null,
-        isChampion: false
-      };
-
-    } catch (err) {
-
+    if (Object.keys(leaguesMap).length === 0) {
+      throw new Error("Failed to load any MFL leagues. Check your connection and try again.");
     }
+
+    // ───────── STEP 3: SAVE ─────────
+    await GMDB.linkPlatform(gmdUsername, "mfl", {
+      mflEmail,
+      mflUsername,
+      linked: true
+    });
+
+    await GMDB.saveLeagues(gmdUsername, leaguesMap);
+    await GMDB.recomputeStats(gmdUsername);
+
+    // Credentials are NEVER stored
+    return { leagues: leaguesMap, mflUsername };
   }
-
-  if (Object.keys(leaguesMap).length === 0) {
-    throw new Error("Failed to process any MFL leagues.");
-  }
-
-  // ───────── STEP 3: SAVE TO YOUR SYSTEM ─────────
-  await GMDB.linkPlatform(gmdUsername, "mfl", {
-    mflEmail,
-    mflUsername,
-    mflAdditionalEmails: additionalEmails.map(e => e.trim().toLowerCase()).filter(Boolean),
-    linked: true
-  });
-
-  await GMDB.saveLeagues(gmdUsername, leaguesMap);
-  await GMDB.recomputeStats(gmdUsername);
-
-  // 🔥 IMPORTANT: credentials are NOT stored anywhere
-  return { leagues: leaguesMap, mflUsername };
-}
 
   // ── Link Yahoo ────────────────────────────────────────────
   async function linkYahoo(gmdUsername) {
@@ -315,86 +286,49 @@ const Profile = (() => {
   // Runs the same resolution as the background version but returns a promise
   // so the caller can show loading state and wait for completion.
   async function syncMFLTeams() {
+    // Re-fetch each MFL league and refresh teamName + record using the
+    // stored myRosterId (franchise_id).  No email matching needed —
+    // myRosterId was set from the authoritative myleagues response on import.
     if (!_currentUsername || !_currentProfile?.platforms?.mfl?.linked) return 0;
-    const before = Object.values(_allLeagues).filter(l => l.platform === "mfl" && l.myRosterId).length;
-    // Force re-resolve ALL MFL leagues (not just unresolved) so email changes take effect
-    const mflPlatform = _currentProfile.platforms.mfl;
-    const { allEmails, allUsernames } = MFLAPI.buildEmailList(mflPlatform);
-    if (!allEmails.length && !allUsernames.length) return 0;
 
     const allMFL = Object.entries(_allLeagues).filter(([, l]) => l.platform === "mfl");
     if (!allMFL.length) return 0;
 
+    let matched = 0;
     const CONCURRENCY = 4;
     for (let i = 0; i < allMFL.length; i += CONCURRENCY) {
       const batch = allMFL.slice(i, i + CONCURRENCY);
       await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
+        const myRosterId = league.myRosterId;
+        if (!myRosterId) return;   // can't resolve without a stored roster id
+
         try {
-          const bundle  = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
-          const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
-          if (!myMatch) return;
+          const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+          const leagueInfo   = bundle?.league?.league || {};
+          const franchisesRaw = leagueInfo?.franchises?.franchise;
+          const franchisesArr = franchisesRaw
+            ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
+            : [];
+          const myFranchise  = franchisesArr.find(f => String(f.id) === String(myRosterId)) || {};
 
           const standingsMap = MFLAPI.getStandingsMap(bundle);
-          const teams        = MFLAPI.getTeams(bundle);
-          const mySt   = standingsMap[String(myMatch.franchiseId)] || {};
-          const myTeam = teams.find(t => String(t.id) === String(myMatch.franchiseId)) || {};
+          const mySt         = standingsMap[String(myRosterId)] || {};
 
           if (_allLeagues[leagueKey]) {
-            _allLeagues[leagueKey].myRosterId = myMatch.franchiseId;
-            _allLeagues[leagueKey].teamName   = myTeam.name || myMatch.teamName || _allLeagues[leagueKey].teamName;
-            _allLeagues[leagueKey].wins       = mySt.wins   || _allLeagues[leagueKey].wins   || 0;
-            _allLeagues[leagueKey].losses     = mySt.losses || _allLeagues[leagueKey].losses || 0;
-            _allLeagues[leagueKey].standing   = mySt.rank   || _allLeagues[leagueKey].standing || null;
-            _allLeagues[leagueKey].pointsFor  = mySt.ptsFor || _allLeagues[leagueKey].pointsFor || 0;
+            _allLeagues[leagueKey].teamName    = myFranchise.name  || _allLeagues[leagueKey].teamName;
+            _allLeagues[leagueKey].wins        = mySt.wins         || _allLeagues[leagueKey].wins    || 0;
+            _allLeagues[leagueKey].losses      = mySt.losses       || _allLeagues[leagueKey].losses  || 0;
+            _allLeagues[leagueKey].ties        = mySt.ties         || _allLeagues[leagueKey].ties    || 0;
+            _allLeagues[leagueKey].standing    = mySt.rank         || _allLeagues[leagueKey].standing || null;
+            _allLeagues[leagueKey].pointsFor   = mySt.ptsFor       || _allLeagues[leagueKey].pointsFor || 0;
             GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            matched++;
           }
         } catch(e) { /* skip failed league */ }
       }));
     }
     _renderLeagues();
-    const after = Object.values(_allLeagues).filter(l => l.platform === "mfl" && l.myRosterId).length;
-    return after;
-  }
-
-  async function _resolveMFLIdentities(username, mflPlatform) {
-    if (!mflPlatform?.linked) return;
-
-    const { allEmails, allUsernames } = MFLAPI.buildEmailList(mflPlatform);
-    if (!allEmails.length && !allUsernames.length) return;
-
-    const unresolved = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "mfl" && !l.myRosterId
-    );
-    if (!unresolved.length) return;
-
-    const CONCURRENCY = 4;
-    for (let i = 0; i < unresolved.length; i += CONCURRENCY) {
-      const batch = unresolved.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
-        try {
-          const bundle  = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
-          const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
-          if (!myMatch) return;
-
-          const standingsMap = MFLAPI.getStandingsMap(bundle);
-          const teams        = MFLAPI.getTeams(bundle);
-          const mySt   = standingsMap[String(myMatch.franchiseId)] || {};
-          const myTeam = teams.find(t => String(t.id) === String(myMatch.franchiseId)) || {};
-
-          if (_allLeagues[leagueKey]) {
-            _allLeagues[leagueKey].myRosterId = myMatch.franchiseId;
-            _allLeagues[leagueKey].teamName   = myTeam.name || myMatch.teamName || _allLeagues[leagueKey].teamName;
-            _allLeagues[leagueKey].wins       = mySt.wins    || _allLeagues[leagueKey].wins    || 0;
-            _allLeagues[leagueKey].losses     = mySt.losses  || _allLeagues[leagueKey].losses  || 0;
-            _allLeagues[leagueKey].standing   = mySt.rank    || _allLeagues[leagueKey].standing || null;
-            _allLeagues[leagueKey].pointsFor  = mySt.ptsFor  || _allLeagues[leagueKey].pointsFor || 0;
-            // Persist to the leagues path so it survives page reload
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
-          }
-        } catch(e) { /* silently skip — network issue, will retry next load */ }
-      }));
-    }
-    _renderLeagues();
+    return matched;
   }
 
   // ── Main locker render ─────────────────────────────────
@@ -1456,12 +1390,6 @@ const Profile = (() => {
       if (emailInput && !emailInput.value) emailInput.value = mfl.mflEmail || mfl.mflUsername;
     }
 
-    // Pre-populate additional emails in the modal input
-    const addlModalInput = document.getElementById("mfl-additional-emails-modal-input");
-    if (addlModalInput) {
-      addlModalInput.value = (mfl?.mflAdditionalEmails || []).join(", ");
-    }
-
     document.getElementById("edit-profile-modal").classList.remove("hidden");
   }
 
@@ -1800,54 +1728,48 @@ const Profile = (() => {
     if (needsLiveFetch) {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
-        const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+        const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
         const standingsMap = MFLAPI.getStandingsMap(bundle);
-        const teams        = MFLAPI.getTeams(bundle);
-        // Build full list of all emails/usernames to match against
-        const { allEmails, allUsernames } = MFLAPI.buildEmailList(_currentProfile?.platforms?.mfl);
 
-        let myTeamId = league.myRosterId || null;
-        if (!myTeamId) {
-          const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
-          if (myMatch) myTeamId = myMatch.franchiseId;
-        }
-
+        // Use stored myRosterId (franchise_id) — set authoritatively on import.
+        const myTeamId = league.myRosterId;
         if (myTeamId) {
-          const myTeam = teams.find(t => String(t.id) === String(myTeamId)) || {};
-          const mySt   = standingsMap[String(myTeamId)] || {};
+          const leagueInfo    = bundle?.league?.league || {};
+          const franchisesRaw = leagueInfo?.franchises?.franchise;
+          const franchisesArr = franchisesRaw
+            ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
+            : [];
+          const myFranchise = franchisesArr.find(f => String(f.id) === String(myTeamId)) || {};
+          const mySt        = standingsMap[String(myTeamId)] || {};
+
           league = {
             ...league,
-            teamName:      myTeam.name     || league.teamName || "",
-            myRosterId:    myTeamId,
-            wins:          mySt.wins       || 0,
-            losses:        mySt.losses     || 0,
-            ties:          mySt.ties       || 0,
-            pointsFor:     mySt.ptsFor     || 0,
-            pointsAgainst: mySt.ptsAgainst || 0,
-            standing:      mySt.rank       || null,
+            teamName:      myFranchise.name  || league.teamName || "",
+            wins:          mySt.wins         || 0,
+            losses:        mySt.losses       || 0,
+            ties:          mySt.ties         || 0,
+            pointsFor:     mySt.ptsFor       || 0,
+            pointsAgainst: mySt.ptsAgainst   || 0,
+            standing:      mySt.rank         || null,
           };
-          // Always update _allLeagues and _detailLeague in memory first —
-          // _renderLeagues() reads from _allLeagues, so this must happen before it fires.
+
           if (_allLeagues[leagueKey]) {
-            _allLeagues[leagueKey].teamName   = league.teamName;
-            _allLeagues[leagueKey].myRosterId = myTeamId;
-            _allLeagues[leagueKey].wins       = league.wins;
-            _allLeagues[leagueKey].losses     = league.losses;
-            _allLeagues[leagueKey].standing   = league.standing;
-            _allLeagues[leagueKey].pointsFor  = league.pointsFor;
+            Object.assign(_allLeagues[leagueKey], {
+              teamName:      league.teamName,
+              wins:          league.wins,
+              losses:        league.losses,
+              ties:          league.ties,
+              standing:      league.standing,
+              pointsFor:     league.pointsFor,
+              pointsAgainst: league.pointsAgainst,
+            });
           }
-          // Keep _detailLeague in sync so tab switches use the resolved myRosterId
           if (_detailLeagueKey === leagueKey) {
             _detailLeague = { ..._detailLeague, ...league };
           }
           if (_currentUsername) {
             _renderLeagues();
-            // Persist to gmd/users/{u}/leagues/{key} so it survives reload
-            if (_allLeagues[leagueKey]) {
-              GMDB.saveLeague(_currentUsername, leagueKey, {
-                ..._allLeagues[leagueKey],
-              }).catch(() => {});
-            }
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         }
       } catch(e) { /* render with what we have */ }
