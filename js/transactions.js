@@ -346,17 +346,19 @@ const DLRTransactions = (() => {
       return synId;
     }
 
-    // Normalize MFL transactions into the same shape _txRow expects
+    // Normalize MFL transactions — only the 4 types Mike cares about.
+    // WAIVER and BBID_WAIVER are both waiver claims (BBID = blind bid).
+    // Everything else (IR, TAXI, AUCTION_WON, WAIVER_REQUEST, etc.) is filtered out.
     const MFL_TYPE_MAP = {
-      "BBID_WAIVER":    "waiver",
-      "FREE_AGENT":     "free_agent",
-      "TRADE":          "trade",
-      "IR":             "waiver",
-      "TAXI":           "waiver",
-      "AUCTION_WON":    "waiver",
+      "WAIVER":       "waiver",
+      "BBID_WAIVER":  "waiver",
+      "FREE_AGENT":   "free_agent",
+      "TRADE":        "trade",
     };
 
-    _allTx = txArr.map(tx => {
+    _allTx = txArr
+      .filter(tx => MFL_TYPE_MAP[tx.type])  // drop IR, TAXI, AUCTION_WON, WAIVER_REQUEST, etc.
+      .map(tx => {
       const type       = MFL_TYPE_MAP[tx.type] || "free_agent";
       const franchId   = tx.franchise || tx.franchises || "";
       const ts         = Number(tx.timestamp || 0) * 1000;

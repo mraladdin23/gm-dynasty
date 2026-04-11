@@ -799,48 +799,68 @@ const DLRStandings = (() => {
       el.innerHTML = `<div class="empty-state">No standings data available.</div>`;
       return;
     }
-    // rawLeague = bundle.league.league — has franchises.franchise[]
-    const franchises = rawLeague?.franchises?.franchise || [];
+    const franchises   = rawLeague?.franchises?.franchise || [];
     const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
-    const teamName = (fid) => franchiseArr.find(f => f.id === fid)?.name || `Team ${fid}`;
+    const teamName     = (fid) => franchiseArr.find(f => f.id === fid)?.name || `Team ${fid}`;
+    const isEliminator = leagueInfo?.isEliminator || standings.some(s => s.isEliminator);
 
     const totalTeams   = standings.length;
     const playoffSpots = leagueInfo?.playoffTeams
       || (rawLeague?.playoffTeams ? parseInt(rawLeague.playoffTeams) : null)
       || Math.floor(totalTeams / 2);
 
+    const leagueLabel = (leagueInfo?.name || rawLeague?.name || "MFL League")
+      + (isEliminator ? " \u00b7 Eliminator" : "");
+
     el.innerHTML = `
       <div class="standings-meta">
-        <span>${leagueInfo?.name || rawLeague?.name || "MFL League"} · ${season}</span>
+        <span>${leagueLabel} \u00b7 ${season}</span>
         <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
-          style="font-size:.75rem;color:var(--color-gold);">View on MFL ↗</a>
+          style="font-size:.75rem;color:var(--color-gold);">View on MFL \u2197</a>
       </div>
       <div class="standings-table-wrap">
         <table class="standings-table">
           <thead><tr>
-            <th>#</th><th class="team-col">Team</th><th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>
+            <th>#</th><th class="team-col">Team</th>
+            ${isEliminator
+              ? `<th>Status</th><th>PF</th>`
+              : `<th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>`}
           </tr></thead>
           <tbody>
             ${standings.map((s, i) => {
-              const rank    = i + 1;
-              const inPO    = rank <= playoffSpots;
-              const bubble  = rank === playoffSpots;
-              const name    = teamName(s.franchiseId);
-              const isMe    = myRosterId && String(s.franchiseId) === String(myRosterId);
+              const rank   = s.rank || i + 1;
+              const name   = teamName(s.franchiseId);
+              const isMe   = myRosterId && String(s.franchiseId) === String(myRosterId);
+              const inPO   = !isEliminator && rank <= playoffSpots;
+              const bubble = !isEliminator && rank === playoffSpots;
+              const border = inPO
+                ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}`
+                : "border-left:3px solid transparent";
+
+              const dataCells = isEliminator
+                ? `<td style="font-size:.75rem;">${
+                    rank === 1
+                      ? `<span style="color:var(--color-gold);font-weight:700;">Winner</span>`
+                      : s.eliminated
+                        ? `<span style="color:var(--color-text-dim)">Out Rd ${s.weekEliminated || "?"}</span>`
+                        : `<span style="color:#18e07a">Active</span>`
+                  }</td><td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>`
+                : `<td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
+                   <td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>
+                   <td class="dim">${s.ptsAgainst > 0 ? s.ptsAgainst.toFixed(1) : "\u2014"}</td>`;
+
               return `<tr class="${inPO ? "standings-row--playoff" : ""} ${isMe ? "standings-row--me" : ""}"
-                style="${inPO ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}` : "border-left:3px solid transparent"}">
+                style="${border}">
                 <td class="standings-rank">${rank}</td>
                 <td class="team-col">
                   <div class="standings-team-cell">
                     <div class="st-av" style="${isMe ? "background:var(--color-gold);color:#000;" : ""}">${name[0]?.toUpperCase() || "?"}</div>
                     <div>
-                      <div class="standings-team-name">${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}</div>
+                      <div class="standings-team-name">${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">\u2605</span>' : ""}</div>
                     </div>
                   </div>
                 </td>
-                <td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
-                <td>${s.ptsFor?.toFixed(1) || "—"}</td>
-                <td class="dim">${s.ptsAgainst?.toFixed(1) || "—"}</td>
+                ${dataCells}
               </tr>`;
             }).join("")}
           </tbody>

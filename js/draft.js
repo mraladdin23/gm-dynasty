@@ -452,14 +452,26 @@ const DLRDraft = (() => {
     });
 
     // ── Salary/auction data from salaries endpoint ───────────
-    // MFL TYPE=salaries returns: {salaries:{leagueUnit:{salary:[{id,salary,franchise}]}}}
-    const salaryRaw = bundle?.salaries?.salaries?.leagueUnit?.salary
-                   || bundle?.salaries?.salaries?.salary;
-    const salaryArr = salaryRaw
-      ? (Array.isArray(salaryRaw) ? salaryRaw : [salaryRaw]).map(p => ({
+    // ── Auction draft results (TYPE=auctionResults) ─────────────────────────
+    // auctionResults is the correct source for startup/yearly auction draft results.
+    // salaries is for ongoing salary cap tracking (different thing).
+    // Check auctionResults first, fall back to salaries variants for salary cap leagues.
+    const auctionRaw = bundle?.auctionResults?.auctionResults?.auction;
+    const salaryRaw  = bundle?.salaries?.salaries?.leagueUnit?.player
+                    || bundle?.salaries?.salaries?.leagueUnit?.salary
+                    || bundle?.salaries?.salaries?.player
+                    || bundle?.salaries?.salaries?.salary;
+    // Build auction/salary list: prefer auctionResults (draft auctions),
+    // fall back to salaries (salary cap leagues)
+    const rawForAuction = auctionRaw || salaryRaw;
+    const salaryArr = rawForAuction
+      ? (Array.isArray(rawForAuction) ? rawForAuction : [rawForAuction]).map(p => ({
           ...p,
-          franchise: p.franchise || p.franchiseId || p.franchise_id || ""
-        }))
+          id:        p.id        || p.player     || p.playerId    || "",
+          franchise: p.franchise || p.franchiseId || p.franchise_id || "",
+          salary:    p.amount    || p.bid         || p.salary      || p.winningBid || 0,
+          amount:    p.amount    || p.bid         || p.salary      || p.winningBid || 0,
+        })).filter(p => p.id)
       : [];
 
     const hasAuction = salaryArr.length > 0;

@@ -93,10 +93,59 @@ const MFLAPI = (() => {
    * [{ franchiseId, wins, losses, ties, ptsFor, ptsAgainst, rank }]
    */
   function normalizeStandings(bundle) {
+    const leagueInfo    = bundle?.league?.league || {};
+    const standingsSort = (leagueInfo.standingsSort || "H2H").toUpperCase();
+
+    // ── Eliminator / Survivor leagues ────────────────────────────────────────
+    // franchises_eliminated = space-separated IDs, in elimination order (first out = first).
+    // The ID absent from the list is the winner (rank 1).
+    const eliminatedRaw = leagueInfo.franchises_eliminated;
+    if (eliminatedRaw && String(eliminatedRaw).trim()) {
+      const eliminatedIds = String(eliminatedRaw).trim().split(/[\s,]+/).filter(Boolean);
+      const rawFranchises = leagueInfo?.franchises?.franchise;
+      const allArr = rawFranchises
+        ? (Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises])
+        : [];
+      const allIds = allArr.map(f => String(f.id));
+      const eliminatedSet = new Set(eliminatedIds.map(String));
+      const winner = allIds.find(id => !eliminatedSet.has(id)) || null;
+
+      // Rank: winner = 1, last-eliminated = 2, first-eliminated = last
+      const ranked = winner ? [winner] : [];
+      for (let i = eliminatedIds.length - 1; i >= 0; i--) ranked.push(String(eliminatedIds[i]));
+
+      const ptsByFid = {};
+      const rawStd = bundle?.standings?.leagueStandings?.franchise;
+      if (rawStd) {
+        const sArr = Array.isArray(rawStd) ? rawStd : [rawStd];
+        sArr.forEach(s => {
+          ptsByFid[String(s.id)] = {
+            ptsFor:     parseFloat(s.pf || s.PF || s.ptsFor || s.pointsFor || 0),
+            ptsAgainst: parseFloat(s.pa || s.PA || s.ptsAgainst || s.pointsAgainst || 0),
+          };
+        });
+      }
+
+      return ranked.map((fid, i) => ({
+        franchiseId:    fid,
+        wins:           0,
+        losses:         0,
+        ties:           0,
+        ptsFor:         ptsByFid[fid]?.ptsFor || 0,
+        ptsAgainst:     ptsByFid[fid]?.ptsAgainst || 0,
+        rank:           i + 1,
+        isEliminator:   true,
+        eliminated:     i > 0,
+        // weekEliminated: eliminatedIds[0] = out first (round 1), [last] = out last
+        weekEliminated: i > 0 ? (eliminatedIds.length - (i - 1)) : null,
+      }));
+    }
+
+    // ── Standard leagues ─────────────────────────────────────────────────────
     const raw = bundle?.standings?.leagueStandings?.franchise;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
-    return arr.map((s, i) => ({
+    const mapped = arr.map((s, i) => ({
       franchiseId: s.id,
       wins:        parseInt(s.wins   || s.W || s.h2hw || s.allPlayW || 0),
       losses:      parseInt(s.losses || s.L || s.h2hl || s.allPlayL || 0),
@@ -104,7 +153,12 @@ const MFLAPI = (() => {
       ptsFor:      parseFloat(s.pf   || s.PF || s.ptsFor  || s.pointsFor  || 0),
       ptsAgainst:  parseFloat(s.pa   || s.PA || s.ptsAgainst || s.pointsAgainst || 0),
       rank:        parseInt(s.rank || i + 1)
-    })).sort((a, b) => b.wins - a.wins || b.ptsFor - a.ptsFor);
+    }));
+
+    if (standingsSort === "PTS" || standingsSort === "POINTS") {
+      return mapped.sort((a, b) => b.ptsFor - a.ptsFor);
+    }
+    return mapped.sort((a, b) => b.wins - a.wins || b.ptsFor - a.ptsFor);
   }
 
   /**
@@ -149,14 +203,36 @@ const MFLAPI = (() => {
   /**
    * Returns matchup array normalized for rendering:
    * [{ week, home: { teamId, score }, away: { teamId, score } }]
+   * Uses TYPE=schedule (all weeks) when available, falls back to TYPE=scoreboard (current week).
    */
   function normalizeMatchups(bundle) {
+    // Prefer schedule — has all weeks, home/away designation, and scores
+    // MFL TYPE=schedule shape: { schedule: { matchupList: { matchup: [{week, home, away}] } } }
+    // Each matchup: { home: { id, score }, away: { id, score }, week }
+    const scheduleRaw = bundle?.schedule?.schedule?.matchupList?.matchup;
+    if (scheduleRaw) {
+      const arr = Array.isArray(scheduleRaw) ? scheduleRaw : [scheduleRaw];
+      const result = [];
+      arr.forEach(m => {
+        // MFL schedule matchup: { week, home: {id, score}, away: {id, score} }
+        const week = parseInt(m.week || 0);
+        // Handle both nested and flat formats
+        const homeId    = m.home?.id    || m.homeTeam?.id    || "";
+        const awayId    = m.away?.id    || m.awayTeam?.id    || "";
+        const homeScore = parseFloat(m.home?.score    || m.homeTeam?.score    || 0);
+        const awayScore = parseFloat(m.away?.score    || m.awayTeam?.score    || 0);
+        if (homeId || awayId) {
+          result.push({ week, home: { teamId: homeId, score: homeScore }, away: { teamId: awayId, score: awayScore } });
+        }
+      });
+      if (result.length > 0) return result;
+    }
+
+    // Fallback: scoreboard (current week only)
     const raw = bundle?.matchups?.scoreboard?.matchup;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
-
     return arr.map(m => {
-      // MFL matchup shape: { matchup_id, week, franchise: [{id, score}, {id, score}] }
       const teams = m.franchise
         ? (Array.isArray(m.franchise) ? m.franchise : [m.franchise])
         : [];
@@ -259,16 +335,90 @@ const MFLAPI = (() => {
   function getLeagueInfo(bundle) {
     const l = bundle?.league?.league || {};
     return {
-      name:         l.name         || "MFL League",
-      numTeams:     parseInt(l.franchises) || 12,
-      season:       l.baseURL?.match(/\/(\d{4})\//)?.[1] || new Date().getFullYear().toString(),
-      playoffTeams: parseInt(l.playoffTeams || l.settings?.playoffTeams || 0) || null,
-      franchises:   l.franchises   // raw franchises object for name lookups
+      name:          l.name         || "MFL League",
+      numTeams:      parseInt(l.franchises) || 12,
+      season:        l.baseURL?.match(/\/(\d{4})\//)?.[1] || new Date().getFullYear().toString(),
+      playoffTeams:  parseInt(l.playoffTeams || l.settings?.playoffTeams || 0) || null,
+      franchises:    l.franchises,
+      standingsSort: l.standingsSort || "H2H",
+      isEliminator:  !!(l.franchises_eliminated && String(l.franchises_eliminated).trim()),
     };
   }
 
   /**
-   * Builds the canonical lists of emails and username prefixes to match against.
+   * Returns auction draft results array: [{ franchiseId, playerId, amount }]
+   * from bundle.auctionResults (TYPE=auctionResults)
+   */
+  function getAuctionResults(bundle) {
+    const raw = bundle?.auctionResults?.auctionResults?.auction;
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr.map(a => ({
+      franchiseId: String(a.franchise || a.franchiseId || ""),
+      playerId:    String(a.player    || a.playerId    || ""),
+      amount:      parseFloat(a.amount || a.bid || a.winningBid || 0),
+    })).filter(a => a.playerId);
+  }
+
+  /**
+   * Debug helper — inspect raw bundle from the browser console:
+   *   MFLAPI.debugBundle("LEAGUE_ID", "2025").then(r => console.log(JSON.stringify(r._paths, null, 2)))
+   */
+  async function debugBundle(leagueId, year) {
+    const bundle = await getLeagueBundle(leagueId, year);
+    const paths = {
+      "league.league":                           !!bundle?.league?.league,
+      "league.league.franchises_eliminated":     !!(bundle?.league?.league?.franchises_eliminated),
+      "league.league.standingsSort":             bundle?.league?.league?.standingsSort || "(none)",
+      "standings.leagueStandings.franchise":     !!bundle?.standings?.leagueStandings?.franchise,
+      "schedule.schedule.matchupList.matchup":   !!bundle?.schedule?.schedule?.matchupList?.matchup,
+      "matchups.scoreboard.matchup":             !!bundle?.matchups?.scoreboard?.matchup,
+      "rosters.rosters.franchise":               !!bundle?.rosters?.rosters?.franchise,
+      "players.players.player":                  !!(bundle?.players?.players?.player),
+      "draft.draftResults.draftUnit":            !!bundle?.draft?.draftResults?.draftUnit,
+      "auctionResults.auctionResults.auction":   !!bundle?.auctionResults?.auctionResults?.auction,
+      "salaries.salaries.leagueUnit.player":     !!(bundle?.salaries?.salaries?.leagueUnit?.player),
+      "salaries.salaries.leagueUnit.salary":     !!(bundle?.salaries?.salaries?.leagueUnit?.salary),
+      "transactions.transactions.transaction":   !!bundle?.transactions?.transactions?.transaction,
+      "playerScores.playerScores.playerScore":   !!bundle?.playerScores?.playerScores?.playerScore,
+    };
+    const rawF = bundle?.league?.league?.franchises?.franchise;
+    const franchises = rawF
+      ? (Array.isArray(rawF) ? rawF : [rawF]).map(f => ({
+          id: f.id, name: f.name,
+          email: f.email || "(none)", owner_name: f.owner_name || "(none)",
+          username: f.username || "(none)", is_owner: f.is_owner, is_commish: f.is_commish,
+        }))
+      : null;
+    const summary = {
+      _paths: paths,
+      _franchiseEmails: franchises,
+      _eliminatedIds: bundle?.league?.league?.franchises_eliminated || "(none)",
+      _standingsSort: bundle?.league?.league?.standingsSort || "(none)",
+    };
+    console.log("[MFLAPI.debugBundle]", JSON.stringify(summary, null, 2));
+    return summary;
+  }
+
+  return {
+    getUserLeagues,
+    getLeagueBundle,
+    getTeams,
+    normalizeStandings,
+    getStandingsMap,
+    getRoster,
+    normalizeMatchups,
+    getLeagueInfo,
+    getAuctionResults,
+    buildMFLToSleeperIndex,
+    mflNameToSleeperId,
+    mflNameToDisplay,
+    getPlayerScores,
+    buildEmailList,
+    findMyFranchise,
+    debugBundle,
+  };
+})();
    * Accepts either a platforms.mfl object or individual named args.
    * Returns { allEmails: string[], allUsernames: string[] }
    */
