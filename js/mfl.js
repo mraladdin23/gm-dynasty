@@ -400,55 +400,6 @@ const MFLAPI = (() => {
     return summary;
   }
 
-function buildEmailList({ mflEmail = "", mflUsername = "", mflAdditionalEmails = [] } = {}) {
-    const primary  = mflEmail.trim().toLowerCase();
-    const extras   = (Array.isArray(mflAdditionalEmails) ? mflAdditionalEmails : [])
-      .map(e => e.trim().toLowerCase()).filter(Boolean);
-    const allEmails = [...new Set([primary, ...extras].filter(Boolean))];
-    const allUsernames = [...new Set(
-      allEmails.map(e => e.includes("@") ? e.split("@")[0] : e)
-        .concat(mflUsername ? [mflUsername.toLowerCase()] : [])
-    )];
-    return { allEmails, allUsernames };
-  }
-
-  /**
-   * Finds the user's franchise in a bundle.
-   * Checks (in order):
-   *   1. Franchise email list (comma-separated) exact match
-   *   2. Franchise email username prefix match
-   *   3. owner_name / username field match
-   *   4. is_owner === "1"
-   *   5. is_commish === "1" fallback
-   * Returns { franchiseId, teamName } or null.
-   */
-  function findMyFranchise(bundle, allEmails, allUsernames) {
-    const leagueInfo   = bundle?.league?.league || {};
-    const rawFranchises = leagueInfo?.franchises?.franchise;
-    if (!rawFranchises) return null;
-    const franchArr = Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises];
-
-    const match = franchArr.find(f => {
-      // MFL can store multiple emails comma-separated in f.email
-      const fEmails  = (f.email || "").toLowerCase().split(",").map(e => e.trim()).filter(Boolean);
-      const fUser    = (f.username   || "").toLowerCase();
-      const fOwner   = (f.owner_name || "").toLowerCase();
-
-      // 1. Exact email match (any slot)
-      if (allEmails.some(e => fEmails.includes(e))) return true;
-      // 2. Username prefix match against any franchise email slot
-      if (allEmails.some(e => fEmails.some(fe => fe.split("@")[0] === e.split("@")[0]))) return true;
-      // 3. owner_name / username field
-      if (allUsernames.some(u => fUser === u || fOwner.includes(u))) return true;
-      // 4. is_owner flag
-      if (f.is_owner === "1") return true;
-      return false;
-    }) || franchArr.find(f => f.is_commish === "1"); // 5. commish fallback
-
-    if (!match) return null;
-    return { franchiseId: match.id, teamName: match.name || `Team ${match.id}` };
-  }
-
   return {
     getUserLeagues,
     getLeagueBundle,
@@ -463,8 +414,6 @@ function buildEmailList({ mflEmail = "", mflUsername = "", mflAdditionalEmails =
     mflNameToSleeperId,
     mflNameToDisplay,
     getPlayerScores,
-    buildEmailList,
-    findMyFranchise,
     debugBundle,
   };
 })();

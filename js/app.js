@@ -34,9 +34,9 @@ const AppState = {
     AppState.showScreen("app-screen");
     setLoading(false);
 
-    // Show resync nudge if MFL is connected via username but email hasn't been captured yet
+    // Show resync nudge if MFL is connected but no email stored (legacy username-only import)
     const mfl = profile?.platforms?.mfl;
-    const needsResync = mfl?.linked && mfl?.mflUsername && !mfl?.mflEmail;
+    const needsResync = mfl?.linked && !mfl?.mflEmail;
     const banner = document.getElementById("mfl-resync-banner");
     if (banner) banner.classList.toggle("hidden", !needsResync);
 
@@ -201,37 +201,31 @@ document.getElementById("sleeper-link-btn")?.addEventListener("click", async () 
 
 // ── Onboarding: MFL link ───────────────────────────────────
 document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
-  const email      = document.getElementById("mfl-email-input")?.value.trim();
-  const password   = document.getElementById("mfl-password-input")?.value.trim();
-  const leagueIdsRaw = document.getElementById("mfl-league-ids-input")?.value.trim();
-  const leagueIds  = leagueIdsRaw
-    ? leagueIdsRaw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
-    : [];
-  const statusEl   = document.getElementById("mfl-status");
-  const btn        = document.getElementById("mfl-link-btn");
-  const profile    = Auth.getCurrentProfile();
+  const email    = document.getElementById("mfl-email-input")?.value.trim();
+  const password = document.getElementById("mfl-password-input")?.value.trim();
+  const statusEl = document.getElementById("mfl-status");
+  const btn      = document.getElementById("mfl-link-btn");
+  const profile  = Auth.getCurrentProfile();
   if (!profile) return;
 
   if (!email) {
-    statusEl.textContent = "Enter your MFL username.";
+    statusEl.textContent = "Enter your MFL email address.";
+    statusEl.classList.add("status-error");
+    return;
+  }
+  if (!password) {
+    statusEl.textContent = "Enter your MFL password.";
     statusEl.classList.add("status-error");
     return;
   }
 
   btn.disabled = true;
   btn.textContent = "Connecting…";
-  statusEl.textContent = leagueIds.length ? `Searching ${leagueIds.length} league(s)…` : "Searching…";
+  statusEl.textContent = "Searching…";
   statusEl.classList.remove("status-connected", "status-error");
 
-  // Read additional emails from input, falling back to whatever is already stored in Firebase
-  const addlRaw = document.getElementById("mfl-additional-emails-input")?.value.trim()
-    || (profile?.platforms?.mfl?.mflAdditionalEmails || []).join(", ");
-  const additionalEmails = addlRaw
-    ? addlRaw.split(/[\s,;]+/).map(e => e.trim()).filter(Boolean)
-    : [];
-
   try {
-    const result = await Profile.linkMFL(profile.username, email, password, leagueIds, additionalEmails);
+    const result = await Profile.linkMFL(profile.username, email, password);
     const count  = Object.keys(result.leagues).length;
     statusEl.textContent = `✓ Connected — ${count} league${count !== 1 ? "s" : ""}`;
     statusEl.classList.add("status-connected");
@@ -447,33 +441,28 @@ document.getElementById("relink-yahoo-btn")?.addEventListener("click", async () 
 });
 // ── Shared MFL resync handler ──────────────────────────────
 async function _doMFLResync() {
-  const profile = Auth.getCurrentProfile();
-  const alreadyLinked = profile?.platforms?.mfl?.mflEmail || profile?.platforms?.mfl?.mflUsername;
+  const profile       = Auth.getCurrentProfile();
+  const alreadyLinked = profile?.platforms?.mfl?.linked;
+  const storedEmail   = profile?.platforms?.mfl?.mflEmail || "";
 
-  const promptMsg = alreadyLinked
-    ? `Resync MFL Leagues\n\nEnter your current MFL email address.\nYour password is only used to fetch your leagues — it is never stored.`
-    : `Connect MFL\n\nEnter your MFL email address.`;
-
-  const email = prompt(promptMsg);
+  const email = prompt(
+    alreadyLinked
+      ? `Resync MFL Leagues\n\nEnter your MFL email address.\nYour password is only used to fetch your leagues — it is never stored.`
+      : `Connect MFL\n\nEnter your MFL email address.`,
+    storedEmail
+  );
   if (!email) return;
   const password = prompt("Enter your MFL password:\n(Never stored — used only to fetch your leagues)");
   if (!password) return;
 
-  // Ask for additional historical emails
-  const storedAddl = (profile?.platforms?.mfl?.mflAdditionalEmails || []).join(", ");
-  const addlPrompt = `Previous MFL email address(es) — optional\n\nIf you've used different emails in past leagues, enter them here (comma-separated).\nThis helps match historical league teams to your account.\n\nCurrent stored: ${storedAddl || "none"}`;
-  const addlRaw = prompt(addlPrompt) ?? storedAddl;
-  const additionalEmails = addlRaw ? addlRaw.split(/[\s,;]+/).map(e => e.trim()).filter(Boolean) : [];
-
   try {
     setLoading(true, alreadyLinked ? "Resyncing MFL leagues…" : "Connecting MFL…");
-    const result = await Profile.linkMFL(profile.username, email, password, [], additionalEmails);
+    const result = await Profile.linkMFL(profile.username, email, password);
     setLoading(false);
     const count = Object.keys(result.leagues).length;
     showToast(`MFL ${alreadyLinked ? "resynced" : "connected"} — ${count} league${count !== 1 ? "s" : ""}`);
     const updated = await Auth.refreshProfile();
     Profile.renderLocker(updated);
-    // Hide banner now that email is stored
     const banner = document.getElementById("mfl-resync-banner");
     if (banner) banner.classList.add("hidden");
     Profile.openEditProfileModal(updated);
@@ -501,53 +490,18 @@ document.getElementById("sync-mfl-teams-btn")?.addEventListener("click", async (
   }
 });
 
-document.getElementById("save-mfl-addl-emails-btn")?.addEventListener("click", _doSaveMFLAddlEmails);
-document.getElementById("save-mfl-addl-emails-onboarding-btn")?.addEventListener("click", _doSaveMFLAddlEmails);
 document.getElementById("sync-mfl-teams-onboarding-btn")?.addEventListener("click", async () => {
   const btn = document.getElementById("sync-mfl-teams-onboarding-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "Syncing..."; }
+  if (btn) { btn.disabled = true; btn.textContent = "Syncing…"; }
   try {
     const count = await Profile.syncMFLTeams();
-    showToast(`Teams synced - ${count} league${count !== 1 ? "s" : ""} matched`);
+    showToast(`Teams refreshed — ${count} league${count !== 1 ? "s" : ""} updated`);
   } catch(err) {
     showToast("Sync failed: " + err.message, "error");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Sync Teams"; }
   }
 });
-
-// ── Save MFL additional emails without reconnecting ────────
-async function _doSaveMFLAddlEmails() {
-  const profile = Auth.getCurrentProfile();
-  if (!profile?.platforms?.mfl?.linked) {
-    showToast("MFL not connected yet.", "error");
-    return;
-  }
-  // Read from whichever input is populated — onboarding screen or edit profile modal
-  // Both elements may exist in DOM simultaneously; pick the one that actually has a value
-  const modalInput = document.getElementById("mfl-additional-emails-modal-input");
-  const panelInput = document.getElementById("mfl-additional-emails-input");
-  const addlInput  = (modalInput?.value.trim()) ? modalInput : panelInput;
-  const addlRaw    = addlInput?.value.trim() || "";
-  const additionalEmails = addlRaw
-    ? addlRaw.split(/[\s,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean)
-    : [];
-
-  try {
-    // Merge with existing platform data — only update the additional emails field
-    const existing = profile.platforms.mfl;
-    await GMDB.linkPlatform(profile.username, "mfl", {
-      ...existing,
-      mflAdditionalEmails: additionalEmails
-    });
-    // Update in-memory profile so re-renders immediately use the new emails
-    profile.platforms.mfl.mflAdditionalEmails = additionalEmails;
-    AppState.currentProfile = profile;
-    showToast(`Additional emails saved (${additionalEmails.length} stored) ✓`);
-  } catch (err) {
-    showToast("Failed to save: " + err.message, "error");
-  }
-}
 
 // ── Manage leagues (go to onboarding to re-import) ────────
 document.getElementById("manage-leagues-btn")?.addEventListener("click", () => {
@@ -572,25 +526,12 @@ function _prefillOnboardingMFL() {
   if (!mfl) return;
 
   const emailInput = document.getElementById("mfl-email-input");
-  const addlInput  = document.getElementById("mfl-additional-emails-input");
-  const msgEl      = document.getElementById("mfl-message");
   const statusEl   = document.getElementById("mfl-connection-status");
 
-  // Pre-fill whatever we have
   if (emailInput && !emailInput.value) {
-    emailInput.value = mfl.mflEmail || mfl.mflUsername || "";
+    emailInput.value = mfl.mflEmail || "";
   }
-  if (addlInput && !addlInput.value && mfl.mflAdditionalEmails?.length) {
-    addlInput.value = mfl.mflAdditionalEmails.join(", ");
-  }
-
-  // Show inline notice if they only have a username stored (no email yet)
-  if (mfl.mflUsername && !mfl.mflEmail && msgEl && statusEl) {
-    statusEl.textContent = "⚠️ Resync needed";
-    msgEl.textContent    = "Your MFL connection was set up with a username. Please enter your MFL email address and password to resync — this fixes team name and league matching.";
-    msgEl.classList.remove("hidden");
-    msgEl.style.color = "var(--color-gold)";
-  } else if (mfl.mflEmail && statusEl) {
+  if (mfl.mflEmail && statusEl) {
     statusEl.textContent = `✓ Connected as ${mfl.mflEmail}`;
   }
 }
