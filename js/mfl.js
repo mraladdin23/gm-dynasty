@@ -419,6 +419,8 @@ const MFLAPI = (() => {
     debugBundle,
   };
 })();
+
+  /**
    * Accepts either a platforms.mfl object or individual named args.
    * Returns { allEmails: string[], allUsernames: string[] }
    */
