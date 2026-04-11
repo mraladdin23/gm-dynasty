@@ -305,6 +305,51 @@ const Profile = (() => {
   // Runs non-blocking after renderLocker. Finds all MFL leagues missing
   // myRosterId and resolves them in the background, then persists to
   // gmd/users/{u}/leagues/{key} so they load correctly on next visit.
+  // ── Public: sync MFL team identities (foreground, for Sync button) ────
+  // Runs the same resolution as the background version but returns a promise
+  // so the caller can show loading state and wait for completion.
+  async function syncMFLTeams() {
+    if (!_currentUsername || !_currentProfile?.platforms?.mfl?.linked) return 0;
+    const before = Object.values(_allLeagues).filter(l => l.platform === "mfl" && l.myRosterId).length;
+    // Force re-resolve ALL MFL leagues (not just unresolved) so email changes take effect
+    const mflPlatform = _currentProfile.platforms.mfl;
+    const { allEmails, allUsernames } = MFLAPI.buildEmailList(mflPlatform);
+    if (!allEmails.length && !allUsernames.length) return 0;
+
+    const allMFL = Object.entries(_allLeagues).filter(([, l]) => l.platform === "mfl");
+    if (!allMFL.length) return 0;
+
+    const CONCURRENCY = 4;
+    for (let i = 0; i < allMFL.length; i += CONCURRENCY) {
+      const batch = allMFL.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
+        try {
+          const bundle  = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+          const myMatch = MFLAPI.findMyFranchise(bundle, allEmails, allUsernames);
+          if (!myMatch) return;
+
+          const standingsMap = MFLAPI.getStandingsMap(bundle);
+          const teams        = MFLAPI.getTeams(bundle);
+          const mySt   = standingsMap[String(myMatch.franchiseId)] || {};
+          const myTeam = teams.find(t => String(t.id) === String(myMatch.franchiseId)) || {};
+
+          if (_allLeagues[leagueKey]) {
+            _allLeagues[leagueKey].myRosterId = myMatch.franchiseId;
+            _allLeagues[leagueKey].teamName   = myTeam.name || myMatch.teamName || _allLeagues[leagueKey].teamName;
+            _allLeagues[leagueKey].wins       = mySt.wins   || _allLeagues[leagueKey].wins   || 0;
+            _allLeagues[leagueKey].losses     = mySt.losses || _allLeagues[leagueKey].losses || 0;
+            _allLeagues[leagueKey].standing   = mySt.rank   || _allLeagues[leagueKey].standing || null;
+            _allLeagues[leagueKey].pointsFor  = mySt.ptsFor || _allLeagues[leagueKey].pointsFor || 0;
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+          }
+        } catch(e) { /* skip failed league */ }
+      }));
+    }
+    _renderLeagues();
+    const after = Object.values(_allLeagues).filter(l => l.platform === "mfl" && l.myRosterId).length;
+    return after;
+  }
+
   async function _resolveMFLIdentities(username, mflPlatform) {
     if (!mflPlatform?.linked) return;
 
@@ -1715,7 +1760,7 @@ const Profile = (() => {
     }
     if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
     if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
-    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername, league.myRosterId || null);
+    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername, league.myRosterId || null, league.season || null);
     if (tab === "rules")         DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
       const sleeperUid2 = league.sleeperUserId
@@ -1992,7 +2037,8 @@ const Profile = (() => {
     jumpToLeague,
     toggleFilterPanel,
     toggleFilter,
-    clearFilters
+    clearFilters,
+    syncMFLTeams
   };
 
 })();

@@ -245,7 +245,9 @@ const DLRTransactions = (() => {
 
   function _chip(pid, chipType) {
     const p    = _players[pid] || {};
-    const name = p.first_name ? `${p.first_name[0]}. ${p.last_name}` : (pid||"?");
+    const name = p.first_name
+      ? `${p.first_name[0]}. ${p.last_name}`
+      : pid?.startsWith("mfl_") ? `#${pid.slice(4)}` : (pid||"?");
     const pos  = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
     const posColor = {QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d"}[pos] || "#9ca3af";
     const cls  = `tx-chip tx-chip--${chipType}`;
@@ -280,6 +282,22 @@ const DLRTransactions = (() => {
     if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
     else _players = { ..._players, ...DLRPlayers.all() };
     if (tok !== _token) return;
+
+    // Supplement mflPlayerMap with names from rosters if players endpoint was empty
+    if (Object.keys(mflPlayerMap).length < 10) {
+      const rawRosters = bundle?.rosters?.rosters?.franchise;
+      if (rawRosters) {
+        const rArr = Array.isArray(rawRosters) ? rawRosters : [rawRosters];
+        rArr.forEach(fr => {
+          const players = fr.player ? (Array.isArray(fr.player) ? fr.player : [fr.player]) : [];
+          players.forEach(p => {
+            if (p.id && !mflPlayerMap[p.id]) {
+              mflPlayerMap[p.id] = { rawName: p.name || "", name: MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`, position: (p.position||"").toUpperCase() };
+            }
+          });
+        });
+      }
+    }
 
     const raw = bundle?.transactions?.transactions?.transaction;
     if (!raw) {
