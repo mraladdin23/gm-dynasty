@@ -88,6 +88,15 @@ const Profile = (() => {
         });
 
         const leagueInfo    = bundle?.league?.league || {};
+	const isSurvivor =
+  	leagueInfo?.survivorPool === "Yes" ||
+  	leagueInfo?.survivor_pool === "Yes" ||
+  	String(leagueInfo?.name || "").toLowerCase().includes("survivor");
+
+	if (isSurvivor) {
+  		console.log(`[MFL] Skipping survivor pool league ${leagueId} (${season})`);
+  		continue;
+	}
         const leagueName    = leagueInfo?.name || `League ${leagueId}`;
 
         // Read team name from bundle.league.league.franchises.franchise[].name
