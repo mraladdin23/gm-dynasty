@@ -1514,6 +1514,41 @@ select option { background: var(--color-bg-2); }
 .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 
 /* Season bar */
+/* ── Draft selector bar (multi-draft: startup + rookie) ── */
+.draft-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-2);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.draft-selector-label {
+  font-size: .75rem;
+  flex-shrink: 0;
+}
+.draft-selector-pill {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: .78rem;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.draft-selector-pill:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.draft-selector-pill--active {
+  background: rgba(0,212,255,.1);
+  border-color: rgba(0,212,255,.4);
+  color: var(--color-blue);
+}
+
 .season-bar-label {
   font-size: .72rem;
   font-weight: 700;
@@ -3086,18 +3121,32 @@ select option { background: var(--color-bg-2); }
   justify-content: flex-end;
 }
 .fa-status-badge {
-  font-size: .68rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: .72rem;
   font-weight: 700;
-  padding: 2px 6px;
   border-radius: var(--radius-sm);
   white-space: nowrap;
-  text-align: center;
-  width: 100%;
-  display: inline-block;
+  flex-shrink: 0;
 }
 .fa-status-badge--claimed  { background: rgba(96,165,250,.15); color: #60a5fa; border: 1px solid rgba(96,165,250,.3); }
 .fa-status-badge--active   { background: rgba(251,191,36,.12); color: var(--color-gold); border: 1px solid rgba(251,191,36,.3); }
 .fa-status-badge--rostered { background: var(--color-bg-3); color: var(--color-text-dim); border: 1px solid var(--color-border); }
+.fa-status-legend {
+  display: flex;
+  gap: var(--space-4);
+  font-size: .7rem;
+  color: var(--color-text-dim);
+  padding: var(--space-2) var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-2);
+}
+.fa-status-legend span { display: flex; align-items: center; gap: 5px; }
 .fa-rank {
   font-size: .72rem;
   color: var(--color-text-dim);
