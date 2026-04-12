@@ -179,6 +179,7 @@ const DLRFreeAgents = (() => {
   let _rosterLookup       = {};
   let _wonIds             = new Set();
   let _statsYear          = null;   // which year's stats to display — null = auto (prior year)
+  let _isCommish          = false;  // whether current user is commissioner
 
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
@@ -186,7 +187,7 @@ const DLRFreeAgents = (() => {
   };
   const SKILL_POS = ["QB","RB","WR","TE"];
 
-  async function init(leagueId, leagueKey, auctionEnabled, auctionIncludePicks, myRosterId, myTeamName, platform, platformLeagueKey, season) {
+  async function init(leagueId, leagueKey, auctionEnabled, auctionIncludePicks, myRosterId, myTeamName, platform, platformLeagueKey, season, isCommish) {
     _leagueId           = leagueId;
     _leagueKey          = leagueKey || null;
     _platform           = platform || "sleeper";
@@ -196,6 +197,7 @@ const DLRFreeAgents = (() => {
     _auctionIncludePicks= !!auctionIncludePicks;
     _myRosterId         = myRosterId || null;
     _myTeamName         = myTeamName || "My Team";
+    _isCommish          = !!isCommish;
     _cachedData         = null;
     _sortMode           = "adp";
     _posFilter          = "ALL";
@@ -250,6 +252,7 @@ const DLRFreeAgents = (() => {
   function reset() {
     _leagueId   = null;
     _cachedData = null;
+    _isCommish  = false;
     _initToken++;
   }
 
@@ -574,7 +577,7 @@ const DLRFreeAgents = (() => {
         <span class="dim" style="font-size:.75rem;margin-left:auto" id="fa-count">${sorted.length} players</span>
       </div>
       <div class="fa-list" id="fa-list-body">
-        ${_buildListHTML(sorted, canNom, auctionReady, statsYear)}
+        ${_buildListHTML(sorted, canNom, auctionReady, statsYear, _isCommish)}
       </div>
       ${_auctionEnabled ? `<div class="fa-status-legend">
         <span><em>🏷</em> = Nominate</span>
@@ -584,7 +587,7 @@ const DLRFreeAgents = (() => {
       </div>` : ""}`;
   }
 
-  function _buildListHTML(sorted, canNom, auctionReady, statsYear) {
+  function _buildListHTML(sorted, canNom, auctionReady, statsYear, isCommish) {
     if (!sorted.length) return `<div class="fa-empty">No players match the current filters.</div>`;
     return sorted.map((p, i) => {
       const color    = POS_COLOR[p.pos] || "#9ca3af";
@@ -596,7 +599,9 @@ const DLRFreeAgents = (() => {
       // Photo: use Sleeper ID for MFL/Yahoo players so photo actually loads
       const photoPid = p.photoPid || p.pid;
 
-      // Auction status column — compact letter badges (C/A/R) or nominate button
+      // Auction status column — compact letter badges (C/A/R) or nominate button.
+      // Commissioners always see the active button for available players so they
+      // can nominate on behalf of any team. The modal handles eligibility feedback.
       let auctionCol = "";
       if (_auctionEnabled) {
         if (p.isWon) {
@@ -605,10 +610,10 @@ const DLRFreeAgents = (() => {
           auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--active" title="Active bid in progress">A</span></div>`;
         } else if (p.isRostered) {
           auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--rostered" title="On a roster">R</span></div>`;
-        } else if (canNom) {
+        } else if (canNom || isCommish) {
           auctionCol = `<div class="fa-auction-col"><button class="fa-nom-btn btn-primary btn-sm"
             onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"
-            title="Nominate for auction">🏷</button></div>`;
+            title="${isCommish && !canNom ? "Nominate on behalf of a team" : "Nominate for auction"}">🏷</button></div>`;
         } else {
           auctionCol = `<div class="fa-auction-col"><button class="fa-nom-btn btn-secondary btn-sm" disabled style="opacity:.4"
             title="${auctionReady ? "Max nominations or cap reached" : "Loading…"}">🏷</button></div>`;
@@ -671,7 +676,7 @@ const DLRFreeAgents = (() => {
       )
       .slice(0, 100);
 
-    listEl.innerHTML  = _buildListHTML(sorted, canNom, auctionReady);
+    listEl.innerHTML  = _buildListHTML(sorted, canNom, auctionReady, null, _isCommish);
     if (countEl) countEl.textContent = `${sorted.length} players`;
   }
 

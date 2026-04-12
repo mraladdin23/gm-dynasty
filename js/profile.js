@@ -1694,7 +1694,8 @@ const Profile = (() => {
       const incPicks  = meta2.auctionIncludePicks || false;
       DLRFreeAgents.init(league.leagueId, leagueKey, auctionOn, incPicks,
         league.myRosterId || null, league.teamName || "My Team",
-        league.platform || "sleeper", league.leagueKey || leagueKey, league.season);
+        league.platform || "sleeper", league.leagueKey || leagueKey, league.season,
+        !!league.isCommissioner);
     }
     if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
     if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);

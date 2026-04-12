@@ -165,7 +165,19 @@ const DLRDraft = (() => {
       if (tr !== 0) return tr;
       return (a.start_time || 0) - (b.start_time || 0);
     });
-    _allDrafts = sorted;
+    // Filter out aborted drafts — a draft that shows as "complete" but has
+    // fewer picks than one full round was almost certainly started and then
+    // cancelled before anyone actually drafted. last_picked is the total number
+    // of picks made on the draft object.
+    const validDrafts = sorted.filter(d => {
+      if (d.status !== "complete") return true;  // keep in-progress / upcoming
+      const teams  = d.settings?.teams || 12;
+      const picked = d.last_picked || 0;
+      return picked >= teams;  // at least one full round completed
+    });
+    // If filtering removed everything, fall back to the full list so we still
+    // show something (e.g. a league that cancelled mid-round 1)
+    _allDrafts = validDrafts.length > 0 ? validDrafts : sorted;
 
     // Default: show the last draft in the sorted list (most likely the rookie
     // or most recent draft).  If _draftIndex is already set (user switched),
