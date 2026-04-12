@@ -24,7 +24,7 @@ const DLRAuction = (() => {
   let _players      = {};
   const DEFAULT_MIN_BID  = 100_000;   // $100K floor
   const DEFAULT_MIN_INC  = 100_000;   // $100K minimum increment
-  let _settings = { pauseStart:0, pauseEnd:8, maxNoms:2, bidDuration:8, maxRosterSize:30, minBid:100_000, minIncrement:100_000, forceFullRoster:false };
+  let _settings = { pauseStart:0, pauseEnd:8, maxNoms:2, bidDuration:8, maxRosterSize:30, minBid:100_000, minIncrement:100_000, forceFullRoster:false, scheduledEnd:null, nominationsClosed:false };
 
   // Dynamic getters so settings changes take effect immediately
   const MIN_BID = () => _settings.minBid     || DEFAULT_MIN_BID;
@@ -581,6 +581,15 @@ function _computeLeader(a) {
             ? `<span class="auc-pause-badge" style="background:rgba(0,212,255,.08);border-color:rgba(0,212,255,.25);color:#00d4ff">
                 📅 Starts ${new Date(_settings.scheduledStart).toLocaleDateString()} ${new Date(_settings.scheduledStart).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
                </span>` : ""}
+          ${_settings.nominationsClosed
+            ? `<span class="auc-pause-badge" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.35);color:#ef4444">🔒 Nominations Closed</span>`
+            : _settings.scheduledEnd && _settings.scheduledEnd > Date.now()
+              ? `<span class="auc-pause-badge" style="background:rgba(251,191,36,.08);border-color:rgba(251,191,36,.3);color:var(--color-gold)">
+                  🏁 Closes ${new Date(_settings.scheduledEnd).toLocaleDateString()} ${new Date(_settings.scheduledEnd).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+                 </span>`
+              : _settings.scheduledEnd && _settings.scheduledEnd <= Date.now()
+                ? `<span class="auc-pause-badge" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.35);color:#ef4444">🔒 Nominations Closed</span>`
+                : ""}
           <span class="auc-nom-info">Nominations: ${myNoms}/${maxNoms}</span>
           ${_isCommish ? `<button class="btn-primary btn-sm auc-quick-nom-btn" onclick="DLRAuction.openQuickNominate()" title="Nominate a player on behalf of any team">+ Nominate</button>` : ""}
         </div>
@@ -755,7 +764,9 @@ function _computeLeader(a) {
 
     // Check each blocker individually so we can give a specific reason
     let blockMsg = "";
-    if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
+    if (_settings.nominationsClosed || (_settings.scheduledEnd && _settings.scheduledEnd <= Date.now())) {
+      blockMsg = "Nominations are closed.";
+    } else if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
       blockMsg = "Auction hasn't started yet.";
     } else if (_myActiveNoms(rid) >= (_settings.maxNoms || 2)) {
       blockMsg = `At max nominations (${_settings.maxNoms || 2}).`;
@@ -931,7 +942,9 @@ function _computeLeader(a) {
     const team = _rosterData.find(r => Number(r.roster_id) === rid);
 
     let blockMsg = "";
-    if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
+    if (_settings.nominationsClosed || (_settings.scheduledEnd && _settings.scheduledEnd <= Date.now())) {
+      blockMsg = "Nominations are closed.";
+    } else if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
       blockMsg = "Auction hasn't started yet.";
     } else if (_myActiveNoms(rid) >= (_settings.maxNoms || 2)) {
       blockMsg = `At max nominations (${_settings.maxNoms || 2}).`;
@@ -1062,6 +1075,11 @@ function _computeLeader(a) {
     }
 
     // Hard check at submit time — catches stale UI where buttons weren't updated
+    if (_settings.nominationsClosed || (_settings.scheduledEnd && _settings.scheduledEnd <= Date.now())) {
+      showToast("Nominations are closed — no new players can be nominated.", "error");
+      document.getElementById("auc-nom-modal")?.remove();
+      return;
+    }
     if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
       const startStr = new Date(_settings.scheduledStart).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
       showToast(`Auction hasn't started yet. Opens ${startStr}.`, "error");
@@ -1556,7 +1574,25 @@ function _computeLeader(a) {
             Defaults to off.
           </span>
         </div>
+        <div class="form-group">
+          <label>Nomination End Date & Time</label>
+          <input type="datetime-local" id="auc-s-end" value="${toDatetimeLocal(s.scheduledEnd || 0)}"/>
+          <span class="field-hint">After this date and time, no new nominations can be made. Leave blank for no scheduled end. Active auctions already in progress continue to run.</span>
+        </div>
         <button class="btn-primary" onclick="DLRAuction.saveSettings()" style="margin-top:var(--space-4)">Save Settings</button>
+        <div style="margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--color-border)">
+          <div style="font-size:.82rem;font-weight:600;margin-bottom:var(--space-2)">Manual Close</div>
+          ${s.nominationsClosed
+            ? `<div style="display:flex;align-items:center;gap:var(--space-3)">
+                <span style="font-size:.8rem;color:#ef4444;font-weight:600">🔒 Nominations are closed</span>
+                <button class="btn-secondary btn-sm" onclick="DLRAuction.reopenNominations()">Reopen Nominations</button>
+               </div>`
+            : `<div style="display:flex;align-items:center;gap:var(--space-3)">
+                <span style="font-size:.8rem;color:var(--color-text-dim)">Nominations are open</span>
+                <button class="btn-secondary btn-sm" style="color:var(--color-red);border-color:var(--color-red)" onclick="DLRAuction.closeNominations()">Close Nominations Now</button>
+               </div>`}
+          <div style="font-size:.72rem;color:var(--color-text-dim);margin-top:var(--space-2)">Immediately blocks all new nominations. Active auctions continue until they expire.</div>
+        </div>
         ${s.scheduledStart ? `<div style="margin-top:var(--space-3);font-size:.8rem;color:var(--color-text-dim)">
           Auction scheduled to start: <strong style="color:var(--color-gold)">${new Date(s.scheduledStart).toLocaleString()}</strong>
         </div>` : ""}
@@ -1568,6 +1604,8 @@ function _computeLeader(a) {
     const scheduledStart = startInput ? new Date(startInput).getTime() : 0;
     const settings = {
       scheduledStart: scheduledStart || null,
+      scheduledEnd:   (() => { const v = document.getElementById("auc-s-end")?.value; return v ? new Date(v).getTime() : null; })(),
+      nominationsClosed: _settings.nominationsClosed,
       bidDuration:   parseInt(document.getElementById("auc-s-duration")?.value)    || 8,
       pauseStart:    parseInt(document.getElementById("auc-s-pstart")?.value)      ?? 0,
       pauseEnd:      parseInt(document.getElementById("auc-s-pend")?.value)        ?? 8,
@@ -2081,6 +2119,22 @@ function _computeLeader(a) {
     }
   }
 
+  async function closeNominations() {
+    if (!_isCommish || !confirm("Close nominations? No new players can be nominated until you reopen. Active auctions continue.")) return;
+    await _settingsRef().update({ nominationsClosed: true });
+    _settings.nominationsClosed = true;
+    showToast("Nominations closed 🔒");
+    _render();
+  }
+
+  async function reopenNominations() {
+    if (!_isCommish || !confirm("Reopen nominations?")) return;
+    await _settingsRef().update({ nominationsClosed: false });
+    _settings.nominationsClosed = false;
+    showToast("Nominations reopened ✓");
+    _render();
+  }
+
   async function claimAuction(auctionId, playerName) {
     if (!_isCommish || !confirm(`Claim ${playerName} for winning bidder?`)) return;
     const auction = _auctions.find(a => a.id === auctionId);
@@ -2158,6 +2212,9 @@ function _computeLeader(a) {
     if (!rid) return false;
     // Block if auction hasn't started yet
     if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) return false;
+    // Block if nominations are manually closed or past the scheduled end date
+    if (_settings.nominationsClosed) return false;
+    if (_settings.scheduledEnd && _settings.scheduledEnd <= Date.now()) return false;
     // Nom count check against this specific team
     if (_myActiveNoms(rid) >= (_settings.maxNoms || 2)) return false;
     // Roster space check for this specific team
@@ -2218,6 +2275,7 @@ function _computeLeader(a) {
     openBidModal, _confirmBid, placeBid,
     showBidHistory, _deleteLogEntry,
     claimAuction, cancelAuction, passAuction, isRostered,
+    closeNominations, reopenNominations,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
     canNominate, canNominateFor, isReady, getActiveNominations
