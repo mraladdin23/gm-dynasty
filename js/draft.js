@@ -24,6 +24,10 @@ const DLRDraft = (() => {
   // MFL data cache for re-renders without refetch
   let _mflCache   = null;
 
+  // Multiple-draft support (Sleeper only)
+  let _allDrafts  = [];   // all drafts returned for this league/season
+  let _draftIndex = 0;    // which draft is currently displayed
+
   const POS_COLOR = {
     QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff",
     TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af"
@@ -36,10 +40,12 @@ const DLRDraft = (() => {
     _season      = season   || new Date().getFullYear().toString();
     _leagueKey   = leagueKey || null;
     _myRosterId  = myRosterId || null;
-    _draftData = null;
-    _viewingId = null;
-    _viewMode  = "draft";
-    _seasons   = [];
+    _draftData  = null;
+    _viewingId  = null;
+    _viewMode   = "draft";
+    _seasons    = [];
+    _allDrafts  = [];
+    _draftIndex = 0;
     _initToken++;
     const token = _initToken;
 
@@ -87,6 +93,8 @@ const DLRDraft = (() => {
     _viewMode    = "draft";
     _layoutMode  = "grid";
     _auctionSort = "salary";
+    _allDrafts   = [];
+    _draftIndex  = 0;
     _initToken++;
   }
 
@@ -135,7 +143,7 @@ const DLRDraft = (() => {
   async function _loadDraft(leagueId, token) {
     const el = document.getElementById("dtab-draft");
 
-    // Get all drafts for this league
+    // Get all drafts for this league/season
     const drafts = await _fetchDrafts(leagueId);
     if (token !== _initToken) return;
 
@@ -148,13 +156,40 @@ const DLRDraft = (() => {
       return;
     }
 
-    // Prefer rookie/linear over snake/startup for dynasty leagues
-    const draft = drafts.find(d => d.type === "rookie" || d.type === "linear")
-               || drafts.find(d => d.type !== "startup")
-               || drafts[drafts.length - 1];
+    // Sort drafts: startup first, then by start_time ascending so the most
+    // recent (rookie) draft shows at the end — user can navigate forward in time.
+    const sorted = [...drafts].sort((a, b) => {
+      // startup/snake before linear/rookie
+      const typeRank = t => t === "snake" || t === "startup" ? 0 : 1;
+      const tr = typeRank(a.type) - typeRank(b.type);
+      if (tr !== 0) return tr;
+      return (a.start_time || 0) - (b.start_time || 0);
+    });
+    _allDrafts = sorted;
+
+    // Default: show the last draft in the sorted list (most likely the rookie
+    // or most recent draft).  If _draftIndex is already set (user switched),
+    // respect it — but clamp to valid range.
+    if (_draftIndex >= _allDrafts.length) _draftIndex = _allDrafts.length - 1;
+    // On first load, default to rookie draft (last) so dynasty users see the
+    // more interesting data first.  Startup with kicker placeholders comes second.
+    // If there's only one draft, index 0 is fine.
+    if (_allDrafts.length > 1 && _draftIndex === 0) {
+      _draftIndex = _allDrafts.length - 1;
+    }
+
+    await _loadDraftAtIndex(leagueId, _draftIndex, token);
+  }
+
+  // Load and render a specific draft by index in _allDrafts
+  async function _loadDraftAtIndex(leagueId, index, token) {
+    const el = document.getElementById("dtab-draft");
+    const draft = _allDrafts[index];
+    if (!draft) return;
+
+    if (el) el.innerHTML = _loadingHTML("Loading draft…");
 
     // Fetch picks + roster/user data + traded picks for this specific draft
-    // Use /v1/draft/{draft_id} for authoritative slot_to_roster_id and draft_order
     const [freshDraft, picks, rosters, users, tradedPicks] = await Promise.all([
       _fetchDraftById(draft.draft_id),
       _fetchPicks(draft.draft_id),
@@ -164,7 +199,7 @@ const DLRDraft = (() => {
     ]);
     if (token !== _initToken) return;
 
-    // Merge fresh draft data (slot_to_roster_id may be more up to date)
+    // Merge fresh draft data
     const draftObj = { ...draft, ...freshDraft };
 
     // Build maps
@@ -173,20 +208,56 @@ const DLRDraft = (() => {
     rosters.forEach(r => {
       const u = userMap[r.owner_id] || {};
       rosterMap[r.roster_id] = {
-        teamName:    u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
-        username:    u.username || "",
-        avatar:      u.avatar || null,
-        roster_id:   r.roster_id,
-        owner_id:    r.owner_id
+        teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
+        username:  u.username || "",
+        avatar:    u.avatar || null,
+        roster_id: r.roster_id,
+        owner_id:  r.owner_id
       };
     });
 
-    // Get players from IndexedDB-backed cache
     const players = DLRPlayers.all();
-
     _draftData = { draft: draftObj, picks, rosterMap, players, tradedPicks: tradedPicks || [] };
     if (token !== _initToken) return;
     _render(el);
+  }
+
+  // Public: user tapped a draft selector pill
+  function switchDraft(index) {
+    _draftIndex = index;
+    _viewMode   = "draft";  // reset to draft view when switching
+    const token = _initToken;
+    _loadDraftAtIndex(_leagueId, index, token);
+  }
+
+  // ── Draft label helper ────────────────────────────────────
+  // Returns a short human-readable label for a Sleeper draft object
+  function _draftLabel(d, index) {
+    const typeLabel = {
+      snake:   "Startup",
+      startup: "Startup",
+      linear:  "Rookie",
+      auction: "Auction",
+    }[d.type] || (d.type ? d.type.charAt(0).toUpperCase() + d.type.slice(1) : `Draft ${index + 1}`);
+
+    const statusIcon = { complete: "✅", drafting: "🔴", pre_draft: "📅" }[d.status] || "";
+    const season = d.season || "";
+    return `${statusIcon} ${season} ${typeLabel}`.trim();
+  }
+
+  // ── Draft selector bar (rendered inside _render for Sleeper) ─
+  function _renderDraftSelectorBar() {
+    if (_allDrafts.length <= 1) return "";
+    return `
+      <div class="draft-selector-bar">
+        <span class="draft-selector-label dim">Draft:</span>
+        ${_allDrafts.map((d, i) => `
+          <button class="draft-selector-pill ${i === _draftIndex ? "draft-selector-pill--active" : ""}"
+            onclick="DLRDraft.switchDraft(${i})"
+            title="${_esc(d.type || "")} · ${d.settings?.rounds || "?"} rounds">
+            ${_esc(_draftLabel(d, i))}
+          </button>`).join("")}
+      </div>`;
   }
 
   async function _fetchDraftById(draftId) {
@@ -274,6 +345,7 @@ const DLRDraft = (() => {
     const hasSlotOrder = draft.slot_to_roster_id && Object.keys(draft.slot_to_roster_id).length > 0;
     if (draftStatus === "pre_draft" && !hasSlotOrder) {
       if (el) el.innerHTML = `
+        ${_renderDraftSelectorBar()}
         <div class="draft-header-bar">
           <div class="draft-meta">
             <span class="draft-type-label">${draftTypeLabel}</span>
@@ -353,6 +425,7 @@ const DLRDraft = (() => {
     }
 
     el.innerHTML = `
+      ${_renderDraftSelectorBar()}
       <div class="draft-header-bar">
         <div class="draft-meta">
           <span class="draft-type-label">${draftTypeLabel}</span>
@@ -789,6 +862,6 @@ const DLRDraft = (() => {
     return String(s || "").replace(/'/g,"\\'").replace(/"/g,"&quot;");
   }
 
-  return { init, reset, switchSeason, setViewMode, setLayoutMode, setAuctionSort };
+  return { init, reset, switchSeason, switchDraft, setViewMode, setLayoutMode, setAuctionSort };
 
 })();

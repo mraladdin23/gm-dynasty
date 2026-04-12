@@ -575,7 +575,13 @@ const DLRFreeAgents = (() => {
       </div>
       <div class="fa-list" id="fa-list-body">
         ${_buildListHTML(sorted, canNom, auctionReady, statsYear)}
-      </div>`;
+      </div>
+      ${_auctionEnabled ? `<div class="fa-status-legend">
+        <span><em>🏷</em> = Nominate</span>
+        <span><em class="fa-status-badge fa-status-badge--rostered" style="font-style:normal;display:inline-flex;width:18px;height:18px;font-size:.65rem">R</em> Rostered</span>
+        <span><em class="fa-status-badge fa-status-badge--active" style="font-style:normal;display:inline-flex;width:18px;height:18px;font-size:.65rem">A</em> Active Bid</span>
+        <span><em class="fa-status-badge fa-status-badge--claimed" style="font-style:normal;display:inline-flex;width:18px;height:18px;font-size:.65rem">C</em> Claimed</span>
+      </div>` : ""}`;
   }
 
   function _buildListHTML(sorted, canNom, auctionReady, statsYear) {
@@ -590,15 +596,15 @@ const DLRFreeAgents = (() => {
       // Photo: use Sleeper ID for MFL/Yahoo players so photo actually loads
       const photoPid = p.photoPid || p.pid;
 
-      // Auction status column — fixed width, consistent font size
+      // Auction status column — compact letter badges (C/A/R) or nominate button
       let auctionCol = "";
       if (_auctionEnabled) {
         if (p.isWon) {
-          auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--claimed">Claimed</span></div>`;
+          auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--claimed" title="Claimed this auction">C</span></div>`;
         } else if (p.activeNom) {
-          auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--active">Active Bid</span></div>`;
+          auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--active" title="Active bid in progress">A</span></div>`;
         } else if (p.isRostered) {
-          auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--rostered">Rostered</span></div>`;
+          auctionCol = `<div class="fa-auction-col"><span class="fa-status-badge fa-status-badge--rostered" title="On a roster">R</span></div>`;
         } else if (canNom) {
           auctionCol = `<div class="fa-auction-col"><button class="fa-nom-btn btn-primary btn-sm"
             onclick="event.stopPropagation();DLRAuction.openNominate('${p.pid}','${_escAttr(p.name)}','${p.pos}','${p.team}')"

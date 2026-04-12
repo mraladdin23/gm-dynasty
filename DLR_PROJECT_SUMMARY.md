@@ -67,7 +67,7 @@ GitHub Pages (dynastylockerroom.com)
 | `playerreport.js` | Cross-league player report panel |
 | `chat.js` | League chat (Firebase Realtime DB) |
 | `hallway.js` | The Hallway social feature |
-| `trophy-room.js` | Trophy room display |
+| `trophy-room.js` — Trophy room display |
 | `leaguegroups.js` | League grouping/commissioner tools |
 | `manager-search.js` | Cross-league manager search |
 | `config.js` | Firebase config (in `firebase/config.js`) |
@@ -80,9 +80,13 @@ GitHub Pages (dynastylockerroom.com)
 All tabs functional: overview, standings, roster, draft, transactions, players, analytics, salary cap, auction.
 
 ### MFL ⚠️ Mostly working, some gaps
-- **Working:** Import (email-based), league cards, overview (live fetch), standings, roster (Sleeper photo mapping), transactions (normalized to Sleeper format), draft board (grid + list), auction/salary board, players tab (Sleeper bio + MFL pts), salary cap
-- **Known issues:** Matchups tab (network-dependent), playoffs/bracket not built, analytics tab not connected
-- **Identity matching:** Uses email exact match → username prefix → `owner_name` → `is_owner` → commish fallback. Supports multiple historical emails (`mflAdditionalEmails` array stored in Firebase).
+- **Working:** Import (franchise_id based), league cards, overview (live fetch), standings, roster (Sleeper photo mapping), transactions (normalized to Sleeper format), draft board (grid + list), auction/salary board, players tab (Sleeper bio + MFL pts), salary cap
+- **Known issues:**
+  - Some worker bundle endpoints may be broken causing incomplete league downloads — needs investigation
+  - Matchups tab uses two endpoints (`TYPE=schedule` + `TYPE=scoreboard` fallback) — needs to be simplified to a single reliable endpoint
+  - Playoffs/bracket tab not built
+  - Analytics tab not connected
+- **Identity matching:** Uses `franchise_id` + `league_id` from `TYPE=myleagues` API response — no email matching. `franchise_id` is the authoritative 4-digit zero-padded user↔franchise link (e.g. `"0035"`).
 
 ### Yahoo ⚠️ Partial
 - OAuth flow implemented in worker
@@ -114,10 +118,23 @@ gmd/
 ```js
 {
   linked: true,
-  mflEmail: "user@email.com",        // primary email (new)
-  mflUsername: "user",               // username prefix (legacy compat)
-  mflAdditionalEmails: ["old@email.com"]  // historical emails for matching
+  mflEmail: "user@email.com",   // primary email used for login
+  mflUsername: "user",          // username prefix (derived from email)
 }
+// NOTE: mflAdditionalEmails has been removed — identity is now franchise_id based, not email based
+```
+
+### MFL league key structure
+```
+League key in Firebase:   mfl_{season}_{leagueId}     e.g. "mfl_2024_22796"
+Dynasty chain key:        mfl__{leagueId}              e.g. "mfl__22796"
+  └── Same league_id across all years chains seasons together automatically.
+      This replaced the old normalized-league-name approach.
+
+myRosterId:               franchise_id from myleagues  e.g. "0035"
+  └── This is the 4-digit zero-padded franchise ID — same as the `id` field
+      on every franchise/roster/standings object in all bundle API calls.
+      Set once at import from myleagues; never re-derived from email matching.
 ```
 
 ### Auction bid record shape
@@ -169,6 +186,22 @@ gmd/
 
 ---
 
+## MFL API — Known Endpoint Issues (Next Session Priority)
+
+The Cloudflare Worker's `/mfl/bundle` endpoint fetches ~11 sub-endpoints in parallel via `Promise.allSettled`. Some of these are suspected broken or returning errors that cause the overall import to fail silently (leagues skipped). The matchups situation specifically needs fixing:
+
+- **Current approach (broken/fragile):** `normalizeMatchups()` in `mfl.js` tries `TYPE=schedule` first (all weeks, home/away), then falls back to `TYPE=scoreboard` (current week only). Both are fetched in every bundle regardless of which is needed.
+- **Goal:** Identify which single matchup endpoint is most reliable and simplify to that one. The MFL API has `TYPE=schedule` (full season schedule with scores) and `TYPE=scoreboard` (current week scoreboard). Determine which one consistently returns data and remove the other from the bundle fetch.
+- **Also investigate:** Which of the ~11 parallel fetches in `mflBundle()` in `worker.js` are causing failures. Candidates: `TYPE=schedule`, `TYPE=auctionResults`, `TYPE=salaries`. Consider making non-essential endpoints optional/lazy rather than blocking the whole bundle.
+
+Worker endpoint list for reference (in `worker.js` → `mflBundle()`):
+```js
+league, rosters, standings, schedule, matchups (scoreboard),
+players, draft, auctionResults, salaries, transactions, playerScores
+```
+
+---
+
 ## Network / Infrastructure Notes
 
 - **Home router** blocks `workers.dev` and `firebaseio.com` WebSocket — use mobile data or disable router security for MFL/Yahoo testing
@@ -178,7 +211,7 @@ gmd/
 
 ---
 
-## Completed This Session (April 2026)
+## Completed — April 10, 2026 Session
 
 1. **Mobile auth fix** — `getIdToken(false)` + timeouts everywhere Firebase is called
 2. **MFL player matching** — Skill positions only (QB/RB/WR/TE), raw name format for Sleeper lookup
@@ -193,20 +226,32 @@ gmd/
 11. **Players tab** — Auction badge as fixed column, year selector (2020–current), MFL Sleeper bio
 12. **Transactions** — `status=complete` filter (hides failed waivers)
 13. **Salary IR/taxi badges** — Removed slot badges, added contextual taxi promotion warnings
-14. **MFL email identity** — Stores `mflEmail`, multi-email support (`mflAdditionalEmails`), resync banner for username-only users
+14. **MFL email identity** — Stored `mflEmail`, resync banner for username-only users
 15. **DNS rollback** — Reverted from Cloudflare to GoDaddy nameservers (Cloudflare proxy broke Firebase mobile)
+
+## Completed — April 12, 2026 Session
+
+16. **MFL identity overhaul** — Removed all email-based franchise matching. Identity is now derived entirely from `franchise_id` + `league_id` in the `TYPE=myleagues` API response:
+    - `franchise_id` → stored as `myRosterId` (4-digit padded, e.g. `"0035"`) — used to look up roster, standings, team name in every bundle
+    - `league_id` → dynasty chain key changed from normalized league name (`mfl__leaguename`) to `mfl__<league_id>` — stable and collision-free across all seasons
+    - `teamName` now read from `bundle.league.league.franchises.franchise[id].name` — the authoritative source
+    - `syncMFLTeams` simplified: uses stored `myRosterId`, refreshes teamName + record from bundle, no email matching
+    - `_resolveMFLIdentities` function deleted (dead code)
+    - `_renderOverview` live-fetch simplified: uses stored `myRosterId` only
+17. **Removed email matching infrastructure** — deleted `buildEmailList()` and `findMyFranchise()` from `mfl.js` and their exports; removed `mflAdditionalEmails` from Firebase storage, all UI inputs, and all app.js handlers
+18. **UI cleanup** — Removed additional emails input from onboarding MFL card and edit profile modal; removed "Save Emails Only" button; simplified `linkMFL` to email + password only; updated field hints and resync banner text
 
 ---
 
 ## Roadmap — What's Left
 
 ### High Priority
-- [ ] **MFL team matching** — Verify email-based matching correctly resolves all leagues after resync
-- [ ] **MFL matchups tab** — Currently not rendering (network-dependent)
+- [ ] **MFL bundle endpoint audit** — Identify which parallel fetches in `worker.js → mflBundle()` are failing and causing leagues to be skipped on import. Make non-essential endpoints (auctionResults, salaries, schedule) non-blocking.
+- [ ] **MFL matchups endpoint fix** — Simplify `normalizeMatchups()` in `mfl.js` to use a single reliable endpoint instead of `TYPE=schedule` + `TYPE=scoreboard` fallback. Determine which one consistently returns data.
 - [ ] **MFL analytics tab** — Power rankings and points leaders not connected
 - [ ] **Yahoo end-to-end test** — OAuth requires non-blocked network; test all tabs once available
 - [ ] **Career stats accuracy** — Verify cross-platform totals are correct
-- [ ] **MFL historical seasons import verification** — Confirm multi-year dynasty chaining works
+- [ ] **MFL historical seasons import verification** — Confirm multi-year dynasty chaining works with new `mfl__<league_id>` key
 
 ### Medium Priority
 - [ ] **Playoffs / bracket tab** — Not built for any platform
@@ -227,7 +272,7 @@ gmd/
 ### What to paste at the start of a new chat:
 1. **This document** — paste the full text or attach as a file
 2. **The specific file(s)** you want to work on — Claude can't access GitHub directly but can read files you paste or upload
-3. **A brief description of what you want to do** — e.g. "Fix MFL matchups tab" or "Build the playoffs bracket"
+3. **A brief description of what you want to do** — e.g. "Fix MFL bundle endpoints" or "Fix MFL matchups tab"
 
 ### How to set context efficiently:
 ```
@@ -235,20 +280,15 @@ I'm working on Dynasty Locker Room (DLR), a fantasy football SPA at dynastylocke
 Repo: mraladdin23/gm-dynasty (GitHub Pages).
 Stack: Vanilla JS, Firebase Realtime DB, Cloudflare Worker (mfl-proxy.mraladdin23.workers.dev).
 Platforms: Sleeper (fully working), MFL (mostly working), Yahoo (partial).
-[Paste or attach DLR_PROJECT_SUMMARY.md]
+[Attach DLR_PROJECT_SUMMARY.md]
 Today I want to work on: [specific task]
-Here is the relevant file: [paste file content]
+Here is the relevant file: [attach file]
 ```
 
 ### What NOT to do:
 - Don't paste 10 files at once — Claude works best with 1-3 files at a time
 - Don't ask Claude to "continue from where we left off" without context — it won't know
 - Do paste the specific file you want changed — Claude can't pull from GitHub
-
-### Search tips if you need to look something up:
-- Use `conversation_search` with queries like `"mfl transactions"`, `"auction proxy"`, `"salary cap taxi"`
-- The transcript journal is at `/mnt/transcripts/journal.txt`
-- All deployed files are at `/mnt/user-data/outputs/`
 
 ---
 
@@ -260,7 +300,7 @@ Here is the relevant file: [paste file content]
 - Claude has a hard context limit; very long chats eventually get compacted (you'll see a summary at the top)
 
 **Best practices for new chats:**
-1. **Start a new chat for each distinct feature** — e.g. one chat for "fix MFL matchups", another for "build playoffs bracket"
+1. **Start a new chat for each distinct feature** — e.g. one chat for "fix MFL bundle endpoints", another for "fix matchups tab"
 2. **Keep file pastes focused** — only paste the file(s) directly relevant to the task
 3. **Save your work frequently** — after each fix, commit to git immediately so you never lose progress
 4. **Use this summary doc** — paste just the relevant sections, not the whole thing, when context allows
@@ -272,5 +312,5 @@ Here is the relevant file: [paste file content]
 
 ---
 
-*Document generated: April 10, 2026*
-*Current deployed versions: CSS v=19, JS v=19 (app.js, profile.js)*
+*Document updated: April 12, 2026*
+*Current deployed versions: CSS v=19, JS files updated April 12 (profile.js, mfl.js, app.js, index.html)*

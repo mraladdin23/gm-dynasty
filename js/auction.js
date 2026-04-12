@@ -24,7 +24,7 @@ const DLRAuction = (() => {
   let _players      = {};
   const DEFAULT_MIN_BID  = 100_000;   // $100K floor
   const DEFAULT_MIN_INC  = 100_000;   // $100K minimum increment
-  let _settings = { pauseStart:0, pauseEnd:8, maxNoms:2, bidDuration:8, maxRosterSize:30, minBid:100_000, minIncrement:100_000 };
+  let _settings = { pauseStart:0, pauseEnd:8, maxNoms:2, bidDuration:8, maxRosterSize:30, minBid:100_000, minIncrement:100_000, forceFullRoster:false };
 
   // Dynamic getters so settings changes take effect immediately
   const MIN_BID = () => _settings.minBid     || DEFAULT_MIN_BID;
@@ -426,38 +426,37 @@ function _computeLeader(a) {
     return mine.length ? Math.max(...mine.map(b => b.maxBid)) : 0;
   }
 
-  function _myActiveNoms() {
+  function _myActiveNoms(rosterId) {
     const now = Date.now();
-    if (!_myRosterId) return 0;
-    const myId = Number(_myRosterId);
-    const active = _auctions.filter(a =>
+    const rid = rosterId != null ? Number(rosterId) : Number(_myRosterId);
+    if (!rid) return 0;
+    return _auctions.filter(a =>
       !a.cancelled && !a.processed && a.expiresAt > now &&
-      Number(a.nominatedBy) === myId
-    );
-    return active.length;
+      Number(a.nominatedBy) === rid
+    ).length;
   }
 
-  // Returns how many open active roster spots the current user has,
+  // Returns how many open active roster spots a team has,
   // accounting for current active roster size AND auctions they are currently winning.
   // IR and Taxi don't count toward the active roster limit.
-  function _myOpenSpots() {
-    if (!_myRosterId) return 0;
+  // Accepts optional rosterId — defaults to _myRosterId.
+  function _myOpenSpots(rosterId) {
+    const rid = rosterId != null ? Number(rosterId) : Number(_myRosterId);
+    if (!rid) return 0;
     const maxRoster = _settings.maxRosterSize || 25;
-    const myTeam    = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+    const myTeam    = _rosterData.find(r => Number(r.roster_id) === rid);
     if (!myTeam) return 0;
 
-    // Active roster = players minus IR and taxi
     const irSet   = new Set(myTeam.reserve || []);
     const taxiSet = new Set(myTeam.taxi    || []);
     const activeRosterCount = (myTeam.players || [])
       .filter(pid => !irSet.has(pid) && !taxiSet.has(pid)).length;
 
-    // Auctions currently winning (would add to active roster if won)
     const now = Date.now();
     const winningCount = _auctions.filter(a => {
       if (a.cancelled || a.processed || a.expiresAt <= now) return false;
       const leader = _computeLeader(a);
-      return Number(leader.rosterId) === Number(_myRosterId);
+      return Number(leader.rosterId) === rid;
     }).length;
 
     return Math.max(0, maxRoster - activeRosterCount - winningCount);
@@ -583,6 +582,7 @@ function _computeLeader(a) {
                 📅 Starts ${new Date(_settings.scheduledStart).toLocaleDateString()} ${new Date(_settings.scheduledStart).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
                </span>` : ""}
           <span class="auc-nom-info">Nominations: ${myNoms}/${maxNoms}</span>
+          ${_isCommish ? `<button class="btn-primary btn-sm auc-quick-nom-btn" onclick="DLRAuction.openQuickNominate()" title="Nominate a player on behalf of any team">+ Nominate</button>` : ""}
         </div>
       </div>
       <div id="auc-content"></div>`;
@@ -625,6 +625,7 @@ function _computeLeader(a) {
         <div style="font-size:2.5rem;margin-bottom:var(--space-3)">🏷</div>
         <div style="font-weight:700;margin-bottom:var(--space-2)">No active auctions</div>
         <div class="dim" style="font-size:.85rem">Go to Players to nominate a player.</div>
+        ${_isCommish ? `<button class="btn-primary btn-sm" style="margin-top:var(--space-3)" onclick="DLRAuction.openQuickNominate()">+ Nominate a Player</button>` : ""}
       </div>`;
       return;
     }
@@ -676,9 +677,7 @@ function _computeLeader(a) {
             if (noSpots) return `<button class="btn-secondary btn-sm" disabled title="Roster full" style="opacity:.4">Bid</button>`;
             return `<button class="btn-primary btn-sm" onclick="DLRAuction.openBidModal('${a.id}','${_escA(name)}','${_escA(leader.displayBid)}','${_escA(myBid)}')">Bid</button>`;
           })()}
-          ${_myHasPassed(a)
-            ? `<span class="auc-passed-badge">✓ Passed</span>`
-            : `<button class="auc-pass-btn btn-secondary btn-sm" onclick="DLRAuction.passAuction('${a.id}','${_escA(name)}')">Pass</button>`}
+          <!-- Pass button removed — use Bid or let auction expire -->
           ${_isCommish ? `
             <button class="btn-secondary btn-sm" onclick="DLRAuction.claimAuction('${a.id}','${_escA(name)}')">✓</button>
             <button class="btn-secondary btn-sm" style="color:var(--color-red)" onclick="DLRAuction.cancelAuction('${a.id}','${_escA(name)}')">✕</button>` : ""}
@@ -693,6 +692,231 @@ function _computeLeader(a) {
 
   function setFaOnly()        {} // no-op
   function setWatchlistOnly() {} // no-op
+
+    // ── Quick Nominate modal (commissioner shortcut from Live tab) ──────
+  // Opens a search + team-select modal. Validates the selected team's eligibility
+  // live as the commish changes the dropdown, so rules are enforced for that team.
+  function openQuickNominate(preselectedRosterId) {
+    if (!_isCommish) return;
+    document.getElementById("auc-quick-nom-modal")?.remove();
+
+    const modal = document.createElement("div");
+    modal.id = "auc-quick-nom-modal";
+    modal.className = "modal-overlay";
+    modal.style.zIndex = "848";
+    modal.innerHTML = `
+      <div class="modal-box modal-box--sm">
+        <div class="modal-header">
+          <h3>🏷 Quick Nominate</h3>
+          <button class="modal-close" onclick="document.getElementById('auc-quick-nom-modal').remove()">✕</button>
+        </div>
+        <div class="modal-body" style="padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="form-group" style="margin:0">
+            <label>Nominating Team</label>
+            <select id="auc-qn-team" style="width:100%" onchange="DLRAuction._qnTeamChanged()">
+              ${_rosterData.map(t =>
+                `<option value="${t.roster_id}" ${Number(t.roster_id) === Number(preselectedRosterId || _myRosterId) ? "selected" : ""}>${_esc(t.teamName)}</option>`
+              ).join("")}
+            </select>
+            <div id="auc-qn-team-status" style="font-size:.75rem;margin-top:4px"></div>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Search Player</label>
+            <input type="text" id="auc-qn-search" class="form-input" placeholder="Type a name…" autocomplete="off"
+              style="width:100%" oninput="DLRAuction._qnSearch(this.value)"/>
+          </div>
+          <div id="auc-qn-results" style="max-height:220px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius-sm);display:none"></div>
+          <div id="auc-qn-selected" style="display:none;background:rgba(255,255,255,.04);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3)"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="document.getElementById('auc-quick-nom-modal').remove()">Cancel</button>
+          <button class="btn-primary" id="auc-qn-proceed" disabled onclick="DLRAuction._qnProceed()">Next →</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+    // Run initial team status check after render
+    setTimeout(() => {
+      DLRAuction._qnTeamChanged();
+      document.getElementById("auc-qn-search")?.focus();
+    }, 50);
+  }
+
+  // Called when the team dropdown changes — validates that team's eligibility
+  // and shows a status line so the commish knows why they can't proceed.
+  function _qnTeamChanged() {
+    const teamEl     = document.getElementById("auc-qn-team");
+    const statusEl   = document.getElementById("auc-qn-team-status");
+    const proceedBtn = document.getElementById("auc-qn-proceed");
+    if (!teamEl || !statusEl) return;
+
+    const rid = parseInt(teamEl.value);
+    const team = _rosterData.find(r => Number(r.roster_id) === rid);
+
+    // Check each blocker individually so we can give a specific reason
+    let blockMsg = "";
+    if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) {
+      blockMsg = "Auction hasn't started yet.";
+    } else if (_myActiveNoms(rid) >= (_settings.maxNoms || 2)) {
+      blockMsg = `At max nominations (${_settings.maxNoms || 2}).`;
+    } else if (_myOpenSpots(rid) <= 0) {
+      blockMsg = "No open roster spots.";
+    } else if (typeof DLRSalaryCap !== "undefined") {
+      const capData = DLRSalaryCap.getCapData?.();
+      if (capData && team) {
+        const d = capData[team.username] || capData[team.ownerId] || capData[String(team.ownerId)];
+        if (d) {
+          const now    = Date.now();
+          const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
+          const committed = active.reduce((sum, a) => {
+            const leader = _computeLeader(a);
+            if (Number(leader.rosterId) !== rid) return sum;
+            return sum + (Number(a.proxies?.[String(rid)]) || 0);
+          }, 0);
+          if ((d.remaining - committed) < MIN_BID()) {
+            blockMsg = `Insufficient cap (${_fmtSal(Math.max(0, d.remaining - committed))} available).`;
+          }
+        }
+      }
+    }
+
+    if (blockMsg) {
+      statusEl.innerHTML = `<span style="color:var(--color-red)">⚠ ${_esc(blockMsg)} Cannot nominate for this team.</span>`;
+      // Disable proceed even if a player was already selected
+      const modal = document.getElementById("auc-quick-nom-modal");
+      if (modal) modal._teamBlocked = true;
+      if (proceedBtn) proceedBtn.disabled = true;
+    } else {
+      statusEl.innerHTML = `<span style="color:var(--color-green)">✓ Eligible to nominate.</span>`;
+      const modal = document.getElementById("auc-quick-nom-modal");
+      if (modal) {
+        modal._teamBlocked = false;
+        // Re-enable proceed only if a player is also selected
+        if (proceedBtn) proceedBtn.disabled = !modal._selectedPid;
+      }
+    }
+  }
+
+  // Live player search inside quick nominate modal
+  function _qnSearch(query) {
+    const resultsEl  = document.getElementById("auc-qn-results");
+    const selectedEl = document.getElementById("auc-qn-selected");
+    const proceedBtn = document.getElementById("auc-qn-proceed");
+    const modal      = document.getElementById("auc-quick-nom-modal");
+    if (!resultsEl) return;
+
+    const q = (query || "").toLowerCase().trim();
+    if (q.length < 2) {
+      resultsEl.style.display = "none";
+      resultsEl.innerHTML = "";
+      return;
+    }
+
+    const rostered  = _rosteredSet();
+    const nominated = _alreadyNominated();
+    const SKILL     = ["QB","RB","WR","TE","K"];
+
+    const matches = Object.entries(_players)
+      .filter(([pid, p]) => {
+        const pos = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
+        if (!SKILL.includes(pos)) return false;
+        const fullName = `${p.first_name || ""} ${p.last_name || ""}`.toLowerCase();
+        return fullName.includes(q);
+      })
+      .slice(0, 12)
+      .map(([pid, p]) => {
+        const pos    = (p.fantasy_positions?.[0] || p.position || "?").toUpperCase();
+        const color  = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+        const name   = `${p.first_name} ${p.last_name}`;
+        const onRoster = rostered.has(pid);
+        const active = nominated.has(pid);
+        const dimmed = onRoster || active;
+        const badge  = onRoster ? ` · <span style="color:var(--color-text-dim)">Rostered</span>`
+                     : active   ? ` · <span style="color:var(--color-gold)">Active Bid</span>`
+                     : "";
+        return `
+          <div class="auc-qn-result"
+            onclick="${dimmed ? "" : `DLRAuction._qnSelect('${pid}','${_escA(name)}','${pos}','${_escA(p.team||"FA")}')`}"
+            style="padding:8px 10px;cursor:${dimmed ? "default" : "pointer"};display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--color-border);${dimmed ? "opacity:.4" : ""}">
+            <span style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:4px;padding:1px 5px;font-size:.7rem;font-weight:700;flex-shrink:0">${pos}</span>
+            <span style="flex:1;font-size:.85rem">${_esc(name)}${badge}</span>
+            <span style="font-size:.72rem;color:var(--color-text-dim);flex-shrink:0">${_esc(p.team||"FA")}</span>
+          </div>`;
+      });
+
+    resultsEl.innerHTML = matches.length
+      ? matches.join("")
+      : `<div style="padding:10px;font-size:.82rem;color:var(--color-text-dim)">No players found.</div>`;
+    resultsEl.style.display = "";
+
+    // Clear any prior selection when user types again
+    if (selectedEl) selectedEl.style.display = "none";
+    if (proceedBtn) proceedBtn.disabled = true;
+    if (modal) modal._selectedPid = null;
+  }
+
+  function _qnSelect(pid, name, pos, nflTeam) {
+    const modal      = document.getElementById("auc-quick-nom-modal");
+    const resultsEl  = document.getElementById("auc-qn-results");
+    const selectedEl = document.getElementById("auc-qn-selected");
+    const proceedBtn = document.getElementById("auc-qn-proceed");
+    if (!modal || !selectedEl || !proceedBtn) return;
+
+    modal._selectedPid  = pid;
+    modal._selectedName = name;
+    modal._selectedPos  = pos;
+    modal._selectedTeam = nflTeam;
+
+    const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+    selectedEl.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px">
+        <img src="https://sleepercdn.com/content/nfl/players/${pid}.jpg"
+          onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0"/>
+        <span style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:4px;padding:1px 5px;font-size:.7rem;font-weight:700">${pos}</span>
+        <span style="font-weight:600">${_esc(name)}</span>
+        <span style="font-size:.75rem;color:var(--color-text-dim)">${_esc(nflTeam)}</span>
+        <button style="margin-left:auto;font-size:.7rem;background:none;border:none;color:var(--color-text-dim);cursor:pointer"
+          onclick="DLRAuction._qnClearSelection()">✕ Clear</button>
+      </div>`;
+    selectedEl.style.display = "";
+    if (resultsEl) resultsEl.style.display = "none";
+    // Only enable proceed if the team is also eligible
+    if (proceedBtn) proceedBtn.disabled = !!(modal._teamBlocked);
+  }
+
+  function _qnClearSelection() {
+    const modal      = document.getElementById("auc-quick-nom-modal");
+    const selectedEl = document.getElementById("auc-qn-selected");
+    const proceedBtn = document.getElementById("auc-qn-proceed");
+    const searchEl   = document.getElementById("auc-qn-search");
+    const resultsEl  = document.getElementById("auc-qn-results");
+    if (modal)      modal._selectedPid = null;
+    if (selectedEl) selectedEl.style.display = "none";
+    if (proceedBtn) proceedBtn.disabled = true;
+    if (searchEl)   { searchEl.value = ""; searchEl.focus(); }
+    if (resultsEl)  { resultsEl.style.display = "none"; resultsEl.innerHTML = ""; }
+  }
+
+  function _qnProceed() {
+    const modal = document.getElementById("auc-quick-nom-modal");
+    if (!modal || !modal._selectedPid || modal._teamBlocked) return;
+
+    const pid     = modal._selectedPid;
+    const name    = modal._selectedName;
+    const pos     = modal._selectedPos;
+    const nflTeam = modal._selectedTeam;
+    const teamEl  = document.getElementById("auc-qn-team");
+    const selectedRosterId = teamEl ? parseInt(teamEl.value) : null;
+
+    modal.remove();
+
+    // Pass selected team to openNominate via module-level handoff variable
+    _qnPreselectedRosterId = selectedRosterId;
+    openNominate(pid, name, pos, nflTeam);
+  }
+
+  // Temporary holder so openNominate can pre-select the commish-chosen team
+  let _qnPreselectedRosterId = null;
 
     // ── Nominate modal ────────────────────────────────────────
   function openNominate(pid, name, pos, nflTeam) {
@@ -726,13 +950,16 @@ function _computeLeader(a) {
     modal.style.zIndex = "850";
     const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
 
-    // Commish can nominate on behalf of any team
+    // Commish can nominate on behalf of any team.
+    // _qnPreselectedRosterId is set when arriving from Quick Nominate modal.
+    const _nomDefaultTeam = _qnPreselectedRosterId || _myRosterId;
+    _qnPreselectedRosterId = null;  // consume immediately
     const teamSelector = _isCommish ? `
       <div class="form-group">
         <label>Nominating Team</label>
         <select id="auc-nom-team">
           ${_rosterData.map(t =>
-            `<option value="${t.roster_id}" ${Number(t.roster_id) === Number(_myRosterId) ? "selected" : ""}>${_esc(t.teamName)}</option>`
+            `<option value="${t.roster_id}" ${Number(t.roster_id) === Number(_nomDefaultTeam) ? "selected" : ""}>${_esc(t.teamName)}</option>`
           ).join("")}
         </select>
         <span class="field-hint">As commissioner you can nominate on behalf of any team.</span>
@@ -860,10 +1087,24 @@ function _computeLeader(a) {
         nominatedByCommish: nomRosterId !== _myRosterId ? _myRosterId : null,
         startTime: now,
         expiresAt: _nextExpiry(now),
-        proxies:  { [String(Number(nomRosterId))]: maxBid }, // flat map: {rosterId: proxyAmount}
-        bidCount: 1,
+        proxies:   { [String(Number(nomRosterId))]: maxBid },
+        leaderId:  Number(nomRosterId),
+        displayBid: MIN_BID(),
+        bidCount:  1,
         processed: false, cancelled: false
       });
+      // ── FIX 1: Write initial bid log entry so history starts from nomination ──
+      await _logRef(id).push({
+        auctionId:  id,
+        playerName,
+        rosterId:   Number(nomRosterId),
+        teamName:   nomName,
+        maxBid,
+        displayBid: MIN_BID(),
+        isLeader:   true,
+        note:       "Opening nomination",
+        timestamp:  now
+      }).catch(() => {});
       document.getElementById("auc-nom-modal")?.remove();
       showToast(`${playerName} nominated by ${nomName} ✓`);
       // Re-render FA list so nominate buttons update immediately
@@ -1237,6 +1478,19 @@ function _computeLeader(a) {
           <input type="number" id="auc-s-rostersize" value="${s.maxRosterSize || 30}" min="1" max="60"/>
           <span class="field-hint">Active roster only — IR and taxi slots don't count toward this limit.</span>
         </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
+            <input type="checkbox" id="auc-s-forceroster" ${s.forceFullRoster ? "checked" : ""}
+              style="width:16px;height:16px;cursor:pointer;accent-color:var(--color-blue)"/>
+            Force Full Roster
+          </label>
+          <span class="field-hint">
+            When enabled, no bid can be placed if it would leave the bidder with less than
+            <strong>min bid × remaining open spots</strong> in available balance.
+            Prevents teams from winning a player and being unable to afford filling the rest of their roster.
+            Defaults to off.
+          </span>
+        </div>
         <button class="btn-primary" onclick="DLRAuction.saveSettings()" style="margin-top:var(--space-4)">Save Settings</button>
         ${s.scheduledStart ? `<div style="margin-top:var(--space-3);font-size:.8rem;color:var(--color-text-dim)">
           Auction scheduled to start: <strong style="color:var(--color-gold)">${new Date(s.scheduledStart).toLocaleString()}</strong>
@@ -1255,7 +1509,8 @@ function _computeLeader(a) {
       maxNoms:       parseInt(document.getElementById("auc-s-maxnoms")?.value)     || 2,
       maxRosterSize: parseInt(document.getElementById("auc-s-rostersize")?.value)  || 30,
       minBid:        parseInt(document.getElementById("auc-s-minbid")?.value)      || 100000,
-      minIncrement:  parseInt(document.getElementById("auc-s-mininc")?.value)      || 100000
+      minIncrement:  parseInt(document.getElementById("auc-s-mininc")?.value)      || 100000,
+      forceFullRoster: !!(document.getElementById("auc-s-forceroster")?.checked)
     };
     const btn = document.querySelector(".auc-settings-form .btn-primary");
     if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
@@ -1277,6 +1532,56 @@ function _computeLeader(a) {
       ? Math.max(curDisplay + MIN_INC(), myMax + MIN_INC())  // raising existing
       : curDisplay + MIN_INC();                               // new bid
 
+    // ── FIX 2: Compute available cap and show it in modal ──────
+    let availableCap = null;
+    let capHtml = "";
+    if (typeof DLRSalaryCap !== "undefined") {
+      const capData = DLRSalaryCap.getCapData?.();
+      if (capData && Object.keys(capData).length > 0) {
+        const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+        if (myTeam) {
+          const d = capData[myTeam.username] || capData[myTeam.ownerId] || capData[String(myTeam.ownerId)];
+          if (d) {
+            const _now  = Date.now();
+            const _active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > _now);
+            // Sum proxies on auctions I'm currently winning, EXCEPT this one
+            const committedOther = _active.reduce((sum, a) => {
+              if (a.id === auctionId) return sum;
+              const leader = _computeLeader(a);
+              if (Number(leader.rosterId) !== Number(_myRosterId)) return sum;
+              const myProxy = a.proxies
+                ? (Number(a.proxies[String(Number(_myRosterId))]) || 0)
+                : _myMaxBid(a);
+              return sum + myProxy;
+            }, 0);
+            availableCap = Math.max(0, d.remaining - committedOther);
+            // If forceFullRoster is on, subtract minimum holdback for remaining open spots
+            if (_settings.forceFullRoster) {
+              const _irSet  = new Set(myTeam.reserve || []);
+              const _taxiSet = new Set(myTeam.taxi   || []);
+              const _activeCount = (myTeam.players||[]).filter(pid => !_irSet.has(pid) && !_taxiSet.has(pid)).length;
+              const _winningCount = _active.filter(a => {
+                const l = _computeLeader(a);
+                return Number(l.rosterId) === Number(_myRosterId) && a.id !== auctionId;
+              }).length;
+              const _openSpots = Math.max(0, (_settings.maxRosterSize||25) - _activeCount - _winningCount);
+              // Hold back minBid for each remaining open spot after this one
+              availableCap = Math.max(0, availableCap - Math.max(0, _openSpots - 1) * MIN_BID());
+            }
+            const capColor = availableCap < minBid ? "var(--color-red)" : "var(--color-green)";
+            const rsvNote = _settings.forceFullRoster
+              ? ` <span style="font-size:.68rem;color:var(--color-text-dim)">(roster reserve applied)</span>`
+              : "";
+            capHtml = `<div style="display:flex;justify-content:space-between;align-items:center;font-size:.78rem;background:rgba(255,255,255,.04);border:1px solid var(--color-border);border-radius:6px;padding:6px 10px;">
+              <span style="color:var(--color-text-dim)">Max you can bid${rsvNote}:</span>
+              <strong style="color:${capColor}">${_fmtSal(availableCap)}</strong>
+            </div>`;
+          }
+        }
+      }
+    }
+    const _maxAttr = availableCap != null ? `max="${availableCap}"` : "";
+
     const modal = document.createElement("div");
     modal.id = "auc-bid-modal";
     modal.className = "modal-overlay";
@@ -1292,10 +1597,11 @@ function _computeLeader(a) {
             Current price: <strong style="color:var(--color-gold)">${_fmtSal(curDisplay)}</strong>
             ${myMax > 0 ? ` · Your proxy: <strong style="color:var(--color-blue)">${_fmtSal(myMax)}</strong>` : ""}
           </div>
+          ${capHtml}
           <div class="form-group" style="margin:0">
             <label style="font-size:.78rem">Enter Max Bid</label>
             <input type="number" id="auc-bid-input" class="form-input"
-              value="${minBid}" min="${minBid}" step="${MIN_INC()}"
+              value="${minBid}" min="${minBid}" ${_maxAttr} step="${MIN_INC()}"
               style="font-size:1rem;font-weight:700"/>
           </div>
           <div style="display:flex;flex-direction:column;gap:var(--space-2)">
@@ -1359,6 +1665,49 @@ function _computeLeader(a) {
             const totalIfWon = committedOther + maxBid;
             if (totalIfWon > d.remaining) {
               showToast(`Bid of ${_fmtSal(maxBid)} would exceed your remaining cap of ${_fmtSal(d.remaining)} (${_fmtSal(committedOther)} already committed).`, "error");
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    // ── FIX 5: forceFullRoster cap enforcement ─────────────────
+    if (_settings.forceFullRoster && typeof DLRSalaryCap !== "undefined") {
+      const capData5 = DLRSalaryCap.getCapData?.();
+      if (capData5 && Object.keys(capData5).length > 0) {
+        const myTeam5 = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
+        if (myTeam5) {
+          const d5 = capData5[myTeam5.username] || capData5[myTeam5.ownerId] || capData5[String(myTeam5.ownerId)];
+          if (d5) {
+            const _now5   = Date.now();
+            const _active5 = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > _now5);
+            const _irSet5  = new Set(myTeam5.reserve || []);
+            const _taxiSet5 = new Set(myTeam5.taxi   || []);
+            const _activeCount5 = (myTeam5.players||[]).filter(pid => !_irSet5.has(pid) && !_taxiSet5.has(pid)).length;
+            const _winningCount5 = _active5.filter(a => {
+              const l = _computeLeader(a);
+              return Number(l.rosterId) === Number(_myRosterId) && a.id !== auctionId;
+            }).length;
+            const _openSpots5 = Math.max(0, (_settings.maxRosterSize||25) - _activeCount5 - _winningCount5);
+            const committedOther5 = _active5.reduce((sum, a) => {
+              if (a.id === auctionId) return sum;
+              const leader = _computeLeader(a);
+              if (Number(leader.rosterId) !== Number(_myRosterId)) return sum;
+              const myProxy = a.proxies
+                ? (Number(a.proxies[String(Number(_myRosterId))]) || 0)
+                : _myMaxBid(a);
+              return sum + myProxy;
+            }, 0);
+            // Must leave minBid * (openSpots - 1) unspent for remaining spots
+            const holdback5 = Math.max(0, _openSpots5 - 1) * MIN_BID();
+            const effectiveCap5 = Math.max(0, d5.remaining - committedOther5 - holdback5);
+            if (maxBid > effectiveCap5) {
+              showToast(
+                `Bid of ${_fmtSal(maxBid)} exceeds your available balance of ${_fmtSal(effectiveCap5)} ` +
+                `(${_fmtSal(holdback5)} reserved for ${Math.max(0, _openSpots5 - 1)} remaining roster spot${_openSpots5 !== 2 ? "s" : ""}).`,
+                "error"
+              );
               return;
             }
           }
@@ -1727,41 +2076,49 @@ function _computeLeader(a) {
   function _escA(s) { return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
 
   // Can the current user nominate? (for FA button check)
-  function canNominate() {
+  // Core check: can a specific team (by rosterId) currently nominate?
+  // Used by canNominate() for the current user, and by the commish Quick Nominate
+  // modal to validate on behalf of whichever team is selected.
+  function canNominateFor(rosterId) {
     if (!_leagueKey) return false;
+    const rid = Number(rosterId);
+    if (!rid) return false;
     // Block if auction hasn't started yet
     if (_settings.scheduledStart && _settings.scheduledStart > Date.now()) return false;
-    if (_myActiveNoms() >= (_settings.maxNoms || 2)) return false;
-    // Block if no open roster spots (active roster + winning auctions >= max)
-    if (_myOpenSpots() <= 0) return false;
-    // Check cap — pull from salary module directly (most reliable source)
-    // Fall back to _rosterData cache, then skip check if neither is available
+    // Nom count check against this specific team
+    if (_myActiveNoms(rid) >= (_settings.maxNoms || 2)) return false;
+    // Roster space check for this specific team
+    if (_myOpenSpots(rid) <= 0) return false;
+    // Cap check for this specific team
     if (typeof DLRSalaryCap !== "undefined") {
       const capData = DLRSalaryCap.getCapData?.();
       if (capData && Object.keys(capData).length > 0) {
-        const myTeam = _rosterData.find(r => Number(r.roster_id) === Number(_myRosterId));
-        if (myTeam) {
-          const d = capData[myTeam.username] || capData[myTeam.ownerId] || capData[String(myTeam.ownerId)];
+        const team = _rosterData.find(r => Number(r.roster_id) === rid);
+        if (team) {
+          const d = capData[team.username] || capData[team.ownerId] || capData[String(team.ownerId)];
           if (d) {
             const now    = Date.now();
             const active = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
-            // Committed = sum of my proxy on auctions I'm currently winning
             const committed = active.reduce((sum, a) => {
               const leader = _computeLeader(a);
-              if (Number(leader.rosterId) !== Number(_myRosterId)) return sum;
-              const myProxy = a.proxies
-                ? (Number(a.proxies[String(Number(_myRosterId))]) || 0)
-                : _myMaxBid(a);
-              return sum + myProxy;
+              if (Number(leader.rosterId) !== rid) return sum;
+              const proxy = a.proxies
+                ? (Number(a.proxies[String(rid)]) || 0)
+                : 0;
+              return sum + proxy;
             }, 0);
             if ((d.remaining - committed) < MIN_BID()) return false;
           }
         }
-        return true; // cap data available, passed the check
+        return true;
       }
     }
-    // No cap data available — don't block nomination (salary may not be configured)
     return true;
+  }
+
+  // Convenience wrapper: can the current logged-in user nominate for themselves?
+  function canNominate() {
+    return canNominateFor(_myRosterId);
   }
 
   // Returns true when this module has rosters loaded for the given leagueKey
@@ -1778,13 +2135,14 @@ function _computeLeader(a) {
 
   return {
     init, preInit, reset, setView,
-    openNominate, submitNomination,
+    openNominate, submitNomination, openQuickNominate,
+    _qnSearch, _qnSelect, _qnClearSelection, _qnProceed, _qnTeamChanged,
     openBidModal, _confirmBid, placeBid,
     showBidHistory, _deleteLogEntry,
     claimAuction, cancelAuction, passAuction, isRostered,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
-    canNominate, isReady, getActiveNominations
+    canNominate, canNominateFor, isReady, getActiveNominations
   };
 
 })();
