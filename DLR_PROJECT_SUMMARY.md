@@ -49,25 +49,25 @@ GitHub Pages (dynastylockerroom.com)
 | `app.js` | Orchestrates screens, auth state, global auction/chat monitors, button handlers |
 | `auth.js` | Firebase Auth wrapper. Login/register/logout. **8-second timeout on auth state** to prevent mobile hang. |
 | `firebase-db.js` | All Firebase Realtime DB reads/writes. Uses REST API with 8-second `AbortController` timeouts on all fetches. |
-| `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo import (`linkMFL`, `linkYahoo`), overview tab live-fetch |
+| `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo import (`linkMFL`, `linkYahoo`), overview tab live-fetch. Calls `DLRFreeAgents.init()` with `isCommissioner` as 10th arg. |
 | `mfl.js` | MFL API helpers: `getLeagueBundle`, `getTeams`, `getStandingsMap`, `getRoster`, `getPlayerScores`, `mflNameToSleeperId` (skill pos only: QB/RB/WR/TE) |
 | `yahoo.js` | Yahoo OAuth token management, `getLeagueBundle` |
 | `sleeper.js` | Sleeper API wrappers |
 | `standings.js` | Standings tab — cross-platform |
 | `roster.js` | Roster tab — cross-platform (Sleeper/MFL/Yahoo) |
-| `draft.js` | Draft board — grid/list toggle, MFL auction board, Sleeper snake/linear |
+| `draft.js` | Draft board — multi-draft selector (startup + rookie), grid/list toggle, MFL auction board, Sleeper snake/linear. Aborted drafts (< 1 full round) are filtered out. |
 | `transactions.js` | Transactions tab — all platforms normalized to Sleeper shape, `status=complete` filter only |
 | `analytics.js` | Analytics tab (Sleeper power rankings; MFL/Yahoo incomplete) |
-| `rules-and-fa.js` | League Rules tab + Players/Free Agents tab. Year selector for stats (2020–current). MFL uses Sleeper bio via `_sleeperId` mapping. |
+| `rules-and-fa.js` | League Rules tab + Players/Free Agents tab. Year selector for stats (2020–current). MFL uses Sleeper bio via `_sleeperId` mapping. `DLRFreeAgents` now tracks `_isCommish` — commissioner always sees active 🏷 nominate button. |
 | `salary.js` | Salary cap module. FAAB multiplier, auto-tracking transactions (cross-platform), taxi squad promotion badges. |
-| `auction.js` | DLR auction system. Proxy bid engine, night pause, auto-claim, bid history log. |
+| `auction.js` | DLR auction system. Proxy bid engine, night pause, auto-claim, bid history log. Commissioner quick-nominate modal. Cap checks subtract in-session auction wins. Nomination close/end-date controls. |
 | `players-db.js` | Sleeper player DB loader (IndexedDB-backed via `idb-cache.js`) |
 | `idb-cache.js` | IndexedDB wrapper for caching player DB and stats |
 | `playercard.js` | Player card modal (Sleeper CDN photos) |
 | `playerreport.js` | Cross-league player report panel |
 | `chat.js` | League chat (Firebase Realtime DB) |
 | `hallway.js` | The Hallway social feature |
-| `trophy-room.js` — Trophy room display |
+| `trophy-room.js` | Trophy room display |
 | `leaguegroups.js` | League grouping/commissioner tools |
 | `manager-search.js` | Cross-league manager search |
 | `config.js` | Firebase config (in `firebase/config.js`) |
@@ -106,7 +106,9 @@ gmd/
   auctions/{leagueKey}/
     bids/{auctionId}          — auction records
     bidLog/{auctionId}        — bid history
-    settings                  — bidDuration, pauseStart, pauseEnd, etc.
+    settings                  — bidDuration, pauseStart, pauseEnd, scheduledStart, scheduledEnd,
+                                 nominationsClosed, minBid, minIncrement, maxNoms, maxRosterSize,
+                                 forceFullRoster
   salaryCap/{storageKey}/
     settings                  — cap, minSalary, faabMultiplier, taxiYears, etc.
     rosters                   — { username: { players: [{playerId, salary, years, holdout}] } }
@@ -161,8 +163,13 @@ myRosterId:               franchise_id from myleagues  e.g. "0035"
 - `_computeLeader(a)` reads stored `a.displayBid` — does NOT recompute from proxies
 - `placeBid()` uses a Firebase transaction to atomically set `proxies`, `leaderId`, `displayBid`, `expiresAt`
 - Auto-claim runs on every Firebase snapshot update AND every 30s interval (commish only)
-- Auto-claim now processes expired auctions even during pause window (previously skipped them, leaving auctions stuck as "Expired")
+- Auto-claim now processes expired auctions even during pause window
 - Night pause: `pauseStart`/`pauseEnd` in CT. Timer shows `⏸ Xh Ym` (post-pause expiry) not "Paused"
+- **Cap checks** use `_auctionSpentTotal(rosterId)` to subtract in-session wins not yet written to salary roster from `d.remaining`. This is critical — `DLRSalaryCap.getCapData().remaining` does not know about DLR auction wins until they are persisted.
+- **Commissioner nomination flow:** `canNominate()` returns `true` for commish (shows button always). `canNominateFor(rosterId)` runs per-team checks. The nomination modal has a live team-eligibility status line (`_nomTeamChanged`) that shows exactly why a team is blocked when the commish changes the dropdown.
+- **Nomination close controls:** `scheduledEnd` (datetime) and `nominationsClosed` (boolean) both block new nominations. Both checked in `canNominateFor`, `_nomTeamChanged`, `_qnTeamChanged`, and `submitNomination`. Commish can toggle via Settings → Manual Close button or set a scheduled end date.
+- **Initial bid log:** Nomination now writes the opening bid as the first `bidLog` entry (note: "Opening nomination") so bid history is never empty.
+- **Pass button removed** from auction cards — the `passAuction` function still exists but has no UI entry point.
 
 ---
 
@@ -173,6 +180,25 @@ myRosterId:               franchise_id from myleagues  e.g. "0035"
 - Auto-track transactions: polls every 5 min, normalized across all platforms
 - Taxi squad: `taxiYears` setting. Badge logic: `years_exp === taxiYears` → ⚠️ Last Year; `years_exp > taxiYears` → 🚨 Promote Now
 - MFL/Yahoo players resolve `years_exp` via `_sleeperId` mapping
+
+---
+
+## Players Tab (DLRFreeAgents) — Critical Details
+
+- `DLRFreeAgents.init()` signature: `(leagueId, leagueKey, auctionEnabled, auctionIncludePicks, myRosterId, myTeamName, platform, platformLeagueKey, season, isCommish)`
+- `isCommish` is the **10th argument** — passed as `!!league.isCommissioner` from `profile.js`
+- When `_isCommish` is true, the 🏷 nominate button is always shown for available players (not rostered/active/claimed), regardless of nom count or cap status. The nomination modal itself handles per-team eligibility feedback.
+- Status badges: `R` = Rostered, `A` = Active Bid, `C` = Claimed. Column width is 32px. Legend shown below player list when auction is enabled.
+
+---
+
+## Draft Board — Critical Details
+
+- **Multi-draft support (Sleeper):** `_allDrafts` stores all drafts for the league. `_draftIndex` tracks which is displayed. Selector bar appears when multiple drafts exist.
+- **Aborted draft filter:** Drafts with `status === "complete"` but `last_picked < settings.teams` (less than one full round completed) are excluded from `_allDrafts`. Falls back to full list if filtering removes everything.
+- **Default draft:** On first load with multiple drafts, defaults to the last (most recent/rookie) draft. Startup drafts with kicker placeholders are sorted first.
+- **Draft labels:** `snake`/`startup` → "Startup", `linear` → "Rookie", `auction` → "Auction". Status icons: ✅ complete, 🔴 live, 📅 upcoming.
+- `switchDraft(index)` is exported for the selector pill buttons.
 
 ---
 
@@ -191,7 +217,7 @@ myRosterId:               franchise_id from myleagues  e.g. "0035"
 The Cloudflare Worker's `/mfl/bundle` endpoint fetches ~11 sub-endpoints in parallel via `Promise.allSettled`. Some of these are suspected broken or returning errors that cause the overall import to fail silently (leagues skipped). The matchups situation specifically needs fixing:
 
 - **Current approach (broken/fragile):** `normalizeMatchups()` in `mfl.js` tries `TYPE=schedule` first (all weeks, home/away), then falls back to `TYPE=scoreboard` (current week only). Both are fetched in every bundle regardless of which is needed.
-- **Goal:** Identify which single matchup endpoint is most reliable and simplify to that one. The MFL API has `TYPE=schedule` (full season schedule with scores) and `TYPE=scoreboard` (current week scoreboard). Determine which one consistently returns data and remove the other from the bundle fetch.
+- **Goal:** Identify which single matchup endpoint is most reliable and simplify to that one.
 - **Also investigate:** Which of the ~11 parallel fetches in `mflBundle()` in `worker.js` are causing failures. Candidates: `TYPE=schedule`, `TYPE=auctionResults`, `TYPE=salaries`. Consider making non-essential endpoints optional/lazy rather than blocking the whole bundle.
 
 Worker endpoint list for reference (in `worker.js` → `mflBundle()`):
@@ -218,7 +244,7 @@ players, draft, auctionResults, salaries, transactions, playerScores
 3. **MFL transactions** — Normalized to Sleeper format (type/team filter dropdowns, chip styling)
 4. **MFL overview** — Live fetch with broadened identity matching, re-renders card on success
 5. **MFL draft board** — Grid/list toggle (same as Sleeper), separate Draft Board / Auction Board buttons
-6. **Auction proxy fix** — Correct displayBid formula. displayBid = second-highest proxy (challenger's bid when champion still leads)
+6. **Auction proxy fix** — Correct displayBid formula
 7. **Auction timer** — Shows post-pause expiry time `⏸ Xh Ym` not just "Paused"
 8. **Auction auto-claim** — Now claims expired auctions even during pause window
 9. **Auction history** — Uses stored `winner`/`winningBid` (authoritative), not re-derived from proxies
@@ -231,15 +257,24 @@ players, draft, auctionResults, salaries, transactions, playerScores
 
 ## Completed — April 12, 2026 Session
 
-16. **MFL identity overhaul** — Removed all email-based franchise matching. Identity is now derived entirely from `franchise_id` + `league_id` in the `TYPE=myleagues` API response:
-    - `franchise_id` → stored as `myRosterId` (4-digit padded, e.g. `"0035"`) — used to look up roster, standings, team name in every bundle
-    - `league_id` → dynasty chain key changed from normalized league name (`mfl__leaguename`) to `mfl__<league_id>` — stable and collision-free across all seasons
-    - `teamName` now read from `bundle.league.league.franchises.franchise[id].name` — the authoritative source
-    - `syncMFLTeams` simplified: uses stored `myRosterId`, refreshes teamName + record from bundle, no email matching
-    - `_resolveMFLIdentities` function deleted (dead code)
-    - `_renderOverview` live-fetch simplified: uses stored `myRosterId` only
-17. **Removed email matching infrastructure** — deleted `buildEmailList()` and `findMyFranchise()` from `mfl.js` and their exports; removed `mflAdditionalEmails` from Firebase storage, all UI inputs, and all app.js handlers
-18. **UI cleanup** — Removed additional emails input from onboarding MFL card and edit profile modal; removed "Save Emails Only" button; simplified `linkMFL` to email + password only; updated field hints and resync banner text
+16. **MFL identity overhaul** — franchise_id based, dynasty chain key `mfl__<league_id>`, teamName from bundle
+17. **Removed email matching infrastructure** — deleted `buildEmailList()`, `findMyFranchise()`, `mflAdditionalEmails`
+18. **UI cleanup** — Simplified `linkMFL` to email + password only
+
+## Completed — April 12–13, 2026 Sessions (Auction + Draft overhaul)
+
+19. **Auction — initial bid log** — Nomination now writes opening bid as first `bidLog` entry so history is never empty. Also stores `leaderId` and `displayBid: MIN_BID()` on the auction record at creation time.
+20. **Auction — available cap in bid modal** — Bid modal shows "Max you can bid" computed as `d.remaining − spent − committedOther`. If Force Full Roster is on, also subtracts `(openSpots − 1) × MIN_BID` holdback.
+21. **Auction — pass button removed** — Cleaned up from auction cards; function preserved.
+22. **Auction — Force Full Roster setting** — New commissioner setting (default off). Blocks bids that would leave a team unable to afford min bids on remaining open spots.
+23. **Auction — cap calculation root fix** — Added `_auctionSpentTotal(rosterId)` helper. All cap checks now subtract in-session wins not yet persisted to salary roster from `d.remaining`. Fixes "showing full balance" bug in bid modal, canNominateFor, placeBid, forceFullRoster enforcement, and quick-nominate modal.
+24. **Auction — commissioner nomination** — `canNominate()` returns `true` for commish so 🏷 button always shows. `canNominateFor(rosterId)` enforces per-team rules. `_nomTeamChanged()` function shows live eligibility feedback (specific block reason) in the nomination modal when commish changes team. `_qnTeamChanged()` does the same for the Quick Nominate modal.
+25. **Auction — Quick Nominate modal** — Commissioner-only shortcut on the Live tab toolbar. Player search + team selector. Team eligibility validated live; Next → button disabled when team is blocked.
+26. **Auction — nomination close controls** — New `scheduledEnd` (datetime) and `nominationsClosed` (boolean) settings. Commish can set a date/time after which nominations close automatically, or use "Close Nominations Now" button in Settings for immediate close. "Reopen Nominations" reverses the manual close. Status bar shows 🏁 Closes / 🔒 Nominations Closed badge.
+27. **Players tab — commissioner always sees nominate button** — `DLRFreeAgents` now tracks `_isCommish` (10th init arg from `profile.js`). Commissioner always sees active 🏷 for available players regardless of their own nomination limits.
+28. **Players tab — compact status badges** — R/A/C letter badges (26×26px) replace full-width text labels. Column shrunk from 72px to 32px. Small legend below player list.
+29. **Draft — multi-draft selector** — Sleeper leagues with multiple drafts (startup + rookie) now show a pill selector bar. Defaults to most recent (rookie) draft. Startup drafts sorted first in the list.
+30. **Draft — aborted draft filter** — Drafts with `status === "complete"` but fewer picks than one full round (`last_picked < teams`) are excluded.
 
 ---
 
@@ -247,7 +282,7 @@ players, draft, auctionResults, salaries, transactions, playerScores
 
 ### High Priority
 - [ ] **MFL bundle endpoint audit** — Identify which parallel fetches in `worker.js → mflBundle()` are failing and causing leagues to be skipped on import. Make non-essential endpoints (auctionResults, salaries, schedule) non-blocking.
-- [ ] **MFL matchups endpoint fix** — Simplify `normalizeMatchups()` in `mfl.js` to use a single reliable endpoint instead of `TYPE=schedule` + `TYPE=scoreboard` fallback. Determine which one consistently returns data.
+- [ ] **MFL matchups endpoint fix** — Simplify `normalizeMatchups()` to use a single reliable endpoint.
 - [ ] **MFL analytics tab** — Power rankings and points leaders not connected
 - [ ] **Yahoo end-to-end test** — OAuth requires non-blocked network; test all tabs once available
 - [ ] **Career stats accuracy** — Verify cross-platform totals are correct
@@ -312,5 +347,5 @@ Here is the relevant file: [attach file]
 
 ---
 
-*Document updated: April 12, 2026*
-*Current deployed versions: CSS v=19, JS files updated April 12 (profile.js, mfl.js, app.js, index.html)*
+*Document updated: April 13, 2026*
+*Files updated this session: auction.js, rules-and-fa.js, locker.css, draft.js, profile.js*
