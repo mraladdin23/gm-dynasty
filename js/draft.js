@@ -562,11 +562,15 @@ const DLRDraft = (() => {
     const salaryArr = auctionSets.flatMap(s => s.picks);
 
     // Cache for re-renders on toggle without refetch
+    // Default draft set to the unit that contains the user's division (if any),
+    // so multi-division leagues open on the correct draft board automatically.
+    const defaultDraftIdx = MFLAPI.getMyDraftUnitIndex(unitArr, bundle, _myRosterId);
+
     _mflCache = {
       allPicks, salaryArr, teamMap, playerLookup,
       hasAuction, hasDraft, season, leagueId,
-      draftSets, auctionSets,          // new: per-set data for selector
-      _activeDraftSetIdx:  0,
+      draftSets, auctionSets,
+      _activeDraftSetIdx:  defaultDraftIdx,
       _activeAuctionSetIdx: 0,
     };
 

@@ -264,18 +264,26 @@ const DLRTransactions = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build player name/pos lookup from bundle
+    // Build player name/pos lookup using the session-cached player universe.
+    // bundle.players is intentionally excluded from the bundle (too large ~500KB).
+    // MFLAPI.getPlayers() fetches once per session from /mfl/players and caches it.
     const mflPlayerMap = {};
-    const rawPlayers = bundle?.players?.players?.player;
-    if (rawPlayers) {
-      const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
-      pArr.forEach(p => {
-        if (p.id) mflPlayerMap[p.id] = {
-          rawName:  p.name || "",                                        // "Last, First" — for Sleeper lookup
-          name:     MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`, // "First Last" — display fallback
-          position: (p.position || "").toUpperCase()
+    try {
+      const playerUniverse = await MFLAPI.getPlayers(_season);
+      if (tok !== _token) return;
+      // playerUniverse is keyed by mflId → { name, pos, team, sleeperId }
+      Object.entries(playerUniverse).forEach(([id, p]) => {
+        if (!id) return;
+        // Convert from getPlayers() shape back to the rawName/position shape _loadMFLData expects
+        // getPlayers() returns name already in "First Last" display format
+        mflPlayerMap[id] = {
+          rawName:  p.name || "",           // already display format — mflNameToSleeperId handles both
+          name:     p.name || `Player ${id}`,
+          position: (p.pos || p.position || "").toUpperCase()
         };
       });
+    } catch(e) {
+      console.warn("[Transactions] MFL player universe load failed:", e.message);
     }
 
     // Load Sleeper player DB first so mflPid() can resolve Sleeper data

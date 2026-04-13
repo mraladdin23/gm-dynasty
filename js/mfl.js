@@ -500,7 +500,102 @@ const MFLAPI = (() => {
   }
 
   /**
-   * Debug helper — inspect raw bundle from the browser console:
+   * Returns division info from bundle.league.league.divisions.
+   * { divisions: [{ id, name }], franchiseDivision: { franchiseId: divisionId } }
+   */
+  function getDivisions(bundle) {
+    const leagueInfo = bundle?.league?.league || {};
+    const rawDivs    = leagueInfo.divisions?.division;
+    const divisions  = rawDivs
+      ? (Array.isArray(rawDivs) ? rawDivs : [rawDivs]).map(d => ({
+          id:   String(d.id),
+          name: d.name || `Division ${d.id}`
+        }))
+      : [];
+
+    // Build franchise → division map
+    const rawFranchises = leagueInfo.franchises?.franchise;
+    const franchiseDivision = {};
+    if (rawFranchises) {
+      const arr = Array.isArray(rawFranchises) ? rawFranchises : [rawFranchises];
+      arr.forEach(f => {
+        if (f.division != null) {
+          franchiseDivision[String(f.id)] = String(f.division);
+        }
+      });
+    }
+
+    return { divisions, franchiseDivision };
+  }
+
+  /**
+   * Returns the division ID for a given franchise ID, or null if undivided.
+   */
+  function getFranchiseDivision(bundle, franchiseId) {
+    if (!franchiseId) return null;
+    const { franchiseDivision } = getDivisions(bundle);
+    return franchiseDivision[String(franchiseId)] || null;
+  }
+
+  /**
+   * Returns all franchise IDs in the same division as `franchiseId`.
+   * Returns null if the league has no divisions.
+   */
+  function getDivisionFranchises(bundle, franchiseId) {
+    if (!franchiseId) return null;
+    const { divisions, franchiseDivision } = getDivisions(bundle);
+    if (!divisions.length) return null;   // no divisions defined
+    const myDiv = franchiseDivision[String(franchiseId)];
+    if (!myDiv) return null;
+    return Object.entries(franchiseDivision)
+      .filter(([, divId]) => divId === myDiv)
+      .map(([fid]) => fid);
+  }
+
+  /**
+   * Filters standings to only the user's division, if divisions exist.
+   * Returns { standings, divisionName, hasDivisions }
+   * If no divisions, returns all standings with hasDivisions=false.
+   */
+  function filterStandingsByDivision(bundle, standings, myRosterId) {
+    const { divisions, franchiseDivision } = getDivisions(bundle);
+    if (!divisions.length || !myRosterId) {
+      return { standings, divisionName: null, hasDivisions: false, allDivisions: divisions };
+    }
+    const myDiv = franchiseDivision[String(myRosterId)];
+    if (!myDiv) {
+      return { standings, divisionName: null, hasDivisions: true, allDivisions: divisions };
+    }
+    const divInfo    = divisions.find(d => d.id === myDiv);
+    const divName    = divInfo?.name || `Division ${myDiv}`;
+    const filtered   = standings.filter(s => franchiseDivision[String(s.franchiseId)] === myDiv);
+    return { standings: filtered, divisionName: divName, hasDivisions: true, allDivisions: divisions };
+  }
+
+  /**
+   * For multi-unit drafts: given draftUnits array and myRosterId,
+   * returns the index of the unit that contains the user's team.
+   * Returns 0 (first unit) if no match or no divisions defined.
+   *
+   * MFL draftUnit shape: { id, unit (division id), draftPick: [...{franchise}] }
+   */
+  function getMyDraftUnitIndex(draftUnits, bundle, myRosterId) {
+    if (!myRosterId || !draftUnits?.length) return 0;
+    const myDiv = getFranchiseDivision(bundle, myRosterId);
+
+    // First try: match by unit field (division ID)
+    if (myDiv) {
+      const byDiv = draftUnits.findIndex(u => String(u.unit || u.id) === String(myDiv));
+      if (byDiv >= 0) return byDiv;
+    }
+
+    // Second try: match by whether any pick in the unit belongs to our franchise
+    const byPick = draftUnits.findIndex(u => {
+      const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
+      return picks.some(p => String(p.franchise || p.franchiseId || "") === String(myRosterId));
+    });
+    return byPick >= 0 ? byPick : 0;
+  }
    *   MFLAPI.debugBundle("LEAGUE_ID", "2025").then(r => console.log(JSON.stringify(r._paths, null, 2)))
    */
   async function debugBundle(leagueId, year) {
@@ -527,11 +622,14 @@ const MFLAPI = (() => {
           username: f.username || "(none)", is_owner: f.is_owner, is_commish: f.is_commish,
         }))
       : null;
+    const { divisions, franchiseDivision } = getDivisions(bundle);
     const summary = {
       _paths: paths,
       _franchiseEmails: franchises,
       _eliminatedIds: bundle?.league?.league?.franchises_eliminated || "(none)",
       _standingsSort: bundle?.league?.league?.standingsSort || "(none)",
+      _divisions: divisions.length ? divisions : "(none)",
+      _franchiseDivisions: Object.keys(franchiseDivision).length ? franchiseDivision : "(none)",
     };
     console.log("[MFLAPI.debugBundle]", JSON.stringify(summary, null, 2));
     return summary;
@@ -625,6 +723,12 @@ const MFLAPI = (() => {
     mflNameToDisplay,
     getPlayerScores,
     debugBundle,
+    // Division helpers
+    getDivisions,
+    getFranchiseDivision,
+    getDivisionFranchises,
+    filterStandingsByDivision,
+    getMyDraftUnitIndex,
   };
 })();
 
