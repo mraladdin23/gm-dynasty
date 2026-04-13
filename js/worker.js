@@ -133,6 +133,46 @@ export default {
         return mflBundle(leagueId, year, cookieHeader);
       }
 
+      // On-demand: fetch a single week of liveScoring (for matchups tab week picker)
+      if (path === "/mfl/liveScoring" && req.method === "POST") {
+        const { leagueId, year, week, username, password } = await req.json();
+        if (!leagueId) return new Response(JSON.stringify({ error: "Missing leagueId" }), { status: 400, headers: corsHeaders() });
+        let cookieHeader = "";
+        if (username && password) {
+          const yr = year || new Date().getFullYear();
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+          const loginXml = await loginRes.text();
+          const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
+          if (m) cookieHeader = `MFL_USER_ID=${m[1]}`;
+        }
+        const season  = year || new Date().getFullYear();
+        const headers = cookieHeader ? { Cookie: cookieHeader } : {};
+        const weekParam = week ? `&W=${week}` : "";
+        const r = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=liveScoring&L=${leagueId}${weekParam}&JSON=1`, { headers });
+        const data = await r.json();
+        return new Response(JSON.stringify(data), { headers: corsHeaders() });
+      }
+
+      // On-demand: fetch a specific playoff bracket by bracket_id
+      if (path === "/mfl/playoffBracket" && req.method === "POST") {
+        const { leagueId, year, bracketId, username, password } = await req.json();
+        if (!leagueId) return new Response(JSON.stringify({ error: "Missing leagueId" }), { status: 400, headers: corsHeaders() });
+        let cookieHeader = "";
+        if (username && password) {
+          const yr = year || new Date().getFullYear();
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+          const loginXml = await loginRes.text();
+          const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
+          if (m) cookieHeader = `MFL_USER_ID=${m[1]}`;
+        }
+        const season  = year || new Date().getFullYear();
+        const headers = cookieHeader ? { Cookie: cookieHeader } : {};
+        const bracketParam = bracketId ? `&BRACKET_ID=${bracketId}` : "";
+        const r = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=playoffBracket&L=${leagueId}${bracketParam}&JSON=1`, { headers });
+        const data = await r.json();
+        return new Response(JSON.stringify(data), { headers: corsHeaders() });
+      }
+
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders() });
@@ -144,18 +184,21 @@ async function mflBundle(leagueId, year, cookieHeader) {
   const season  = year || new Date().getFullYear();
   const headers = cookieHeader ? { Cookie: cookieHeader } : {};
   const base    = `https://api.myfantasyleague.com/${season}/export`;
+  // NOTE: `players` (full MFL player universe ~500KB) and `salaries` are excluded from the
+  // bundle — players are resolved via the Sleeper DB on the frontend; salaries not yet used.
+  // `schedule` and `scoreboard` are replaced by `liveScoring` which covers all weeks + live data.
+  // `playoffBrackets` lists all brackets defined by the commish; individual bracket results
+  // are fetched on-demand via /mfl/playoffBracket.
   const endpoints = {
-    league:         `${base}?TYPE=league&L=${leagueId}&JSON=1`,
-    rosters:        `${base}?TYPE=rosters&L=${leagueId}&JSON=1`,
-    standings:      `${base}?TYPE=leagueStandings&L=${leagueId}&JSON=1`,
-    schedule:       `${base}?TYPE=schedule&L=${leagueId}&JSON=1`,
-    matchups:       `${base}?TYPE=scoreboard&L=${leagueId}&JSON=1`,
-    players:        `${base}?TYPE=players&JSON=1`,
-    draft:          `${base}?TYPE=draftResults&L=${leagueId}&JSON=1`,
-    auctionResults: `${base}?TYPE=auctionResults&L=${leagueId}&JSON=1`,
-    salaries:       `${base}?TYPE=salaries&L=${leagueId}&JSON=1`,
-    transactions:   `${base}?TYPE=transactions&L=${leagueId}&JSON=1`,
-    playerScores:   `${base}?TYPE=playerScores&L=${leagueId}&SEASON=${season}&WEEK=YTD&JSON=1`,
+    league:          `${base}?TYPE=league&L=${leagueId}&JSON=1`,
+    rosters:         `${base}?TYPE=rosters&L=${leagueId}&JSON=1`,
+    standings:       `${base}?TYPE=leagueStandings&L=${leagueId}&JSON=1`,
+    liveScoring:     `${base}?TYPE=liveScoring&L=${leagueId}&JSON=1`,
+    draft:           `${base}?TYPE=draftResults&L=${leagueId}&JSON=1`,
+    auctionResults:  `${base}?TYPE=auctionResults&L=${leagueId}&JSON=1`,
+    transactions:    `${base}?TYPE=transactions&L=${leagueId}&JSON=1`,
+    playerScores:    `${base}?TYPE=playerScores&L=${leagueId}&SEASON=${season}&WEEK=YTD&JSON=1`,
+    playoffBrackets: `${base}?TYPE=playoffBrackets&L=${leagueId}&JSON=1`,
   };
   const results = await Promise.allSettled(
     Object.entries(endpoints).map(async ([key, url]) => {
