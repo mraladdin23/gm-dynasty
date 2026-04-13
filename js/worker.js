@@ -98,32 +98,73 @@ export default {
         const cookieMatch = loginXml.match(/MFL_USER_ID="([^"]+)"/);
         if (!cookieMatch) return new Response(JSON.stringify({ error: "MFL login failed — check username and password", loginResponse: loginXml.slice(0, 300) }), { status: 200, headers: corsHeaders() });
         const cookieValue = cookieMatch[1];
+
+        // Build year list: current year down to 1999
         const years = [];
         for (let y = currentYear; y >= 1999; y--) years.push(y);
+
+        // Fetch in batches of 4 with a 150ms pause between batches.
+        // Firing all 27 years in parallel causes MFL to rate-limit or drop requests,
+        // producing inconsistent results (4 leagues one run, 28 the next).
+        const BATCH_SIZE = 4;
+        const BATCH_DELAY_MS = 150;
         const allLeagues = [];
-        const results = await Promise.allSettled(
-          years.map(y => fetch(`https://api.myfantasyleague.com/${y}/export?TYPE=myleagues&JSON=1`, { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } })
-            .then(r => r.json())
-            .then(data => {
-              const list = data?.leagues?.league ? (Array.isArray(data.leagues.league) ? data.leagues.league : [data.leagues.league]) : [];
-              return list.map(l => ({ ...l, season: String(y) }));
-            }).catch(() => []))
-        );
-        results.forEach(r => { if (r.status === "fulfilled") allLeagues.push(...r.value); });
+
+        for (let i = 0; i < years.length; i += BATCH_SIZE) {
+          const batch = years.slice(i, i + BATCH_SIZE);
+          const batchResults = await Promise.allSettled(
+            batch.map(y =>
+              fetch(`https://api.myfantasyleague.com/${y}/export?TYPE=myleagues&JSON=1`,
+                { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } })
+                .then(r => r.json())
+                .then(data => {
+                  const list = data?.leagues?.league
+                    ? (Array.isArray(data.leagues.league) ? data.leagues.league : [data.leagues.league])
+                    : [];
+                  return list.map(l => ({ ...l, season: String(y) }));
+                })
+                .catch(() => [])
+            )
+          );
+          batchResults.forEach(r => { if (r.status === "fulfilled") allLeagues.push(...r.value); });
+
+          // Short pause between batches — skip after the last one
+          if (i + BATCH_SIZE < years.length) {
+            await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+          }
+        }
+
+        // Deduplicate by league_id + season (same league can appear in multiple year responses)
         const seen = new Map();
         for (const l of allLeagues) {
-          const id = l.league_id || l.id;
+          const id  = l.league_id || l.id;
           const key = `${id}_${l.season}`;
           if (id && !seen.has(key)) seen.set(key, l);
         }
         return new Response(JSON.stringify([...seen.values()]), { headers: corsHeaders() });
       }
 
+      // Standalone login — returns cookie so the client can reuse it across bundle calls
+      // instead of re-logging in for every league (28 leagues = 28 logins otherwise).
+      if (path === "/mfl/login" && req.method === "POST") {
+        const { username, password, year } = await req.json();
+        if (!username || !password) return new Response(JSON.stringify({ error: "Missing credentials" }), { status: 400, headers: corsHeaders() });
+        const yr       = year || new Date().getFullYear();
+        const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+        const loginXml = await loginRes.text();
+        const m        = loginXml.match(/MFL_USER_ID="([^"]+)"/);
+        if (!m) return new Response(JSON.stringify({ error: "MFL login failed", loginResponse: loginXml.slice(0, 300) }), { status: 200, headers: corsHeaders() });
+        return new Response(JSON.stringify({ cookie: m[1] }), { headers: corsHeaders() });
+      }
+
       if (path === "/mfl/bundle" && req.method === "POST") {
-        const { leagueId, year, username, password } = await req.json();
+        const { leagueId, year, username, password, cookie } = await req.json();
         if (!leagueId) return new Response(JSON.stringify({ error: "Missing leagueId" }), { status: 400, headers: corsHeaders() });
         let cookieHeader = "";
-        if (username && password) {
+        // Accept pre-obtained cookie directly (preferred — avoids redundant logins)
+        if (cookie) {
+          cookieHeader = `MFL_USER_ID=${cookie}`;
+        } else if (username && password) {
           const yr = year || new Date().getFullYear();
           const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
           const loginXml = await loginRes.text();

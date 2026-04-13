@@ -927,14 +927,16 @@ const DLRStandings = (() => {
     const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
     const teamName     = (fid) => franchiseArr.find(f => f.id === fid)?.name || `Team ${fid}`;
     const isEliminator = leagueInfo?.isEliminator || standings.some(s => s.isEliminator);
+    const isGuillotine = leagueInfo?.isGuillotine  || standings.some(s => s.isGuillotine);
+    const isSpecial    = isEliminator || isGuillotine;
 
     const totalTeams   = standings.length;
     const playoffSpots = leagueInfo?.playoffTeams
       || (rawLeague?.playoffTeams ? parseInt(rawLeague.playoffTeams) : null)
       || Math.floor(totalTeams / 2);
 
-    const leagueLabel = (leagueInfo?.name || rawLeague?.name || "MFL League")
-      + (isEliminator ? " \u00b7 Eliminator" : "");
+    const typeLabel = isGuillotine ? " \u00b7 Guillotine" : isEliminator ? " \u00b7 Eliminator" : "";
+    const leagueLabel = (leagueInfo?.name || rawLeague?.name || "MFL League") + typeLabel;
 
     el.innerHTML = `
       <div class="standings-meta">
@@ -946,7 +948,7 @@ const DLRStandings = (() => {
         <table class="standings-table">
           <thead><tr>
             <th>#</th><th class="team-col">Team</th>
-            ${isEliminator
+            ${isSpecial
               ? `<th>Status</th><th>PF</th>`
               : `<th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>`}
           </tr></thead>
@@ -955,25 +957,42 @@ const DLRStandings = (() => {
               const rank   = s.rank || i + 1;
               const name   = teamName(s.franchiseId);
               const isMe   = myRosterId && String(s.franchiseId) === String(myRosterId);
-              const inPO   = !isEliminator && rank <= playoffSpots;
-              const bubble = !isEliminator && rank === playoffSpots;
+              const inPO   = !isSpecial && rank <= playoffSpots;
+              const bubble = !isSpecial && rank === playoffSpots;
               const border = inPO
                 ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}`
-                : "border-left:3px solid transparent";
+                : isSpecial && s.eliminated
+                  ? "border-left:3px solid var(--color-text-dim)"
+                  : isSpecial && !s.eliminated
+                    ? "border-left:3px solid #18e07a"
+                    : "border-left:3px solid transparent";
 
-              const dataCells = isEliminator
-                ? `<td style="font-size:.75rem;">${
-                    rank === 1
-                      ? `<span style="color:var(--color-gold);font-weight:700;">Winner</span>`
-                      : s.eliminated
-                        ? `<span style="color:var(--color-text-dim)">Out Rd ${s.weekEliminated || "?"}</span>`
-                        : `<span style="color:#18e07a">Active</span>`
-                  }</td><td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>`
+              let statusCell = "";
+              if (isGuillotine) {
+                statusCell = `<td style="font-size:.75rem;">${
+                  rank === 1 && !s.eliminated
+                    ? `<span style="color:var(--color-gold);font-weight:700;">Survivor \u2605</span>`
+                    : s.eliminated
+                      ? `<span style="color:var(--color-text-dim)">\u2694\ufe0f Out Wk ${s.weekEliminated || "?"}</span>`
+                      : `<span style="color:#18e07a">Active</span>`
+                }</td><td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>`;
+              } else if (isEliminator) {
+                statusCell = `<td style="font-size:.75rem;">${
+                  rank === 1
+                    ? `<span style="color:var(--color-gold);font-weight:700;">Winner</span>`
+                    : s.eliminated
+                      ? `<span style="color:var(--color-text-dim)">Out Rd ${s.weekEliminated || "?"}</span>`
+                      : `<span style="color:#18e07a">Active</span>`
+                }</td><td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>`;
+              }
+
+              const dataCells = isSpecial
+                ? statusCell
                 : `<td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
                    <td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>
                    <td class="dim">${s.ptsAgainst > 0 ? s.ptsAgainst.toFixed(1) : "\u2014"}</td>`;
 
-              return `<tr class="${inPO ? "standings-row--playoff" : ""} ${isMe ? "standings-row--me" : ""}"
+              return `<tr class="${inPO ? "standings-row--playoff" : ""} ${isMe ? "standings-row--me" : ""} ${isSpecial && s.eliminated ? "standings-row--eliminated" : ""}"
                 style="${border}">
                 <td class="standings-rank">${rank}</td>
                 <td class="team-col">
