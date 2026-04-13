@@ -201,46 +201,66 @@ const MFLAPI = (() => {
   }
 
   /**
-   * Returns matchup array normalized for rendering:
+   * Returns matchup array for all weeks (or a single week) from liveScoring data:
    * [{ week, home: { teamId, score }, away: { teamId, score } }]
-   * Uses TYPE=schedule (all weeks) when available, falls back to TYPE=scoreboard (current week).
+   *
+   * `liveScoringData` can be:
+   *   - bundle.liveScoring  (current week from bundle)
+   *   - raw response from /mfl/liveScoring endpoint (single week on-demand)
+   *
+   * MFL liveScoring shape:
+   *   { liveScoring: { matchup: [ { franchise: [{id, score, players:{player:[...]}}] } ] } }
    */
-  function normalizeMatchups(bundle) {
-    // Prefer schedule — has all weeks, home/away designation, and scores
-    // MFL TYPE=schedule shape: { schedule: { matchupList: { matchup: [{week, home, away}] } } }
-    // Each matchup: { home: { id, score }, away: { id, score }, week }
-    const scheduleRaw = bundle?.schedule?.schedule?.matchupList?.matchup;
-    if (scheduleRaw) {
-      const arr = Array.isArray(scheduleRaw) ? scheduleRaw : [scheduleRaw];
-      const result = [];
-      arr.forEach(m => {
-        // MFL schedule matchup: { week, home: {id, score}, away: {id, score} }
-        const week = parseInt(m.week || 0);
-        // Handle both nested and flat formats
-        const homeId    = m.home?.id    || m.homeTeam?.id    || "";
-        const awayId    = m.away?.id    || m.awayTeam?.id    || "";
-        const homeScore = parseFloat(m.home?.score    || m.homeTeam?.score    || 0);
-        const awayScore = parseFloat(m.away?.score    || m.awayTeam?.score    || 0);
-        if (homeId || awayId) {
-          result.push({ week, home: { teamId: homeId, score: homeScore }, away: { teamId: awayId, score: awayScore } });
-        }
-      });
-      if (result.length > 0) return result;
-    }
-
-    // Fallback: scoreboard (current week only)
-    const raw = bundle?.matchups?.scoreboard?.matchup;
+  function normalizeMatchups(liveScoringData) {
+    const raw = liveScoringData?.liveScoring?.matchup;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
+    const week = liveScoringData?.liveScoring?.week ? parseInt(liveScoringData.liveScoring.week) : 0;
     return arr.map(m => {
-      const teams = m.franchise
+      const franchises = m.franchise
         ? (Array.isArray(m.franchise) ? m.franchise : [m.franchise])
         : [];
-      const [h, a] = teams;
+      const [h, a] = franchises;
       return {
-        week: parseInt(m.week || 0),
+        week,
         home: { teamId: h?.id || "", score: parseFloat(h?.score || 0) },
         away: { teamId: a?.id || "", score: parseFloat(a?.score || 0) }
+      };
+    }).filter(m => m.home.teamId || m.away.teamId);
+  }
+
+  /**
+   * Returns detailed per-player scoring for a matchup week.
+   * Useful for the matchup detail view (starter breakdown).
+   *
+   * Returns: [{ week, franchises: [{ id, score, starters: [{id,score}], bench: [{id,score}] }] }]
+   */
+  function normalizeLiveScoring(liveScoringData) {
+    const raw = liveScoringData?.liveScoring?.matchup;
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const week = liveScoringData?.liveScoring?.week ? parseInt(liveScoringData.liveScoring.week) : 0;
+    return arr.map(m => {
+      const franchises = m.franchise
+        ? (Array.isArray(m.franchise) ? m.franchise : [m.franchise])
+        : [];
+      return {
+        week,
+        franchises: franchises.map(f => {
+          const allPlayers = f.players?.player
+            ? (Array.isArray(f.players.player) ? f.players.player : [f.players.player])
+            : [];
+          const starters = allPlayers.filter(p => p.status === "starter")
+            .map(p => ({ id: p.id, score: parseFloat(p.score || 0) }));
+          const bench = allPlayers.filter(p => p.status !== "starter")
+            .map(p => ({ id: p.id, score: parseFloat(p.score || 0) }));
+          return {
+            id:       f.id    || "",
+            score:    parseFloat(f.score || 0),
+            starters,
+            bench
+          };
+        })
       };
     });
   }
@@ -367,20 +387,18 @@ const MFLAPI = (() => {
   async function debugBundle(leagueId, year) {
     const bundle = await getLeagueBundle(leagueId, year);
     const paths = {
-      "league.league":                           !!bundle?.league?.league,
-      "league.league.franchises_eliminated":     !!(bundle?.league?.league?.franchises_eliminated),
-      "league.league.standingsSort":             bundle?.league?.league?.standingsSort || "(none)",
-      "standings.leagueStandings.franchise":     !!bundle?.standings?.leagueStandings?.franchise,
-      "schedule.schedule.matchupList.matchup":   !!bundle?.schedule?.schedule?.matchupList?.matchup,
-      "matchups.scoreboard.matchup":             !!bundle?.matchups?.scoreboard?.matchup,
-      "rosters.rosters.franchise":               !!bundle?.rosters?.rosters?.franchise,
-      "players.players.player":                  !!(bundle?.players?.players?.player),
-      "draft.draftResults.draftUnit":            !!bundle?.draft?.draftResults?.draftUnit,
-      "auctionResults.auctionResults.auction":   !!bundle?.auctionResults?.auctionResults?.auction,
-      "salaries.salaries.leagueUnit.player":     !!(bundle?.salaries?.salaries?.leagueUnit?.player),
-      "salaries.salaries.leagueUnit.salary":     !!(bundle?.salaries?.salaries?.leagueUnit?.salary),
-      "transactions.transactions.transaction":   !!bundle?.transactions?.transactions?.transaction,
-      "playerScores.playerScores.playerScore":   !!bundle?.playerScores?.playerScores?.playerScore,
+      "league.league":                             !!bundle?.league?.league,
+      "league.league.franchises_eliminated":       !!(bundle?.league?.league?.franchises_eliminated),
+      "league.league.standingsSort":               bundle?.league?.league?.standingsSort || "(none)",
+      "standings.leagueStandings.franchise":       !!bundle?.standings?.leagueStandings?.franchise,
+      "liveScoring.liveScoring.matchup":           !!bundle?.liveScoring?.liveScoring?.matchup,
+      "liveScoring.liveScoring.week":              bundle?.liveScoring?.liveScoring?.week || "(none)",
+      "rosters.rosters.franchise":                 !!bundle?.rosters?.rosters?.franchise,
+      "draft.draftResults.draftUnit":              !!bundle?.draft?.draftResults?.draftUnit,
+      "auctionResults.auctionResults.auction":     !!bundle?.auctionResults?.auctionResults?.auction,
+      "transactions.transactions.transaction":     !!bundle?.transactions?.transactions?.transaction,
+      "playerScores.playerScores.playerScore":     !!bundle?.playerScores?.playerScores?.playerScore,
+      "playoffBrackets.playoffBrackets.bracket":   !!bundle?.playoffBrackets?.playoffBrackets?.bracket,
     };
     const rawF = bundle?.league?.league?.franchises?.franchise;
     const franchises = rawF
@@ -400,6 +418,72 @@ const MFLAPI = (() => {
     return summary;
   }
 
+  /**
+   * Returns playoff brackets metadata from bundle.playoffBrackets:
+   * [{ id, name, rounds, teams }]
+   */
+  function normalizePlayoffBrackets(bundle) {
+    const raw = bundle?.playoffBrackets?.playoffBrackets?.bracket;
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr.map(b => ({
+      id:     String(b.id     || b.bracket_id || ""),
+      name:   b.name          || `Bracket ${b.id || ""}`,
+      rounds: parseInt(b.rounds || 0),
+      teams:  parseInt(b.teams  || 0),
+    }));
+  }
+
+  /**
+   * Normalizes a full playoff bracket result from /mfl/playoffBracket response.
+   * Returns: [{ round, matchups: [{ home: {id, score, won}, away: {id, score, won} }] }]
+   *
+   * MFL shape: { playoffBracket: { bracket: { round: [{matchup:[{away,home,winner}]}] } } }
+   */
+  function normalizePlayoffBracketResult(data) {
+    const raw = data?.playoffBracket?.bracket?.round;
+    if (!raw) return [];
+    const rounds = Array.isArray(raw) ? raw : [raw];
+    return rounds.map((r, ri) => {
+      const matchups = Array.isArray(r.matchup) ? r.matchup : (r.matchup ? [r.matchup] : []);
+      return {
+        round: ri + 1,
+        matchups: matchups.map(m => {
+          const winner = String(m.winner || "");
+          const homeId = String(m.home?.id || m.home || "");
+          const awayId = String(m.away?.id || m.away || "");
+          return {
+            home: { id: homeId, score: parseFloat(m.home?.score || 0), won: winner === homeId },
+            away: { id: awayId, score: parseFloat(m.away?.score || 0), won: winner === awayId },
+          };
+        })
+      };
+    });
+  }
+
+  /**
+   * Fetches a single week of liveScoring on-demand from the worker.
+   * Returns raw liveScoring data — pass to normalizeMatchups() or normalizeLiveScoring().
+   * Omit `week` to get the current week.
+   */
+  async function getLiveScoring(leagueId, year, week, username, password) {
+    return post("/mfl/liveScoring", {
+      leagueId,
+      year,
+      week: week != null ? String(week) : undefined,
+      username,
+      password
+    });
+  }
+
+  /**
+   * Fetches a specific playoff bracket result on-demand from the worker.
+   * Returns raw data — pass to normalizePlayoffBracketResult().
+   */
+  async function getPlayoffBracket(leagueId, year, bracketId, username, password) {
+    return post("/mfl/playoffBracket", { leagueId, year, bracketId, username, password });
+  }
+
   return {
     getUserLeagues,
     getLeagueBundle,
@@ -408,6 +492,11 @@ const MFLAPI = (() => {
     getStandingsMap,
     getRoster,
     normalizeMatchups,
+    normalizeLiveScoring,
+    normalizePlayoffBrackets,
+    normalizePlayoffBracketResult,
+    getLiveScoring,
+    getPlayoffBracket,
     getLeagueInfo,
     getAuctionResults,
     buildMFLToSleeperIndex,

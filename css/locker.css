@@ -1684,10 +1684,16 @@ select option { background: var(--color-bg-2); }
   border-radius: var(--radius);
   padding: var(--space-3);
 }
-.bracket-slot {
-  font-size: .82rem;
-  padding: var(--space-1) 0;
+.bracket-slot {font-size: .82rem; padding: var(--space-1) 0;}
+.bracket-slot--me {  border-left: 3px solid var(--color-gold);}
+.bracket-score {
+  margin-left: auto;
+  font-size: .75rem;
+  font-family: var(--font-display);
+  color: var(--color-text-dim);
+  padding-left: var(--space-2);
 }
+.bracket-slot--win .bracket-score {color: var(--color-gold); font-weight: 700;}
 .bracket-slot--win  { color: var(--color-green); font-weight: 700; }
 .bracket-slot--lose { color: var(--color-text-dim); text-decoration: line-through; opacity: .6; }
 .bracket-vs { font-size: .65rem; color: var(--color-text-dim); margin: 2px 0; }

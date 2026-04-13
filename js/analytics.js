@@ -714,73 +714,539 @@ const DLRAnalytics = (() => {
     }
   }
 
-  // ── MFL Analytics ─────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════
+  //  MFL ANALYTICS — full tab parity with Sleeper
+  // ══════════════════════════════════════════════════════════
+
+  const MFL_TABS = [
+    { id:"power",   label:"🏆 Power Rankings", fn: _mflRenderPower   },
+    { id:"luck",    label:"🍀 Luck Index",      fn: _mflRenderLuck    },
+    { id:"trades",  label:"🔄 Trade Map",        fn: _mflRenderTrades  },
+    { id:"draft",   label:"📋 Draft Recap",      fn: _mflRenderDraft   },
+    { id:"waivers", label:"💎 Waivers",          fn: _mflRenderWaivers },
+  ];
+
+  let _mflBundle      = null;  // cached bundle for the current MFL league
+  let _mflTeamMap     = {};    // franchiseId → name
+  let _mflStandings   = [];    // normalized standings array
+  let _mflActiveTab   = 0;
+  let _mflWeekScores  = null;  // { franchiseId: [score_wk1, score_wk2, ...] } (lazy-loaded)
+
   async function _renderMFLAnalytics(el, leagueId, token) {
     const season = _season || new Date().getFullYear().toString();
-    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
+    _mflBundle    = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
-    const teams    = MFLAPI.getTeams(bundle);
-    const standings = MFLAPI.normalizeStandings(bundle);
-    const teamMap  = {};
-    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
-
-    // Sort for power rankings by win% then pts
-    const ranked = [...standings].sort((a, b) =>
-      (b.wins/(b.wins+b.losses+b.ties||1)) - (a.wins/(a.wins+a.losses+a.ties||1)) ||
-      b.ptsFor - a.ptsFor
-    );
-
-    const maxPts = Math.max(...standings.map(s => s.ptsFor), 1);
+    const teams = MFLAPI.getTeams(_mflBundle);
+    _mflTeamMap = {};
+    teams.forEach(t => { _mflTeamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+    _mflStandings  = MFLAPI.normalizeStandings(_mflBundle);
+    _mflWeekScores = null;  // reset; will be fetched lazily by luck/power tabs
+    _mflActiveTab  = 0;
 
     el.innerHTML = `
-      <div style="padding:var(--space-4)">
-        <div class="az-section-title" style="margin-bottom:var(--space-3)">🏆 Power Rankings</div>
-        <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-          ${ranked.map((s, i) => {
-            const name    = teamMap[String(s.franchiseId)] || `Team ${s.franchiseId}`;
-            const record  = `${s.wins}–${s.losses}${s.ties ? `–${s.ties}` : ""}`;
-            const pct     = ((s.ptsFor / maxPts) * 100).toFixed(0);
-            const rankColor = i === 0 ? "var(--color-gold)" : i < 3 ? "#94a3b8" : "var(--color-text-dim)";
-            const isMe    = _myRosterId && String(s.franchiseId) === String(_myRosterId);
-            return `
-              <div style="display:grid;grid-template-columns:28px 1fr auto;gap:var(--space-2);align-items:center;padding:var(--space-2) var(--space-3);background:${isMe ? "var(--color-surface-raised)" : "var(--color-surface)"};border-radius:var(--radius-sm);${isMe ? "border:1px solid var(--color-gold-dim);" : ""}">
-                <span style="font-weight:700;color:${rankColor};font-family:var(--font-display)">${i+1}</span>
-                <div>
-                  <div style="font-weight:600;font-size:.88rem">${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}</div>
-                  <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:2px">
-                    <span style="font-size:.72rem;color:var(--color-text-dim)">${record}</span>
-                    <div style="flex:1;height:4px;background:var(--color-border);border-radius:2px;max-width:120px">
-                      <div style="height:100%;width:${pct}%;background:var(--color-gold);border-radius:2px"></div>
-                    </div>
-                    <span style="font-size:.72rem;color:var(--color-text-dim)">${s.ptsFor.toFixed(1)} pts</span>
-                  </div>
-                </div>
-                <span style="font-size:.75rem;color:var(--color-text-dim)">${s.ptsFor > 0 ? (s.ptsFor/(s.wins+s.losses+s.ties||1)).toFixed(1)+"/wk" : ""}</span>
-              </div>`;
-          }).join("")}
-        </div>
-        <div style="margin-top:var(--space-5)">
-          <div class="az-section-title" style="margin-bottom:var(--space-3)">📊 Points Leaders</div>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-            ${[...standings].sort((a,b) => b.ptsFor - a.ptsFor).slice(0,5).map((s,i) => {
-              const name  = teamMap[String(s.franchiseId)] || `Team ${s.franchiseId}`;
-              const isMe  = _myRosterId && String(s.franchiseId) === String(_myRosterId);
-              return `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) var(--space-3);background:${isMe ? "var(--color-surface-raised)" : "var(--color-surface)"};border-radius:var(--radius-sm);${isMe ? "border:1px solid var(--color-gold-dim);" : ""}">
-                  <span style="font-size:.85rem">${i+1}. ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}</span>
-                  <span style="font-weight:700;color:var(--color-gold);font-family:var(--font-display)">${s.ptsFor.toFixed(1)}</span>
-                </div>`;
-            }).join("")}
-          </div>
-        </div>
-        <div style="margin-top:var(--space-4);text-align:center">
-          <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
-            style="font-size:.78rem;color:var(--color-gold)">View full analytics on MFL ↗</a>
-        </div>
+      <div class="az-tabs" id="az-tab-bar">
+        ${MFL_TABS.map((t, i) => `
+          <button class="az-tab ${i === 0 ? "az-tab--active" : ""}" data-idx="${i}"
+            onclick="DLRAnalytics.showMFLTab(${i})">${t.label}</button>`
+        ).join("")}
+      </div>
+      <div class="az-content" id="az-content">
+        <div class="detail-loading"><div class="spinner"></div><span>Loading…</span></div>
       </div>`;
+
+    _mflShowTab(0, el);
   }
 
-  return { init, reset, showTab };
+  function _mflShowTab(idx) {
+    _mflActiveTab = idx;
+    document.querySelectorAll(".az-tab").forEach((t, i) => {
+      t.classList.toggle("az-tab--active", i === idx);
+    });
+    const content = document.getElementById("az-content");
+    if (!content) return;
+    content.innerHTML = _loadingHTML("Loading…");
+    MFL_TABS[idx]?.fn(content);
+  }
+
+  // ── MFL: Fetch all weekly scores via liveScoring ───────────
+  // Returns { franchiseId: [wk1pts, wk2pts, ...], _weeks: [1,2,...], _matchups: [{week,home,away}] }
+  async function _mflFetchWeekScores() {
+    if (_mflWeekScores) return _mflWeekScores;
+    const season = _season || new Date().getFullYear().toString();
+    const leagueInfo = MFLAPI.getLeagueInfo(_mflBundle);
+    const totalWeeks = parseInt(_mflBundle?.league?.league?.lastRegularSeasonWeek || 13);
+    // Fetch all weeks in parallel
+    const fetches = Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w =>
+      MFLAPI.getLiveScoring(_leagueId, season, w).catch(() => null)
+    );
+    const results = await Promise.all(fetches);
+    const byFranchise = {}, allMatchups = [], weeks = [];
+    results.forEach((liveData, i) => {
+      if (!liveData) return;
+      const week = i + 1;
+      const matchups = MFLAPI.normalizeMatchups(liveData);
+      if (!matchups.length) return;
+      weeks.push(week);
+      matchups.forEach(m => {
+        allMatchups.push({ week, ...m });
+        const hId = m.home.teamId, aId = m.away.teamId;
+        if (!byFranchise[hId]) byFranchise[hId] = {};
+        if (!byFranchise[aId]) byFranchise[aId] = {};
+        byFranchise[hId][week] = m.home.score;
+        byFranchise[aId][week] = m.away.score;
+      });
+    });
+    _mflWeekScores = { byFranchise, allMatchups, weeks };
+    return _mflWeekScores;
+  }
+
+  // ── MFL Tab 1: Power Rankings ──────────────────────────────
+  async function _mflRenderPower(el) {
+    try {
+      // Try to use week-by-week scores for recent form; fall back to season standings
+      let weekData = null;
+      try { weekData = await _mflFetchWeekScores(); } catch(e) {}
+
+      const standings = _mflStandings;
+      if (!standings.length) { el.innerHTML = _noData("No standings data available."); return; }
+
+      const rankings = standings.map(s => {
+        const fid    = String(s.franchiseId);
+        const name   = _mflTeamMap[fid] || `Team ${fid}`;
+        const wins   = s.wins, losses = s.losses, ties = s.ties;
+        const total  = wins + losses + ties || 1;
+        const winPct = wins / total;
+        const isMe   = _myRosterId && fid === String(_myRosterId);
+
+        // Recent form: last 3 weeks avg vs season avg
+        let avgAll = s.ptsFor / total;
+        let avgRecent = avgAll, trend = "→", trendColor = "var(--color-text-dim)";
+        if (weekData && weekData.byFranchise[fid]) {
+          const wScores = weekData.byFranchise[fid];
+          const allWks  = Object.values(wScores).filter(p => p > 0);
+          avgAll        = allWks.length ? allWks.reduce((a, b) => a + b, 0) / allWks.length : avgAll;
+          const maxWk   = Math.max(...Object.keys(wScores).map(Number));
+          const recent  = [maxWk, maxWk - 1, maxWk - 2].filter(w => w > 0)
+            .map(w => wScores[w]).filter(p => p != null && p > 0);
+          avgRecent = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : avgAll;
+          trend     = avgRecent > avgAll * 1.05 ? "↑" : avgRecent < avgAll * 0.9 ? "↓" : "→";
+          trendColor = trend === "↑" ? "var(--color-green)" : trend === "↓" ? "var(--color-red)" : "var(--color-text-dim)";
+        }
+
+        const power = avgRecent * 0.4 + avgAll * 0.3 + winPct * 100 * 0.3;
+        return { fid, name, wins, losses, ties, avgAll, avgRecent, power, trend, trendColor, isMe };
+      }).filter(r => r.power > 0).sort((a, b) => b.power - a.power);
+
+      if (!rankings.length) { el.innerHTML = _noData("Not enough data yet."); return; }
+      const maxPower = rankings[0].power;
+      const medals   = ["🥇","🥈","🥉"];
+
+      el.innerHTML = `
+        <div class="az-section-title">Power Rankings</div>
+        <div class="az-desc">40% recent form (last 3 wks) + 30% season avg + 30% win%</div>
+        <div class="az-list">
+          ${rankings.map((r, i) => {
+            const pct    = (r.power / maxPower * 100).toFixed(1);
+            const record = `${r.wins}–${r.losses}${r.ties ? `–${r.ties}` : ""}`;
+            return `
+              <div class="az-list-row ${r.isMe ? "az-list-row--me" : ""}">
+                <div class="az-rank">${medals[i] || `#${i+1}`}</div>
+                <div class="az-team-name">${_esc(r.name)}${r.isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</div>
+                <div class="az-record">${record}</div>
+                <div class="az-bar-wrap"><div class="az-bar" style="width:${pct}%"></div></div>
+                <div class="az-stat-sm">${r.avgAll.toFixed(1)} avg</div>
+                <div class="az-trend" style="color:${r.trendColor}">${r.trend}</div>
+              </div>`;
+          }).join("")}
+        </div>`;
+    } catch(e) {
+      el.innerHTML = _errMsg("Could not load power rankings: " + e.message);
+    }
+  }
+
+  // ── MFL Tab 2: Luck Index ──────────────────────────────────
+  async function _mflRenderLuck(el) {
+    try {
+      el.innerHTML = _loadingHTML("Fetching weekly scores…");
+      const weekData = await _mflFetchWeekScores();
+      if (!weekData.allMatchups.length) { el.innerHTML = _noData("Not enough matchup data yet."); return; }
+
+      // For MFL matchups we have home/away but no matchup_id — use week pairing directly
+      const weeklyScores = {}, actualRecord = {};
+      weekData.allMatchups.forEach(m => {
+        const hId = m.home.teamId, aId = m.away.teamId;
+        if (!hId || !aId) return;
+        if (!weeklyScores[hId]) weeklyScores[hId] = [];
+        if (!weeklyScores[aId]) weeklyScores[aId] = [];
+        weeklyScores[hId].push(m.home.score);
+        weeklyScores[aId].push(m.away.score);
+        if (!actualRecord[hId]) actualRecord[hId] = { w: 0, l: 0 };
+        if (!actualRecord[aId]) actualRecord[aId] = { w: 0, l: 0 };
+        if (m.home.score >= m.away.score) { actualRecord[hId].w++; actualRecord[aId].l++; }
+        else                              { actualRecord[aId].w++; actualRecord[hId].l++; }
+      });
+
+      const allScores = Object.values(weeklyScores).flat().filter(s => s > 0);
+      if (!allScores.length) { el.innerHTML = _noData("Not enough scoring data yet."); return; }
+
+      const results = _mflStandings.map(s => {
+        const fid    = String(s.franchiseId);
+        const scores = weeklyScores[fid] || [];
+        const actual = actualRecord[fid] || { w: 0, l: 0 };
+        if (!scores.length) return null;
+        const sortedAll    = [...allScores].sort((a, b) => a - b);
+        const expectedWins = scores.filter(sc => sortedAll.filter(x => x < sc).length > sortedAll.length / 2).length;
+        return {
+          fid,
+          name:         _mflTeamMap[fid] || `Team ${fid}`,
+          actual,
+          expectedWins,
+          luckScore:    actual.w - expectedWins,
+          avgScore:     scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : "0",
+          isMe:         _myRosterId && fid === String(_myRosterId)
+        };
+      }).filter(Boolean).sort((a, b) => b.luckScore - a.luckScore);
+
+      const maxLuck = Math.max(...results.map(r => Math.abs(r.luckScore)), 1);
+
+      el.innerHTML = `
+        <div class="az-section-title">Luck Index</div>
+        <div class="az-desc">Actual Wins − Expected Wins vs league-wide weekly median. Positive = lucky, Negative = unlucky.</div>
+        <div class="az-list">
+          ${results.map(r => {
+            const pct   = (Math.abs(r.luckScore) / maxLuck) * 40;
+            const color = r.luckScore > 0 ? "var(--color-green)" : r.luckScore < 0 ? "var(--color-red)" : "var(--color-text-dim)";
+            const emoji = r.luckScore >= 2 ? "🍀" : r.luckScore <= -2 ? "😤" : "😐";
+            return `
+              <div class="az-list-row ${r.isMe ? "az-list-row--me" : ""}">
+                <div class="az-rank" style="font-size:1.1rem">${emoji}</div>
+                <div class="az-team-name">${_esc(r.name)}${r.isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</div>
+                <div class="az-record">${r.actual.w}–${r.actual.l}</div>
+                <div class="az-luck-bar-wrap">
+                  <div class="az-luck-bar ${r.luckScore >= 0 ? "az-luck-bar--pos" : "az-luck-bar--neg"}"
+                    style="width:${pct}%;${r.luckScore >= 0 ? "margin-left:50%;" : `margin-left:${50 - pct}%;`}"></div>
+                  <div class="az-luck-zero"></div>
+                </div>
+                <div class="az-stat-sm" style="color:${color};font-weight:700;">${r.luckScore > 0 ? "+" : ""}${r.luckScore}</div>
+              </div>`;
+          }).join("")}
+        </div>`;
+    } catch(e) {
+      el.innerHTML = _errMsg("Could not load luck data: " + e.message);
+    }
+  }
+
+  // ── MFL Tab 3: Trade Map ───────────────────────────────────
+  async function _mflRenderTrades(el) {
+    try {
+      const rawTx  = _mflBundle?.transactions?.transactions?.transaction;
+      if (!rawTx) { el.innerHTML = _noData("No transaction data available."); return; }
+      const txArr  = Array.isArray(rawTx) ? rawTx : [rawTx];
+      const trades = txArr.filter(t => {
+        const type = (t.type || t.transaction_type || "").toLowerCase();
+        return type === "trade";
+      });
+
+      if (!trades.length) { el.innerHTML = _noData("No trades found this season."); return; }
+
+      // MFL trade shape: { franchise: [{id}], transaction_type:"TRADE", ... }
+      const pairs = {}, counts = {};
+      trades.forEach(t => {
+        const fArr = t.franchise
+          ? (Array.isArray(t.franchise) ? t.franchise : [t.franchise])
+          : [];
+        const ids = fArr.map(f => String(f.id || f)).filter(Boolean).sort();
+        if (ids.length >= 2) {
+          const key = ids.join("-");
+          pairs[key] = (pairs[key] || 0) + 1;
+          ids.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+        }
+      });
+
+      const sorted   = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      const maxCount = sorted[0]?.[1] || 1;
+
+      el.innerHTML = `
+        <div class="az-section-title">Trade Activity</div>
+        <div class="az-list" style="margin-bottom:var(--space-5);">
+          ${sorted.map(([fid, n]) => `
+            <div class="az-list-row ${_myRosterId && fid === String(_myRosterId) ? "az-list-row--me" : ""}">
+              <div class="az-team-name">${_esc(_mflTeamMap[fid] || `Team ${fid}`)}</div>
+              <div class="az-bar-wrap"><div class="az-bar" style="width:${(n/maxCount*100).toFixed(0)}%"></div></div>
+              <div class="az-stat-sm">${n} trade${n !== 1 ? "s" : ""}</div>
+            </div>`).join("")}
+        </div>
+        <div class="az-section-title">Trading Partners</div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+          ${Object.entries(pairs).sort((a, b) => b[1] - a[1]).map(([key, n]) => {
+            const [a, b] = key.split("-");
+            const nA  = _esc(_mflTeamMap[a] || `Team ${a}`);
+            const nB  = _esc(_mflTeamMap[b] || `Team ${b}`);
+            const isMe = _myRosterId && (a === String(_myRosterId) || b === String(_myRosterId));
+            return `<div class="az-trade-chip ${isMe ? "az-trade-chip--me" : ""}">
+              ${nA} <span class="az-trade-arrow">↔</span> ${nB}
+              <span class="az-trade-count">${n}×</span>
+            </div>`;
+          }).join("")}
+        </div>`;
+    } catch(e) {
+      el.innerHTML = _errMsg("Could not load trade data: " + e.message);
+    }
+  }
+
+  // ── MFL Tab 4: Draft Recap ─────────────────────────────────
+  async function _mflRenderDraft(el) {
+    try {
+      const leagueInfo = MFLAPI.getLeagueInfo(_mflBundle);
+      const season     = _season || new Date().getFullYear().toString();
+
+      // Detect auction vs snake — check auctionResults first
+      const auctionRaw   = _mflBundle?.auctionResults?.auctionResults;
+      const draftRaw     = _mflBundle?.draft?.draftResults;
+
+      // Multiple draft units (startup + rookie) — handle toggle
+      const draftUnits = draftRaw?.draftUnit
+        ? (Array.isArray(draftRaw.draftUnit) ? draftRaw.draftUnit : [draftRaw.draftUnit])
+        : [];
+
+      // Multiple auction result sets
+      const auctionSets = auctionRaw?.auction
+        ? (Array.isArray(auctionRaw.auction) && auctionRaw.auction[0]?.franchise
+            ? [auctionRaw]                          // single set
+            : (Array.isArray(auctionRaw) ? auctionRaw : [auctionRaw]))
+        : [];
+
+      const hasAuction = auctionSets.length > 0 && MFLAPI.getAuctionResults(_mflBundle).length > 0;
+      const hasDraft   = draftUnits.length > 0;
+
+      if (!hasAuction && !hasDraft) {
+        el.innerHTML = _noData("No draft or auction results found.");
+        return;
+      }
+
+      // Build pill selector if multiple sets
+      const allSets = [];
+      draftUnits.forEach((unit, i) => {
+        allSets.push({ type: "draft", label: unit.name || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`), data: unit });
+      });
+      if (hasAuction) {
+        auctionSets.forEach((set, i) => {
+          allSets.push({ type: "auction", label: i === 0 ? "Auction" : `Auction ${i + 1}`, data: set });
+        });
+      }
+
+      // Render with selector
+      const pillBar = allSets.length > 1
+        ? `<div class="draft-selector" id="mfl-draft-selector" style="margin-bottom:var(--space-3)">
+            ${allSets.map((s, i) =>
+              `<button class="season-pill ${i === 0 ? "season-pill--current" : ""}"
+                onclick="DLRAnalytics._mflSwitchDraftSet(${i})">${_esc(s.label)}</button>`
+            ).join("")}
+           </div>`
+        : "";
+
+      el.innerHTML = `${pillBar}<div id="mfl-draft-body"></div>`;
+
+      // Store sets for switching
+      DLRAnalytics._mflDraftSets = allSets;
+      _mflRenderDraftSet(allSets[0], 0);
+
+    } catch(e) {
+      el.innerHTML = _errMsg("Could not load draft data: " + e.message);
+    }
+  }
+
+  function _mflRenderDraftSet(setObj, idx) {
+    const body = document.getElementById("mfl-draft-body");
+    if (!body) return;
+
+    // Update pill highlight
+    document.querySelectorAll("#mfl-draft-selector .season-pill").forEach((b, i) => {
+      b.classList.toggle("season-pill--current", i === idx);
+    });
+
+    if (setObj.type === "auction") {
+      // Auction list — sorted by price desc, list-only
+      const raw   = setObj.data?.auctionResults?.auction || setObj.data?.auction;
+      const picks = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      if (!picks.length) { body.innerHTML = _noData("No auction results found."); return; }
+
+      const playerLookup = _mflBuildPlayerLookup();
+      const sorted = [...picks].sort((a, b) => parseFloat(b.amount || 0) - parseFloat(a.amount || 0));
+      const maxAmt = parseFloat(sorted[0]?.amount || 1);
+
+      body.innerHTML = `
+        <div class="az-section-title">${_esc(setObj.label)} Results</div>
+        <div class="az-desc">Sorted by winning bid · ${sorted.length} players</div>
+        <div class="az-list">
+          ${sorted.map((a, i) => {
+            const fid    = String(a.franchise || "");
+            const pid    = String(a.player    || "");
+            const amt    = parseFloat(a.amount || 0);
+            const pInfo  = playerLookup[pid] || {};
+            const pName  = pInfo.name  || pid;
+            const pPos   = pInfo.position || "?";
+            const tName  = _esc(_mflTeamMap[fid] || `Team ${fid}`);
+            const isMe   = _myRosterId && fid === String(_myRosterId);
+            const posCol = POS_COLOR[pPos] || "#9ca3af";
+            const pct    = (amt / maxAmt * 100).toFixed(1);
+            return `
+              <div class="az-list-row ${isMe ? "az-list-row--me" : ""}">
+                <div class="az-rank" style="color:var(--color-text-dim)">${i+1}</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(pName)}</div>
+                  <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:2px">
+                    <span class="az-pos-badge" style="background:${posCol}22;color:${posCol};border-color:${posCol}55">${pPos}</span>
+                    <span style="font-size:.75rem;color:var(--color-text-dim)">${tName}</span>
+                    <div style="flex:1;height:3px;background:var(--color-border);border-radius:2px;max-width:80px">
+                      <div style="height:100%;width:${pct}%;background:var(--color-gold);border-radius:2px"></div>
+                    </div>
+                  </div>
+                </div>
+                <div style="font-weight:700;color:var(--color-gold);font-family:var(--font-display);font-size:.95rem">$${amt.toFixed(0)}</div>
+              </div>`;
+          }).join("")}
+        </div>`;
+    } else {
+      // Snake/linear draft — grid/list view (list for now; grid is in draft.js tab)
+      const unit  = setObj.data;
+      const picks = unit?.draftPick ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]) : [];
+      if (!picks.length) { body.innerHTML = _noData("No draft picks found."); return; }
+
+      const playerLookup = _mflBuildPlayerLookup();
+      const byTeam = {};
+      picks.forEach(p => {
+        const fid = String(p.franchise || "");
+        if (!byTeam[fid]) byTeam[fid] = [];
+        const pid   = String(p.player || "");
+        const pInfo = playerLookup[pid] || {};
+        byTeam[fid].push({
+          overall: parseInt(p.pick || 0),
+          round:   parseInt(p.round || 1),
+          name:    pInfo.name     || pid,
+          pos:     pInfo.position || "?",
+          pid
+        });
+      });
+
+      const summaries = Object.entries(byTeam).map(([fid, rPicks]) => {
+        const posMap = {};
+        rPicks.forEach(p => { posMap[p.pos] = (posMap[p.pos] || 0) + 1; });
+        const isMe = _myRosterId && fid === String(_myRosterId);
+        return { fid, name: _mflTeamMap[fid] || `Team ${fid}`, picks: rPicks, posMap, isMe };
+      }).sort((a, b) => a.fid.localeCompare(b.fid));
+
+      const medals = ["🥇","🥈","🥉"];
+      body.innerHTML = `
+        <div class="az-section-title">${_esc(setObj.label)}</div>
+        <div class="az-desc">${picks.length} picks · ${summaries.length} teams</div>
+        <div class="az-list">
+          ${summaries.map((s, i) => `
+            <div class="az-draft-row ${s.isMe ? "az-list-row--me" : ""}">
+              <div class="az-rank">${medals[i] || `#${i+1}`}</div>
+              <div class="az-draft-body">
+                <div class="az-draft-header">
+                  <span class="az-team-name">${_esc(s.name)}</span>
+                  <span class="az-stat-sm">${s.picks.length} picks</span>
+                </div>
+                <div class="az-pos-badges">
+                  ${Object.entries(s.posMap).map(([pos, n]) => {
+                    const col = POS_COLOR[pos] || "#9ca3af";
+                    return `<span class="az-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}×${n}</span>`;
+                  }).join("")}
+                </div>
+              </div>
+            </div>`).join("")}
+        </div>`;
+    }
+  }
+
+  function _mflBuildPlayerLookup() {
+    const raw = _mflBundle?.players?.players?.player;
+    if (!raw) return {};
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const map = {};
+    arr.forEach(p => { if (p.id) map[p.id] = { name: p.name || "", position: p.position || "?" }; });
+    return map;
+  }
+
+  // ── MFL Tab 5: Waiver Analysis ─────────────────────────────
+  async function _mflRenderWaivers(el) {
+    try {
+      const rawTx = _mflBundle?.transactions?.transactions?.transaction;
+      if (!rawTx) { el.innerHTML = _noData("No transaction data available."); return; }
+      const txArr   = Array.isArray(rawTx) ? rawTx : [rawTx];
+      const waivers = txArr.filter(t => {
+        const type = (t.type || t.transaction_type || "").toLowerCase();
+        return type === "waiver" || type === "free_agent" || type === "fa";
+      });
+
+      if (!waivers.length) { el.innerHTML = _noData("No waiver activity found this season."); return; }
+
+      const teamPickups = {}, playerClaims = {};
+      waivers.forEach(t => {
+        // MFL waiver shape: { franchise: {id}, transaction:[{type:"added"|"dropped", player}] }
+        const fArr = t.franchise
+          ? (Array.isArray(t.franchise) ? t.franchise : [t.franchise])
+          : [];
+        const fid = String(fArr[0]?.id || fArr[0] || "");
+        if (!fid) return;
+        if (!teamPickups[fid]) teamPickups[fid] = { adds: 0, drops: 0 };
+
+        const txDetails = t.transaction
+          ? (Array.isArray(t.transaction) ? t.transaction : [t.transaction])
+          : [];
+        txDetails.forEach(tx => {
+          const ttype = (tx.type || "").toLowerCase();
+          if (ttype === "added"   || ttype === "add")  {
+            teamPickups[fid].adds++;
+            const pid = String(tx.player || "");
+            if (pid) playerClaims[pid] = (playerClaims[pid] || 0) + 1;
+          }
+          if (ttype === "dropped" || ttype === "drop") teamPickups[fid].drops++;
+        });
+      });
+
+      // Resolve player names from bundle.players if available, else show id
+      const playerLookup = _mflBuildPlayerLookup();
+      const hotPlayers   = Object.entries(playerClaims)
+        .filter(([, n]) => n > 1)
+        .sort((a, b) => b[1] - a[1]).slice(0, 12)
+        .map(([pid, n]) => ({ name: playerLookup[pid]?.name || pid, n }));
+
+      const teamRows = Object.entries(teamPickups)
+        .map(([fid, { adds, drops }]) => ({
+          name: _mflTeamMap[fid] || `Team ${fid}`,
+          adds, drops,
+          isMe: _myRosterId && fid === String(_myRosterId)
+        })).sort((a, b) => b.adds - a.adds);
+      const maxAdds = teamRows[0]?.adds || 1;
+
+      el.innerHTML = `
+        <div class="az-section-title">Waiver Activity by Team</div>
+        <div class="az-list" style="margin-bottom:var(--space-5);">
+          ${teamRows.map(r => `
+            <div class="az-list-row ${r.isMe ? "az-list-row--me" : ""}">
+              <div class="az-team-name">${_esc(r.name)}</div>
+              <div class="az-bar-wrap">
+                <div class="az-bar" style="width:${(r.adds/maxAdds*100).toFixed(0)}%"></div>
+              </div>
+              <div class="az-stat-sm">${r.adds} adds · ${r.drops} drops</div>
+            </div>`).join("")}
+        </div>
+        ${hotPlayers.length ? `
+        <div class="az-section-title">Most Claimed Players</div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+          ${hotPlayers.map(({ name, n }) =>
+            `<div class="az-trade-chip">${_esc(name)} <span class="az-trade-count">${n}×</span></div>`
+          ).join("")}
+        </div>` : ""}`;
+    } catch(e) {
+      el.innerHTML = _errMsg("Could not load waiver data: " + e.message);
+    }
+  }
+
+  return { init, reset, showTab, showMFLTab: _mflShowTab, _mflSwitchDraftSet: (i) => _mflRenderDraftSet(DLRAnalytics._mflDraftSets?.[i], i) };
 
 })();

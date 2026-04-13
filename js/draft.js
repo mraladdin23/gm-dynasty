@@ -505,7 +505,8 @@ const DLRDraft = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build player name/pos lookup from bundle, with Sleeper ID mapping
+    // Build player name/pos lookup — bundle.players removed from worker bundle,
+    // so fall back gracefully; names will show as player IDs if not present
     const playerLookup = {};
     const rawPlayers = bundle?.players?.players?.player;
     if (rawPlayers) {
@@ -523,51 +524,69 @@ const DLRDraft = (() => {
       });
     }
 
-    // ── Regular draft picks ──────────────────────────────────
-    const units = bundle?.draft?.draftResults?.draftUnit;
-    const unitArr = units ? (Array.isArray(units) ? units : [units]) : [];
-    const allPicks = [];
-    unitArr.forEach(u => {
+    // ── Draft units — keep per-unit for multi-draft selector ─
+    const unitsRaw  = bundle?.draft?.draftResults?.draftUnit;
+    const unitArr   = unitsRaw ? (Array.isArray(unitsRaw) ? unitsRaw : [unitsRaw]) : [];
+
+    // Normalize each unit's picks into a flat array tagged with unitIndex
+    const draftSets = unitArr.map((u, i) => {
       const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
-      picks.forEach(p => {
-        // Normalize franchise field — MFL uses different names across versions
-        const franchise = p.franchise || p.franchiseId || p.franchise_id || "";
-        allPicks.push({ ...p, franchise });
-      });
-    });
-
-    // ── Salary/auction data from salaries endpoint ───────────
-    // ── Auction draft results (TYPE=auctionResults) ─────────────────────────
-    // auctionResults is the correct source for startup/yearly auction draft results.
-    // salaries is for ongoing salary cap tracking (different thing).
-    // Check auctionResults first, fall back to salaries variants for salary cap leagues.
-    const auctionRaw = bundle?.auctionResults?.auctionResults?.auction;
-    const salaryRaw  = bundle?.salaries?.salaries?.leagueUnit?.player
-                    || bundle?.salaries?.salaries?.leagueUnit?.salary
-                    || bundle?.salaries?.salaries?.player
-                    || bundle?.salaries?.salaries?.salary;
-    // Build auction/salary list: prefer auctionResults (draft auctions),
-    // fall back to salaries (salary cap leagues)
-    const rawForAuction = auctionRaw || salaryRaw;
-    const salaryArr = rawForAuction
-      ? (Array.isArray(rawForAuction) ? rawForAuction : [rawForAuction]).map(p => ({
+      return {
+        label:   u.name || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`),
+        type:    "draft",
+        picks:   picks.map(p => ({
           ...p,
-          id:        p.id        || p.player     || p.playerId    || "",
-          franchise: p.franchise || p.franchiseId || p.franchise_id || "",
-          salary:    p.amount    || p.bid         || p.salary      || p.winningBid || 0,
-          amount:    p.amount    || p.bid         || p.salary      || p.winningBid || 0,
-        })).filter(p => p.id)
-      : [];
+          franchise: p.franchise || p.franchiseId || p.franchise_id || ""
+        }))
+      };
+    }).filter(s => s.picks.length > 0);
 
-    const hasAuction = salaryArr.length > 0;
-    const hasDraft   = allPicks.length > 0;
+    // ── Auction results — support multiple sets ──────────────
+    // auctionResults.auctionResults can be a single object or array of objects
+    const auctionResultsRoot = bundle?.auctionResults?.auctionResults;
+    let auctionSetsRaw = [];
+    if (auctionResultsRoot) {
+      // Multiple sets: top-level array of auctionResults objects
+      if (Array.isArray(auctionResultsRoot)) {
+        auctionSetsRaw = auctionResultsRoot;
+      } else if (auctionResultsRoot.auction) {
+        auctionSetsRaw = [auctionResultsRoot];
+      }
+    }
+
+    const auctionSets = auctionSetsRaw.map((set, i) => {
+      const raw = set.auction ? (Array.isArray(set.auction) ? set.auction : [set.auction]) : [];
+      return {
+        label: set.name || (i === 0 ? "Auction" : `Auction ${i + 1}`),
+        type:  "auction",
+        picks: raw.map(p => ({
+          id:        p.player    || p.playerId || "",
+          franchise: p.franchise || p.franchiseId || "",
+          salary:    parseFloat(p.amount || p.bid || p.winningBid || 0),
+          amount:    parseFloat(p.amount || p.bid || p.winningBid || 0),
+        })).filter(p => p.id)
+      };
+    }).filter(s => s.picks.length > 0);
+
+    const hasAuction = auctionSets.length > 0;
+    const hasDraft   = draftSets.length  > 0;
+
+    // Flatten all picks for legacy code paths that need allPicks
+    const allPicks  = draftSets.flatMap(s => s.picks);
+    const salaryArr = auctionSets.flatMap(s => s.picks);
 
     // Cache for re-renders on toggle without refetch
-    _mflCache = { allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId };
+    _mflCache = {
+      allPicks, salaryArr, teamMap, playerLookup,
+      hasAuction, hasDraft, season, leagueId,
+      draftSets, auctionSets,          // new: per-set data for selector
+      _activeDraftSetIdx:  0,
+      _activeAuctionSetIdx: 0,
+    };
 
     // Default view: show auction if no draft data, else draft
-    if (!_viewMode || (_viewMode === "draft" && !hasDraft && hasAuction)) _viewMode = "auction";
-    if (!_viewMode || (_viewMode === "auction" && !hasAuction && hasDraft)) _viewMode = "draft";
+    if (!_viewMode || (_viewMode === "draft"   && !hasDraft   && hasAuction)) _viewMode = "auction";
+    if (!_viewMode || (_viewMode === "auction" && !hasAuction && hasDraft))   _viewMode = "draft";
 
     _renderMFLDraftBoard(el);
   }
@@ -575,12 +594,38 @@ const DLRDraft = (() => {
   function _renderMFLDraftBoard(el) {
     if (!el) el = document.getElementById("dtab-draft");
     if (!el || !_mflCache) return;
-    const { allPicks, salaryArr, teamMap, playerLookup, hasAuction, hasDraft, season, leagueId } = _mflCache;
+    const { teamMap, playerLookup, hasAuction, hasDraft, season, leagueId,
+            draftSets, auctionSets } = _mflCache;
 
     const showAuction = _viewMode === "auction";
 
-    // Toggle bar: always show Draft Board / Auction Board buttons when both exist.
-    // Show only the relevant label when one type is absent.
+    // Resolve active set + picks for current view
+    let activeSet, allPicks, salaryArr;
+    if (showAuction) {
+      const idx  = Math.min(_mflCache._activeAuctionSetIdx || 0, (auctionSets?.length || 1) - 1);
+      activeSet  = auctionSets?.[idx];
+      salaryArr  = activeSet?.picks || _mflCache.salaryArr;
+      allPicks   = _mflCache.allPicks;
+    } else {
+      const idx  = Math.min(_mflCache._activeDraftSetIdx || 0, (draftSets?.length || 1) - 1);
+      activeSet  = draftSets?.[idx];
+      allPicks   = activeSet?.picks || _mflCache.allPicks;
+      salaryArr  = _mflCache.salaryArr;
+    }
+
+    // ── Multi-set pill selector ──────────────────────────────
+    const sets      = showAuction ? (auctionSets || []) : (draftSets || []);
+    const activeIdx = showAuction ? (_mflCache._activeAuctionSetIdx || 0) : (_mflCache._activeDraftSetIdx || 0);
+    const setPills  = sets.length > 1
+      ? `<div class="draft-selector-bar" style="margin-bottom:var(--space-2)">
+          ${sets.map((s, i) =>
+            `<button class="draft-selector-pill ${i === activeIdx ? "draft-selector-pill--active" : ""}"
+              onclick="DLRDraft._mflSetActiveSet(${i})">${_esc(s.label)}</button>`
+          ).join("")}
+         </div>`
+      : "";
+
+    // Toggle bar: Draft Board / Auction Board + layout/sort toggles
     let toggleBar = "";
     if (hasAuction || hasDraft) {
       toggleBar = `<div class="draft-toggle-bar">`;
@@ -592,7 +637,6 @@ const DLRDraft = (() => {
         toggleBar += `<button class="draft-toggle-btn ${showAuction ? "draft-toggle-btn--active" : ""}"
           onclick="DLRDraft.setViewMode('auction')">🏷 Auction Board</button>`;
       }
-      // Grid/list toggle only shown for draft board view
       if (!showAuction) {
         toggleBar += `
           <div style="margin-left:auto;display:flex;gap:4px">
@@ -602,7 +646,6 @@ const DLRDraft = (() => {
               onclick="DLRDraft.setLayoutMode('list')" title="List view">☰</button>
           </div>`;
       } else {
-        // Auction sort buttons
         toggleBar += `
           <div style="margin-left:auto;display:flex;gap:4px">
             <button class="draft-toggle-btn ${_auctionSort === "salary" ? "draft-toggle-btn--active" : ""}"
@@ -624,7 +667,7 @@ const DLRDraft = (() => {
         }
         return Number(b.salary || b.amount || 0) - Number(a.salary || a.amount || 0);
       });
-      el.innerHTML = toggleBar + `
+      el.innerHTML = setPills + toggleBar + `
         <div class="draft-auction-list">
           <div class="draft-auction-header" style="grid-template-columns:40px 44px 1fr 1fr auto">
             <span>#</span><span>Pos</span><span>Player</span><span>Team</span><span>Salary</span>
@@ -658,7 +701,7 @@ const DLRDraft = (() => {
 
     // ── Draft board ──────────────────────────────────────────
     if (!allPicks.length) {
-      el.innerHTML = toggleBar + `
+      el.innerHTML = setPills + toggleBar + `
         <div class="draft-empty">
           <div style="font-size:2.5rem">📋</div>
           <div style="font-weight:700;margin-bottom:var(--space-2)">No draft data for ${season}</div>
@@ -676,7 +719,7 @@ const DLRDraft = (() => {
 
     if (_layoutMode === "list") {
       // List view
-      el.innerHTML = toggleBar + `
+      el.innerHTML = setPills + toggleBar + `
         <div class="draft-auction-list">
           <div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
             <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
@@ -763,13 +806,13 @@ const DLRDraft = (() => {
       boardHTML += `</div></div>`;
     }
 
-    el.innerHTML = toggleBar + `
+    el.innerHTML = setPills + toggleBar + `
       <div class="draft-board-scroll">
         <div class="draft-board">${boardHTML}</div>
       </div>`;
   }
 
-    // ── Yahoo draft + auction history ──────────────────────────
+  // ── Yahoo draft + auction history ──────────────────────────
   async function _loadYahooDraft(leagueId, leagueKey, token) {
     const el  = document.getElementById("dtab-draft");
     const key = leagueKey || `nfl.l.${leagueId}`;
@@ -874,6 +917,14 @@ const DLRDraft = (() => {
     return String(s || "").replace(/'/g,"\\'").replace(/"/g,"&quot;");
   }
 
-  return { init, reset, switchSeason, switchDraft, setViewMode, setLayoutMode, setAuctionSort };
+  return {
+    init, reset, switchSeason, switchDraft, setViewMode, setLayoutMode, setAuctionSort,
+    _mflSetActiveSet(idx) {
+      if (!_mflCache) return;
+      if (_viewMode === "auction") _mflCache._activeAuctionSetIdx = idx;
+      else                         _mflCache._activeDraftSetIdx   = idx;
+      _renderMFLDraftBoard();
+    }
+  };
 
 })();
