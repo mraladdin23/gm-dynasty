@@ -93,7 +93,7 @@ export default {
         const { username, password } = await req.json();
         if (!username || !password) return new Response(JSON.stringify({ error: "Missing credentials" }), { status: 400, headers: corsHeaders() });
         const currentYear = new Date().getFullYear();
-        const loginRes = await fetch(`https://api.myfantasyleague.com/${currentYear}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+        const loginRes = await fetch(`https://api.myfantasyleague.com/${currentYear}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
         const loginXml = await loginRes.text();
         const cookieMatch = loginXml.match(/MFL_USER_ID="([^"]+)"/);
         if (!cookieMatch) return new Response(JSON.stringify({ error: "MFL login failed — check username and password", loginResponse: loginXml.slice(0, 300) }), { status: 200, headers: corsHeaders() });
@@ -109,7 +109,7 @@ export default {
         let usedSince = false;
         try {
           const sinceUrl = `https://api.myfantasyleague.com/${currentYear}/export?TYPE=myleagues&SINCE=1999&JSON=1`;
-          const sinceRes = await fetch(sinceUrl, { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } });
+          const sinceRes = await fetch(sinceUrl, { headers: mflHeaders({ Cookie: `MFL_USER_ID=${cookieValue}` }) });
           const sinceText = await sinceRes.text();
           let sinceData;
           try { sinceData = JSON.parse(sinceText); } catch(e) {}
@@ -136,7 +136,7 @@ export default {
             const batchResults = await Promise.allSettled(
               batch.map(async y => {
                 const r    = await fetch(`https://api.myfantasyleague.com/${y}/export?TYPE=myleagues&JSON=1`,
-                  { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } });
+                  { headers: mflHeaders({ Cookie: `MFL_USER_ID=${cookieValue}` }) });
                 const text = await r.text();
                 let data;
                 try { data = JSON.parse(text); } catch(e) { return []; }
@@ -171,7 +171,7 @@ export default {
         const { username, password, year } = await req.json();
         if (!username || !password) return new Response(JSON.stringify({ error: "Missing credentials" }), { status: 400, headers: corsHeaders() });
         const yr       = year || new Date().getFullYear();
-        const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+        const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
         const loginXml = await loginRes.text();
         const m        = loginXml.match(/MFL_USER_ID="([^"]+)"/);
         if (!m) return new Response(JSON.stringify({ error: "MFL login failed", loginResponse: loginXml.slice(0, 300) }), { status: 200, headers: corsHeaders() });
@@ -187,7 +187,7 @@ export default {
           cookieHeader = `MFL_USER_ID=${cookie}`;
         } else if (username && password) {
           const yr = year || new Date().getFullYear();
-          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
           const loginXml = await loginRes.text();
           const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
           if (m) cookieHeader = `MFL_USER_ID=${m[1]}`;
@@ -202,13 +202,13 @@ export default {
         let cookieHeader = "";
         if (username && password) {
           const yr = year || new Date().getFullYear();
-          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
           const loginXml = await loginRes.text();
           const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
           if (m) cookieHeader = `MFL_USER_ID=${m[1]}`;
         }
         const season  = year || new Date().getFullYear();
-        const headers = cookieHeader ? { Cookie: cookieHeader } : {};
+        const headers = mflHeaders(cookieHeader ? { Cookie: cookieHeader } : {});
         const weekParam = week ? `&W=${week}` : "";
         const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=liveScoring&L=${leagueId}${weekParam}&JSON=1`, { headers });
         const text = await r.text();
@@ -224,13 +224,13 @@ export default {
         let cookieHeader = "";
         if (username && password) {
           const yr = year || new Date().getFullYear();
-          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`);
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${yr}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
           const loginXml = await loginRes.text();
           const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
           if (m) cookieHeader = `MFL_USER_ID=${m[1]}`;
         }
         const season  = year || new Date().getFullYear();
-        const headers = cookieHeader ? { Cookie: cookieHeader } : {};
+        const headers = mflHeaders(cookieHeader ? { Cookie: cookieHeader } : {});
         const bracketParam = bracketId ? `&BRACKET_ID=${bracketId}` : "";
         const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=playoffBracket&L=${leagueId}${bracketParam}&JSON=1`, { headers });
         const text = await r.text();
@@ -244,9 +244,12 @@ export default {
         const { year } = await req.json();
         const season = year || new Date().getFullYear();
         const r = await fetch(
-          `https://api.myfantasyleague.com/${season}/export?TYPE=players&JSON=1`
+          `https://api.myfantasyleague.com/${season}/export?TYPE=players&JSON=1`,
+          { headers: mflHeaders() }
         );
-        const data = await r.json();
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch(e) { data = {}; }
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
@@ -259,7 +262,7 @@ export default {
 
 async function mflBundle(leagueId, year, cookieHeader) {
   const season  = year || new Date().getFullYear();
-  const headers = cookieHeader ? { Cookie: cookieHeader } : {};
+  const headers = mflHeaders(cookieHeader ? { Cookie: cookieHeader } : {});
   const base    = `https://api.myfantasyleague.com/${season}/export`;
   // NOTE: `players` (full MFL player universe ~500KB) and `salaries` are excluded from the
   // bundle — players are resolved via the Sleeper DB on the frontend; salaries not yet used.
@@ -486,6 +489,15 @@ async function yahooCallback(req, env) {
   if (tokenData.error) return new Response(`Yahoo auth error: ${tokenData.error} — ${tokenData.error_description || ""}`, { status: 400 });
   const appUrl = `https://dynastylockerroom.com/#yahoo_token=${encodeURIComponent(tokenData.access_token)}&yahoo_refresh=${encodeURIComponent(tokenData.refresh_token || "")}&yahoo_expires=${tokenData.expires_in || 3600}`;
   return Response.redirect(appUrl, 302);
+}
+
+// MFL grants better rate limits to identified clients.
+// Always include this on every outbound MFL API request.
+function mflHeaders(extra = {}) {
+  return {
+    "User-Agent": "DynastyLockerRoom/1.0 (dynastylockerroom.com)",
+    ...extra
+  };
 }
 
 function corsHeaders() {
