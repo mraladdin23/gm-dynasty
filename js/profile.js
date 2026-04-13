@@ -1718,7 +1718,7 @@ const Profile = (() => {
     const el = document.getElementById(`dtab-${tab}`);
     if (!el) return;
     // Always set the league context so matchups/playoffs work independently
-    DLRStandings.setLeague(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey);
+    DLRStandings.setLeague(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
     if (tab === "overview")    await _renderOverview(el, leagueKey, league);
     if (tab === "standings")   DLRStandings.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
     if (tab === "matchups")    DLRStandings.initMatchups();

@@ -373,12 +373,16 @@ const DLRFreeAgents = (() => {
 
     _rosterLookup = {};
     const rostered = new Set();
-    teams.forEach(t => {
-      MFLAPI.getRoster(bundle, t.id).forEach(p => {
+
+    // getRoster is async — must await each call (uses session-cached player universe)
+    await Promise.all(teams.map(async t => {
+      const players = await MFLAPI.getRoster(bundle, t.id, _season);
+      players.forEach(p => {
         rostered.add(`mfl_${p.id}`);
         _rosterLookup[`mfl_${p.id}`] = t.name || `Team ${t.id}`;
       });
-    });
+    }));
+    if (token !== _initToken) return;
 
     // Fetch Sleeper stats for selected year (for cross-platform consistency)
     const currentYear = parseInt(_season) || new Date().getFullYear();
@@ -398,48 +402,57 @@ const DLRFreeAgents = (() => {
     if (token !== _initToken) return;
 
     const SKILL = ["QB","RB","WR","TE"];
+
+    // Use MFLAPI.getPlayers() — the session-cached player universe fetched from
+    // /mfl/players on-demand. This is NOT in the bundle (intentionally excluded
+    // due to size). getPlayers() caches in sessionStorage after the first call.
     const playerLookup = {};
-    const raw = bundle?.players?.players?.player;
-    if (raw) {
-      const arr = Array.isArray(raw) ? raw : [raw];
-      arr.forEach(p => {
-        if (!p.id) return;
-        const pos = (p.position || "?").toUpperCase();
-        if (!SKILL.includes(pos)) return;
-
-        const displayName = MFLAPI.mflNameToDisplay(p.name);
-        const sleeperId   = MFLAPI.mflNameToSleeperId(p.name, pos);
-        const sleeperP    = sleeperId ? DLRPlayers.get(sleeperId) : null;
-
-        // Points: use Sleeper historical stats for selected year,
-        // fall back to MFL league-specific score for current season
-        const sleeperPts = sleeperId ? (sleeperStats[sleeperId]?.pts_ppr || null) : null;
-        const mflPts     = mflScores[p.id] > 0 ? mflScores[p.id] : null;
-        const pts        = sleeperPts ?? mflPts;
-
-        // Use Sleeper name/bio when matched — more reliable and consistent
-        const name = sleeperP?.first_name
-          ? `${sleeperP.first_name} ${sleeperP.last_name}`.trim()
-          : displayName || `Player ${p.id}`;
-
-        playerLookup[`mfl_${p.id}`] = {
-          pid:        `mfl_${p.id}`,
-          photoPid:   sleeperId || null,   // use Sleeper ID for photo URL
-          name,
-          pos,
-          team:       sleeperP?.team || p.team || "FA",
-          rank:       sleeperP?.search_rank || 9999,
-          pts,
-          age:        sleeperP?.age || (p.age ? parseInt(p.age) : null),
-          status:     sleeperP?.injury_status || null,
-          isRostered: rostered.has(`mfl_${p.id}`),
-          rosterTeam: _rosterLookup[`mfl_${p.id}`] || null,
-          isWon:      false,
-          _sleeperId: sleeperId,
-          _mflId:     p.id,
-        };
-      });
+    let mflPlayerUniverse = {};
+    try {
+      mflPlayerUniverse = await MFLAPI.getPlayers(_season);
+    } catch(e) {
+      console.warn("[Players] Could not load MFL player universe:", e.message);
     }
+    if (token !== _initToken) return;
+
+    // mflPlayerUniverse is keyed by mflId → { name, pos, team, sleeperId }
+    // (shape returned by MFLAPI.getPlayers)
+    Object.entries(mflPlayerUniverse).forEach(([mflId, p]) => {
+      if (!mflId) return;
+      const pos = (p.pos || p.position || "?").toUpperCase();
+      if (!SKILL.includes(pos)) return;
+
+      const sleeperId  = p.sleeperId || null;
+      const sleeperP   = sleeperId ? DLRPlayers.get(sleeperId) : null;
+
+      // Points: use Sleeper historical stats for selected year,
+      // fall back to MFL league-specific score for current season
+      const sleeperPts = sleeperId ? (sleeperStats[sleeperId]?.pts_ppr || null) : null;
+      const mflPts     = mflScores[mflId] > 0 ? mflScores[mflId] : null;
+      const pts        = sleeperPts ?? mflPts;
+
+      // Use Sleeper name/bio when matched — more reliable and consistent
+      const name = sleeperP?.first_name
+        ? `${sleeperP.first_name} ${sleeperP.last_name}`.trim()
+        : (p.name || `Player ${mflId}`);
+
+      playerLookup[`mfl_${mflId}`] = {
+        pid:        `mfl_${mflId}`,
+        photoPid:   sleeperId || null,
+        name,
+        pos,
+        team:       sleeperP?.team || p.team || "FA",
+        rank:       sleeperP?.search_rank || 9999,
+        pts,
+        age:        sleeperP?.age || (p.age ? parseInt(p.age) : null),
+        status:     sleeperP?.injury_status || null,
+        isRostered: rostered.has(`mfl_${mflId}`),
+        rosterTeam: _rosterLookup[`mfl_${mflId}`] || null,
+        isWon:      false,
+        _sleeperId: sleeperId,
+        _mflId:     mflId,
+      };
+    });
 
     _cachedData = Object.values(playerLookup);
     if (token !== _initToken) return;
