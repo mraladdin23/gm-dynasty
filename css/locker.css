@@ -1516,6 +1516,47 @@ select option { background: var(--color-bg-2); }
 }
 .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 
+/* ── Division filter bar (MFL multi-division leagues) ─── */
+.standings-division-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+.standings-division-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+  margin-right: var(--space-1);
+}
+.standings-div-pill {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: .72rem;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  white-space: nowrap;
+}
+.standings-div-pill:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.standings-div-pill--active {
+  background: rgba(240,180,41,.12);
+  border-color: var(--color-gold-dim);
+  color: var(--color-gold);
+}
+/* Row highlight for user's own team — used by MFL standings */
+.standings-row--me td { background: rgba(240,180,41,.06); }
+
 /* Season bar */
 /* ── Draft selector bar (multi-draft: startup + rookie) ── */
 .draft-selector-bar {
@@ -4066,6 +4107,10 @@ select option { background: var(--color-bg-2); }
   .standings-table-wrap { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
   .standings-table { font-size: .7rem; min-width: 300px; }
   .standings-table td, .standings-table th { padding: 5px 4px; }
+  /* Division bar: let pills scroll horizontally on narrow screens */
+  .standings-division-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .standings-division-bar::-webkit-scrollbar { display: none; }
+  .standings-div-pill { font-size: .68rem; padding: 3px 8px; flex-shrink: 0; }
 
   /* Roster */
   .roster-player-row { gap: var(--space-2); padding: var(--space-2); }

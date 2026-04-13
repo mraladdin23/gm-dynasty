@@ -29,15 +29,19 @@ const DLRStandings = (() => {
     _myRosterId  = null;
     _mflBundle   = null;
     _mflNameMap  = {};
+    _mflLiveScoringCache = {};
+    _mflPlayoffState     = null;
     _initToken++;
   }
 
-  function setLeague(leagueId, platform, season, leagueKey) {
-    if (_leagueId !== leagueId) reset();
-    _leagueId  = leagueId;
-    _platform  = platform  || "sleeper";
-    _season    = season    || null;
-    _leagueKey = leagueKey || null;
+  function setLeague(leagueId, platform, season, leagueKey, myRosterId) {
+    // Reset if league OR season changed (MFL reuses the same leagueId across seasons)
+    if (_leagueId !== leagueId || _season !== season) reset();
+    _leagueId   = leagueId;
+    _platform   = platform   || "sleeper";
+    _season     = season     || null;
+    _leagueKey  = leagueKey  || null;
+    _myRosterId = myRosterId || _myRosterId || null;  // keep existing if not passed
   }
   async function init(leagueId, platform, season, leagueKey, myRosterId) {
     reset();
@@ -58,9 +62,23 @@ const DLRStandings = (() => {
         const season = _season || new Date().getFullYear().toString();
         const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
         if (token !== _initToken) return;
+
+        // Cache bundle so matchups/playoffs can reuse it without a second fetch
+        if (!_mflBundle) {
+          const teams   = MFLAPI.getTeams(bundle);
+          const nameMap = {};
+          teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+          const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
+          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
+          const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
+          const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
+          _mflBundle = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek };
+          _mflNameMap = nameMap;
+        }
+
         const standings  = MFLAPI.normalizeStandings(bundle);
         const leagueInfo = MFLAPI.getLeagueInfo(bundle);
-        _renderMFLStandings(el, bundle.league?.league, standings, leagueId, season, leagueInfo, _myRosterId);
+        _renderMFLStandings(el, bundle.league?.league, standings, leagueId, season, leagueInfo, _myRosterId, bundle);
       } catch(e) {
         if (token !== _initToken) return;
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-8);text-align:center;">
@@ -259,31 +277,43 @@ const DLRStandings = (() => {
       el.innerHTML = _loadingHTML("Loading MFL matchups…");
       try {
         const season = _season || new Date().getFullYear().toString();
-        // Fetch league info for teams + total weeks, plus current week's liveScoring
-        const [bundle, liveData] = await Promise.all([
-          MFLAPI.getLeagueBundle(_leagueId, season),
-          MFLAPI.getLiveScoring(_leagueId, season)  // current week (no W= param)
-        ]);
-        const teams   = MFLAPI.getTeams(bundle);
-        const nameMap = {};
-        teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
 
-        const leagueInfo = MFLAPI.getLeagueInfo(bundle);
-        // MFL regular season is typically weeks 1–13 or 1–14; use league nflScheduleWeek if available
-        const currentWeek = parseInt(liveData?.liveScoring?.week || bundle?.league?.league?.nflScheduleWeek || 1);
-        const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
-        const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
+        // Reuse cached bundle from standings tab to avoid a redundant fetch.
+        // If standings tab was never opened, we fetch the bundle now and cache it.
+        let bundleState = _mflBundle;
+        if (!bundleState) {
+          const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
+          const teams   = MFLAPI.getTeams(bundle);
+          const nameMap = {};
+          teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+          const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
+          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
+          const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
+          const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
+          bundleState = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek };
+          _mflBundle  = bundleState;
+          _mflNameMap = nameMap;
+        }
 
-        // Seed cache with the current week we already fetched
-        _mflLiveScoringCache = {};
-        _mflLiveScoringCache[currentWeek] = liveData;
+        const { bundle, nameMap, allWeeks, currentWeek } = bundleState;
 
+        // Fetch current week liveScoring (use cache if already loaded)
+        let liveData = _mflLiveScoringCache[currentWeek];
+        if (!liveData) {
+          liveData = await MFLAPI.getLiveScoring(_leagueId, season);
+          const fetchedWeek = parseInt(liveData?.liveScoring?.week || currentWeek);
+          _mflLiveScoringCache[fetchedWeek] = liveData;
+        }
+
+        const activeWeek     = parseInt(liveData?.liveScoring?.week || currentWeek);
         const currentMatchups = MFLAPI.normalizeMatchups(liveData);
 
-        _mflBundle  = { teams, nameMap, season, leagueInfo, allWeeks };
-        _mflNameMap = nameMap;
+        // Filter matchups to user's division if applicable
+        const divisionFranchises = _myRosterId
+          ? MFLAPI.getDivisionFranchises(bundle, _myRosterId)
+          : null;
 
-        _renderMFLMatchupsShell(el, nameMap, allWeeks, currentWeek, currentMatchups);
+        _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, currentMatchups, divisionFranchises);
       } catch(e) {
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
           <div style="margin-bottom:var(--space-2)">Could not load MFL matchups: ${e.message}</div>
@@ -313,20 +343,42 @@ const DLRStandings = (() => {
   let _mflBundle            = null;   // { teams, nameMap, season, allWeeks }
   let _mflNameMap           = {};
   let _mflLiveScoringCache  = {};     // week → raw liveScoring response
+  let _mflPlayoffState      = null;   // { brackets, nameMap, season, leagueId, activeBracketIdx }
 
-  function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups) {
+  function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises) {
     const weekPills = allWeeks.map(w =>
       `<button class="season-pill ${w === activeWeek ? "season-pill--current" : ""}"
         onclick="DLRStandings._mflLoadWeek(${w})">${w}</button>`
     ).join("");
+
+    // Store division filter for week-switching
+    if (divisionFranchises !== undefined) {
+      _mflBundle._divisionFranchises = divisionFranchises;
+    }
+
+    // Division banner if applicable
+    let divBanner = "";
+    if (divisionFranchises && _mflBundle?.bundle && _myRosterId) {
+      const { divisionName } = MFLAPI.filterStandingsByDivision(_mflBundle.bundle, [], _myRosterId);
+      // We only have the name from standings helper — build it from getDivisions directly
+      const { franchiseDivision, divisions } = MFLAPI.getDivisions(_mflBundle.bundle);
+      const myDivId   = franchiseDivision[String(_myRosterId)];
+      const myDivName = divisions.find(d => d.id === myDivId)?.name || "";
+      if (myDivName) {
+        divBanner = `<div class="standings-division-bar" style="margin-bottom:var(--space-2)">
+          <span class="standings-division-label">📊 ${_esc(myDivName)} matchups</span>
+        </div>`;
+      }
+    }
 
     el.innerHTML = `
       <div class="matchups-week-bar">
         <span class="matchups-week-label">Week:</span>
         <div class="matchups-week-pills" style="overflow-x:auto;flex-wrap:nowrap">${weekPills}</div>
       </div>
+      ${divBanner}
       <div id="mfl-matchups-grid" class="matchups-grid">
-        ${_mflMatchupCards(matchups, nameMap)}
+        ${_mflMatchupCards(matchups, nameMap, divisionFranchises)}
       </div>`;
   }
 
@@ -339,10 +391,12 @@ const DLRStandings = (() => {
       b.classList.toggle("season-pill--current", b.textContent.trim() === String(week));
     });
 
+    const divisionFranchises = _mflBundle._divisionFranchises || null;
+
     // Use cache if available
     if (_mflLiveScoringCache[week]) {
       const matchups = MFLAPI.normalizeMatchups(_mflLiveScoringCache[week]);
-      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap);
+      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises);
       return;
     }
 
@@ -351,17 +405,24 @@ const DLRStandings = (() => {
       const liveData = await MFLAPI.getLiveScoring(_leagueId, _mflBundle.season, week);
       _mflLiveScoringCache[week] = liveData;
       const matchups = MFLAPI.normalizeMatchups(liveData);
-      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap);
+      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises);
     } catch(e) {
       grid.innerHTML = `<div class="dim" style="padding:var(--space-4)">Could not load week ${week}: ${e.message}</div>`;
     }
   }
 
-  function _mflMatchupCards(matchups, nameMap) {
-    if (!matchups.length) {
+  function _mflMatchupCards(matchups, nameMap, divisionFranchises) {
+    // Filter to only matchups involving teams in the user's division
+    const filtered = divisionFranchises
+      ? matchups.filter(m =>
+          divisionFranchises.includes(String(m.home.teamId)) ||
+          divisionFranchises.includes(String(m.away.teamId)))
+      : matchups;
+
+    if (!filtered.length) {
       return `<div class="dim" style="padding:var(--space-4)">No matchups this week.</div>`;
     }
-    return matchups.map(m => {
+    return filtered.map(m => {
       const home  = m.home || {};
       const away  = m.away || {};
       const hId   = home.teamId || "";
@@ -549,7 +610,25 @@ const DLRStandings = (() => {
       el.innerHTML = _loadingHTML("Loading MFL playoffs…");
       try {
         const season = _season || new Date().getFullYear().toString();
-        const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
+
+        // Reuse bundle from standings/matchups tab if already cached
+        let bundle;
+        if (_mflBundle?.bundle) {
+          bundle = _mflBundle.bundle;
+        } else {
+          bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
+          if (token !== _initToken) return;
+          // Cache it for other tabs
+          const teams   = MFLAPI.getTeams(bundle);
+          const nameMap = {};
+          teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+          const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
+          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
+          const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
+          const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
+          _mflBundle  = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek };
+          _mflNameMap = nameMap;
+        }
         if (token !== _initToken) return;
 
         const brackets  = MFLAPI.normalizePlayoffBrackets(bundle);
@@ -561,7 +640,7 @@ const DLRStandings = (() => {
           // No brackets defined — show standings as fallback
           const standings  = MFLAPI.normalizeStandings(bundle);
           const leagueInfo = MFLAPI.getLeagueInfo(bundle);
-          _renderMFLStandings(el, bundle.league?.league, standings, _leagueId, season, leagueInfo, _myRosterId);
+          _renderMFLStandings(el, bundle.league?.league, standings, _leagueId, season, leagueInfo, _myRosterId, bundle);
           return;
         }
 
@@ -729,8 +808,6 @@ const DLRStandings = (() => {
   }
 
   // ── MFL Playoff bracket — on-demand per-bracket ───────────
-  let _mflPlayoffState = null;  // { brackets, nameMap, season, leagueId, activeBracketIdx }
-
   async function _mflLoadBracket(idx) {
     const body = document.getElementById("mfl-bracket-body");
     if (!body || !_mflPlayoffState) return;
@@ -918,7 +995,7 @@ const DLRStandings = (() => {
       <div class="matchups-grid">${cards}</div>`;
   }
 
-  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo, myRosterId) {
+  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo, myRosterId, bundle, showAllDivisions) {
     if (!standings.length) {
       el.innerHTML = `<div class="empty-state">No standings data available.</div>`;
       return;
@@ -930,7 +1007,41 @@ const DLRStandings = (() => {
     const isGuillotine = leagueInfo?.isGuillotine  || standings.some(s => s.isGuillotine);
     const isSpecial    = isEliminator || isGuillotine;
 
-    const totalTeams   = standings.length;
+    // ── Division filter ──────────────────────────────────────
+    let displayStandings = standings;
+    let divisionBannerHTML = "";
+    if (bundle && myRosterId && !showAllDivisions) {
+      const { standings: divStandings, divisionName, hasDivisions, allDivisions } =
+        MFLAPI.filterStandingsByDivision(bundle, standings, myRosterId);
+      if (hasDivisions && divisionName) {
+        displayStandings = divStandings;
+        const otherDivNames = allDivisions
+          .filter(d => d.name !== divisionName)
+          .map(d => `<button class="standings-div-pill" onclick="DLRStandings._showAllDivisions()">${_esc(d.name)}</button>`)
+          .join("");
+        divisionBannerHTML = `
+          <div class="standings-division-bar">
+            <span class="standings-division-label">📊 ${_esc(divisionName)}</span>
+            <button class="standings-div-pill standings-div-pill--active" onclick="DLRStandings._showAllDivisions()">All Teams</button>
+            ${otherDivNames}
+          </div>`;
+      } else if (hasDivisions && !divisionName) {
+        // League has divisions but user's team isn't in one — show all
+        divisionBannerHTML = `<div class="standings-division-bar"><span class="standings-division-label dim">Multi-division league</span>
+          <button class="standings-div-pill standings-div-pill--active">All Teams</button></div>`;
+      }
+    } else if (bundle && showAllDivisions) {
+      const { allDivisions } = MFLAPI.filterStandingsByDivision(bundle, standings, myRosterId);
+      if (allDivisions.length) {
+        divisionBannerHTML = `
+          <div class="standings-division-bar">
+            <span class="standings-division-label">📊 All Divisions</span>
+            <button class="standings-div-pill standings-div-pill--active" onclick="DLRStandings._showAllDivisions()">All Teams</button>
+          </div>`;
+      }
+    }
+
+    const totalTeams   = displayStandings.length;
     const playoffSpots = leagueInfo?.playoffTeams
       || (rawLeague?.playoffTeams ? parseInt(rawLeague.playoffTeams) : null)
       || Math.floor(totalTeams / 2);
@@ -944,6 +1055,7 @@ const DLRStandings = (() => {
         <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
           style="font-size:.75rem;color:var(--color-gold);">View on MFL \u2197</a>
       </div>
+      ${divisionBannerHTML}
       <div class="standings-table-wrap">
         <table class="standings-table">
           <thead><tr>
@@ -953,7 +1065,7 @@ const DLRStandings = (() => {
               : `<th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>`}
           </tr></thead>
           <tbody>
-            ${standings.map((s, i) => {
+            ${displayStandings.map((s, i) => {
               const rank   = s.rank || i + 1;
               const name   = teamName(s.franchiseId);
               const isMe   = myRosterId && String(s.franchiseId) === String(myRosterId);
@@ -1011,6 +1123,17 @@ const DLRStandings = (() => {
       </div>`;
   }
 
+  // Called when user clicks "All Teams" to show all divisions
+  function _showAllDivisions() {
+    if (!_mflBundle) return;
+    const el = document.getElementById("dtab-standings");
+    if (!el) return;
+    const { bundle, season } = _mflBundle;
+    const standings  = MFLAPI.normalizeStandings(bundle);
+    const leagueInfo = MFLAPI.getLeagueInfo(bundle);
+    _renderMFLStandings(el, bundle.league?.league, standings, _leagueId, season, leagueInfo, _myRosterId, bundle, true);
+  }
+
   function _loadingHTML(msg) {
     return `<div class="detail-loading"><div class="spinner"></div><span>${msg}</span></div>`;
   }
@@ -1024,7 +1147,8 @@ const DLRStandings = (() => {
   return {
     init, reset, setLeague, refresh,
     initMatchups, loadMatchupsWeek,
-    initPlayoffs, _mflLoadWeek, _mflLoadBracket
+    initPlayoffs, _mflLoadWeek, _mflLoadBracket,
+    _showAllDivisions,
   };
 
 })();
