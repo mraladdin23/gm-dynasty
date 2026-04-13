@@ -225,10 +225,17 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
   statusEl.classList.remove("status-connected", "status-error");
 
   try {
-    const result = await Profile.linkMFL(profile.username, email, password);
-    const count  = Object.keys(result.leagues).length;
-    statusEl.textContent = `✓ Connected — ${count} league${count !== 1 ? "s" : ""}`;
-    statusEl.classList.add("status-connected");
+    const result = await Profile.linkMFL(
+      profile.username, email, password,
+      (msg) => { statusEl.textContent = msg; }  // live progress updates
+    );
+    const count   = Object.keys(result.leagues).length;
+    const nSkip   = result.skipped?.length || 0;
+    const skipMsg = nSkip > 0
+      ? ` (${nSkip} league${nSkip !== 1 ? "s" : ""} failed to load — reconnect to retry)`
+      : "";
+    statusEl.textContent = `✓ Connected — ${count} league${count !== 1 ? "s" : ""}${skipMsg}`;
+    statusEl.classList.add(nSkip > 0 ? "status-error" : "status-connected");
     Profile.renderLeaguePreview("mfl-leagues-preview", result.leagues);
     document.getElementById("onboarding-save-btn").disabled = false;
     btn.textContent = "Reconnect";
@@ -457,10 +464,20 @@ async function _doMFLResync() {
 
   try {
     setLoading(true, alreadyLinked ? "Resyncing MFL leagues…" : "Connecting MFL…");
-    const result = await Profile.linkMFL(profile.username, email, password);
+    const result = await Profile.linkMFL(
+      profile.username, email, password,
+      (msg) => { setLoading(true, msg); }  // live progress updates
+    );
     setLoading(false);
-    const count = Object.keys(result.leagues).length;
-    showToast(`MFL ${alreadyLinked ? "resynced" : "connected"} — ${count} league${count !== 1 ? "s" : ""}`);
+    const count  = Object.keys(result.leagues).length;
+    const nSkip  = result.skipped?.length || 0;
+    const skipMsg = nSkip > 0
+      ? ` · ${nSkip} league${nSkip !== 1 ? "s" : ""} failed to load (reconnect to retry)`
+      : "";
+    showToast(
+      `MFL ${alreadyLinked ? "resynced" : "connected"} — ${count} league${count !== 1 ? "s" : ""}${skipMsg}`,
+      nSkip > 0 ? "error" : "success"
+    );
     const updated = await Auth.refreshProfile();
     Profile.renderLocker(updated);
     const banner = document.getElementById("mfl-resync-banner");

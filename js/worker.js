@@ -189,8 +189,10 @@ export default {
         const season  = year || new Date().getFullYear();
         const headers = cookieHeader ? { Cookie: cookieHeader } : {};
         const weekParam = week ? `&W=${week}` : "";
-        const r = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=liveScoring&L=${leagueId}${weekParam}&JSON=1`, { headers });
-        const data = await r.json();
+        const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=liveScoring&L=${leagueId}${weekParam}&JSON=1`, { headers });
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch(e) { data = {}; }
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
@@ -209,8 +211,10 @@ export default {
         const season  = year || new Date().getFullYear();
         const headers = cookieHeader ? { Cookie: cookieHeader } : {};
         const bracketParam = bracketId ? `&BRACKET_ID=${bracketId}` : "";
-        const r = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=playoffBracket&L=${leagueId}${bracketParam}&JSON=1`, { headers });
-        const data = await r.json();
+        const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=playoffBracket&L=${leagueId}${bracketParam}&JSON=1`, { headers });
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch(e) { data = {}; }
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
@@ -254,8 +258,18 @@ async function mflBundle(leagueId, year, cookieHeader) {
   };
   const results = await Promise.allSettled(
     Object.entries(endpoints).map(async ([key, url]) => {
-      const r = await fetch(url, { headers });
-      return [key, await r.json()];
+      const r    = await fetch(url, { headers });
+      const text = await r.text();
+      // MFL sometimes returns plain text like "No" or "No\n\n" for endpoints
+      // that don't apply to a league (e.g. auctionResults on a snake draft league,
+      // or liveScoring before the season starts). Safely skip those.
+      try {
+        const data = JSON.parse(text);
+        return [key, data];
+      } catch(e) {
+        // Non-JSON response — treat as empty for this key
+        return [key, null];
+      }
     })
   );
   const bundle = {};
