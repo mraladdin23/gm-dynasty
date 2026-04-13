@@ -202,11 +202,29 @@ const Profile = (() => {
       linked: true
     });
 
-    await GMDB.saveLeagues(gmdUsername, leaguesMap);
+    // saveLeagues uses Firebase .update() which merges — leagues not in this
+    // run are preserved automatically. We still do an explicit pre-load merge
+    // here as a belt-and-suspenders measure for skipped leagues, using the
+    // correct GMDB method name.
+    let mergedLeagues = { ...leaguesMap };
+    try {
+      const existing = await GMDB.getLeagues(gmdUsername);
+      if (existing && typeof existing === "object") {
+        Object.entries(existing).forEach(([key, league]) => {
+          if (league?.platform === "mfl" && !mergedLeagues[key]) {
+            mergedLeagues[key] = league;
+          }
+        });
+      }
+    } catch(e) {
+      console.warn("[MFL] Could not load existing leagues for merge:", e.message);
+    }
+
+    await GMDB.saveLeagues(gmdUsername, mergedLeagues);
     await GMDB.recomputeStats(gmdUsername);
 
     // Credentials are NEVER stored
-    return { leagues: leaguesMap, mflUsername, skipped };
+    return { leagues: mergedLeagues, mflUsername, skipped };
   }
 
   // ── Link Yahoo ────────────────────────────────────────────

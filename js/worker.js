@@ -99,42 +99,63 @@ export default {
         if (!cookieMatch) return new Response(JSON.stringify({ error: "MFL login failed — check username and password", loginResponse: loginXml.slice(0, 300) }), { status: 200, headers: corsHeaders() });
         const cookieValue = cookieMatch[1];
 
-        // Build year list: current year down to 1999
-        const years = [];
-        for (let y = currentYear; y >= 1999; y--) years.push(y);
-
-        // Fetch in batches of 4 with a 150ms pause between batches.
-        // Firing all 27 years in parallel causes MFL to rate-limit or drop requests,
-        // producing inconsistent results (4 leagues one run, 28 the next).
-        const BATCH_SIZE = 4;
-        const BATCH_DELAY_MS = 150;
+        // ── Fetch all leagues in one shot using SINCE= parameter ──────────────
+        // MFL supports TYPE=myleagues&SINCE=YYYY to return leagues across all years
+        // from that year to present — one request instead of 27.
+        // Falls back to year-by-year batching if the single request fails or returns
+        // nothing (some MFL account configurations don't support SINCE=).
         const allLeagues = [];
 
-        for (let i = 0; i < years.length; i += BATCH_SIZE) {
-          const batch = years.slice(i, i + BATCH_SIZE);
-          const batchResults = await Promise.allSettled(
-            batch.map(y =>
-              fetch(`https://api.myfantasyleague.com/${y}/export?TYPE=myleagues&JSON=1`,
-                { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } })
-                .then(r => r.json())
-                .then(data => {
-                  const list = data?.leagues?.league
-                    ? (Array.isArray(data.leagues.league) ? data.leagues.league : [data.leagues.league])
-                    : [];
-                  return list.map(l => ({ ...l, season: String(y) }));
-                })
-                .catch(() => [])
-            )
-          );
-          batchResults.forEach(r => { if (r.status === "fulfilled") allLeagues.push(...r.value); });
+        let usedSince = false;
+        try {
+          const sinceUrl = `https://api.myfantasyleague.com/${currentYear}/export?TYPE=myleagues&SINCE=1999&JSON=1`;
+          const sinceRes = await fetch(sinceUrl, { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } });
+          const sinceText = await sinceRes.text();
+          let sinceData;
+          try { sinceData = JSON.parse(sinceText); } catch(e) {}
+          if (sinceData?.leagues?.league) {
+            const list = Array.isArray(sinceData.leagues.league)
+              ? sinceData.leagues.league
+              : [sinceData.leagues.league];
+            // SINCE= responses include a season field on each league
+            list.forEach(l => { if (l.league_id || l.id) allLeagues.push(l); });
+            usedSince = allLeagues.length > 0;
+          }
+        } catch(e) {}
 
-          // Short pause between batches — skip after the last one
-          if (i + BATCH_SIZE < years.length) {
-            await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+        // Fallback: year-by-year batching if SINCE= returned nothing
+        if (!usedSince) {
+          const years = [];
+          for (let y = currentYear; y >= 2005; y--) years.push(y);  // 2005 covers most dynasty leagues
+
+          const BATCH_SIZE    = 4;
+          const BATCH_DELAY_MS = 150;
+
+          for (let i = 0; i < years.length; i += BATCH_SIZE) {
+            const batch = years.slice(i, i + BATCH_SIZE);
+            const batchResults = await Promise.allSettled(
+              batch.map(async y => {
+                const r    = await fetch(`https://api.myfantasyleague.com/${y}/export?TYPE=myleagues&JSON=1`,
+                  { headers: { Cookie: `MFL_USER_ID=${cookieValue}` } });
+                const text = await r.text();
+                let data;
+                try { data = JSON.parse(text); } catch(e) { return []; }
+                if (!data || typeof data !== "object") return [];
+                const list = data?.leagues?.league
+                  ? (Array.isArray(data.leagues.league) ? data.leagues.league : [data.leagues.league])
+                  : [];
+                return list.map(l => ({ ...l, season: String(y) }));
+              })
+            );
+            batchResults.forEach(r => { if (r.status === "fulfilled") allLeagues.push(...r.value); });
+
+            if (i + BATCH_SIZE < years.length) {
+              await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+            }
           }
         }
 
-        // Deduplicate by league_id + season (same league can appear in multiple year responses)
+        // Deduplicate by league_id + season
         const seen = new Map();
         for (const l of allLeagues) {
           const id  = l.league_id || l.id;
