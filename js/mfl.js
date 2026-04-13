@@ -43,14 +43,22 @@ const MFLAPI = (() => {
     return Array.isArray(data) ? data : (data?.leagues || []);
   }
 
+  // ───────── LOGIN (returns cookie for reuse) ─────────
+  async function login(username, password, year) {
+    const data = await post("/mfl/login", { username, password, year });
+    if (data?.error) throw new Error(data.error);
+    return data?.cookie || null;
+  }
+
   // ───────── GET FULL LEAGUE BUNDLE ─────────
   // Accepts either object form: getLeagueBundle({ leagueId, year, ... })
-  // OR positional form: getLeagueBundle(leagueId, year) for convenience
+  // OR positional form: getLeagueBundle(leagueId, year) for convenience.
+  // Pass `cookie` (from login()) to skip redundant re-authentication.
   async function getLeagueBundle(leagueIdOrObj, yearArg, usernameArg, passwordArg) {
-    let leagueId, year, username, password;
+    let leagueId, year, username, password, cookie;
 
     if (leagueIdOrObj && typeof leagueIdOrObj === "object") {
-      ({ leagueId, year, username, password } = leagueIdOrObj);
+      ({ leagueId, year, username, password, cookie } = leagueIdOrObj);
     } else {
       leagueId = leagueIdOrObj;
       year     = yearArg;
@@ -60,7 +68,7 @@ const MFLAPI = (() => {
 
     if (!leagueId) throw new Error("Missing leagueId");
 
-    return post("/mfl/bundle", { leagueId, year, username, password });
+    return post("/mfl/bundle", { leagueId, year, username, password, cookie });
   }
 
   // ───────── BUNDLE HELPERS ─────────
@@ -96,9 +104,9 @@ const MFLAPI = (() => {
     const leagueInfo    = bundle?.league?.league || {};
     const standingsSort = (leagueInfo.standingsSort || "H2H").toUpperCase();
 
-    // ── Eliminator / Survivor leagues ────────────────────────────────────────
-    // franchises_eliminated = space-separated IDs, in elimination order (first out = first).
-    // The ID absent from the list is the winner (rank 1).
+    // ── Eliminator leagues ────────────────────────────────────────────────────
+    // franchises_eliminated on league.league = classic eliminator/survivor.
+    // One team is eliminated per week (usually for losing), players stay rostered.
     const eliminatedRaw = leagueInfo.franchises_eliminated;
     if (eliminatedRaw && String(eliminatedRaw).trim()) {
       const eliminatedIds = String(eliminatedRaw).trim().split(/[\s,]+/).filter(Boolean);
@@ -135,24 +143,77 @@ const MFLAPI = (() => {
         ptsAgainst:     ptsByFid[fid]?.ptsAgainst || 0,
         rank:           i + 1,
         isEliminator:   true,
+        isGuillotine:   false,
         eliminated:     i > 0,
-        // weekEliminated: eliminatedIds[0] = out first (round 1), [last] = out last
         weekEliminated: i > 0 ? (eliminatedIds.length - (i - 1)) : null,
       }));
     }
 
-    // ── Standard leagues ─────────────────────────────────────────────────────
+    // ── Standard + Guillotine leagues ────────────────────────────────────────
+    // Guillotine: franchise_eliminated field lives on each standings entry
+    // (not on league.league). Lowest scorer each week is eliminated and their
+    // players return to free agency. Detected when any standings row has
+    // franchise_eliminated set.
     const raw = bundle?.standings?.leagueStandings?.franchise;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
+
+    const isGuillotine = arr.some(
+      s => s.franchise_eliminated != null || s.franchiseEliminated != null
+    );
+
+    if (isGuillotine) {
+      // Build elimination order from standings entries.
+      // franchise_eliminated = the week they were eliminated (or 0/null if still alive).
+      // Rank: still-alive teams first (sorted by ptsFor desc), then eliminated
+      // in reverse order of elimination week (last eliminated = best rank).
+      const ptsByFid = {};
+      arr.forEach(s => { ptsByFid[String(s.id)] = s; });
+
+      const alive      = arr.filter(s => !s.franchise_eliminated && !s.franchiseEliminated);
+      const eliminated = arr.filter(s =>  s.franchise_eliminated ||  s.franchiseEliminated);
+
+      // Sort alive by ptsFor desc, eliminated by weekEliminated desc (last out = higher rank)
+      alive.sort((a, b) =>
+        parseFloat(b.pf || b.PF || 0) - parseFloat(a.pf || a.PF || 0)
+      );
+      eliminated.sort((a, b) => {
+        const wA = parseInt(a.franchise_eliminated || a.franchiseEliminated || 0);
+        const wB = parseInt(b.franchise_eliminated || b.franchiseEliminated || 0);
+        return wB - wA;  // higher week = survived longer = better rank
+      });
+
+      const ranked = [...alive, ...eliminated];
+      return ranked.map((s, i) => {
+        const weekOut = parseInt(s.franchise_eliminated || s.franchiseEliminated || 0);
+        return {
+          franchiseId:    String(s.id),
+          wins:           parseInt(s.wins   || s.W || s.h2hw || 0),
+          losses:         parseInt(s.losses || s.L || s.h2hl || 0),
+          ties:           parseInt(s.ties   || s.T || s.h2ht || 0),
+          ptsFor:         parseFloat(s.pf   || s.PF || 0),
+          ptsAgainst:     parseFloat(s.pa   || s.PA || 0),
+          rank:           i + 1,
+          isEliminator:   false,
+          isGuillotine:   true,
+          eliminated:     weekOut > 0,
+          weekEliminated: weekOut || null,
+        };
+      });
+    }
+
+    // ── Standard leagues ─────────────────────────────────────────────────────
     const mapped = arr.map((s, i) => ({
-      franchiseId: s.id,
-      wins:        parseInt(s.wins   || s.W || s.h2hw || s.allPlayW || 0),
-      losses:      parseInt(s.losses || s.L || s.h2hl || s.allPlayL || 0),
-      ties:        parseInt(s.ties   || s.T || s.h2ht || s.allPlayT || 0),
-      ptsFor:      parseFloat(s.pf   || s.PF || s.ptsFor  || s.pointsFor  || 0),
-      ptsAgainst:  parseFloat(s.pa   || s.PA || s.ptsAgainst || s.pointsAgainst || 0),
-      rank:        parseInt(s.rank || i + 1)
+      franchiseId:  s.id,
+      wins:         parseInt(s.wins   || s.W || s.h2hw || s.allPlayW || 0),
+      losses:       parseInt(s.losses || s.L || s.h2hl || s.allPlayL || 0),
+      ties:         parseInt(s.ties   || s.T || s.h2ht || s.allPlayT || 0),
+      ptsFor:       parseFloat(s.pf   || s.PF || s.ptsFor  || s.pointsFor  || 0),
+      ptsAgainst:   parseFloat(s.pa   || s.PA || s.ptsAgainst || s.pointsAgainst || 0),
+      rank:         parseInt(s.rank || i + 1),
+      isEliminator: false,
+      isGuillotine: false,
+      eliminated:   false,
     }));
 
     if (standingsSort === "PTS" || standingsSort === "POINTS") {
@@ -403,6 +464,14 @@ const MFLAPI = (() => {
    */
   function getLeagueInfo(bundle) {
     const l = bundle?.league?.league || {};
+
+    // Guillotine detection: franchise_eliminated lives on standings entries, not league.league
+    const rawStd = bundle?.standings?.leagueStandings?.franchise;
+    const stdArr = rawStd ? (Array.isArray(rawStd) ? rawStd : [rawStd]) : [];
+    const isGuillotine = stdArr.some(
+      s => s.franchise_eliminated != null || s.franchiseEliminated != null
+    ) && !l.franchises_eliminated;
+
     return {
       name:          l.name         || "MFL League",
       numTeams:      parseInt(l.franchises) || 12,
@@ -411,6 +480,7 @@ const MFLAPI = (() => {
       franchises:    l.franchises,
       standingsSort: l.standingsSort || "H2H",
       isEliminator:  !!(l.franchises_eliminated && String(l.franchises_eliminated).trim()),
+      isGuillotine,
     };
   }
 
@@ -534,6 +604,7 @@ const MFLAPI = (() => {
   }
 
   return {
+    login,
     getUserLeagues,
     getLeagueBundle,
     getTeams,
