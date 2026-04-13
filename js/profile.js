@@ -43,7 +43,7 @@ const Profile = (() => {
     return result;
   }
 
-  async function linkMFL(gmdUsername, email, password) {
+  async function linkMFL(gmdUsername, email, password, onProgress) {
     if (!email?.trim())    throw new Error("Enter your MFL email address.");
     if (!password?.trim()) throw new Error("Enter your MFL password.");
 
@@ -53,6 +53,7 @@ const Profile = (() => {
     // ───────── STEP 1: FETCH ALL USER LEAGUES VIA CREDENTIALS ─────────
     let leagues;
     try {
+      onProgress?.("Finding your MFL leagues…");
       leagues = await MFLAPI.getUserLeagues({ username: mflUsername, password });
     } catch (err) {
       throw new Error("Could not connect to MFL. Check your email and password.");
@@ -63,8 +64,6 @@ const Profile = (() => {
     }
 
     // ───────── STEP 1b: LOGIN ONCE — reuse cookie for all bundle fetches ─────
-    // Without this, getLeagueBundle re-logs in for every league (28 leagues =
-    // 28 login calls) which is slow and risks hitting MFL's rate limits.
     let mflCookie = null;
     try {
       const currentYear = new Date().getFullYear().toString();
@@ -74,89 +73,117 @@ const Profile = (() => {
     }
 
     // ───────── STEP 2: FETCH BUNDLE PER LEAGUE AND BUILD MAP ─────────
-    // Process leagues in batches of 3 — firing all bundles simultaneously
-    // causes MFL to throttle, producing incomplete or dropped responses.
     const BUNDLE_BATCH   = 3;
-    const BUNDLE_DELAY   = 200; // ms between batches
+    const BUNDLE_DELAY   = 200;
+    const RETRY_DELAY    = 600; // ms before retrying a failed bundle
     const leaguesMap     = {};
+    const skipped        = [];  // track leagues that failed even after retry
+    let   processed      = 0;
+    const total          = leagues.length;
+
+    // Helper: fetch one bundle with one automatic retry on failure or empty response
+    async function fetchBundle(l) {
+      const leagueId      = String(l.league_id || l.id || "");
+      const season        = String(l.season || new Date().getFullYear());
+      const myFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
+      if (!leagueId) return;
+
+      const opts = {
+        leagueId,
+        year:     season,
+        cookie:   mflCookie   || undefined,
+        username: mflCookie   ? undefined : mflUsername,
+        password: mflCookie   ? undefined : password,
+      };
+
+      let bundle, leagueInfo;
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          if (attempt === 2) {
+            // Before retrying, pause briefly to let MFL recover
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            console.log(`[MFL] Retrying league ${leagueId} (${season})…`);
+          }
+          bundle     = await MFLAPI.getLeagueBundle(opts);
+          leagueInfo = bundle?.league?.league || {};
+          // If we got a valid league name, bundle is good — break out
+          if (leagueInfo?.name) break;
+        } catch(err) {
+          if (attempt === 2) {
+            console.warn(`[MFL] Skipped league ${leagueId} (${season}) after retry:`, err.message);
+            skipped.push({ leagueId, season, name: l.name || leagueId, reason: err.message });
+            return;
+          }
+        }
+      }
+
+      // After both attempts, if still no bundle name, skip
+      if (!leagueInfo?.name && !l.name) {
+        console.warn(`[MFL] Skipping league ${leagueId} (${season}) — bundle returned no league name after retry`);
+        skipped.push({ leagueId, season, name: leagueId, reason: "empty bundle" });
+        return;
+      }
+
+      const leagueName = leagueInfo?.name || l.name || `League ${leagueId}`;
+
+      // Read team name
+      const franchisesRaw = leagueInfo?.franchises?.franchise;
+      const franchisesArr = franchisesRaw
+        ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
+        : [];
+      const myFranchise   = myFranchiseId
+        ? franchisesArr.find(f => String(f.id) === myFranchiseId)
+        : null;
+
+      // Read record from standings
+      const standingsRaw  = bundle?.standings?.leagueStandings?.franchise;
+      const standingsArr  = standingsRaw
+        ? (Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw])
+        : [];
+      const mySt          = myFranchiseId
+        ? (standingsArr.find(f => String(f.id) === myFranchiseId) || {})
+        : {};
+
+      // Detect guillotine league
+      const hasStandingsEliminated = standingsArr.some(
+        s => s.franchise_eliminated != null || s.franchiseEliminated != null
+      );
+      const isGuillotine = hasStandingsEliminated && !leagueInfo.franchises_eliminated;
+
+      const dynChainId = `mfl__${leagueId}`;
+      const key        = `mfl_${season}_${leagueId}`;
+
+      leaguesMap[key] = {
+        platform:       "mfl",
+        leagueId,
+        franchiseId:    dynChainId,
+        leagueName,
+        season,
+        leagueType:     _detectMFLLeagueType(leagueName),
+        totalTeams:     Number(leagueInfo?.franchises) || 12,
+        teamName:       myFranchise?.name     || "",
+        isCommissioner: myFranchise?.is_commish === "1",
+        myRosterId:     myFranchiseId         || null,
+        wins:           Number(mySt.h2hw      || mySt.wins   || 0),
+        losses:         Number(mySt.h2hl      || mySt.losses || 0),
+        ties:           Number(mySt.h2ht      || mySt.ties   || 0),
+        pointsFor:      Number(mySt.pf        || mySt.PF     || 0),
+        pointsAgainst:  Number(mySt.pa        || mySt.PA     || 0),
+        standing:       Number(mySt.rank)     || null,
+        playoffFinish:  null,
+        isChampion:     false,
+        isGuillotine,
+      };
+    }
 
     for (let i = 0; i < leagues.length; i += BUNDLE_BATCH) {
       const batch = leagues.slice(i, i + BUNDLE_BATCH);
+      onProgress?.(`Importing league ${Math.min(i + 1, total)}–${Math.min(i + BUNDLE_BATCH, total)} of ${total}…`);
 
-      await Promise.allSettled(batch.map(async l => {
-        const leagueId      = String(l.league_id || l.id || "");
-        const season        = String(l.season || new Date().getFullYear());
-        const myFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
-        if (!leagueId) return;
+      await Promise.allSettled(batch.map(l => fetchBundle(l)));
 
-        try {
-          const bundle = await MFLAPI.getLeagueBundle({
-            leagueId,
-            year: season,
-            cookie:   mflCookie   || undefined,
-            username: mflCookie   ? undefined : mflUsername,
-            password: mflCookie   ? undefined : password,
-          });
-
-          const leagueInfo    = bundle?.league?.league || {};
-          const leagueName    = leagueInfo?.name || `League ${leagueId}`;
-
-          // Read team name from bundle.league.league.franchises.franchise[].name
-          const franchisesRaw = leagueInfo?.franchises?.franchise;
-          const franchisesArr = franchisesRaw
-            ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
-            : [];
-          const myFranchise   = myFranchiseId
-            ? franchisesArr.find(f => String(f.id) === myFranchiseId)
-            : null;
-
-          // Read record from standings using the same franchise id
-          const standingsRaw  = bundle?.standings?.leagueStandings?.franchise;
-          const standingsArr  = standingsRaw
-            ? (Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw])
-            : [];
-          const mySt          = myFranchiseId
-            ? (standingsArr.find(f => String(f.id) === myFranchiseId) || {})
-            : {};
-
-          // Detect guillotine league — franchises_eliminated on standings entries
-          // (distinct from eliminator where it lives on league.league)
-          const hasStandingsEliminated = standingsArr.some(
-            s => s.franchise_eliminated != null || s.franchiseEliminated != null
-          );
-          const isGuillotine = hasStandingsEliminated &&
-            !leagueInfo.franchises_eliminated;
-
-          // Dynasty chaining key: same league_id across seasons = same dynasty.
-          const dynChainId = `mfl__${leagueId}`;
-          const key        = `mfl_${season}_${leagueId}`;
-
-          leaguesMap[key] = {
-            platform:       "mfl",
-            leagueId,
-            franchiseId:    dynChainId,
-            leagueName,
-            season,
-            leagueType:     _detectMFLLeagueType(leagueName),
-            totalTeams:     Number(leagueInfo?.franchises) || 12,
-            teamName:       myFranchise?.name     || "",
-            isCommissioner: myFranchise?.is_commish === "1",
-            myRosterId:     myFranchiseId         || null,
-            wins:           Number(mySt.h2hw      || mySt.wins   || 0),
-            losses:         Number(mySt.h2hl      || mySt.losses || 0),
-            ties:           Number(mySt.h2ht      || mySt.ties   || 0),
-            pointsFor:      Number(mySt.pf        || mySt.PF     || 0),
-            pointsAgainst:  Number(mySt.pa        || mySt.PA     || 0),
-            standing:       Number(mySt.rank)     || null,
-            playoffFinish:  null,
-            isChampion:     false,
-            isGuillotine,
-          };
-
-        } catch (err) {
-          console.warn(`[MFL] Skipped league ${leagueId} (${season}):`, err.message);
-        }
-      }));
+      processed += batch.length;
 
       // Pause between batches to avoid MFL throttling
       if (i + BUNDLE_BATCH < leagues.length) {
@@ -179,7 +206,7 @@ const Profile = (() => {
     await GMDB.recomputeStats(gmdUsername);
 
     // Credentials are NEVER stored
-    return { leagues: leaguesMap, mflUsername };
+    return { leagues: leaguesMap, mflUsername, skipped };
   }
 
   // ── Link Yahoo ────────────────────────────────────────────
