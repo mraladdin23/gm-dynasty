@@ -596,6 +596,9 @@ const MFLAPI = (() => {
     });
     return byPick >= 0 ? byPick : 0;
   }
+
+  /**
+   * Debug helper — inspect raw bundle from the browser console:
    *   MFLAPI.debugBundle("LEAGUE_ID", "2025").then(r => console.log(JSON.stringify(r._paths, null, 2)))
    */
   async function debugBundle(leagueId, year) {
