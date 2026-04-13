@@ -172,10 +172,11 @@ const MFLAPI = (() => {
   }
 
   /**
-   * Returns array of player objects for a given team ID:
-   * [{ id, status, position, team, name }]
+   * Returns array of player objects for a given team ID (async — fetches player
+   * universe from session cache on first call, instant thereafter):
+   * [{ id, status, position, team, name, sleeperId }]
    */
-  function getRoster(bundle, teamId) {
+  async function getRoster(bundle, teamId, year) {
     const raw = bundle?.rosters?.rosters?.franchise;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
@@ -185,17 +186,18 @@ const MFLAPI = (() => {
     if (!players) return [];
     const playerArr = Array.isArray(players) ? players : [players];
 
-    // Build player name/pos lookup from bundle.players if available
-    const playerLookup = _buildPlayerLookup(bundle);
+    // Use session-cached player universe for current names/positions/teams
+    const playerLookup = await getPlayers(year);
 
     return playerArr.map(p => {
       const info = playerLookup[p.id] || {};
       return {
-        id:       p.id,
-        status:   (p.status || "").toUpperCase(),   // "IR", "TAXI", or ""
-        position: info.position || p.position || "?",
-        team:     info.team     || p.team     || "FA",
-        name:     info.name     || p.name     || `Player ${p.id}`
+        id:        p.id,
+        status:    (p.status || "").toUpperCase(),   // "IR", "TAXI", or ""
+        position:  info.position  || p.position || "?",
+        team:      info.team      || p.team     || "FA",
+        name:      info.name      || p.name     || `Player ${p.id}`,
+        sleeperId: info.sleeperId || null,
       };
     });
   }
@@ -330,6 +332,53 @@ const MFLAPI = (() => {
         };
       }
     });
+    return map;
+  }
+
+  // ── Cached MFL player universe ───────────────────────────
+  // Fetched once per session from /mfl/players and stored in sessionStorage.
+  // Key is year-scoped so rookies are always current within a browser session.
+  let _playersMemCache = null;  // in-memory reference for the current page load
+
+  async function getPlayers(year) {
+    if (_playersMemCache) return _playersMemCache;
+
+    const season   = year || new Date().getFullYear().toString();
+    const cacheKey = `mfl_players_${season}`;
+
+    // Try sessionStorage — survives tab switches within the same session
+    try {
+      const stored = sessionStorage.getItem(cacheKey);
+      if (stored) {
+        _playersMemCache = JSON.parse(stored);
+        return _playersMemCache;
+      }
+    } catch(e) {}
+
+    // Fetch from worker
+    const data = await post("/mfl/players", { year: season });
+    const raw  = data?.players?.player;
+    if (!raw) return {};
+
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const map = {};
+    arr.forEach(p => {
+      if (p.id) {
+        const displayName = mflNameToDisplay(p.name);
+        const sleeperId   = mflNameToSleeperId(p.name, p.position);
+        const pos         = (p.position || "?").toUpperCase();
+        map[p.id] = {
+          name:      displayName || p.name || "",
+          position:  pos,   // used by getRoster()
+          pos:       pos,   // used by draft.js render
+          team:      p.team || "FA",
+          sleeperId,
+        };
+      }
+    });
+
+    _playersMemCache = map;
+    try { sessionStorage.setItem(cacheKey, JSON.stringify(map)); } catch(e) {}
     return map;
   }
 
@@ -491,12 +540,13 @@ const MFLAPI = (() => {
     normalizeStandings,
     getStandingsMap,
     getRoster,
-    normalizeMatchups,
     normalizeLiveScoring,
+    normalizeMatchups,
     normalizePlayoffBrackets,
     normalizePlayoffBracketResult,
     getLiveScoring,
     getPlayoffBracket,
+    getPlayers,
     getLeagueInfo,
     getAuctionResults,
     buildMFLToSleeperIndex,

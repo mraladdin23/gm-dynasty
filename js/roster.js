@@ -371,10 +371,13 @@ const DLRRoster = (() => {
     const standingsMap = MFLAPI.getStandingsMap(bundle);
     const playerScores = MFLAPI.getPlayerScores(bundle);  // { mflId: ytdPoints }
 
-    const teams = bundleTeams.map(t => {
+    // Fetch once for all rosters — session-cached, includes name/pos/team/sleeperId
+    await MFLAPI.getPlayers(season);
+
+    const teams = await Promise.all(bundleTeams.map(async t => {
       const s = standingsMap[t.id] || {};
-      // Get roster from bundle using helper
-      const mflPlayers = MFLAPI.getRoster(bundle, t.id);
+      // getRoster is now async (uses session-cached player universe)
+      const mflPlayers = await MFLAPI.getRoster(bundle, t.id, season);
 
       const mainRoster = mflPlayers.filter(p => p.status !== "IR" && p.status !== "TAXI");
       const irRoster   = mflPlayers.filter(p => p.status === "IR");
@@ -394,23 +397,25 @@ const DLRRoster = (() => {
         losses:    s.losses || 0,
         fpts:      s.ptsFor || 0
       };
-    }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
+    }));
+    teams.sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Build a local player lookup from MFL data, mapping to Sleeper IDs where possible
+    // Build a local player lookup from resolved roster data.
+    // name and sleeperId are already resolved by getRoster() via getPlayers() —
+    // no need to re-derive from raw MFL name format.
     const mflPlayerLookup = {};
     teams.forEach(t => {
       (t.mflPlayers || []).forEach(p => {
-        const displayName = MFLAPI.mflNameToDisplay(p.name);
-        const sleeperId   = MFLAPI.mflNameToSleeperId(p.name, p.position);
+        const nameParts = (p.name || "").trim().split(" ");
         mflPlayerLookup[`mfl_${p.id}`] = {
-          first_name:        displayName.split(" ")[0] || "",
-          last_name:         displayName.split(" ").slice(1).join(" ") || "",
+          first_name:        nameParts[0] || "",
+          last_name:         nameParts.slice(1).join(" ") || "",
           position:          p.position || "?",
           fantasy_positions: [p.position || "?"],
           team:              p.team || "FA",
           search_rank:       9999,
-          pts_season:        playerScores[p.id] || 0,  // MFL YTD points
-          _sleeperId:        sleeperId,
+          pts_season:        playerScores[p.id] || 0,
+          _sleeperId:        p.sleeperId || null,
           _mflId:            p.id,
         };
       });
