@@ -173,6 +173,17 @@ export default {
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
+      // On-demand: fetch full MFL player universe (cached by client per session)
+      if (path === "/mfl/players" && req.method === "POST") {
+        const { year } = await req.json();
+        const season = year || new Date().getFullYear();
+        const r = await fetch(
+          `https://api.myfantasyleague.com/${season}/export?TYPE=players&JSON=1`
+        );
+        const data = await r.json();
+        return new Response(JSON.stringify(data), { headers: corsHeaders() });
+      }
+
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders() });

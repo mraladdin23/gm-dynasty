@@ -505,24 +505,10 @@ const DLRDraft = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build player name/pos lookup — bundle.players removed from worker bundle,
-    // so fall back gracefully; names will show as player IDs if not present
-    const playerLookup = {};
-    const rawPlayers = bundle?.players?.players?.player;
-    if (rawPlayers) {
-      const pArr = Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
-      pArr.forEach(p => {
-        if (p.id) {
-          const displayName = MFLAPI.mflNameToDisplay(p.name);
-          const sleeperId   = MFLAPI.mflNameToSleeperId(p.name, p.position);
-          playerLookup[p.id] = {
-            name:      displayName || `Player ${p.id}`,
-            pos:       (p.position || "?").toUpperCase(),
-            sleeperId,
-          };
-        }
-      });
-    }
+    // Fetch session-cached player universe — includes name, pos, team, sleeperId.
+    // getPlayers() fetches once per session from /mfl/players and caches in sessionStorage.
+    const playerLookup = await MFLAPI.getPlayers(season);
+    if (token !== _initToken) return;
 
     // ── Draft units — keep per-unit for multi-draft selector ─
     const unitsRaw  = bundle?.draft?.draftResults?.draftUnit;
