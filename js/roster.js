@@ -252,48 +252,26 @@ const DLRRoster = (() => {
   }
 
   function _playerRowHTML(playerId, slot) {
-    const p        = _players[playerId] || {};
-    const name     = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : (p.name || playerId);
-    const pos      = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
-    const nflTeam  = p.team || "FA";
-    const color    = POS_COLOR[pos] || "#9ca3af";
+    const p = DLRPlayers.getFullPlayer(playerId.replace("mfl_", ""), "mfl");
+    const name = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : playerId;
+    const pos  = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
+    const nflTeam = p.team || "FA";
+    const color = POS_COLOR[pos] || "#9ca3af";
     const dim      = slot === "ir" || slot === "taxi";
 
-    // Resolve best photo/card ID
-    const isMFL        = playerId.startsWith("mfl_");
-    const isYahoo      = playerId.startsWith("yahoo_");
-    const mappedId     = p._sleeperId || null;  // Sleeper ID found via name match
-    const mflId        = p._mflId || playerId.replace("mfl_", "");
-    const photoId      = isMFL ? mappedId : (isYahoo ? null : playerId);
-    const isSleeperNative = !isMFL && !isYahoo && /^\d+$/.test(playerId);
-
-    const photoHTML = photoId
-      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${photoId}.jpg"
-           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
-           loading="lazy" />
-         <div class="roster-player-photo-fallback" style="display:none;color:${color};">${pos}</div>`
-      : `<div class="roster-player-photo-fallback" style="display:flex;color:${color};">${pos}</div>`;
-
-    // Player card: use Sleeper card if we have a mapped ID, else MFL link, else nothing
-    const cardId  = isSleeperNative ? playerId : mappedId;
-    const clickAttr = cardId
-      ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"`
-      : isMFL
-        ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${mflId}','_blank')" style="cursor:pointer;"`
-        : "";
+    const sleeperId = DLRPlayers.getSleeperIdFromMfl(playerId.replace("mfl_", "")) || null;
+    const photoHTML = sleeperId 
+      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${sleeperId}.jpg" onerror="this.style.display='none'" loading="lazy" />`
+      : `<div class="roster-player-photo-fallback" style="color:${color};">${pos}</div>`;
 
     return `
-      <div class="roster-player-row ${dim ? "roster-player-row--dim" : ""}" ${clickAttr}>
-        <div class="roster-player-photo">
-          ${photoHTML}
-        </div>
+      <div class="roster-player-row" onclick="DLRPlayerCard.show('${sleeperId || playerId}','${_escAttr(name)}')">
+        <div class="roster-player-photo">${photoHTML}</div>
         <div class="roster-player-info">
           <div class="roster-player-name">${_esc(name)}</div>
           <div class="roster-player-meta">
             <span class="roster-nfl-team">${nflTeam}</span>
-            ${p.years_exp === 0 ? '<span class="roster-rookie-badge">R</span>' : ""}
-            ${p.injury_status ? `<span class="roster-injury-badge">${p.injury_status}</span>` : ""}
-            ${p.pts_season ? `<span class="roster-pts dim" style="margin-left:auto;font-size:.7rem">${p.pts_season.toFixed(1)} pts</span>` : ""}
+            ${DLRPlayers.formatBio(p) ? `<span class="roster-bio dim">${DLRPlayers.formatBio(p)}</span>` : ""}
           </div>
         </div>
       </div>`;
@@ -403,22 +381,32 @@ const DLRRoster = (() => {
     // Build a local player lookup from resolved roster data.
     // name and sleeperId are already resolved by getRoster() via getPlayers() —
     // no need to re-derive from raw MFL name format.
-    const mflPlayerLookup = {};
-    teams.forEach(t => {
-      (t.mflPlayers || []).forEach(p => {
-        const nameParts = (p.name || "").trim().split(" ");
-        mflPlayerLookup[`mfl_${p.id}`] = {
-          first_name:        nameParts[0] || "",
-          last_name:         nameParts.slice(1).join(" ") || "",
-          position:          p.position || "?",
-          fantasy_positions: [p.position || "?"],
-          team:              p.team || "FA",
-          search_rank:       9999,
-          pts_season:        playerScores[p.id] || 0,
-          _sleeperId:        p.sleeperId || null,
-          _mflId:            p.id,
-        };
-      });
+    const playerLookup = {};
+    let mflPlayerUniverse = await MFLAPI.getPlayers(_season);
+
+    Object.entries(mflPlayerUniverse).forEach(([mflId, p]) => {
+      if (!mflId) return;
+      const pos = (p.pos || p.position || "?").toUpperCase();
+      if (!SKILL.includes(pos)) return;
+
+      const fullPlayer = DLRPlayers.getFullPlayer(mflId, "mfl");
+
+      playerLookup[`mfl_${mflId}`] = {
+        pid:        `mfl_${mflId}`,
+        photoPid:   DLRPlayers.getSleeperIdFromMfl(mflId) || null,
+        name:       fullPlayer.first_name ? `${fullPlayer.first_name} ${fullPlayer.last_name}`.trim() : (p.name || `Player ${mflId}`),
+        pos,
+        team:       fullPlayer.team || "FA",
+        rank:       fullPlayer.search_rank || 9999,
+        pts:        fullPlayer.pts_season || null,
+        age:        fullPlayer.age,
+        status:     fullPlayer.injury_status || null,
+        isRostered: rostered.has(`mfl_${mflId}`),
+        rosterTeam: _rosterLookup[`mfl_${mflId}`] || null,
+        isWon:      false,
+        _sleeperId: DLRPlayers.getSleeperIdFromMfl(mflId)
+      };
+    });
     });
 
     // Merge into _players
