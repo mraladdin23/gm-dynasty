@@ -5,7 +5,8 @@
 
 const DLRPlayerCard = (() => {
 
-  let _playerId  = null;
+  let _playerId  = null;   // raw ID passed by caller (may be mfl_XXXX, Sleeper ID, etc.)
+  let _statsId   = null;   // resolved Sleeper ID used for stats + weekly log fetches
   let _year      = 2025;
   let _weekCache = {};
 
@@ -35,7 +36,7 @@ const DLRPlayerCard = (() => {
       delete wl[_playerId];
       showToast("Removed from watchlist");
     } else {
-      const p    = DLRPlayers.get(_playerId) || {};
+      const p    = DLRPlayers.get(_statsId || _playerId) || {};
       const name = p.first_name ? `${p.first_name} ${p.last_name}` : _playerId;
       wl[_playerId] = { name, pos: p.fantasy_positions?.[0] || p.position, addedAt: Date.now() };
       showToast("Added to watchlist ★");
@@ -46,7 +47,7 @@ const DLRPlayerCard = (() => {
 
   function nominateFromCard() {
     if (!_playerId) return;
-    const p    = DLRPlayers.get(_playerId) || {};
+    const p    = DLRPlayers.get(_statsId || _playerId) || {};
     const name = p.first_name ? `${p.first_name} ${p.last_name}` : _playerId;
     const pos  = (p.fantasy_positions?.[0] || p.position || "?").toUpperCase();
     const team = p.team || "FA";
@@ -59,7 +60,6 @@ const DLRPlayerCard = (() => {
   function _updateNominateBtn() {
     const btn = document.getElementById("pc-nominate-btn");
     if (!btn) return;
-    // Nominate only available in the FA tab — hide from player card
     btn.style.display = "none";
   }
 
@@ -78,14 +78,21 @@ const DLRPlayerCard = (() => {
 
     _buildModal();
 
-    // Show loading bio state
     const bioEl = document.getElementById("pc-bio");
     if (bioEl) bioEl.innerHTML = `<div class="pc-bio-loading">Loading…</div>`;
 
-    // Ensure player DB is loaded (uses IndexedDB, no quota issues)
     await DLRPlayers.load();
 
-    const p = DLRPlayers.get(playerId);
+    // Resolve the Sleeper ID for stats fetches.
+    // Callers may pass: a Sleeper ID, an mfl_XXXX prefixed ID, or a bare MFL numeric ID.
+    if (playerId && playerId.toString().startsWith("mfl_")) {
+      _statsId = DLRPlayers.getSleeperIdFromMfl(playerId.replace("mfl_", "")) || null;
+    } else {
+      // Treat as Sleeper ID directly (roster tab already resolves to Sleeper ID for photo)
+      _statsId = playerId || null;
+    }
+
+    const p = DLRPlayers.get(_statsId || playerId);
     _renderHeader(p, playerId, playerName);
     _updateWatchBtn();
     _updateNominateBtn();
@@ -131,27 +138,29 @@ const DLRPlayerCard = (() => {
     modal.addEventListener("click", e => { if (e.target === modal) close(); });
   }
 
-// ── Render header ─────────────────────────────────────────
+  // ── Render header ─────────────────────────────────────────
   function _renderHeader(p, playerId, fallbackName) {
-    // Use enriched player data (handles MFL via mapping)
-    const enriched = playerId && playerId.toString().startsWith("mfl_") 
+    const isMfl = playerId && playerId.toString().startsWith("mfl_");
+
+    // Best available player object: getFullPlayer handles MFL→CSV→Sleeper merge
+    const enriched = isMfl
       ? DLRPlayers.getFullPlayer(playerId.replace("mfl_", ""), "mfl")
       : (p || DLRPlayers.get(playerId) || {});
 
-    const name  = enriched.first_name 
-      ? `${enriched.first_name} ${enriched.last_name}`.trim() 
+    const name  = enriched.first_name
+      ? `${enriched.first_name} ${enriched.last_name}`.trim()
       : (fallbackName || "Unknown");
 
     const pos   = (enriched.fantasy_positions?.[0] || enriched.position || "—").toUpperCase();
     const team  = enriched.team || "FA";
     const color = POS_COLOR[pos] || "#9ca3af";
 
+    // Photo: use _statsId (resolved Sleeper ID) when available
     const photoEl = document.getElementById("pc-photo");
     if (photoEl) {
-      const sleeperId = DLRPlayers.getSleeperIdFromMfl(playerId?.replace("mfl_", "")) 
-                     || (playerId && !playerId.toString().startsWith("mfl_") ? playerId : null);
-      if (sleeperId) {
-        photoEl.src = `https://sleepercdn.com/content/nfl/players/${sleeperId}.jpg`;
+      if (_statsId) {
+        photoEl.src = `https://sleepercdn.com/content/nfl/players/${_statsId}.jpg`;
+        photoEl.style.display = "";
       } else {
         photoEl.style.display = "none";
       }
@@ -171,13 +180,9 @@ const DLRPlayerCard = (() => {
     const teamEl = document.getElementById("pc-team");
     if (teamEl) teamEl.textContent = `${team} · ${pos}`;
 
-    // Improved bio using mapping when needed
-    const mapping = playerId && playerId.toString().startsWith("mfl_") 
-      ? DLRPlayers.getByMflId(playerId.replace("mfl_", "")) 
-      : null;
-
-    const bioStr = DLRPlayers.formatBio(enriched, mapping);
-    const alerts = [];
+    const mapping = isMfl ? DLRPlayers.getByMflId(playerId.replace("mfl_", "")) : null;
+    const bioStr  = DLRPlayers.formatBio(enriched, mapping);
+    const alerts  = [];
     if (enriched.status && enriched.status !== "Active") alerts.push(`⚠️ ${enriched.status}`);
     if (enriched.injury_status) alerts.push(`🏥 ${enriched.injury_status}`);
 
@@ -189,7 +194,6 @@ const DLRPlayerCard = (() => {
         (!bioStr && !alerts.length ? `<div style="color:var(--color-text-dim);font-size:.78rem;">Bio not available</div>` : "");
     }
 
-    // Year tabs (unchanged)
     const tabsEl = document.getElementById("pc-year-tabs");
     if (tabsEl) {
       tabsEl.innerHTML = YEARS.map(y =>
@@ -210,11 +214,19 @@ const DLRPlayerCard = (() => {
 
   // ── Load stats ────────────────────────────────────────────
   async function _loadYear(year) {
-    if (!_playerId) { _showNoStats(); return; }
+    // Always use _statsId (Sleeper ID) for stat lookups.
+    // If no Sleeper ID was resolved, show a graceful no-stats message.
+    const sid = _statsId;
 
     const sumEl = document.getElementById("pc-season-summary");
     const logEl = document.getElementById("pc-game-log");
     if (!sumEl || !logEl) return;
+
+    if (!sid) {
+      sumEl.innerHTML = "";
+      logEl.innerHTML = `<div class="pc-no-weekly">No Sleeper stats available for this player.</div>`;
+      return;
+    }
 
     sumEl.innerHTML = `<div class="pc-loading">Loading ${year} stats…</div>`;
     logEl.innerHTML = "";
@@ -242,13 +254,13 @@ const DLRPlayerCard = (() => {
         }
       }
 
-      const st = bulkData?.[_playerId] || null;
+      const st = bulkData?.[sid] || null;
 
-      // Weekly game log
+      // Weekly game log — keyed by Sleeper ID
       let weeklyArr = _weekCache[year] || null;
       if (!weeklyArr) {
         try {
-          const cached = await DLRIDB.get(`dlr_pcw_${_playerId}_${year}`);
+          const cached = await DLRIDB.get(`dlr_pcw_${sid}_${year}`);
           if (cached) weeklyArr = cached;
         } catch(e) {}
       }
@@ -257,14 +269,14 @@ const DLRPlayerCard = (() => {
           Array.from({ length: 18 }, (_, i) => i + 1).map(w =>
             fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${year}/${w}?season_type=regular`)
               .then(r => r.ok ? r.json() : null)
-              .then(data => data?.[_playerId]?.pts_ppr != null ? { week: w, ...data[_playerId] } : null)
+              .then(data => data?.[sid]?.pts_ppr != null ? { week: w, ...data[sid] } : null)
               .catch(() => null)
           )
         );
         weeklyArr = results.filter(Boolean);
         if (weeklyArr.length) {
           _weekCache[year] = weeklyArr;
-          try { await DLRIDB.set(`dlr_pcw_${_playerId}_${year}`, weeklyArr); } catch(e) {}
+          try { await DLRIDB.set(`dlr_pcw_${sid}_${year}`, weeklyArr); } catch(e) {}
         }
       }
 

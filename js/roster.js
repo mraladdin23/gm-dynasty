@@ -286,8 +286,9 @@ const DLRRoster = (() => {
       ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${photoPid}.jpg" onerror="this.style.display='none'" loading="lazy" />`
       : `<div class="roster-player-photo-fallback" style="color:${color};">${pos}</div>`;
 
-    // Player card click: use photoPid (Sleeper ID) when available, otherwise full prefixed ID
-    const cardId = photoPid || playerId;
+    // Player card click: pass the original playerId — playercard.js resolves
+    // the Sleeper ID internally for stats. This means mfl_ IDs work correctly.
+    const cardId = playerId;
 
     // Bio string via DLRPlayers.formatBio — works for both Sleeper and CSV-mapped players
     const mapping = isMfl ? DLRPlayers.getByMflId(playerId.replace("mfl_", "")) : null;
@@ -300,7 +301,7 @@ const DLRRoster = (() => {
           <div class="roster-player-name">${_esc(name)}</div>
           <div class="roster-player-meta">
             <span class="roster-nfl-team">${nflTeam}</span>
-            ${bioStr ? `<span class="roster-bio dim">${bioStr}</span>` : ""}
+            ${bioStr ? `<span class="roster-bio dim" style="font-size:.72rem;color:var(--color-text-dim)">${bioStr}</span>` : ""}
           </div>
         </div>
       </div>`;
@@ -407,9 +408,24 @@ const DLRRoster = (() => {
 
     teams.sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // _playerRowHTML resolves each player on-demand via DLRPlayers.getFullPlayer()
-    // so no separate player lookup map is needed here — _players stays as the
-    // Sleeper DB loaded above, and MFL IDs fall through to getFullPlayer().
+    // Populate _players with mfl_-keyed stubs so _teamCardHTML can read
+    // pos and rank for position grouping. getFullPlayer() is the source of truth.
+    const mflPlayerUniverse = await MFLAPI.getPlayers(season);
+    if (token !== _initToken) return;
+    Object.entries(mflPlayerUniverse).forEach(([mflId, p]) => {
+      const key  = `mfl_${mflId}`;
+      const full = DLRPlayers.getFullPlayer(mflId, "mfl");
+      _players[key] = {
+        first_name:        full.first_name || "",
+        last_name:         full.last_name  || "",
+        position:          full.position   || p.pos || p.position || "?",
+        fantasy_positions: full.fantasy_positions || [full.position || p.pos || "?"],
+        team:              full.team       || p.team || "FA",
+        search_rank:       full.search_rank || 9999,
+        age:               full.age        || null,
+        injury_status:     full.injury_status || null,
+      };
+    });
 
     _rosterData = { teams, league: MFLAPI.getLeagueInfo(bundle) };
     _filter = "all";

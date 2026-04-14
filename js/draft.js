@@ -724,10 +724,13 @@ const DLRDraft = (() => {
             const round    = Number(p.round || 0);
             const pickNum  = Number(p.pick || 0);
             const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
+            // Always open the DLR player card. Pass Sleeper ID when available so
+            // stats load immediately; fall back to mfl_XXXX — playercard.js resolves
+            // the Sleeper ID internally and still shows bio + photo via DynastyProcess.
             const sid      = info.sleeperId;
-            const clickAttr = sid
-              ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer;"`
-              : pid ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${pid}','_blank')" style="cursor:pointer;"` : "";
+            const cardId   = sid ? sid : (pid ? `mfl_${pid}` : null);
+            const clickAttr = cardId
+              ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"` : "";
             return `
               <div class="draft-auction-row" ${clickAttr}>
                 <span class="draft-auction-rank dim">${pickLabel}</span>
@@ -769,9 +772,9 @@ const DLRDraft = (() => {
         const pickNum = Number(p.pick || 0);
         const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
         const sid   = info.sleeperId;
-        const clickAttr = sid
-          ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer;"`
-          : pid ? `onclick="window.open('https://www.myfantasyleague.com/player/details?player_id=${pid}','_blank')" style="cursor:pointer;"` : "";
+        const cardId = sid ? sid : (pid ? `mfl_${pid}` : null);
+        const clickAttr = cardId
+          ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"` : "";
 
         if (name && name !== "—") {
           boardHTML += `

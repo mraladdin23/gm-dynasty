@@ -612,8 +612,10 @@ const DLRFreeAgents = (() => {
       const starIcon = p.starred ? "⭐" : "☆";
       const starClr  = p.starred ? "var(--color-gold)" : "var(--color-text-dim)";
 
-      // Photo: use Sleeper CDN ID (photoPid) for MFL/Yahoo players so photos load
-      const photoPid = p.photoPid || p.pid;
+      // Photo: use Sleeper CDN ID (photoPid). For MFL/Yahoo p.pid is a prefixed key
+      // (mfl_XXXX / yahoo_XXXX) which is not a valid CDN path — only use p.pid as
+      // photo src when it's a bare Sleeper ID (no underscore prefix).
+      const photoPid = p.photoPid || (p.pid && !p.pid.includes("_") ? p.pid : null);
 
       // Auction status column
       let auctionCol = "";
@@ -641,8 +643,9 @@ const DLRFreeAgents = (() => {
             style="color:${starClr};background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 2px;flex-shrink:0;line-height:1">${starIcon}</button>
           <div class="fa-rank">${i + 1}</div>
           <div class="fa-photo">
-            <img src="https://sleepercdn.com/content/nfl/players/thumb/${photoPid}.jpg"
-              onerror="this.style.display='none'" loading="lazy" />
+            ${photoPid
+              ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${photoPid}.jpg" onerror="this.style.display='none'" loading="lazy" />`
+              : ""}
           </div>
           <div class="fa-pos-dot" style="background:${color}22;color:${color};border-color:${color}55">${p.pos}</div>
           <div class="fa-info">
