@@ -846,54 +846,49 @@ const MFLAPI = (() => {
    *   Pass 2: fill SF then FLEX with remaining players.
    * Within each pass, process slots in order.
    */
-  function assignStartersToSlots(slots, players, playerLookup) {
-    // What slot types a given player position can fill
-    const POS_VALID_SLOTS = {
-      QB:    ["QB", "SF", "FLEX"],
-      RB:    ["RB", "FLEX"],
-      WR:    ["WR", "FLEX"],
-      TE:    ["TE", "FLEX"],
-      K:     ["K",  "FLEX"],
-      DEF:   ["DEF","FLEX"],
-      P:     ["P",  "FLEX"],
-      COACH: ["COACH","FLEX"],
-    };
-    const FLEX_SLOTS = new Set(["FLEX", "SF"]);
+function assignStartersToSlots(slots, players, playerLookup) {
+  const POS_VALID_SLOTS = {
+    QB:    ["QB", "SF", "FLEX"],
+    RB:    ["RB", "FLEX"],
+    WR:    ["WR", "FLEX"],
+    TE:    ["TE", "FLEX"],
+    K:     ["K",  "FLEX"],
+    DEF:   ["DEF","FLEX"],
+    P:     ["P",  "FLEX"],
+    COACH: ["COACH","FLEX"],
+  };
+  const FLEX_SLOTS = new Set(["FLEX", "SF"]);
 
-    // Enrich players with normalized position
-    const enriched = players.map(p => ({
-      ...p,
-      pos: _normalizeMFLPos(playerLookup?.[p.id]?.pos || playerLookup?.[p.id]?.position || "?")
-    }));
+  const enriched = players.map(p => ({
+    ...p,
+    pos: _normalizeMFLPos(playerLookup?.[p.id]?.pos || playerLookup?.[p.id]?.position || "?")
+  }));
 
-    const used   = new Array(enriched.length).fill(false);
-    const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));
+  const used   = new Array(enriched.length).fill(false);
+  const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));
 
-    // Ordered indices: named slots first, then SF, then FLEX
-    const named = result.map((r, i) => i).filter(i => !FLEX_SLOTS.has(result[i].slot));
-    const sf    = result.map((r, i) => i).filter(i => result[i].slot === "SF");
-    const flex  = result.map((r, i) => i).filter(i => result[i].slot === "FLEX");
-    const order = [...named, ...sf, ...flex];
+  const named = result.map((r, i) => i).filter(i => !FLEX_SLOTS.has(result[i].slot));
+  const sf    = result.map((r, i) => i).filter(i => result[i].slot === "SF");
+  const flex  = result.map((r, i) => i).filter(i => result[i].slot === "FLEX");
+  const order = [...named, ...sf, ...flex];
 
-    for (const si of order) {
-      const slot = result[si].slot;
-      for (let pi = 0; pi < enriched.length; pi++) {
-        if (used[pi]) continue;
-        const validSlots = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
-        if (validSlots.includes(slot)) {
-          result[si].player = enriched[pi];
-          used[pi] = true;
-          // For FLEX/SF slots, show the player's actual position as the display label
-          if (FLEX_SLOTS.has(slot)) {
-            result[si].displaySlot = enriched[pi].pos || slot;
-          }
-          break;
-        }
+  for (const si of order) {
+    const slot = result[si].slot;
+    for (let pi = 0; pi < enriched.length; pi++) {
+      if (used[pi]) continue;
+      const validSlots = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
+      if (validSlots.includes(slot)) {
+        result[si].player = enriched[pi];
+        used[pi] = true;
+        // ── REMOVED: do NOT override displaySlot with player's pos ──
+        // FLEX/SF slots now correctly display "FLEX" or "SF"
+        break;
       }
     }
-
-    return result;
   }
+
+  return result;
+}
 
   /**
    * Debug helper — inspect raw bundle from the browser console:
