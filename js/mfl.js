@@ -717,6 +717,187 @@ const MFLAPI = (() => {
     return { winnerId, eliminatedId };
   }
 
+  // ── Canonical MFL position normalizer ──────────────────────
+  // Maps raw MFL position strings to display labels used throughout DLR.
+  function _normalizeMFLPos(raw) {
+    const s = String(raw || "").toUpperCase().trim();
+    if (s === "PK")    return "K";
+    if (s === "PN")    return "P";
+    if (s === "COACH") return "COACH";
+    if (s === "DEF")   return "DEF";
+    return s || "?";
+  }
+
+  /**
+   * Parses the league starters config into an ordered list of slot labels.
+   * Handles MFL's limit syntax: "2" = exactly 2, "2-5" = min 2, max 5.
+   *
+   * bundle.league.league.starters shape (after JSON from XML):
+   *   { count: "11", position: [ { name:"QB", limit:"2" }, ... ] }
+   *   OR a single position object (not array).
+   *
+   * Returns an ordered array of slot labels, e.g.:
+   *   ["QB","QB","RB","RB","WR","WR","WR","TE","FLEX","FLEX","FLEX"]
+   *
+   * Three cases:
+   *
+   * A) Some positions have min > 0 (forced starters).
+   *    → Named slots from mins, FLEX fills the remainder.
+   *    → QB with min=0 and present in list → SF slots instead of QB slots for flex overflow.
+   *
+   * B) All positions have min=0 AND QB max < count (SuperFlex-heavy league).
+   *    → QB max = number of SF slots; rest are FLEX.
+   *    Example: count=8, QB 0-3 → ["SF","SF","SF","FLEX","FLEX","FLEX","FLEX","FLEX"]
+   *
+   * C) All positions have min=0 AND every position can fill up to count (true all-flex).
+   *    → All slots are "FLEX". The slot label will show the player's actual position on render.
+   *    Example: count=8, every position 0-8 → ["FLEX"×8]
+   *
+   * Special labels: PK→K, PN→P, Def→DEF, Coach→COACH
+   */
+  function getStarterSlots(bundle) {
+    const startersRaw = bundle?.league?.league?.starters;
+    if (!startersRaw) return [];
+
+    const totalCount = parseInt(startersRaw.count || 0);
+    if (!totalCount) return [];
+
+    const rawPositions = startersRaw.position;
+    if (!rawPositions) return [];
+    const posArr = Array.isArray(rawPositions) ? rawPositions : [rawPositions];
+
+    // Parse each position rule
+    const parsed = posArr.map(p => {
+      const name  = _normalizeMFLPos(p.name);
+      const limit = String(p.limit || "0");
+      const [minStr, maxStr] = limit.includes("-") ? limit.split("-") : [limit, limit];
+      const min = parseInt(minStr) || 0;
+      const max = parseInt(maxStr) || min;
+      return { name, min, max };
+    });
+
+    const allMinsZero = parsed.every(p => p.min === 0);
+
+    if (!allMinsZero) {
+      // ── Case A: some forced positions ────────────────────────
+      const slots = [];
+      let namedTotal = 0;
+      for (const p of parsed) {
+        if (p.min === 0) continue;
+        // QB with min=0 would be SF but min>0 here means it IS a forced QB slot
+        for (let i = 0; i < p.min; i++) {
+          slots.push(p.name);
+          namedTotal++;
+        }
+      }
+      // QB present with min=0 means the flex remainder supports QB (SF)
+      const hasQBFlex = parsed.some(p => p.name === "QB" && p.min === 0 && p.max > 0);
+      for (let i = namedTotal; i < totalCount; i++) {
+        slots.push(hasQBFlex ? "SF" : "FLEX");
+      }
+      return slots;
+    }
+
+    // ── Cases B & C: all mins are zero ───────────────────────
+    // Check if any single position is capped below totalCount.
+    // If QB is capped (e.g. max=3 but count=8), that cap tells us how many
+    // QB-eligible (SF) slots exist vs true open FLEX slots.
+    const qbRule   = parsed.find(p => p.name === "QB");
+    const qbMax    = qbRule?.max ?? totalCount;
+    const allMaxFull = parsed.every(p => p.max >= totalCount);
+
+    if (allMaxFull) {
+      // ── Case C: true all-flex — every position can fill any slot ──
+      // Return FLEX×count. On render we show the actual player position instead.
+      return Array(totalCount).fill("FLEX");
+    }
+
+    // ── Case B: QB (and possibly others) are capped ──────────
+    // SF slots = QB max cap; rest are FLEX
+    const sfCount   = Math.min(qbMax, totalCount);
+    const flexCount = totalCount - sfCount;
+    return [
+      ...Array(sfCount).fill("SF"),
+      ...Array(flexCount).fill("FLEX"),
+    ];
+  }
+
+  /**
+   * Given an ordered starter slot list and a list of player objects,
+   * assigns each player to the best-matching slot.
+   * Returns an array of { slot, displaySlot, player } in slot order.
+   *
+   * `slot`        — the canonical slot name from getStarterSlots (QB/RB/SF/FLEX etc.)
+   * `displaySlot` — what to show in the center column:
+   *                  • named slot → show slot name (QB, RB, WR, TE, K, DEF, COACH, P…)
+   *                  • FLEX/SF with a player → show the player's actual position
+   *                  • FLEX/SF without a player → show "FLEX" / "SF"
+   *
+   * Position → valid slots:
+   *   QB    → QB, SF, FLEX
+   *   RB    → RB, FLEX
+   *   WR    → WR, FLEX
+   *   TE    → TE, FLEX
+   *   K     → K, FLEX        (K can fill FLEX in many leagues)
+   *   DEF   → DEF, FLEX
+   *   P     → P, FLEX
+   *   COACH → COACH, FLEX
+   *   ?/other → FLEX only
+   *
+   * Algorithm: two-pass greedy.
+   *   Pass 1: fill named slots (QB, RB, WR, TE, K, DEF, COACH, P) first.
+   *   Pass 2: fill SF then FLEX with remaining players.
+   * Within each pass, process slots in order.
+   */
+  function assignStartersToSlots(slots, players, playerLookup) {
+    // What slot types a given player position can fill
+    const POS_VALID_SLOTS = {
+      QB:    ["QB", "SF", "FLEX"],
+      RB:    ["RB", "FLEX"],
+      WR:    ["WR", "FLEX"],
+      TE:    ["TE", "FLEX"],
+      K:     ["K",  "FLEX"],
+      DEF:   ["DEF","FLEX"],
+      P:     ["P",  "FLEX"],
+      COACH: ["COACH","FLEX"],
+    };
+    const FLEX_SLOTS = new Set(["FLEX", "SF"]);
+
+    // Enrich players with normalized position
+    const enriched = players.map(p => ({
+      ...p,
+      pos: _normalizeMFLPos(playerLookup?.[p.id]?.pos || playerLookup?.[p.id]?.position || "?")
+    }));
+
+    const used   = new Array(enriched.length).fill(false);
+    const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));
+
+    // Ordered indices: named slots first, then SF, then FLEX
+    const named = result.map((r, i) => i).filter(i => !FLEX_SLOTS.has(result[i].slot));
+    const sf    = result.map((r, i) => i).filter(i => result[i].slot === "SF");
+    const flex  = result.map((r, i) => i).filter(i => result[i].slot === "FLEX");
+    const order = [...named, ...sf, ...flex];
+
+    for (const si of order) {
+      const slot = result[si].slot;
+      for (let pi = 0; pi < enriched.length; pi++) {
+        if (used[pi]) continue;
+        const validSlots = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
+        if (validSlots.includes(slot)) {
+          result[si].player = enriched[pi];
+          used[pi] = true;
+          // For FLEX/SF slots, show the player's actual position as the display label
+          if (FLEX_SLOTS.has(slot)) {
+            result[si].displaySlot = enriched[pi].pos || slot;
+          }
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+
   /**
    * Debug helper — inspect raw bundle from the browser console:
    *   MFLAPI.debugBundle("LEAGUE_ID", "2025").then(r => console.log(JSON.stringify(r._paths, null, 2)))
@@ -918,6 +1099,8 @@ const MFLAPI = (() => {
     getAuctionResults,
     getAuctionResultsDirect,
     resolveGuillotineFinal,
+    getStarterSlots,
+    assignStartersToSlots,
     buildMFLToSleeperIndex,
     mflNameToSleeperId,
     mflNameToDisplay,
