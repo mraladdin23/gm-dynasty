@@ -31,6 +31,7 @@ const DLRStandings = (() => {
     _mflNameMap  = {};
     _mflLiveScoringCache = {};
     _mflPlayoffState     = null;
+    _mflSelectedDivId    = null;
     _initToken++;
   }
 
@@ -297,23 +298,32 @@ const DLRStandings = (() => {
 
         const { bundle, nameMap, allWeeks, currentWeek } = bundleState;
 
-        // Fetch current week liveScoring (use cache if already loaded)
-        let liveData = _mflLiveScoringCache[currentWeek];
+        // Fetch week 1 live scoring for initial render (default week = 1)
+        let liveData = _mflLiveScoringCache[1];
         if (!liveData) {
-          liveData = await MFLAPI.getLiveScoring(_leagueId, season);
-          const fetchedWeek = parseInt(liveData?.liveScoring?.week || currentWeek);
-          _mflLiveScoringCache[fetchedWeek] = liveData;
+          liveData = await MFLAPI.getLiveScoring(_leagueId, season, 1);
+          _mflLiveScoringCache[1] = liveData;
         }
 
-        const activeWeek     = parseInt(liveData?.liveScoring?.week || currentWeek);
-        const currentMatchups = MFLAPI.normalizeMatchups(liveData);
+        // If week 1 is empty (pre-season), also cache current week for the week switcher
+        if (!_mflLiveScoringCache[currentWeek] && currentWeek !== 1) {
+          MFLAPI.getLiveScoring(_leagueId, season, currentWeek)
+            .then(d => { _mflLiveScoringCache[currentWeek] = d; })
+            .catch(() => {});
+        }
+
+        const matchups = MFLAPI.normalizeMatchups(liveData);
+
+        // Fetch player lookup for per-player detail in expanded cards
+        let playerLookup = null;
+        try { playerLookup = await MFLAPI.getPlayers(season); } catch(e) {}
 
         // Filter matchups to user's division if applicable
         const divisionFranchises = _myRosterId
           ? MFLAPI.getDivisionFranchises(bundle, _myRosterId)
           : null;
 
-        _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, currentMatchups, divisionFranchises);
+        _renderMFLMatchupsShell(el, nameMap, allWeeks, 1, matchups, divisionFranchises, liveData, playerLookup);
       } catch(e) {
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
           <div style="margin-bottom:var(--space-2)">Could not load MFL matchups: ${e.message}</div>
@@ -344,23 +354,26 @@ const DLRStandings = (() => {
   let _mflNameMap           = {};
   let _mflLiveScoringCache  = {};     // week → raw liveScoring response
   let _mflPlayoffState      = null;   // { brackets, nameMap, season, leagueId, activeBracketIdx }
+  // Persistent division selection: null = user's own division, "all" = show all, divId = specific div
+  let _mflSelectedDivId     = null;   // set when user clicks a division pill
 
-  function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises) {
+  function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, liveData, playerLookup) {
+    // Default to week 1 display (pills highlight week 1, not current week)
+    const displayWeek = 1;
     const weekPills = allWeeks.map(w =>
-      `<button class="season-pill ${w === activeWeek ? "season-pill--current" : ""}"
+      `<button class="season-pill ${w === displayWeek ? "season-pill--current" : ""}"
         onclick="DLRStandings._mflLoadWeek(${w})">${w}</button>`
     ).join("");
 
-    // Store division filter for week-switching
+    // Store division filter and player lookup for week-switching
     if (divisionFranchises !== undefined) {
       _mflBundle._divisionFranchises = divisionFranchises;
     }
+    if (playerLookup) _mflBundle._playerLookup = playerLookup;
 
     // Division banner if applicable
     let divBanner = "";
     if (divisionFranchises && _mflBundle?.bundle && _myRosterId) {
-      const { divisionName } = MFLAPI.filterStandingsByDivision(_mflBundle.bundle, [], _myRosterId);
-      // We only have the name from standings helper — build it from getDivisions directly
       const { franchiseDivision, divisions } = MFLAPI.getDivisions(_mflBundle.bundle);
       const myDivId   = franchiseDivision[String(_myRosterId)];
       const myDivName = divisions.find(d => d.id === myDivId)?.name || "";
@@ -378,8 +391,13 @@ const DLRStandings = (() => {
       </div>
       ${divBanner}
       <div id="mfl-matchups-grid" class="matchups-grid">
-        ${_mflMatchupCards(matchups, nameMap, divisionFranchises)}
+        ${_mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup)}
       </div>`;
+
+    // Immediately load week 1 data (which may differ from activeWeek)
+    if (displayWeek !== activeWeek) {
+      _mflLoadWeek(displayWeek);
+    }
   }
 
   async function _mflLoadWeek(week) {
@@ -392,11 +410,13 @@ const DLRStandings = (() => {
     });
 
     const divisionFranchises = _mflBundle._divisionFranchises || null;
+    const playerLookup       = _mflBundle._playerLookup || null;
 
     // Use cache if available
     if (_mflLiveScoringCache[week]) {
-      const matchups = MFLAPI.normalizeMatchups(_mflLiveScoringCache[week]);
-      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises);
+      const liveData = _mflLiveScoringCache[week];
+      const matchups = MFLAPI.normalizeMatchups(liveData);
+      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises, liveData, playerLookup);
       return;
     }
 
@@ -405,14 +425,112 @@ const DLRStandings = (() => {
       const liveData = await MFLAPI.getLiveScoring(_leagueId, _mflBundle.season, week);
       _mflLiveScoringCache[week] = liveData;
       const matchups = MFLAPI.normalizeMatchups(liveData);
-      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises);
+      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises, liveData, playerLookup);
     } catch(e) {
       grid.innerHTML = `<div class="dim" style="padding:var(--space-4)">Could not load week ${week}: ${e.message}</div>`;
     }
   }
 
-  function _mflMatchupCards(matchups, nameMap, divisionFranchises) {
-    // Filter to only matchups involving teams in the user's division
+  // Detect whether a liveScoring response is a "no-roster" (pick-a-player / survivor)
+  // league. Real MFL shape for these leagues:
+  //   { liveScoring: { franchise: [{id, score, players:{player:[...]}}, ...], week: "N" } }
+  // Standard leagues have:
+  //   { liveScoring: { matchup: [{franchise:[{...},{...}]}, ...], week: "N" } }
+  function _isMFLNoRosterLeague(liveData) {
+    const ls = liveData?.liveScoring;
+    if (!ls) return false;
+    const hasMatchup   = ls.matchup != null;
+    const hasFranchise = ls.franchise != null;
+    return !hasMatchup && hasFranchise;
+  }
+
+  // Normalize "no-roster" franchise scores. Each franchise entry has its own
+  // players array at the top level (no home/away pairing).
+  // Returns [{ teamId, score, players: [{id, score, status, position}] }]
+  function _normalizeMFLNoRosterScores(liveData) {
+    const ls  = liveData?.liveScoring;
+    const raw = ls?.franchise;
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr
+      .filter(f => parseFloat(f.score || 0) > 0 || (f.players?.player))
+      .map(f => {
+        const allP = f.players?.player
+          ? (Array.isArray(f.players.player) ? f.players.player : [f.players.player])
+          : [];
+        return {
+          teamId: String(f.id || ""),
+          score:  parseFloat(f.score || 0),
+          players: allP.map(p => ({
+            id:       String(p.id || ""),
+            score:    parseFloat(p.score || 0),
+            status:   String(p.status || ""),
+            position: String(p.position || "?").toUpperCase(),
+          }))
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+  }
+
+  // Render MFL matchup cards — two paths:
+  //   1. Standard matchups (head-to-head): click to expand side-by-side player breakdown
+  //   2. No-roster scoring leagues: sorted score cards with per-position breakdown on expand
+  function _mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup) {
+    // ── No-roster / pick-a-player league path ────────────────
+    if (liveData && _isMFLNoRosterLeague(liveData)) {
+      const teams = _normalizeMFLNoRosterScores(liveData);
+      const filtered = divisionFranchises
+        ? teams.filter(t => divisionFranchises.includes(t.teamId))
+        : teams;
+      if (!filtered.length) return `<div class="dim" style="padding:var(--space-4)">No scores this week.</div>`;
+
+      const POS_ORDER = ["QB","RB","WR","TE","K","DEF","DL","LB","DB","P",""];
+      const posRank = p => { const i = POS_ORDER.indexOf(p); return i < 0 ? 99 : i; };
+      const POS_COLOR = { QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)", TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)" };
+
+      return filtered.map((t, rank) => {
+        const name = _esc(nameMap[t.teamId] || t.teamId || "TBD");
+        const scoreFmt = t.score > 0 ? t.score.toFixed(2) : "—";
+        // Sort by position then score desc
+        const sorted = [...t.players].sort((a, b) => {
+          const pr = posRank(a.position) - posRank(b.position);
+          return pr !== 0 ? pr : b.score - a.score;
+        });
+        const starters = sorted.filter(p => p.status === "starter" || p.status === "");
+        const bench    = sorted.filter(p => p.status !== "starter" && p.status !== "");
+        const hasDetail = sorted.length > 0;
+
+        const playerRows = (arr, isBench) => arr.map(p => {
+          const pName = playerLookup ? (playerLookup[p.id]?.name || p.id) : p.id;
+          const pos   = p.position || "?";
+          const col   = POS_COLOR[pos] || "var(--color-text-dim)";
+          return `<div class="mu-sbs-row${isBench ? " mu-sbs-row--bench" : ""}">
+            <span class="mu-slot" style="color:${col}">${pos}</span>
+            <span class="mu-name mu-name--left${isBench ? " dim" : ""}" style="flex:1">${_esc(pName)}</span>
+            <span class="mu-pts${isBench ? " dim" : ""}" style="margin-left:auto">${p.score > 0 ? p.score.toFixed(2) : "—"}</span>
+          </div>`;
+        }).join("");
+
+        return `<div class="mu-card" onclick="this.querySelector('.mu-detail').classList.toggle('hidden')">
+          <div class="mu-header">
+            <div class="mu-team"><div class="st-av">${(nameMap[t.teamId]||"?")[0].toUpperCase()}</div>
+              <span>${name}</span></div>
+            <div class="mu-scores">
+              <span class="mu-score mu-score--win">${scoreFmt}</span>
+            </div>
+            <div style="min-width:44px;text-align:right;color:var(--color-text-dim);font-size:.75rem">#${rank+1}</div>
+          </div>
+          ${hasDetail
+            ? `<div class="mu-detail hidden" style="padding:var(--space-3) var(--space-4)">
+                ${starters.length ? playerRows(starters, false) : ""}
+                ${bench.length ? `<div class="mu-bench-header">Bench</div>${playerRows(bench, true)}` : ""}
+              </div>`
+            : `<div class="mu-no-detail">No player data yet</div>`}
+        </div>`;
+      }).join("");
+    }
+
+    // ── Standard head-to-head matchups ───────────────────────
     const filtered = divisionFranchises
       ? matchups.filter(m =>
           divisionFranchises.includes(String(m.home.teamId)) ||
@@ -422,6 +540,9 @@ const DLRStandings = (() => {
     if (!filtered.length) {
       return `<div class="dim" style="padding:var(--space-4)">No matchups this week.</div>`;
     }
+
+    const POS_COLOR = { QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)", TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)" };
+
     return filtered.map(m => {
       const home  = m.home || {};
       const away  = m.away || {};
@@ -431,18 +552,96 @@ const DLRStandings = (() => {
       const aSc   = parseFloat(away.score || 0);
       const hWin  = hSc > aSc && hSc > 0;
       const aWin  = aSc > hSc && aSc > 0;
-      return `
-        <div class="matchup-card">
-          <div class="matchup-team ${hWin ? "matchup-team--winner" : ""}">
-            <span class="matchup-name">${_esc(nameMap[hId] || hId || "TBD")}</span>
-            <span class="matchup-score">${hSc > 0 ? hSc.toFixed(2) : "—"}</span>
+      const hName = nameMap[hId] || hId || "TBD";
+      const aName = nameMap[aId] || aId || "TBD";
+      const fmt   = n => n > 0 ? n.toFixed(2) : "—";
+
+      // Per-player detail from normalizeLiveScoring data when available
+      let detailHTML = `<div class="mu-no-detail">No player data yet</div>`;
+      if (liveData) {
+        const matchupRaw = liveData?.liveScoring?.matchup;
+        const matchupArr = matchupRaw ? (Array.isArray(matchupRaw) ? matchupRaw : [matchupRaw]) : [];
+        const rawMatchup = matchupArr.find(mu => {
+          const fs = mu.franchise ? (Array.isArray(mu.franchise) ? mu.franchise : [mu.franchise]) : [];
+          return fs.some(f => String(f.id) === String(hId)) && fs.some(f => String(f.id) === String(aId));
+        });
+        if (rawMatchup) {
+          const fs = Array.isArray(rawMatchup.franchise) ? rawMatchup.franchise : [rawMatchup.franchise];
+          const fH = fs.find(f => String(f.id) === String(hId));
+          const fA = fs.find(f => String(f.id) === String(aId));
+          if (fH && fA && playerLookup) {
+            const extractPlayers = (f) => {
+              const ps = f.players?.player ? (Array.isArray(f.players.player) ? f.players.player : [f.players.player]) : [];
+              return ps.map(p => ({ id: String(p.id||""), score: parseFloat(p.score||0), status: p.status||"", position: (p.position||"?").toUpperCase() }));
+            };
+            const pH = extractPlayers(fH);
+            const pA = extractPlayers(fA);
+            const stH = pH.filter(p => p.status === "starter");
+            const stA = pA.filter(p => p.status === "starter");
+            const bnH = pH.filter(p => p.status !== "starter");
+            const bnA = pA.filter(p => p.status !== "starter");
+            const maxSt = Math.max(stH.length, stA.length);
+            const maxBn = Math.max(bnH.length, bnA.length);
+            let rows = "";
+            for (let i = 0; i < maxSt; i++) {
+              const ph = stH[i], pa = stA[i];
+              const pos = (ph?.position || pa?.position || "?");
+              const col = POS_COLOR[pos] || "var(--color-text-dim)";
+              const ptsH = ph ? ph.score : null;
+              const ptsA = pa ? pa.score : null;
+              rows += `<div class="mu-sbs-row">
+                <span class="mu-pts ${ptsH > ptsA ? "mu-pts--win" : ""}">${ptsH != null ? ptsH.toFixed(2) : "—"}</span>
+                <span class="mu-name mu-name--left">${ph ? _esc(playerLookup[ph.id]?.name || ph.id) : "—"}</span>
+                <span class="mu-slot" style="color:${col}">${pos}</span>
+                <span class="mu-name mu-name--right">${pa ? _esc(playerLookup[pa.id]?.name || pa.id) : "—"}</span>
+                <span class="mu-pts mu-pts--right ${ptsA > ptsH ? "mu-pts--win" : ""}">${ptsA != null ? ptsA.toFixed(2) : "—"}</span>
+              </div>`;
+            }
+            if (maxBn > 0) {
+              rows += `<div class="mu-bench-header">Bench</div>`;
+              for (let i = 0; i < maxBn; i++) {
+                const ph = bnH[i], pa = bnA[i];
+                rows += `<div class="mu-sbs-row mu-sbs-row--bench">
+                  <span class="mu-pts dim">${ph ? ph.score.toFixed(2) : ""}</span>
+                  <span class="mu-name mu-name--left dim">${ph ? _esc(playerLookup[ph.id]?.name || ph.id) : ""}</span>
+                  <span class="mu-slot dim">BN</span>
+                  <span class="mu-name mu-name--right dim">${pa ? _esc(playerLookup[pa.id]?.name || pa.id) : ""}</span>
+                  <span class="mu-pts mu-pts--right dim">${pa ? pa.score.toFixed(2) : ""}</span>
+                </div>`;
+              }
+            }
+            detailHTML = `<div class="mu-detail hidden">
+              <div class="mu-sbs-header">
+                <span></span>
+                <span class="mu-sbs-team">${_esc(hName)}</span>
+                <span class="mu-sbs-pos">POS</span>
+                <span class="mu-sbs-team" style="text-align:right">${_esc(aName)}</span>
+                <span></span>
+              </div>
+              ${rows}
+            </div>`;
+          }
+        }
+      }
+
+      return `<div class="mu-card" onclick="this.querySelector('.mu-detail, .mu-no-detail').classList?.toggle('hidden')">
+        <div class="mu-header">
+          <div class="mu-team">
+            <div class="st-av">${hName[0]?.toUpperCase()||"?"}</div>
+            <span class="${hWin ? "fw-700" : ""}">${_esc(hName)}</span>
           </div>
-          <div class="matchup-vs">vs</div>
-          <div class="matchup-team ${aWin ? "matchup-team--winner" : ""}">
-            <span class="matchup-name">${_esc(nameMap[aId] || aId || "TBD")}</span>
-            <span class="matchup-score">${aSc > 0 ? aSc.toFixed(2) : "—"}</span>
+          <div class="mu-scores">
+            <span class="mu-score ${hWin ? "mu-score--win" : aWin ? "mu-score--lose" : ""}">${fmt(hSc)}</span>
+            <span class="mu-dash">–</span>
+            <span class="mu-score ${aWin ? "mu-score--win" : hWin ? "mu-score--lose" : ""}">${fmt(aSc)}</span>
           </div>
-        </div>`;
+          <div class="mu-team mu-team--right">
+            <span class="${aWin ? "fw-700" : ""}">${_esc(aName)}</span>
+            <div class="st-av">${aName[0]?.toUpperCase()||"?"}</div>
+          </div>
+        </div>
+        ${detailHTML}
+      </div>`;
     }).join("");
   }
 
@@ -838,59 +1037,90 @@ const DLRStandings = (() => {
         return;
       }
 
-      const roundLabels = ["First Round", "Quarterfinals", "Semifinals", "Finals"];
-      const isSingleElim = rounds.length <= 4;
+      // Build seed map from standings if available
+      const seedMap = {};
+      if (_mflBundle?.bundle) {
+        const standings = MFLAPI.normalizeStandings(_mflBundle.bundle);
+        standings.forEach((s, i) => { seedMap[String(s.franchiseId)] = i + 1; });
+      }
 
-      const cols = rounds.map((r, ri) => {
-        const isFinal = ri === rounds.length - 1;
-        const label   = isFinal
-          ? "🏆 Championship"
-          : (roundLabels[ri] || `Round ${r.round}`);
+      function teamLabel(id) {
+        if (!id) return "TBD";
+        const name = nameMap[id] || `Team ${id}`;
+        const seed = seedMap[id];
+        return `${_esc(name)}${seed ? ` <span class="seed-tag">#${seed}</span>` : ""}`;
+      }
 
-        const games = r.matchups.map(m => _mflBracketMatchCard(m, nameMap)).join("");
-        return `
-          <div class="bracket-section">
-            <div class="bracket-section-label">${label}</div>
-            <div class="bracket-section-games">${games || '<div class="bracket-tbd">TBD</div>'}</div>
-          </div>`;
+      function bracketMatchCard(m) {
+        const hId  = m.home.id;
+        const aId  = m.away.id;
+        const hSc  = m.home.score;
+        const aSc  = m.away.score;
+        const hWon = m.home.won;
+        const aWon = m.away.won;
+        const decided  = hWon || aWon;
+        const isMe_h   = _myRosterId && hId && hId === String(_myRosterId);
+        const isMe_a   = _myRosterId && aId && aId === String(_myRosterId);
+        return `<div class="bracket-match">
+          <div class="bracket-slot ${hWon ? "bracket-slot--win" : decided ? "bracket-slot--lose" : ""}${isMe_h ? " bracket-slot--me" : ""}">
+            <span class="bracket-team">${teamLabel(hId)}</span>
+            ${hSc > 0 ? `<span class="bracket-score">${hSc.toFixed(1)}</span>` : ""}
+            ${hWon ? '<span class="bracket-check">✓</span>' : ""}
+          </div>
+          <div class="bracket-slot ${aWon ? "bracket-slot--win" : decided ? "bracket-slot--lose" : ""}${isMe_a ? " bracket-slot--me" : ""}">
+            <span class="bracket-team">${teamLabel(aId)}</span>
+            ${aSc > 0 ? `<span class="bracket-score">${aSc.toFixed(1)}</span>` : ""}
+            ${aWon ? '<span class="bracket-check">✓</span>' : ""}
+          </div>
+          ${!decided ? '<div class="bracket-tbd">In progress</div>' : ""}
+        </div>`;
+      }
+
+      // Separate championship (last) round from earlier rounds
+      const earlyRounds = rounds.slice(0, -1);
+      const finalRound  = rounds[rounds.length - 1];
+
+      const roundLabels = ["First Round", "Quarterfinals", "Semifinals", "Semifinals"];
+
+      const cols = earlyRounds.map((r, ri) => {
+        const label = roundLabels[ri] || `Round ${r.round}`;
+        const games = r.matchups.map(m => bracketMatchCard(m)).join("");
+        return `<div class="bracket-section">
+          <div class="bracket-section-label">${label}</div>
+          <div class="bracket-section-games">${games || '<div class="bracket-tbd">TBD</div>'}</div>
+        </div>`;
       }).join("");
 
-      body.innerHTML = `<div class="bracket-wrap">${cols}</div>`;
+      // Championship / finals — one game per "place" in the final round
+      // MFL final round may have multiple matchups (champ + consolation)
+      const finalMatchups = finalRound?.matchups || [];
+      let finalsHTML = "";
+      if (finalMatchups.length === 1) {
+        finalsHTML = `<div class="bracket-finals">
+          <div class="bracket-finals-game">
+            <div class="bracket-finals-label">🏆 Championship</div>
+            ${bracketMatchCard(finalMatchups[0])}
+          </div>
+        </div>`;
+      } else if (finalMatchups.length > 1) {
+        // Multiple games in final round — label them Championship, 3rd, 5th...
+        const placeLabels = ["🏆 Championship", "🥉 3rd Place", "5th Place", "7th Place"];
+        finalsHTML = `<div class="bracket-finals">
+          ${finalMatchups.map((m, i) => `
+            <div class="bracket-finals-game">
+              <div class="bracket-finals-label${i > 0 ? " place-" + (2*i+1) : ""}">${placeLabels[i] || `Place ${2*i+1}`}</div>
+              ${bracketMatchCard(m)}
+            </div>`).join("")}
+        </div>`;
+      }
+
+      body.innerHTML = `<div class="bracket-wrap">${cols}${finalsHTML}</div>`;
 
     } catch(e) {
       body.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
         Could not load bracket: ${_esc(e.message)}
       </div>`;
     }
-  }
-
-  function _mflBracketMatchCard(m, nameMap) {
-    const hId   = m.home.id;
-    const aId   = m.away.id;
-    const hName = hId ? (_esc(nameMap[hId] || `Team ${hId}`)) : "TBD";
-    const aName = aId ? (_esc(nameMap[aId] || `Team ${aId}`)) : "TBD";
-    const hSc   = m.home.score;
-    const aSc   = m.away.score;
-    const hWon  = m.home.won;
-    const aWon  = m.away.won;
-    const decided = hWon || aWon;
-    const isMe_h  = _myRosterId && hId === String(_myRosterId);
-    const isMe_a  = _myRosterId && aId === String(_myRosterId);
-
-    return `
-      <div class="bracket-match">
-        <div class="bracket-slot ${hWon ? "bracket-slot--win" : decided ? "bracket-slot--lose" : ""}${isMe_h ? " bracket-slot--me" : ""}">
-          <span class="bracket-team">${hName}</span>
-          ${hSc > 0 ? `<span class="bracket-score">${hSc.toFixed(1)}</span>` : ""}
-          ${hWon ? '<span class="bracket-check">✓</span>' : ""}
-        </div>
-        <div class="bracket-slot ${aWon ? "bracket-slot--win" : decided ? "bracket-slot--lose" : ""}${isMe_a ? " bracket-slot--me" : ""}">
-          <span class="bracket-team">${aName}</span>
-          ${aSc > 0 ? `<span class="bracket-score">${aSc.toFixed(1)}</span>` : ""}
-          ${aWon ? '<span class="bracket-check">✓</span>' : ""}
-        </div>
-        ${!decided ? '<div class="bracket-tbd">In progress</div>' : ""}
-      </div>`;
   }
 
   // ── Helpers ────────────────────────────────────────────
@@ -995,7 +1225,7 @@ const DLRStandings = (() => {
       <div class="matchups-grid">${cards}</div>`;
   }
 
-  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo, myRosterId, bundle, showAllDivisions) {
+  function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo, myRosterId, bundle, _unused) {
     if (!standings.length) {
       el.innerHTML = `<div class="empty-state">No standings data available.</div>`;
       return;
@@ -1010,34 +1240,35 @@ const DLRStandings = (() => {
     // ── Division filter ──────────────────────────────────────
     let displayStandings = standings;
     let divisionBannerHTML = "";
-    if (bundle && myRosterId && !showAllDivisions) {
-      const { standings: divStandings, divisionName, hasDivisions, allDivisions } =
-        MFLAPI.filterStandingsByDivision(bundle, standings, myRosterId);
-      if (hasDivisions && divisionName) {
-        displayStandings = divStandings;
-        const otherDivNames = allDivisions
-          .filter(d => d.name !== divisionName)
-          .map(d => `<button class="standings-div-pill" onclick="DLRStandings._showAllDivisions()">${_esc(d.name)}</button>`)
-          .join("");
-        divisionBannerHTML = `
-          <div class="standings-division-bar">
-            <span class="standings-division-label">📊 ${_esc(divisionName)}</span>
-            <button class="standings-div-pill standings-div-pill--active" onclick="DLRStandings._showAllDivisions()">All Teams</button>
-            ${otherDivNames}
-          </div>`;
-      } else if (hasDivisions && !divisionName) {
-        // League has divisions but user's team isn't in one — show all
-        divisionBannerHTML = `<div class="standings-division-bar"><span class="standings-division-label dim">Multi-division league</span>
-          <button class="standings-div-pill standings-div-pill--active">All Teams</button></div>`;
-      }
-    } else if (bundle && showAllDivisions) {
-      const { allDivisions } = MFLAPI.filterStandingsByDivision(bundle, standings, myRosterId);
-      if (allDivisions.length) {
-        divisionBannerHTML = `
-          <div class="standings-division-bar">
-            <span class="standings-division-label">📊 All Divisions</span>
-            <button class="standings-div-pill standings-div-pill--active" onclick="DLRStandings._showAllDivisions()">All Teams</button>
-          </div>`;
+    if (bundle) {
+      const { divisions, franchiseDivision } = MFLAPI.getDivisions(bundle);
+      if (divisions.length) {
+        const myDivId   = myRosterId ? franchiseDivision[String(myRosterId)] : null;
+        // Resolve active div: explicit selection > user's own div > null (all)
+        const activeDivId = _mflSelectedDivId === "all" ? null
+                          : (_mflSelectedDivId || myDivId || null);
+
+        if (activeDivId) {
+          displayStandings = standings.filter(s => franchiseDivision[String(s.franchiseId)] === activeDivId);
+        }
+        const activeDivName = activeDivId ? (divisions.find(d => d.id === activeDivId)?.name || activeDivId) : null;
+
+        // Build pill bar — always render when divisions exist
+        const allPill = `<button class="standings-div-pill ${!activeDivId ? "standings-div-pill--active" : ""}"
+          onclick="DLRStandings._selectDivision('all')">All Teams</button>`;
+        const divPills = divisions.map(d =>
+          `<button class="standings-div-pill ${d.id === activeDivId ? "standings-div-pill--active" : ""}"
+            onclick="DLRStandings._selectDivision('${_esc(d.id)}')">${_esc(d.name)}</button>`
+        ).join("");
+        const label = activeDivName
+          ? `📊 ${_esc(activeDivName)}`
+          : `📊 All Divisions`;
+        divisionBannerHTML = `<div class="standings-division-bar">${allPill}${divPills}</div>`;
+        // Prepend the label span
+        divisionBannerHTML = `<div class="standings-division-bar">
+          <span class="standings-division-label">${label}</span>
+          ${allPill}${divPills}
+        </div>`;
       }
     }
 
@@ -1123,16 +1354,20 @@ const DLRStandings = (() => {
       </div>`;
   }
 
-  // Called when user clicks "All Teams" to show all divisions
-  function _showAllDivisions() {
+  // Called when user clicks any division pill ("all" or a specific division ID)
+  function _selectDivision(divId) {
     if (!_mflBundle) return;
+    _mflSelectedDivId = divId === "all" ? "all" : String(divId);
     const el = document.getElementById("dtab-standings");
     if (!el) return;
     const { bundle, season } = _mflBundle;
     const standings  = MFLAPI.normalizeStandings(bundle);
     const leagueInfo = MFLAPI.getLeagueInfo(bundle);
-    _renderMFLStandings(el, bundle.league?.league, standings, _leagueId, season, leagueInfo, _myRosterId, bundle, true);
+    _renderMFLStandings(el, bundle.league?.league, standings, _leagueId, season, leagueInfo, _myRosterId, bundle);
   }
+
+  // Keep old name as alias for any existing onclick references
+  function _showAllDivisions() { _selectDivision("all"); }
 
   function _loadingHTML(msg) {
     return `<div class="detail-loading"><div class="spinner"></div><span>${msg}</span></div>`;
@@ -1148,7 +1383,8 @@ const DLRStandings = (() => {
     init, reset, setLeague, refresh,
     initMatchups, loadMatchupsWeek,
     initPlayoffs, _mflLoadWeek, _mflLoadBracket,
-    _showAllDivisions,
+    _showAllDivisions, _selectDivision,
+    getSelectedDivId: () => _mflSelectedDivId,
   };
 
 })();

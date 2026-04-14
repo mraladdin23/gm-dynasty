@@ -328,13 +328,9 @@ Guillotine leagues show which week a team was eliminated via `franchise_eliminat
 **Login check loop + zoom on mobile**
 On mobile the app is constantly re-checking login state, and the screen view is zoomed in requiring manual zoom-out to snap back. Fix: add `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">` to `index.html`. Also audit `auth.js` for redundant `onAuthStateChanged` triggers. Files: `index.html`, `auth.js`, `hallway.js`.
 
-**Consolation draft order card height mismatch**
-Cards are 36px but inner content sections are 72px. Files: `locker.css` (`.draft-order-row`, `.draft-order-section`).
-
 ### High Priority
 - [ ] Yahoo end-to-end test — OAuth requires non-blocked network; test all tabs once available
 - [ ] Career stats accuracy — Verify cross-platform totals are correct
-- [ ] MFL historical seasons import verification — Confirm multi-year dynasty chaining works
 
 ### Medium Priority
 - [ ] Auction History tab cleanup — Minor display issues noted

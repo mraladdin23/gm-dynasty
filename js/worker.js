@@ -239,6 +239,28 @@ export default {
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
+      // On-demand: fetch auction results directly (fallback when bundle value is null)
+      if (path === "/mfl/auctionResults" && req.method === "POST") {
+        const { leagueId, year, cookie, username, password } = await req.json();
+        if (!leagueId) return new Response(JSON.stringify({ error: "Missing leagueId" }), { status: 400, headers: corsHeaders() });
+        const season = year || new Date().getFullYear();
+        let cookieHdr = "";
+        if (cookie) {
+          cookieHdr = `MFL_USER_ID=${cookie}`;
+        } else if (username && password) {
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${season}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
+          const loginXml = await loginRes.text();
+          const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
+          if (m) cookieHdr = `MFL_USER_ID=${m[1]}`;
+        }
+        const headers = mflHeaders(cookieHdr ? { Cookie: cookieHdr } : {});
+        const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=auctionResults&L=${leagueId}&JSON=1`, { headers });
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch(e) { data = {}; }
+        return new Response(JSON.stringify(data), { headers: corsHeaders() });
+      }
+
       // On-demand: fetch full MFL player universe (cached by client per session)
       if (path === "/mfl/players" && req.method === "POST") {
         const { year } = await req.json();
