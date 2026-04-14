@@ -462,30 +462,33 @@ const MFLAPI = (() => {
 
   // ── Cached MFL player universe ───────────────────────────
   // Fetched once per session from /mfl/players and stored in sessionStorage.
-  // Key is year-scoped so rookies are always current within a browser session.
+  // Key is year+league scoped so custom players (draft picks) for each league are included.
+  // The global (no-league) fetch is also cached separately as a fallback.
 
- let _playersMemCache = null;
+  let _playersMemCache = null;   // { leagueId|"global": map }
 
-  async function getPlayers(year) {
-    if (_playersMemCache) return _playersMemCache;
+  async function getPlayers(year, leagueId) {
+    const season   = year ? String(year) : new Date().getFullYear().toString();
+    const cacheKey = `mfl_players_${season}_${leagueId || "global"}`;
 
-    const season   = year || new Date().getFullYear().toString();
-    const cacheKey = `mfl_players_${season}`;
+    // In-memory cache: keyed by cacheKey to support multiple leagues per session
+    if (!_playersMemCache) _playersMemCache = {};
+    if (_playersMemCache[cacheKey]) return _playersMemCache[cacheKey];
 
     // Try sessionStorage first (fast path)
     try {
       const stored = sessionStorage.getItem(cacheKey);
       if (stored) {
-        _playersMemCache = JSON.parse(stored);
-        return _playersMemCache;
+        _playersMemCache[cacheKey] = JSON.parse(stored);
+        return _playersMemCache[cacheKey];
       }
     } catch(e) {}
 
     // Ensure cross-platform mappings are loaded
     await DLRPlayers.load();
 
-    // Fetch raw MFL player list from worker
-    const data = await post("/mfl/players", { year: season });
+    // Fetch raw MFL player list from worker — pass leagueId so custom players are included
+    const data = await post("/mfl/players", { year: season, leagueId: leagueId || undefined });
     const raw  = data?.players?.player || [];
     const arr  = Array.isArray(raw) ? raw : [raw];
 
@@ -494,31 +497,51 @@ const MFLAPI = (() => {
       if (!p.id) return;
 
       const rawName     = p.name || "";
-      const displayName = mflNameToDisplay(rawName);   // your existing helper
-      const pos         = (p.position || "?").toUpperCase();
+      const displayName = mflNameToDisplay(rawName);
+      const pos         = _normalizeMFLPos(p.position || "?");
 
-      // NEW: Use reliable ID mapping from DynastyProcess CSV
+      // Use reliable ID mapping from DynastyProcess CSV when available.
+      // Custom/pick players (e.g. "2025 Rookie, 4.01") won't be in the CSV —
+      // for those, fall back to MFL's own name + position directly.
       const mapping   = DLRPlayers.getByMflId(p.id);
-      const sleeperId = mapping?.sleeper_id || mflNameToSleeperId(rawName, pos); // fallback to old name match
+      const sleeperId = mapping?.sleeper_id || mflNameToSleeperId(rawName, pos);
+
+      // Detect custom/pick players: MFL uses numeric IDs < 1000 or ids like "0836"
+      // that look like pick placeholders. We trust MFL's name directly for these.
+      const isCustom  = !mapping && (parseInt(p.id) < 10000 || rawName.includes("Pick") || rawName.includes("Round"));
 
       map[p.id] = {
-        name:      mapping?.name || displayName || `Player ${p.id}`,
+        name:      mapping?.name || (isCustom ? displayName : null) || displayName || `Player ${p.id}`,
         position:  mapping?.position || pos,
         pos:       mapping?.position || pos,
         team:      mapping?.team || p.team || "FA",
         sleeperId: sleeperId,
-        // Extra bio fields from CSV when Sleeper match is missing
-        age:       mapping?.age,
-        height:    mapping?.height,
-        weight:    mapping?.weight,
-        college:   mapping?.college,
-        draft_year: mapping?.draft_year
+        isCustom,
+        // Bio fields from CSV
+        age:        mapping?.age,
+        height:     mapping?.height,
+        weight:     mapping?.weight,
+        college:    mapping?.college,
+        draft_year: mapping?.draft_year,
       };
     });
 
-    _playersMemCache = map;
+    _playersMemCache[cacheKey] = map;
 
-    // Cache in sessionStorage for this browser session
+    // Also merge into the global cache so lookups without leagueId still hit known players
+    const globalKey = `mfl_players_${season}_global`;
+    if (leagueId && !_playersMemCache[globalKey]) {
+      _playersMemCache[globalKey] = { ...map };
+    } else if (leagueId && _playersMemCache[globalKey]) {
+      // Merge league-specific entries into global — custom players win over unknowns
+      Object.entries(map).forEach(([id, player]) => {
+        if (!_playersMemCache[globalKey][id] || player.isCustom) {
+          _playersMemCache[globalKey][id] = player;
+        }
+      });
+    }
+
+    // Cache in sessionStorage
     try {
       sessionStorage.setItem(cacheKey, JSON.stringify(map));
     } catch(e) {}
@@ -717,8 +740,7 @@ const MFLAPI = (() => {
     return { winnerId, eliminatedId };
   }
 
-  // ── Canonical MFL position normalizer ──────────────────────
-  // Maps raw MFL position strings to display labels used throughout DLR.
+  // ── Canonical MFL position normalizer ───────────────────────
   function _normalizeMFLPos(raw) {
     const s = String(raw || "").toUpperCase().trim();
     if (s === "PK")    return "K";
@@ -728,32 +750,18 @@ const MFLAPI = (() => {
     return s || "?";
   }
 
+  // Canonical display order for slot types in matchup cards
+  const _SLOT_ORDER = ["QB","RB","WR","TE","K","P","DEF","COACH","SF","FLEX"];
+  function _slotSortKey(s) {
+    const i = _SLOT_ORDER.indexOf(s);
+    return i < 0 ? _SLOT_ORDER.length : i;
+  }
+
   /**
    * Parses the league starters config into an ordered list of slot labels.
-   * Handles MFL's limit syntax: "2" = exactly 2, "2-5" = min 2, max 5.
-   *
-   * bundle.league.league.starters shape (after JSON from XML):
-   *   { count: "11", position: [ { name:"QB", limit:"2" }, ... ] }
-   *   OR a single position object (not array).
-   *
-   * Returns an ordered array of slot labels, e.g.:
-   *   ["QB","QB","RB","RB","WR","WR","WR","TE","FLEX","FLEX","FLEX"]
-   *
-   * Three cases:
-   *
-   * A) Some positions have min > 0 (forced starters).
-   *    → Named slots from mins, FLEX fills the remainder.
-   *    → QB with min=0 and present in list → SF slots instead of QB slots for flex overflow.
-   *
-   * B) All positions have min=0 AND QB max < count (SuperFlex-heavy league).
-   *    → QB max = number of SF slots; rest are FLEX.
-   *    Example: count=8, QB 0-3 → ["SF","SF","SF","FLEX","FLEX","FLEX","FLEX","FLEX"]
-   *
-   * C) All positions have min=0 AND every position can fill up to count (true all-flex).
-   *    → All slots are "FLEX". The slot label will show the player's actual position on render.
-   *    Example: count=8, every position 0-8 → ["FLEX"×8]
-   *
-   * Special labels: PK→K, PN→P, Def→DEF, Coach→COACH
+   * Output is always sorted in canonical order: QB→RB→WR→TE→K→P→DEF→COACH→SF→FLEX.
+   * In all-flex leagues (all mins zero, all maxes full), returns all FLEX slots.
+   * In SF-heavy leagues (QB capped below count), SF slots come after DEF/COACH.
    */
   function getStarterSlots(bundle) {
     const startersRaw = bundle?.league?.league?.starters;
@@ -766,7 +774,6 @@ const MFLAPI = (() => {
     if (!rawPositions) return [];
     const posArr = Array.isArray(rawPositions) ? rawPositions : [rawPositions];
 
-    // Parse each position rule
     const parsed = posArr.map(p => {
       const name  = _normalizeMFLPos(p.name);
       const limit = String(p.limit || "0");
@@ -778,48 +785,38 @@ const MFLAPI = (() => {
 
     const allMinsZero = parsed.every(p => p.min === 0);
 
+    let slots = [];
+
     if (!allMinsZero) {
       // ── Case A: some forced positions ────────────────────────
-      const slots = [];
       let namedTotal = 0;
       for (const p of parsed) {
         if (p.min === 0) continue;
-        // QB with min=0 would be SF but min>0 here means it IS a forced QB slot
-        for (let i = 0; i < p.min; i++) {
-          slots.push(p.name);
-          namedTotal++;
-        }
+        for (let i = 0; i < p.min; i++) { slots.push(p.name); namedTotal++; }
       }
-      // QB present with min=0 means the flex remainder supports QB (SF)
       const hasQBFlex = parsed.some(p => p.name === "QB" && p.min === 0 && p.max > 0);
       for (let i = namedTotal; i < totalCount; i++) {
         slots.push(hasQBFlex ? "SF" : "FLEX");
       }
-      return slots;
+    } else {
+      const qbRule   = parsed.find(p => p.name === "QB");
+      const qbMax    = qbRule?.max ?? totalCount;
+      const allMaxFull = parsed.every(p => p.max >= totalCount);
+
+      if (allMaxFull) {
+        // ── Case C: pure all-flex ─────────────────────────────
+        slots = Array(totalCount).fill("FLEX");
+      } else {
+        // ── Case B: QB capped → SF + FLEX ────────────────────
+        const sfCount   = Math.min(qbMax, totalCount);
+        const flexCount = totalCount - sfCount;
+        slots = [...Array(sfCount).fill("SF"), ...Array(flexCount).fill("FLEX")];
+      }
     }
 
-    // ── Cases B & C: all mins are zero ───────────────────────
-    // Check if any single position is capped below totalCount.
-    // If QB is capped (e.g. max=3 but count=8), that cap tells us how many
-    // QB-eligible (SF) slots exist vs true open FLEX slots.
-    const qbRule   = parsed.find(p => p.name === "QB");
-    const qbMax    = qbRule?.max ?? totalCount;
-    const allMaxFull = parsed.every(p => p.max >= totalCount);
-
-    if (allMaxFull) {
-      // ── Case C: true all-flex — every position can fill any slot ──
-      // Return FLEX×count. On render we show the actual player position instead.
-      return Array(totalCount).fill("FLEX");
-    }
-
-    // ── Case B: QB (and possibly others) are capped ──────────
-    // SF slots = QB max cap; rest are FLEX
-    const sfCount   = Math.min(qbMax, totalCount);
-    const flexCount = totalCount - sfCount;
-    return [
-      ...Array(sfCount).fill("SF"),
-      ...Array(flexCount).fill("FLEX"),
-    ];
+    // Sort into canonical order: QB,RB,WR,TE,K,P,DEF,COACH,SF,FLEX
+    slots.sort((a, b) => _slotSortKey(a) - _slotSortKey(b));
+    return slots;
   }
 
   /**

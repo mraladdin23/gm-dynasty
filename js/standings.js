@@ -66,16 +66,8 @@ const DLRStandings = (() => {
 
         // Cache bundle so matchups/playoffs can reuse it without a second fetch
         if (!_mflBundle) {
-          const teams   = MFLAPI.getTeams(bundle);
-          const nameMap = {};
-          teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
-          const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
-          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
-          const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
-          const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
-          _mflBundle = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek,
-                         starterSlots: MFLAPI.getStarterSlots(bundle) };
-          _mflNameMap = nameMap;
+          _mflBundle  = _mflBuildBundleState(bundle, season);
+          _mflNameMap = _mflBundle.nameMap;
         }
 
         const standings  = MFLAPI.normalizeStandings(bundle);
@@ -285,17 +277,9 @@ const DLRStandings = (() => {
         let bundleState = _mflBundle;
         if (!bundleState) {
           const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
-          const teams   = MFLAPI.getTeams(bundle);
-          const nameMap = {};
-          teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
-          const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
-          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
-          const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
-          const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
-          bundleState = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek,
-                          starterSlots: MFLAPI.getStarterSlots(bundle) };
+          bundleState = _mflBuildBundleState(bundle, season);
           _mflBundle  = bundleState;
-          _mflNameMap = nameMap;
+          _mflNameMap = bundleState.nameMap;
         }
 
         const { bundle, nameMap, allWeeks, currentWeek } = bundleState;
@@ -316,9 +300,9 @@ const DLRStandings = (() => {
 
         const matchups = MFLAPI.normalizeMatchups(liveData);
 
-        // Fetch player lookup for per-player detail in expanded cards
+        // Fetch player lookup including league-custom players (draft picks etc.)
         let playerLookup = null;
-        try { playerLookup = await MFLAPI.getPlayers(season); } catch(e) {}
+        try { playerLookup = await MFLAPI.getPlayers(season, _leagueId); } catch(e) {}
 
         // Filter matchups to user's division if applicable
         const divisionFranchises = _myRosterId
@@ -358,6 +342,30 @@ const DLRStandings = (() => {
   let _mflPlayoffState      = null;   // { brackets, nameMap, season, leagueId, activeBracketIdx }
   // Persistent division selection: null = user's own division, "all" = show all, divId = specific div
   let _mflSelectedDivId     = null;   // set when user clicks a division pill
+
+  // Build the bundle state object, shared across all three bundle-fetch sites.
+  // Computes allWeeks correctly for eliminator/guillotine leagues that run beyond lastRegularSeasonWeek.
+  function _mflBuildBundleState(bundle, season) {
+    const teams   = MFLAPI.getTeams(bundle);
+    const nameMap = {};
+    teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
+    const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
+    const l = bundle?.league?.league || {};
+
+    const currentWeek    = parseInt(l.nflScheduleWeek || 1);
+    const lastRegular    = parseInt(l.lastRegularSeasonWeek || 13);
+    // lastPlayoffWeek covers eliminator/guillotine/playoff leagues that run past regular season
+    const lastPlayoff    = parseInt(l.lastPlayoffWeek || l.playoffWeeks || 0);
+    // Never exceed 18 (max NFL regular + playoff weeks)
+    const maxWeek = Math.min(Math.max(currentWeek, lastRegular, lastPlayoff || 0), 18);
+    const allWeeks = Array.from({ length: maxWeek }, (_, i) => i + 1);
+
+    return {
+      bundle, teams, nameMap, season, leagueInfo,
+      allWeeks, currentWeek,
+      starterSlots: MFLAPI.getStarterSlots(bundle),
+    };
+  }
 
   function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, liveData, playerLookup, starterSlots) {
     // Default to week 1 display (pills highlight week 1, not current week)
@@ -868,17 +876,8 @@ const DLRStandings = (() => {
         } else {
           bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
           if (token !== _initToken) return;
-          // Cache it for other tabs
-          const teams   = MFLAPI.getTeams(bundle);
-          const nameMap = {};
-          teams.forEach(t => { nameMap[t.id] = t.name || `Team ${t.id}`; });
-          const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
-          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
-          const totalWeeks  = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
-          const allWeeks    = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
-          _mflBundle  = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek,
-                          starterSlots: MFLAPI.getStarterSlots(bundle) };
-          _mflNameMap = nameMap;
+          _mflBundle  = _mflBuildBundleState(bundle, season);
+          _mflNameMap = _mflBundle.nameMap;
         }
         if (token !== _initToken) return;
 
