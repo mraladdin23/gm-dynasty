@@ -495,7 +495,7 @@ const DLRDraft = (() => {
       </div>`;
   }
 
-  // ── MFL draft + auction history ───────────────────────────
+
 // ── MFL draft + auction history ───────────────────────────
 async function _loadMFLDraft(leagueId, season, token) {
   const el = document.getElementById("dtab-draft");
@@ -506,28 +506,30 @@ async function _loadMFLDraft(leagueId, season, token) {
   const teamMap = {};
   teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-  // Division name map for proper pill labels
+  // Division name map — this is what makes the pills show real names
   const { divisions } = MFLAPI.getDivisions(bundle);
   const divNameMap = {};
   divisions.forEach(d => {
     divNameMap[String(d.id)] = d.name || `Division ${d.id}`;
   });
 
-  // Safe array conversion (draftUnit can be object or missing)
+  // Safe array conversion (MFL sometimes returns a single object instead of array)
   let unitArr = bundle.draft?.draftResults?.draftUnit || [];
   if (!Array.isArray(unitArr)) unitArr = unitArr ? [unitArr] : [];
 
   const playerLookup = await MFLAPI.getPlayers(season, leagueId).catch(() => ({}));
 
-  // ── Draft sets (non-auction units) ──
+  // ── Draft sets (non-auction) ──
   const draftUnits = unitArr.filter(u => String(u.type || "").toLowerCase() !== "auction");
   const draftSets = draftUnits.map((unit, i) => {
-    const divId     = String(unit.unit || unit.division || unit.id || "");
-    const divLabel  = divNameMap[divId] || "";
-    const rawLabel  = unit.name || unit.unit || "";
-    const label     = (rawLabel && rawLabel !== "LEAGUE" && rawLabel.trim() !== "")
-      ? rawLabel
-      : (divLabel || (i === 0 ? "Startup" : `Draft ${i + 1}`));
+    const divId    = String(unit.unit || unit.division || unit.id || "");
+    const divLabel = divNameMap[divId] || "";
+    const rawLabel = unit.name || unit.unit || "";
+
+    // Prioritize division name, then unit name, then generic fallback
+    let label = divLabel;
+    if (!label && rawLabel && rawLabel !== "LEAGUE" && rawLabel.trim() !== "") label = rawLabel;
+    if (!label) label = i === 0 ? "Startup" : `Draft ${i + 1}`;
 
     const rawPicks = unit.draftPick
       ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick])
@@ -562,7 +564,8 @@ async function _loadMFLDraft(leagueId, season, token) {
 
   Object.keys(auctionByDiv).forEach((divId, i) => {
     const divLabel = divNameMap[divId] || "";
-    const label    = (divLabel && divLabel.trim() !== "") ? divLabel : `Auction ${i + 1}`;
+    let label = divLabel;
+    if (!label) label = `Auction ${i + 1}`;
     const picks = auctionByDiv[divId].map(p => ({
       id:        String(p.player || p.playerId || ""),
       franchise: String(p.franchise || p.franchiseId || ""),
@@ -584,14 +587,13 @@ async function _loadMFLDraft(leagueId, season, token) {
     });
   }
 
-  // Flatten for legacy code + compute defaults
+  // Flatten + defaults
   const allPicks  = draftSets.flatMap(s => s.picks);
   const salaryArr = auctionSets.flatMap(s => s.picks);
 
   const hasAuction = auctionSets.length > 0;
   const hasDraft   = draftSets.length  > 0;
 
-  // Default to user's division when possible
   const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
 
   let defaultDraftIdx = 0;
@@ -614,7 +616,7 @@ async function _loadMFLDraft(leagueId, season, token) {
     _activeAuctionSetIdx: defaultAuctionIdx,
   };
 
-  // Default view logic
+  // Default view
   if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
   if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
   if (_viewMode !== "draft" && _viewMode !== "auction") {
@@ -622,7 +624,8 @@ async function _loadMFLDraft(leagueId, season, token) {
   }
 
   _renderMFLDraftBoard(el);
-}  
+}
+
 
 function _renderMFLDraftBoard(el) {
     if (!el) el = document.getElementById("dtab-draft");

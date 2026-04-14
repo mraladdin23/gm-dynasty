@@ -846,16 +846,17 @@ const MFLAPI = (() => {
    *   Pass 2: fill SF then FLEX with remaining players.
    * Within each pass, process slots in order.
    */
+
 function assignStartersToSlots(slots, players, playerLookup) {
   const POS_VALID_SLOTS = {
-    QB:    ["QB", "SF", "FLEX"],
-    RB:    ["RB", "FLEX"],
-    WR:    ["WR", "FLEX"],
-    TE:    ["TE", "FLEX"],
-    K:     ["K",  "FLEX"],
-    DEF:   ["DEF","FLEX"],
-    P:     ["P",  "FLEX"],
-    COACH: ["COACH","FLEX"],
+    QB:    ["QB", "SF", "FLEX"],   // QB can go anywhere
+    RB:    ["RB", "SF", "FLEX"],   // ← SF now accepts RB/WR/TE
+    WR:    ["WR", "SF", "FLEX"],
+    TE:    ["TE", "SF", "FLEX"],
+    K:     ["K", "SF", "FLEX"],
+    DEF:   ["DEF", "SF", "FLEX"],
+    P:     ["P", "SF", "FLEX"],
+    COACH: ["COACH", "SF", "FLEX"],
   };
   const FLEX_SLOTS = new Set(["FLEX", "SF"]);
 
@@ -865,12 +866,12 @@ function assignStartersToSlots(slots, players, playerLookup) {
   }));
 
   const used   = new Array(enriched.length).fill(false);
-  const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));   // ← displaySlot starts as the slot name
+  const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));
 
   const named = result.map((r, i) => i).filter(i => !FLEX_SLOTS.has(result[i].slot));
   const sf    = result.map((r, i) => i).filter(i => result[i].slot === "SF");
   const flex  = result.map((r, i) => i).filter(i => result[i].slot === "FLEX");
-  const order = [...named, ...sf, ...flex];
+  const order = [...named, ...sf, ...flex];   // SF filled before FLEX → precedence
 
   for (const si of order) {
     const slot = result[si].slot;
@@ -880,8 +881,7 @@ function assignStartersToSlots(slots, players, playerLookup) {
       if (validSlots.includes(slot)) {
         result[si].player = enriched[pi];
         used[pi] = true;
-        // Do NOT override displaySlot for FLEX/SF — keep the league-defined slot name
-        break;
+        break;   // displaySlot stays as the league-defined slot (SF / FLEX)
       }
     }
   }
