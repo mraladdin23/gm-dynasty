@@ -495,134 +495,142 @@ const DLRDraft = (() => {
       </div>`;
   }
 
+  // ── MFL draft + auction history ───────────────────────────
+  async function _loadMFLDraft(leagueId, season, token) {
+    const el = document.getElementById("dtab-draft");
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
+    if (token !== _initToken) return;
 
-// ── MFL draft + auction history ───────────────────────────
-async function _loadMFLDraft(leagueId, season, token) {
-  const el = document.getElementById("dtab-draft");
-  const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
-  if (token !== _initToken) return;
+    const teams = MFLAPI.getTeams(bundle);
+    const teamMap = {};
+    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-  const teams = MFLAPI.getTeams(bundle);
-  const teamMap = {};
-  teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+    // Fetch session-cached player universe including league-custom players (pick proxies etc.)
+    const playerLookup = await MFLAPI.getPlayers(season, leagueId);
+    if (token !== _initToken) return;
 
-  // Division name map
-  const { divisions } = MFLAPI.getDivisions(bundle);
-  const divNameMap = {};
-  divisions.forEach(d => {
-    divNameMap[String(d.id)] = d.name || `Division ${d.id}`;
-  });
+    // Build division name map for labelling multi-unit drafts/auctions
+    const { divisions } = MFLAPI.getDivisions(bundle);
+    const divNameMap = {};  // divisionId → name
+    divisions.forEach(d => { divNameMap[String(d.id)] = d.name; });
 
-  // Safe array conversion
-  let unitArr = bundle.draft?.draftResults?.draftUnit || [];
-  if (!Array.isArray(unitArr)) unitArr = unitArr ? [unitArr] : [];
+    // ── Draft units — keep per-unit for multi-draft selector ─
+    const unitsRaw  = bundle?.draft?.draftResults?.draftUnit;
+    const unitArr   = unitsRaw ? (Array.isArray(unitsRaw) ? unitsRaw : [unitsRaw]) : [];
 
-  const playerLookup = await MFLAPI.getPlayers(season, leagueId).catch(() => ({}));
+    // Normalize each unit's picks into a flat array tagged with unitIndex
+    const draftSets = unitArr.map((u, i) => {
+      const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
+      // Label: prefer explicit name, then division name, then fallback
+      const divId    = String(u.unit || u.division || "");
+      const divLabel = divNameMap[divId] || "";
+      const label    = u.name || divLabel || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`);
+      return {
+        label,
+        divId,
+        type:  "draft",
+        picks: picks.map(p => ({
+          ...p,
+          franchise: p.franchise || p.franchiseId || p.franchise_id || ""
+        }))
+      };
+    }).filter(s => s.picks.length > 0);
 
-  // ── Draft sets (non-auction) ──
-  const draftUnits = unitArr.filter(u => String(u.type || "").toLowerCase() !== "auction");
-  const draftSets = draftUnits.map((unit, i) => {
-    const divId    = String(unit.unit || unit.division || unit.id || "");
-    const divLabel = divNameMap[divId] || "";
-    const rawLabel = unit.name || unit.unit || "";
-    let label = divLabel;
-    if (!label && rawLabel && rawLabel !== "LEAGUE" && rawLabel.trim() !== "") label = rawLabel;
-    if (!label) label = i === 0 ? "Startup" : `Draft ${i + 1}`;
+    // ── Auction results — support multiple units ─────────────
+    // Real MFL shape from /mfl/auctionResults:
+    //   { auctionResults: { auctionUnit: { auction: [...], unit: "LEAGUE" } } }
+    //   OR multiple units: { auctionResults: { auctionUnit: [{...},{...}] } }
+    // The bundle key is `auctionResults` → value is the full auctionResults response.
+    // So bundle.auctionResults.auctionResults.auctionUnit is the unit or unit array.
+    let auctionResultsRoot = bundle?.auctionResults?.auctionResults?.auctionUnit
+                          || bundle?.auctionResults?.auctionUnit;  // direct shape from standalone fetch
 
-    const rawPicks = unit.draftPick ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]) : [];
-    const picks = rawPicks.map(p => ({
-      id:        String(p.player || p.playerId || ""),
-      round:     Number(p.round || 0),
-      pick:      Number(p.pick || 0),
-      franchise: String(p.franchise || p.franchiseId || ""),
-      playerName: p.playerName || "",
-      pos:       p.pos || "",
-    })).filter(p => p.id);
+    // If not in bundle (null/undefined), try a targeted fetch (non-fatal)
+    if (!auctionResultsRoot) {
+      try {
+        const auctionData = await MFLAPI.getAuctionResultsDirect(leagueId, season);
+        if (token !== _initToken) return;
+        // Standalone response shape: { auctionResults: { auctionUnit: {...} } }
+        auctionResultsRoot = auctionData?.auctionResults?.auctionUnit;
+      } catch(e) {
+        // Auction results not available — fine for draft-only leagues
+      }
+    }
 
-    return { label, divId, type: "draft", picks };
-  });
+    // Normalize auctionUnit (single object or array) into auctionSets
+    let auctionSetsRaw = [];
+    if (auctionResultsRoot) {
+      const unitArr = Array.isArray(auctionResultsRoot) ? auctionResultsRoot : [auctionResultsRoot];
+      auctionSetsRaw = unitArr;
+    }
 
-  // ── Auction sets ──
-  let auctionRaw = bundle.auctionResults?.auctionResults?.auction || [];
-  if (!auctionRaw.length) {
-    const auctionUnits = unitArr.filter(u => String(u.type || "").toLowerCase() === "auction");
-    auctionRaw = auctionUnits.flatMap(u => u.draftPick || []);
+    const auctionSets = auctionSetsRaw.map((unit, i) => {
+      const raw    = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
+      const divId  = String(unit.unit_id || unit.division || "");
+      const divLabel = divNameMap[divId] || "";
+      const rawLabel = unit.name || unit.unit || "";
+      const label  = (rawLabel && rawLabel !== "LEAGUE")
+        ? rawLabel
+        : divLabel || (i === 0 ? "Auction" : `Auction ${i + 1}`);
+      return {
+        label,
+        divId,
+        type:  "auction",
+        picks: raw.map(p => ({
+          id:        String(p.player    || p.playerId || ""),
+          franchise: String(p.franchise || p.franchiseId || ""),
+          salary:    parseFloat(p.winningBid || p.amount || p.bid || 0),
+          amount:    parseFloat(p.winningBid || p.amount || p.bid || 0),
+        })).filter(p => p.id)
+      };
+    }).filter(s => s.picks.length > 0);
+
+    const hasAuction = auctionSets.length > 0;
+    const hasDraft   = draftSets.length  > 0;
+
+    // Flatten for legacy code paths
+    const allPicks  = draftSets.flatMap(s => s.picks);
+    const salaryArr = auctionSets.flatMap(s => s.picks);
+
+    // Default to the draft/auction unit matching the user's division.
+    // Try by divId first (new), then fall back to existing getMyDraftUnitIndex logic.
+    const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
+
+    let defaultDraftIdx = 0;
+    if (myDivId && draftSets.length > 1) {
+      const byDiv = draftSets.findIndex(s => s.divId === String(myDivId));
+      defaultDraftIdx = byDiv >= 0 ? byDiv : MFLAPI.getMyDraftUnitIndex(unitArr, bundle, _myRosterId);
+    } else {
+      defaultDraftIdx = MFLAPI.getMyDraftUnitIndex(unitArr, bundle, _myRosterId);
+    }
+
+    let defaultAuctionIdx = 0;
+    if (myDivId && auctionSets.length > 1) {
+      const byDiv = auctionSets.findIndex(s => s.divId === String(myDivId));
+      defaultAuctionIdx = byDiv >= 0 ? byDiv : 0;
+    }
+
+    _mflCache = {
+      allPicks, salaryArr, teamMap, playerLookup,
+      hasAuction, hasDraft, season, leagueId,
+      draftSets, auctionSets,
+      _activeDraftSetIdx:   defaultDraftIdx,
+      _activeAuctionSetIdx: defaultAuctionIdx,
+    };
+
+    // Default view: auction if no draft data, draft otherwise. Only override if
+    // current _viewMode doesn't match what's available.
+    if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
+    if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
+    // Fresh init with no selection — pick sensibly
+    if (_viewMode !== "draft" && _viewMode !== "auction") {
+      _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
+    }
+
+    _renderMFLDraftBoard(el);
   }
-  const auctionPicks = Array.isArray(auctionRaw) ? auctionRaw : (auctionRaw ? [auctionRaw] : []);
 
-  const auctionSets = [];
-  const auctionByDiv = {};
-  auctionPicks.forEach(p => {
-    const divId = String(p.unit || p.division || "0");
-    if (!auctionByDiv[divId]) auctionByDiv[divId] = [];
-    auctionByDiv[divId].push(p);
-  });
-
-  Object.keys(auctionByDiv).forEach((divId, i) => {
-    const divLabel = divNameMap[divId] || "";
-    let label = divLabel || `Auction ${i + 1}`;
-    const picks = auctionByDiv[divId].map(p => ({
-      id:        String(p.player || p.playerId || ""),
-      franchise: String(p.franchise || p.franchiseId || ""),
-      salary:    parseFloat(p.winningBid || p.amount || p.bid || 0),
-    })).filter(p => p.id);
-    auctionSets.push({ label, divId, type: "auction", picks });
-  });
-
-  if (auctionSets.length === 0 && auctionPicks.length > 0) {
-    auctionSets.push({
-      label: "Auction",
-      divId: "",
-      type: "auction",
-      picks: auctionPicks.map(p => ({
-        id:        String(p.player || p.playerId || ""),
-        franchise: String(p.franchise || p.franchiseId || ""),
-        salary:    parseFloat(p.winningBid || p.amount || p.bid || 0),
-      })).filter(p => p.id)
-    });
-  }
-
-  const allPicks  = draftSets.flatMap(s => s.picks);
-  const salaryArr = auctionSets.flatMap(s => s.picks);
-
-  const hasAuction = auctionSets.length > 0;
-  const hasDraft   = draftSets.length > 0;
-
-  const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
-
-  let defaultDraftIdx = 0;
-  if (myDivId && draftSets.length > 1) {
-    const byDiv = draftSets.findIndex(s => s.divId === String(myDivId));
-    defaultDraftIdx = byDiv >= 0 ? byDiv : 0;
-  }
-
-  let defaultAuctionIdx = 0;
-  if (myDivId && auctionSets.length > 1) {
-    const byDiv = auctionSets.findIndex(s => s.divId === String(myDivId));
-    defaultAuctionIdx = byDiv >= 0 ? byDiv : 0;
-  }
-
-  _mflCache = {
-    allPicks, salaryArr, teamMap, playerLookup,
-    hasAuction, hasDraft, season, leagueId,
-    draftSets, auctionSets,
-    _activeDraftSetIdx:   defaultDraftIdx,
-    _activeAuctionSetIdx: defaultAuctionIdx,
-  };
-
-  // Default view
-  if (_viewMode === "draft" && !hasDraft && hasAuction) _viewMode = "auction";
-  if (_viewMode === "auction" && !hasAuction && hasDraft) _viewMode = "draft";
-  if (_viewMode !== "draft" && _viewMode !== "auction") {
-    _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
-  }
-
-  _renderMFLDraftBoard(el);
-}
-
-
-
-function _renderMFLDraftBoard(el) {
+  function _renderMFLDraftBoard(el) {
     if (!el) el = document.getElementById("dtab-draft");
     if (!el || !_mflCache) return;
     const { teamMap, playerLookup, hasAuction, hasDraft, season, leagueId,
