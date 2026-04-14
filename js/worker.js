@@ -261,12 +261,16 @@ export default {
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
-      // On-demand: fetch full MFL player universe (cached by client per session)
+      // On-demand: fetch full MFL player universe (cached by client per session).
+      // Pass leagueId to include league-custom players (draft picks, custom roster spots).
       if (path === "/mfl/players" && req.method === "POST") {
-        const { year } = await req.json();
+        const { year, leagueId } = await req.json();
         const season = year || new Date().getFullYear();
+        // Including &L=leagueId causes MFL to return custom players defined for that league
+        // (e.g. "2025 Rookie, 4.01" draft pick proxies). Falls back gracefully if no leagueId.
+        const leagueParam = leagueId ? `&L=${encodeURIComponent(leagueId)}` : "";
         const r = await fetch(
-          `https://api.myfantasyleague.com/${season}/export?TYPE=players&JSON=1`,
+          `https://api.myfantasyleague.com/${season}/export?TYPE=players${leagueParam}&JSON=1`,
           { headers: mflHeaders() }
         );
         const text = await r.text();

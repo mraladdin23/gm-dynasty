@@ -505,10 +505,14 @@ const DLRDraft = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Fetch session-cached player universe — includes name, pos, team, sleeperId.
-    // getPlayers() fetches once per session from /mfl/players and caches in sessionStorage.
-    const playerLookup = await MFLAPI.getPlayers(season);
+    // Fetch session-cached player universe including league-custom players (pick proxies etc.)
+    const playerLookup = await MFLAPI.getPlayers(season, leagueId);
     if (token !== _initToken) return;
+
+    // Build division name map for labelling multi-unit drafts/auctions
+    const { divisions } = MFLAPI.getDivisions(bundle);
+    const divNameMap = {};  // divisionId → name
+    divisions.forEach(d => { divNameMap[String(d.id)] = d.name; });
 
     // ── Draft units — keep per-unit for multi-draft selector ─
     const unitsRaw  = bundle?.draft?.draftResults?.draftUnit;
@@ -517,10 +521,15 @@ const DLRDraft = (() => {
     // Normalize each unit's picks into a flat array tagged with unitIndex
     const draftSets = unitArr.map((u, i) => {
       const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
+      // Label: prefer explicit name, then division name, then fallback
+      const divId    = String(u.unit || u.division || "");
+      const divLabel = divNameMap[divId] || "";
+      const label    = u.name || divLabel || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`);
       return {
-        label:   u.name || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`),
-        type:    "draft",
-        picks:   picks.map(p => ({
+        label,
+        divId,
+        type:  "draft",
+        picks: picks.map(p => ({
           ...p,
           franchise: p.franchise || p.franchiseId || p.franchise_id || ""
         }))
@@ -556,10 +565,16 @@ const DLRDraft = (() => {
     }
 
     const auctionSets = auctionSetsRaw.map((unit, i) => {
-      const raw = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
-      const label = unit.name || unit.unit || (i === 0 ? "Auction" : `Auction ${i + 1}`);
+      const raw    = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
+      const divId  = String(unit.unit_id || unit.division || "");
+      const divLabel = divNameMap[divId] || "";
+      const rawLabel = unit.name || unit.unit || "";
+      const label  = (rawLabel && rawLabel !== "LEAGUE")
+        ? rawLabel
+        : divLabel || (i === 0 ? "Auction" : `Auction ${i + 1}`);
       return {
-        label: label === "LEAGUE" ? "Auction" : label,
+        label,
+        divId,
         type:  "auction",
         picks: raw.map(p => ({
           id:        String(p.player    || p.playerId || ""),
@@ -573,21 +588,34 @@ const DLRDraft = (() => {
     const hasAuction = auctionSets.length > 0;
     const hasDraft   = draftSets.length  > 0;
 
-    // Flatten all picks for legacy code paths that need allPicks
+    // Flatten for legacy code paths
     const allPicks  = draftSets.flatMap(s => s.picks);
     const salaryArr = auctionSets.flatMap(s => s.picks);
 
-    // Cache for re-renders on toggle without refetch
-    // Default draft set to the unit that contains the user's division (if any),
-    // so multi-division leagues open on the correct draft board automatically.
-    const defaultDraftIdx = MFLAPI.getMyDraftUnitIndex(unitArr, bundle, _myRosterId);
+    // Default to the draft/auction unit matching the user's division.
+    // Try by divId first (new), then fall back to existing getMyDraftUnitIndex logic.
+    const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
+
+    let defaultDraftIdx = 0;
+    if (myDivId && draftSets.length > 1) {
+      const byDiv = draftSets.findIndex(s => s.divId === String(myDivId));
+      defaultDraftIdx = byDiv >= 0 ? byDiv : MFLAPI.getMyDraftUnitIndex(unitArr, bundle, _myRosterId);
+    } else {
+      defaultDraftIdx = MFLAPI.getMyDraftUnitIndex(unitArr, bundle, _myRosterId);
+    }
+
+    let defaultAuctionIdx = 0;
+    if (myDivId && auctionSets.length > 1) {
+      const byDiv = auctionSets.findIndex(s => s.divId === String(myDivId));
+      defaultAuctionIdx = byDiv >= 0 ? byDiv : 0;
+    }
 
     _mflCache = {
       allPicks, salaryArr, teamMap, playerLookup,
       hasAuction, hasDraft, season, leagueId,
       draftSets, auctionSets,
-      _activeDraftSetIdx:  defaultDraftIdx,
-      _activeAuctionSetIdx: 0,
+      _activeDraftSetIdx:   defaultDraftIdx,
+      _activeAuctionSetIdx: defaultAuctionIdx,
     };
 
     // Default view: auction if no draft data, draft otherwise. Only override if
@@ -672,8 +700,8 @@ const DLRDraft = (() => {
     if (showAuction) {
       const sorted = [...salaryArr].sort((a, b) => {
         if (_auctionSort === "name") {
-          const na = (playerLookup[a.id]?.name || "").toLowerCase();
-          const nb = (playerLookup[b.id]?.name || "").toLowerCase();
+          const na = (playerLookup[a.id]?.name || a.id || "").toLowerCase();
+          const nb = (playerLookup[b.id]?.name || b.id || "").toLowerCase();
           return na.localeCompare(nb);
         }
         return Number(b.salary || b.amount || 0) - Number(a.salary || a.amount || 0);
@@ -685,15 +713,19 @@ const DLRDraft = (() => {
           </div>
           ${sorted.map((p, i) => {
             const info   = playerLookup[p.id] || {};
-            const pos    = (info.pos || p.position || "?").toUpperCase();
+            // Resolve position — custom players may only have 'pos' or 'position'
+            const pos    = (info.pos || info.position || "?").toUpperCase();
             const color  = POS_COLOR[pos] || "#9ca3af";
-            const name   = info.name || p.name || `Player ${p.id}`;
+            // Name: use lookup name, fall back to a readable ID label
+            const name   = info.name || (p.id ? `Player #${p.id}` : "Unknown");
             const tid    = String(p.franchise || p.franchiseId || "");
             const team   = teamMap[tid] || "—";
             const sal    = Number(p.salary || p.amount || 0);
             const salFmt = sal >= 1000000 ? `$${(sal/1000000).toFixed(sal%1000000===0?0:2)}M`
                          : sal > 0 ? `$${sal.toLocaleString()}` : "—";
             const sid    = info.sleeperId;
+            // For custom players (draft picks), no player card — just show a dimmed indicator
+            const isCustom = info.isCustom || (!info.name && !sid);
             const clickAttr = sid
               ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer"`
               : "";
@@ -701,7 +733,10 @@ const DLRDraft = (() => {
               <div class="draft-auction-row" ${clickAttr}>
                 <span class="draft-auction-rank dim">${i+1}</span>
                 <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
-                <span class="draft-auction-name">${_esc(name)}</span>
+                <div>
+                  <div class="draft-auction-name">${_esc(name)}</div>
+                  ${isCustom && p.id ? `<div class="dim" style="font-size:.7rem">MFL #${p.id}</div>` : ""}
+                </div>
                 <span class="draft-auction-team dim">${_esc(team)}</span>
                 <span class="draft-auction-bid" style="color:var(--color-gold);font-family:var(--font-display);font-weight:700">${salFmt}</span>
               </div>`;
