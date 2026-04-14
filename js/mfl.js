@@ -849,46 +849,87 @@ const MFLAPI = (() => {
 
 function assignStartersToSlots(slots, players, playerLookup) {
   const POS_VALID_SLOTS = {
-    QB:    ["QB", "SF", "FLEX"],   // QB can go anywhere
-    RB:    ["RB", "SF", "FLEX"],   // ← SF now accepts RB/WR/TE
+    QB:    ["QB", "SF", "FLEX"],
+    RB:    ["RB", "SF", "FLEX"],
     WR:    ["WR", "SF", "FLEX"],
     TE:    ["TE", "SF", "FLEX"],
-    K:     ["K", "SF", "FLEX"],
-    DEF:   ["DEF", "SF", "FLEX"],
-    P:     ["P", "SF", "FLEX"],
-    COACH: ["COACH", "SF", "FLEX"],
+    K:     ["K",  "FLEX"],
+    DEF:   ["DEF","FLEX"],
+    P:     ["P",  "FLEX"],
+    COACH: ["COACH","FLEX"],
   };
-  const FLEX_SLOTS = new Set(["FLEX", "SF"]);
 
   const enriched = players.map(p => ({
     ...p,
     pos: _normalizeMFLPos(playerLookup?.[p.id]?.pos || playerLookup?.[p.id]?.position || "?")
   }));
 
-  const used   = new Array(enriched.length).fill(false);
+  const used = new Array(enriched.length).fill(false);
   const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));
 
-  const named = result.map((r, i) => i).filter(i => !FLEX_SLOTS.has(result[i].slot));
-  const sf    = result.map((r, i) => i).filter(i => result[i].slot === "SF");
-  const flex  = result.map((r, i) => i).filter(i => result[i].slot === "FLEX");
-  const order = [...named, ...sf, ...flex];   // SF filled before FLEX → precedence
+  // Two-pass for SF precedence:
+  // 1. Named slots first (QB, RB, WR, TE, K, etc.)
+  // 2. SF slots — QBs get priority, then other skill positions
+  // 3. FLEX slots get whatever remains
 
-  for (const si of order) {
+  // Pass 1: Fill all forced named slots
+  const namedSlots = result.map((r, i) => i).filter(i => !["SF", "FLEX"].includes(result[i].slot));
+  for (const si of namedSlots) {
     const slot = result[si].slot;
     for (let pi = 0; pi < enriched.length; pi++) {
       if (used[pi]) continue;
-      const validSlots = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
-      if (validSlots.includes(slot)) {
+      if ((POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"]).includes(slot)) {
         result[si].player = enriched[pi];
         used[pi] = true;
-        break;   // displaySlot stays as the league-defined slot (SF / FLEX)
+        break;
+      }
+    }
+  }
+
+  // Pass 2: Fill SF slots — QBs first, then everything else
+  const sfSlots = result.map((r, i) => i).filter(i => result[i].slot === "SF");
+  for (const si of sfSlots) {
+    // First preference: any remaining QB
+    let assigned = false;
+    for (let pi = 0; pi < enriched.length; pi++) {
+      if (used[pi]) continue;
+      if (enriched[pi].pos === "QB") {
+        result[si].player = enriched[pi];
+        used[pi] = true;
+        assigned = true;
+        break;
+      }
+    }
+    // If no QB left, take any skill position that can fill SF
+    if (!assigned) {
+      for (let pi = 0; pi < enriched.length; pi++) {
+        if (used[pi]) continue;
+        const valid = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
+        if (valid.includes("SF")) {
+          result[si].player = enriched[pi];
+          used[pi] = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Pass 3: Fill remaining FLEX slots
+  const flexSlots = result.map((r, i) => i).filter(i => result[i].slot === "FLEX");
+  for (const si of flexSlots) {
+    for (let pi = 0; pi < enriched.length; pi++) {
+      if (used[pi]) continue;
+      const valid = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
+      if (valid.includes("FLEX")) {
+        result[si].player = enriched[pi];
+        used[pi] = true;
+        break;
       }
     }
   }
 
   return result;
 }
-
   /**
    * Debug helper — inspect raw bundle from the browser console:
    *   MFLAPI.debugBundle("LEAGUE_ID", "2025").then(r => console.log(JSON.stringify(r._paths, null, 2)))
