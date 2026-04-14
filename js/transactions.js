@@ -208,6 +208,7 @@ const DLRTransactions = (() => {
           ${!statusOk ? `<span class="tx-status" style="${statusColor}">${tx.status}</span>` : ""}
         </div>
         ${body ? `<div class="tx-body">${body}</div>` : ""}
+        ${tx.comments ? `<div class="tx-comments dim">${_esc(tx.comments)}</div>` : ""}
       </div>`;
   }
 
@@ -244,7 +245,13 @@ const DLRTransactions = (() => {
   }
 
   function _chip(pid, chipType) {
-    const p    = _players[pid] || {};
+    const p = _players[pid] || {};
+
+    // FAAB bankroll chip (BB_ trade values) — render as a distinct money badge
+    if (p._isFaab) {
+      return `<span class="tx-chip tx-chip--faab" title="FAAB">${_esc(p.first_name)}</span>`;
+    }
+
     const name = p.first_name
       ? `${p.first_name[0]}. ${p.last_name}`
       : pid?.startsWith("mfl_") ? `#${pid.slice(4)}` : (pid||"?");
@@ -321,11 +328,28 @@ const DLRTransactions = (() => {
     // for the _chip() renderer. Uses DLRPlayers.getFullPlayer() (DynastyProcess CSV +
     // Sleeper DB) as the primary source — no fuzzy name matching.
     function mflPid(pid) {
+      // BB_ prefix = FAAB bankroll included in a trade (e.g. "BB_62" = $62 FAAB).
+      // Render as a money chip, not a player chip.
+      if (pid && pid.startsWith("BB_")) {
+        const amt   = pid.slice(3);
+        const synId = `mfl_faab_${amt}`;
+        if (!_players[synId]) {
+          _players[synId] = {
+            first_name:        `$${amt}`,
+            last_name:         "FAAB",
+            position:          "FAAB",
+            fantasy_positions: ["FAAB"],
+            _isFaab:           true,
+          };
+        }
+        return synId;
+      }
+
       // mflPlayerMap[pid].sleeperId was already resolved by MFLAPI.getPlayers()
       // via DLRPlayers.getByMflId(), so we trust it directly.
-      const entry    = mflPlayerMap[pid] || {};
+      const entry     = mflPlayerMap[pid] || {};
       const sleeperId = entry.sleeperId || null;
-      const synId    = sleeperId ? sleeperId : `mfl_${pid}`;
+      const synId     = sleeperId ? sleeperId : `mfl_${pid}`;
 
       if (!_players[synId]) {
         if (sleeperId) {
@@ -357,8 +381,8 @@ const DLRTransactions = (() => {
       return synId;
     }
 
-    // Normalize MFL transactions — only the 4 types Mike cares about.
-    // WAIVER and BBID_WAIVER are both waiver claims (BBID = blind bid).
+    // Normalize MFL transactions — only the 4 types DLR cares about.
+    // WAIVER and BBID_WAIVER are both waiver claims (BBID = blind bid FAAB).
     // Everything else (IR, TAXI, AUCTION_WON, WAIVER_REQUEST, etc.) is filtered out.
     const MFL_TYPE_MAP = {
       "WAIVER":       "waiver",
@@ -367,37 +391,128 @@ const DLRTransactions = (() => {
       "TRADE":        "trade",
     };
 
+    // Splits a comma-delimited "gave_up" string like "13146,17102," into clean player ID array.
+    function parseGaveUp(str) {
+      if (!str) return [];
+      return str.split(",").map(s => s.trim()).filter(Boolean);
+    }
+
+    // Parses the MFL `transaction` field used by WAIVER, BBID_WAIVER, and FREE_AGENT.
+    //
+    // MFL format:  "<added_pid>,<pipe_delimited_drop_segment>"
+    //   WAIVER example:     "16191,|0.00|"
+    //     → added: "16191", faab: "0.00", dropped: ""
+    //   BBID_WAIVER example: "16191,50.00|14358"
+    //     → added: "16191", faab: "50.00", dropped: "14358"
+    //   FREE_AGENT example:  "|14358,"
+    //     → added: "14358" (first non-empty pipe segment before comma), dropped: ""
+    //   FREE_AGENT with drop: "|14358,|13200"  (rare)
+    //     → added: "14358", dropped: "13200"
+    //
+    // Returns { addedPid, droppedPid, faab }
+    function parseTransactionField(str, mflType) {
+      if (!str) return { addedPid: null, droppedPid: null, faab: null };
+
+      const commaIdx = str.indexOf(",");
+      // Everything before the first comma is the "add" segment
+      const addSeg  = commaIdx >= 0 ? str.slice(0, commaIdx) : str;
+      // Everything after the first comma is the "drop/faab" segment
+      const dropSeg = commaIdx >= 0 ? str.slice(commaIdx + 1) : "";
+
+      // The add segment may be prefixed with a pipe for FREE_AGENT (e.g. "|14358")
+      // or be a plain pid for WAIVER/BBID_WAIVER (e.g. "16191").
+      const addedPid = addSeg.split("|").map(s => s.trim()).filter(Boolean)[0] || null;
+
+      // The drop segment is pipe-delimited: "faab|droppedPid" or "|faab|" or "|0.00|"
+      // We want the last non-empty, non-numeric-looking segment as the dropped pid.
+      const dropParts = dropSeg.split("|").map(s => s.trim()).filter(Boolean);
+      let droppedPid = null;
+      let faab       = null;
+
+      dropParts.forEach(part => {
+        if (/^\d+(\.\d+)?$/.test(part)) {
+          // Numeric → FAAB amount
+          if (!faab) faab = part;
+        } else if (part.length > 0) {
+          // Non-numeric, non-empty → player ID being dropped
+          droppedPid = part;
+        }
+      });
+
+      return { addedPid, droppedPid, faab };
+    }
+
     _allTx = txArr
       .filter(tx => MFL_TYPE_MAP[tx.type])
       .map(tx => {
-        const type       = MFL_TYPE_MAP[tx.type] || "free_agent";
-        const franchId   = tx.franchise || tx.franchises || "";
-        const ts         = Number(tx.timestamp || 0) * 1000;
+        const type    = MFL_TYPE_MAP[tx.type];
+        const ts      = Number(tx.timestamp || 0) * 1000;
+        const adds    = {};
+        const drops   = {};
 
-        // Parse "pid|fid,pid|fid" strings
-        function parsePairs(str) {
-          if (!str) return [];
-          return str.split(",").map(p => { const [pid] = p.split("|"); return pid; }).filter(Boolean);
+        if (type === "trade") {
+          // ── TRADE ─────────────────────────────────────────────────
+          // franchise  + franchise1_gave_up  → what franchise gave up  (other side gets it)
+          // franchise2 + franchise2_gave_up  → what franchise2 gave up (franchise gets it)
+          const fran1    = (tx.franchise  || "").trim();
+          const fran2    = (tx.franchise2 || "").trim();
+          const gave1    = parseGaveUp(tx.franchise1_gave_up);  // what fran1 sends away
+          const gave2    = parseGaveUp(tx.franchise2_gave_up);  // what fran2 sends away
+
+          // fran1 gives up these players → fran2 receives them
+          gave1.forEach(pid => {
+            const key = mflPid(pid);
+            drops[key] = fran1;   // fran1 is giving
+            adds[key]  = fran2;   // fran2 is receiving
+          });
+          // fran2 gives up these players → fran1 receives them
+          gave2.forEach(pid => {
+            const key = mflPid(pid);
+            drops[key] = fran2;
+            adds[key]  = fran1;
+          });
+
+          return {
+            type,
+            created:     ts,
+            status:      "complete",
+            roster_ids:  [fran1, fran2].filter(Boolean),
+            adds,
+            drops,
+            draft_picks: [],
+            settings:    {},
+            comments:    tx.comments || "",
+            _mflType:    tx.type,
+            _mflFran1:   fran1,
+            _mflFran2:   fran2,
+          };
+
+        } else {
+          // ── WAIVER / BBID_WAIVER / FREE_AGENT ──────────────────────
+          const franchId = (tx.franchise || "").trim();
+          const { addedPid, droppedPid, faab } = parseTransactionField(tx.transaction, tx.type);
+
+          if (addedPid)   adds[mflPid(addedPid)]   = franchId;
+          if (droppedPid) drops[mflPid(droppedPid)] = franchId;
+
+          // FAAB: use parsed pipe amount for BBID_WAIVER; fall back to tx.bid attribute.
+          const faabAmt = faab != null ? Number(faab)
+                        : tx.bid      ? Number(tx.bid)
+                        : undefined;
+
+          return {
+            type,
+            created:    ts,
+            status:     "complete",
+            roster_ids: [franchId],
+            adds,
+            drops,
+            draft_picks: [],
+            settings:   { waiver_bid: faabAmt != null && !isNaN(faabAmt) ? faabAmt : undefined },
+            comments:   "",
+            _mflType:   tx.type,
+          };
         }
-        const addedPids   = parsePairs(tx.transaction);
-        const droppedPids = parsePairs(tx.dropped);
-
-        const adds  = {};
-        const drops = {};
-        addedPids.forEach(pid   => { adds[mflPid(pid)]  = franchId; });
-        droppedPids.forEach(pid => { drops[mflPid(pid)] = franchId; });
-
-        return {
-          type,
-          created:    ts,
-          status:     "complete",
-          roster_ids: [franchId],
-          adds,
-          drops,
-          draft_picks: [],
-          settings:   { waiver_bid: tx.bid ? Number(tx.bid) : undefined },
-          _mflType:   tx.type,
-        };
       }).sort((a,b) => b.created - a.created);
 
     _renderView(el);
