@@ -237,8 +237,62 @@ const MFLAPI = (() => {
    * universe from session cache on first call, instant thereafter):
    * [{ id, status, position, team, name, sleeperId }]
    */
-  async function getRoster(bundle, teamId, year) {
-    const raw = bundle?.rosters?.rosters?.franchise;
+  /**
+   * Normalizes MFL roster slot status to the three values the rest of the app
+   * uses: "IR", "TAXI", or "" (active).
+   * MFL API returns: "INJURED_RESERVE", "TAXI_SQUAD", or "" / absent.
+   */
+  function _normalizeMFLStatus(raw) {
+    const s = (raw || "").toUpperCase();
+    if (s === "INJURED_RESERVE" || s === "IR") return "IR";
+    if (s === "TAXI_SQUAD"      || s === "TAXI") return "TAXI";
+    return "";
+  }
+
+  /**
+   * Returns the latest scored week number from bundle.liveScoring.
+   * Falls back to 0 if liveScoring is absent (pre-season / off-season).
+   */
+  function getLatestScoredWeek(bundle) {
+    const week = parseInt(bundle?.liveScoring?.liveScoring?.week || 0);
+    return isNaN(week) ? 0 : week;
+  }
+
+  /**
+   * Fetches rosters for a specific week from the worker's /mfl/rosters endpoint.
+   * Returns the same shape as bundle.rosters so getRoster() can consume it.
+   * Worker endpoint to add in worker.js:
+   *
+   *   case "/mfl/rosters": {
+   *     const { leagueId, year, week, cookie } = await req.json();
+   *     const weekParam = week ? `&W=${week}` : "";
+   *     const url = `https://www57.myfantasyleague.com/${year}/export?TYPE=rosters&L=${leagueId}&JSON=1${weekParam}`;
+   *     const r = await fetch(url, { headers: { Cookie: cookie || "", "User-Agent": UA } });
+   *     const text = await r.text();
+   *     try { return new Response(text, { headers: CORS }); }
+   *     catch(e) { return new Response('{"rosters":{}}', { headers: CORS }); }
+   *   }
+   */
+  async function getRostersAtWeek(leagueId, year, week, cookie) {
+    try {
+      return await post("/mfl/rosters", { leagueId, year, week: String(week), cookie });
+    } catch(e) {
+      console.warn("[MFLAPI] getRostersAtWeek failed, bundle rosters will be used:", e.message);
+      return null;
+    }
+  }
+
+  /**
+   * Returns array of player objects for a given team ID (async — fetches player
+   * universe from session cache on first call, instant thereafter):
+   * [{ id, status, position, team, name, sleeperId }]
+   *
+   * Pass rostersData to use a week-specific roster snapshot instead of bundle.rosters.
+   */
+  async function getRoster(bundle, teamId, year, rostersData) {
+    // Use week-specific rosters when provided, otherwise fall back to bundle
+    const source = rostersData || bundle;
+    const raw = source?.rosters?.rosters?.franchise;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
     const franchise = arr.find(f => String(f.id) === String(teamId));
@@ -254,7 +308,7 @@ const MFLAPI = (() => {
       const info = playerLookup[p.id] || {};
       return {
         id:        p.id,
-        status:    (p.status || "").toUpperCase(),   // "IR", "TAXI", or ""
+        status:    _normalizeMFLStatus(p.status),
         position:  info.position  || p.position || "?",
         team:      info.team      || p.team     || "FA",
         name:      info.name      || p.name     || `Player ${p.id}`,
@@ -747,6 +801,8 @@ const MFLAPI = (() => {
     normalizeStandings,
     getStandingsMap,
     getRoster,
+    getRostersAtWeek,
+    getLatestScoredWeek,
     normalizeLiveScoring,
     normalizeMatchups,
     normalizePlayoffBrackets,

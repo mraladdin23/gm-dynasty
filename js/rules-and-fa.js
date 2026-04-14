@@ -383,9 +383,16 @@ const DLRFreeAgents = (() => {
     const irIds     = new Set();   // mfl_XXXX keys on IR
     const taxiIds   = new Set();   // mfl_XXXX keys on Taxi
 
-    // getRoster is async — must await each call (uses session-cached player universe)
+    // getRoster is async — must await each call (uses session-cached player universe).
+    // Fetch at the latest scored week so IR/Taxi status is end-of-season accurate.
+    const latestWeek = MFLAPI.getLatestScoredWeek(bundle);
+    const weekRosters = latestWeek > 0
+      ? await MFLAPI.getRostersAtWeek(leagueId, _season, latestWeek)
+      : null;
+    if (token !== _initToken) return;
+
     await Promise.all(teams.map(async t => {
-      const players = await MFLAPI.getRoster(bundle, t.id, _season);
+      const players = await MFLAPI.getRoster(bundle, t.id, _season, weekRosters);
       players.forEach(p => {
         const key = `mfl_${p.id}`;
         rostered.add(key);
