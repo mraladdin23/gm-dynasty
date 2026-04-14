@@ -1800,7 +1800,7 @@ select option { background: var(--color-bg-2); }
 .draft-order-row .draft-maxpf {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   font-family: var(--font-mono);
   font-weight: 700;
   font-size: .82rem;
