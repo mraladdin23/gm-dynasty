@@ -257,10 +257,18 @@ export default {
       // The bundle's TYPE=rosters fetch has no W= param and returns current-snapshot
       // status which may not reflect end-of-season slot assignments.
       if (path === "/mfl/rosters" && req.method === "POST") {
-        const { leagueId, year, week, cookie } = await req.json();
+        const { leagueId, year, week, cookie, username, password } = await req.json();
         if (!leagueId) return new Response(JSON.stringify({ error: "Missing leagueId" }), { status: 400, headers: corsHeaders() });
-        const season    = year || new Date().getFullYear();
-        const cookieHdr = cookie ? `MFL_USER_ID=${cookie}` : "";
+        const season = year || new Date().getFullYear();
+        let cookieHdr = "";
+        if (cookie) {
+          cookieHdr = `MFL_USER_ID=${cookie}`;
+        } else if (username && password) {
+          const loginRes = await fetch(`https://api.myfantasyleague.com/${season}/login?USERNAME=${encodeURIComponent(username)}&PASSWORD=${encodeURIComponent(password)}&XML=1`, { headers: mflHeaders() });
+          const loginXml = await loginRes.text();
+          const m = loginXml.match(/MFL_USER_ID="([^"]+)"/);
+          if (m) cookieHdr = `MFL_USER_ID=${m[1]}`;
+        }
         const headers   = mflHeaders(cookieHdr ? { Cookie: cookieHdr } : {});
         const weekParam = week ? `&W=${week}` : "";
         const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=rosters&L=${leagueId}${weekParam}&JSON=1`, { headers });
