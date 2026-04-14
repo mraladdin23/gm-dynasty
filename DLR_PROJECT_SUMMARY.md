@@ -54,16 +54,16 @@ GitHub Pages (dynastylockerroom.com)
 | `yahoo.js` | Yahoo OAuth token management, `getLeagueBundle` |
 | `sleeper.js` | Sleeper API wrappers |
 | `standings.js` | Standings, Matchups, Playoffs tabs — cross-platform. MFL: bundle cached in `_mflBundle` after first tab load and reused by matchups + playoffs tabs to avoid redundant fetches. `setLeague()` now accepts `myRosterId` as 5th arg and resets on season change. `_mflLiveScoringCache` and `_mflPlayoffState` cleared on reset. Division filter bar with "All Teams" toggle via `_showAllDivisions()`. |
-| `roster.js` | Roster tab — cross-platform (Sleeper/MFL/Yahoo). MFL uses `getPlayers()` session cache for player names. |
-| `draft.js` | Draft board — multi-draft selector (startup + rookie), grid/list toggle, MFL auction board, Sleeper snake/linear. MFL multi-set selector defaults to user's division unit via `MFLAPI.getMyDraftUnitIndex()`. Aborted drafts (< 1 full round) filtered out. |
-| `transactions.js` | Transactions tab — all platforms normalized to Sleeper shape. MFL uses `MFLAPI.getPlayers()` for player name lookup (not bundle.players which is excluded from bundle). |
+| `roster.js` | Roster tab — cross-platform (Sleeper/MFL/Yahoo). MFL: player universe pre-loaded via `MFLAPI.getPlayers()`, then `_players` populated with `mfl_`-keyed stubs from `DLRPlayers.getFullPlayer()` so position grouping (QB/RB/WR/TE/K/DEF sections) and rank sorting work. `_playerRowHTML()` unified for all platforms — passes original ID to player card; bio is dimmed small text (`.72rem`). |
+| `draft.js` | Draft board — multi-draft selector (startup + rookie), grid/list toggle, MFL auction board, Sleeper snake/linear. MFL multi-set selector defaults to user's division unit via `MFLAPI.getMyDraftUnitIndex()`. Aborted drafts (< 1 full round) filtered out. MFL pick clicks open DLR player card (`mfl_${pid}` fallback when no Sleeper ID mapped). |
+| `transactions.js` | Transactions tab — all platforms normalized to Sleeper shape. MFL `mflPid()` resolver uses `entry.sleeperId` (already resolved by `MFLAPI.getPlayers()` via DynastyProcess CSV), then `DLRPlayers.getFullPlayer()` for bio fallback — no fuzzy name matching. |
 | `analytics.js` | Analytics tab — Sleeper fully working. MFL: full 5-tab parity (Power Rankings, Luck Index, Trade Map, Draft Recap, Waivers). Yahoo incomplete. |
-| `rules-and-fa.js` | League Rules tab + Players/Free Agents tab. MFL players tab uses `MFLAPI.getPlayers()` (not bundle.players). `getRoster()` is awaited correctly with `Promise.all`. `DLRFreeAgents` tracks `_isCommish`. |
+| `rules-and-fa.js` | League Rules tab + Players/Free Agents tab. MFL: `_loadMFLRosterData()` tracks IR and Taxi slot per player via `irIds`/`taxiIds` Sets (from `MFLAPI.getRoster()` `p.status`). Player photo resolved via `DLRPlayers.getSleeperIdFromMfl()` first (CSV mapping, more reliable), then `p.sleeperId` fallback. `rosterSlot` field on each cached player ("IR", "TAXI", or null) — shown in list as 🏥 IR / 🚕 Taxi badge next to team name. |
 | `salary.js` | Salary cap module. FAAB multiplier, auto-tracking transactions (cross-platform), taxi squad promotion badges. |
 | `auction.js` | DLR auction system. Proxy bid engine, night pause, auto-claim, bid history log. Commissioner quick-nominate modal. Cap checks subtract in-session auction wins. Nomination close/end-date controls. |
-| `players-db.js` | Sleeper player DB loader (IndexedDB-backed via `idb-cache.js`) |
-| `idb-cache.js` | IndexedDB wrapper for caching player DB and stats |
-| `playercard.js` | Player card modal (Sleeper CDN photos) |
+| `players-db.js` | Cross-platform player DB. Loads Sleeper player DB (IndexedDB-backed via `idb-cache.js`) **and** DynastyProcess `db_playerids.csv` mappings (`byMfl`, `byYahoo`, `bySleeper`). `getFullPlayer(platformId, platform)` returns best available object — Sleeper record when mapped, CSV bio otherwise. `getSleeperIdFromMfl(mflId)` is the primary Sleeper ID resolution path used by roster, players tab, and player card. `formatBio()` works for both Sleeper and CSV-only players. Mappings cached in IndexedDB, version-keyed (`MAPPINGS_VERSION = "2026-04"`). |
+| `idb-cache.js` | IndexedDB wrapper (`dlr_cache` DB, `kvstore` store, v2). Stores Sleeper player DB and DynastyProcess mappings. Fallback to localStorage on error. |
+| `playercard.js` | Player card modal. `show(playerId, playerName)` accepts any ID format (Sleeper, `mfl_XXXX`). Internally resolves `_statsId` (Sleeper ID for stats/photo) via `DLRPlayers.getSleeperIdFromMfl()` when given an `mfl_` ID. Stats and weekly game log always query Sleeper API via `_statsId`. Photo uses `_statsId`. If no Sleeper mapping exists, photo is hidden and a clean "No Sleeper stats available" message is shown. Bio via `DLRPlayers.getFullPlayer()` + `formatBio()`. |
 | `playerreport.js` | Cross-league player report panel |
 | `chat.js` | League chat (Firebase Realtime DB) |
 | `hallway.js` | The Hallway social feature |
@@ -80,9 +80,9 @@ GitHub Pages (dynastylockerroom.com)
 All tabs functional: overview, standings, roster, draft, transactions, players, analytics, salary cap, auction.
 
 ### MFL ⚠️ Connection stable — UI polish remaining
-- **Working well:** Import (franchise_id based), league cards, overview (live fetch), standings (standard + eliminator + guillotine + division filter), rosters (player names resolving), analytics (all 5 tabs), salary cap, auction/salary board
-- **Partially working:** Matchups (data loads but plain text — not card format), playoffs (data loads but bracket rendering broken), draft (multi-unit selector working but some player names unresolved), transactions (loads but trades show "details unavailable", some player chips blank), players tab (loads but some unresolved)
-- **Known architecture:** `myRosterId` is the 4-digit zero-padded franchise ID (e.g. `"0035"`). Player name resolution depends on `MFLAPI.getPlayers()` session cache — unresolved players mean the cache lookup returned nothing for that MFL player ID. MFL player IDs in rosters are bare numeric strings; the `getPlayers()` map keys on those same IDs.
+- **Working well:** Import (franchise_id based), league cards, overview (live fetch), standings (standard + eliminator + guillotine + division filter), rosters (player names, photos, position grouping, IR/Taxi sections), analytics (all 5 tabs), salary cap, auction/salary board, players tab (photos, IR/Taxi badges, age/bio), draft (all picks open DLR player card), transactions (player chips resolved via DynastyProcess mapping)
+- **Partially working:** Matchups (data loads but plain text — not card format), playoffs (data loads but bracket rendering broken)
+- **Known architecture:** `myRosterId` is the 4-digit zero-padded franchise ID (e.g. `"0035"`). Player name/photo resolution uses DynastyProcess CSV mappings (`DLRPlayers.getSleeperIdFromMfl()`) as the primary path — more reliable than the old name-match fallback. MFL player IDs in rosters are bare numeric strings; the `getPlayers()` map keys on those same IDs.
 
 ### Yahoo ⚠️ Partial
 - OAuth flow implemented in worker
@@ -144,6 +144,7 @@ myRosterId:               4-digit zero-padded franchise ID e.g. "0035"
 // NOTE: players (TYPE=players) is NOT in the bundle — fetched on-demand via
 // /mfl/players endpoint and cached in sessionStorage as mfl_players_{year}.
 // rosters endpoint only returns {id, status} per player — names come from getPlayers() cache.
+// status values on roster players: "IR", "TAXI", or "" (active roster)
 ```
 
 ### MFL divisions (multi-division leagues)
@@ -172,12 +173,26 @@ All MFL outbound fetches in `worker.js` now include:
 ```
 User-Agent: DynastyLockerRoom/1.0 (dynastylockerroom.com)
 ```
-This gives better rate limits from MFL. Previously unidentified requests got stricter throttling.
 
 ### League type detection
 - **Eliminator:** `league.league.franchises_eliminated` present → teams eliminated in order, players stay rostered
 - **Guillotine:** `franchise_eliminated` on individual standings entries → lowest scorer eliminated weekly, players return to FA
 - **Survivor pool:** `survivorPool === "Yes"` — these ARE imported (reversed earlier decision)
+
+### DynastyProcess player mappings (`players-db.js`)
+```js
+// Fetched from: https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv
+// Cached in IndexedDB under key "dlr_player_mappings", version "2026-04"
+// Shape: { byMfl: {mflId → entry}, byYahoo: {yahooId → entry}, bySleeper: {sleeperId → entry} }
+// Entry fields: sleeper_id, mfl_id, yahoo_id, name, position, team, age, height, weight, college, draft_year
+
+// Key API:
+DLRPlayers.load()                    // loads both Sleeper DB + CSV mappings (IDB-backed)
+DLRPlayers.getFullPlayer(id, "mfl")  // best available player object — Sleeper if mapped, CSV bio otherwise
+DLRPlayers.getSleeperIdFromMfl(id)   // primary ID resolution — used by roster, players tab, playercard
+DLRPlayers.getByMflId(id)            // raw CSV mapping entry
+DLRPlayers.formatBio(p, mapping)     // age · height · weight · college · experience — works for both sources
+```
 
 ---
 
@@ -280,14 +295,20 @@ All MFL API responses go through `r.text()` then `JSON.parse()` in a try/catch. 
 56. draft.js — MFL multi-unit draft: defaults to user's division unit via `getMyDraftUnitIndex()` instead of always unit 0
 57. locker.css — Added `.standings-division-bar`, `.standings-division-label`, `.standings-div-pill`, `.standings-div-pill--active`, `.standings-row--me td`; mobile: division bar scrolls horizontally
 
+### April 14, 2026 (Cross-platform player lookup overhaul)
+58. players-db.js — Added DynastyProcess `db_playerids.csv` mappings as second data source alongside Sleeper DB. `getFullPlayer(id, platform)` returns Sleeper record when mapped, CSV bio otherwise. `getSleeperIdFromMfl()` is now the primary ID resolution path. `formatBio()` works for both sources. IndexedDB version bumped to `"2026-04"`.
+59. idb-cache.js — DB version bumped to 2; single `kvstore` object store handles both Sleeper DB and mappings.
+60. roster.js — Syntax error fixed (stray `});` + `mflPlayerLookup` variable name mismatch). `_loadMFLData()` populates `_players["mfl_XXXX"]` stubs via `getFullPlayer()` so position grouping (QB/RB/WR/TE/K/DEF) and rank sorting work. `_playerRowHTML()` unified across all platforms; bio is dimmed `.72rem` text.
+61. transactions.js — `mflPid()` resolver: dropped `mflNameToSleeperId()` fuzzy matching. Uses `entry.sleeperId` (pre-resolved via CSV), then `DLRPlayers.getFullPlayer()`, then name stub.
+62. rules-and-fa.js — MFL Players tab: photo resolved via `DLRPlayers.getSleeperIdFromMfl()` first (more reliable than name-match fallback). IR/Taxi tracked via `irIds`/`taxiIds` Sets from `MFLAPI.getRoster()` `p.status`; shown as 🏥 IR / 🚕 Taxi badge in player list.
+63. playercard.js — Added `_statsId` (resolved Sleeper ID) alongside `_playerId`. Any ID format works as input. Photo and stats always use `_statsId`. Clean "No Sleeper stats" message when no mapping exists.
+64. draft.js — MFL pick clicks: `window.open(mfl.com)` fallback replaced with `DLRPlayerCard.show('mfl_${pid}', name)` in both list and grid view.
+
 ---
 
 ## Roadmap — Open Issues
 
 ### 🔴 Critical — Next Session Priority
-
-**MFL — Division state not persistent across tabs**
-Division filter is currently computed fresh on each tab. It should be stored at the league level and respected by all tabs (standings, matchups, playoffs, and potentially roster/draft). The pill clicking "All Teams" also currently causes pills to disappear — the toggle needs to re-render properly. Architecture: store selected division ID in `_mflBundle` or a module-level var in `standings.js`, and expose a getter so other modules can read it.
 
 **MFL — Matchups not rendered as cards**
 Currently renders as plain text. Should match Sleeper's card format: clickable cards that expand to show per-player scorer breakdown (side-by-side layout). Should default to Week 1, not current week. Files: `standings.js` (`_renderMFLMatchupsShell`, `_mflMatchupCards`). Model after Sleeper's `_renderMatchupCards()` in the same file.
@@ -295,14 +316,8 @@ Currently renders as plain text. Should match Sleeper's card format: clickable c
 **MFL — Playoffs bracket not rendering correctly**
 Bracket data is loading but the visual rendering is broken. Should match Sleeper's bracket look and feel. Files: `standings.js` (`_mflLoadBracket`, `_mflBracketMatchCard`). Compare with Sleeper's `_loadBracket()`.
 
-**MFL — Large number of unresolved players**
-Many MFL players show as `Player {id}` with no name. Root cause: `MFLAPI.getPlayers()` returns names in `"Last, First"` MFL format but roster/transaction code may not be converting them consistently. Also affects draft results (some pick names missing), transactions (chips show blank), and the Players tab. Debug approach: use `MFLAPI.debugBundle()` in browser console on a broken league to inspect `_franchiseEmails` and then check if the player IDs in rosters exist as keys in `sessionStorage.getItem('mfl_players_2025')`.
-
-**MFL — Auction results not showing**
-The Auction Board tab shows empty. The `auctionResults` key in the bundle uses `bundle.auctionResults.auctionResults` — the shape may be inconsistent (single object vs array). Also verify the `salary` field name: MFL uses `amount`, `bid`, or `winningBid` depending on endpoint version. Files: `draft.js` (`_loadMFLDraft`, auction set normalization).
-
-**MFL — Trades show "details unavailable", some transaction chips blank**
-Trades in MFL transactions use a different structure than Sleeper — the `adds`/`drops` format doesn't map correctly to the trade summary renderer. Also some player IDs in transactions don't match the `getPlayers()` map. Files: `transactions.js` (`_loadMFLData`, `mflPid()` resolver, `_tradeSummary()`).
+**MFL — Division state not persistent across tabs**
+Division filter is currently computed fresh on each tab. It should be stored at the league level and respected by all tabs (standings, matchups, playoffs, and potentially roster/draft). The pill clicking "All Teams" also currently causes pills to disappear — the toggle needs to re-render properly. Architecture: store selected division ID in `_mflBundle` or a module-level var in `standings.js`, and expose a getter so other modules can read it.
 
 **MFL — Eliminator week elimination not shown consistently**
 Guillotine leagues show which week a team was eliminated via `franchise_eliminated` on standings entries, but eliminator leagues (where `franchises_eliminated` is on `league.league`) don't show the week number consistently. The `weekEliminated` field on eliminator standings rows may be off-by-one or null. Files: `mfl.js` (`normalizeStandings` eliminator branch).
@@ -310,10 +325,10 @@ Guillotine leagues show which week a team was eliminated via `franchise_eliminat
 ### 🟡 Mobile Issues
 
 **Login check loop + zoom on mobile**
-On mobile the app is constantly re-checking login state, and the screen view is zoomed in requiring manual zoom-out to snap back. This also happens when focusing search inputs in the Hallway section. Fix: add `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">` to `index.html` to prevent browser zoom on input focus. Also audit `auth.js` for redundant `onAuthStateChanged` triggers. Files: `index.html`, `auth.js`, `hallway.js`.
+On mobile the app is constantly re-checking login state, and the screen view is zoomed in requiring manual zoom-out to snap back. Fix: add `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">` to `index.html`. Also audit `auth.js` for redundant `onAuthStateChanged` triggers. Files: `index.html`, `auth.js`, `hallway.js`.
 
 **Consolation draft order card height mismatch**
-Cards are 36px but inner content sections are 72px. Either increase card height to 72px or condense inner sections to 36px. Files: `locker.css` (`.draft-order-row`, `.draft-order-section`).
+Cards are 36px but inner content sections are 72px. Files: `locker.css` (`.draft-order-row`, `.draft-order-section`).
 
 ### High Priority
 - [ ] Yahoo end-to-end test — OAuth requires non-blocked network; test all tabs once available
@@ -360,11 +375,7 @@ Ask: *"MFL matchups are plain text, not cards. They should match Sleeper's card 
 Attach: `standings.js`, `profile.js`
 Ask: *"The MFL division filter is not persistent — clicking 'All Teams' makes the pills disappear and the division state resets on every tab switch. Division context should be stored at the module level and persist across standings, matchups, and playoffs tabs."*
 
-**Priority 3 — Player resolution + transactions:**
-Attach: `mfl.js`, `transactions.js`, `draft.js`
-Ask: *"Many MFL players are unresolved (show as 'Player {id}'). Trades show 'details unavailable'. Auction results are empty. Please audit the player ID → name resolution chain and fix."*
-
-**Priority 4 — Mobile viewport + auth loop:**
+**Priority 3 — Mobile viewport + auth loop:**
 Attach: `index.html`, `auth.js`
 Ask: *"On mobile the screen zooms in on input focus and the auth state check loops. Add viewport meta tag to prevent zoom and audit the auth state listener."*
 
@@ -389,6 +400,6 @@ Ask: *"On mobile the screen zooms in on input focus and the auth state check loo
 
 ---
 
-*Document updated: April 13, 2026*
-*Files updated this session: mfl.js, standings.js, transactions.js, draft.js, locker.css*
-*Previous session files: worker.js, rules-and-fa.js, profile.js*
+*Document updated: April 14, 2026*
+*Files updated this session: players-db.js, idb-cache.js, roster.js, transactions.js, rules-and-fa.js, playercard.js, draft.js*
+*Previous session files: mfl.js, standings.js, transactions.js, draft.js, locker.css*
