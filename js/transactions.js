@@ -208,7 +208,7 @@ const DLRTransactions = (() => {
           ${!statusOk ? `<span class="tx-status" style="${statusColor}">${tx.status}</span>` : ""}
         </div>
         ${body ? `<div class="tx-body">${body}</div>` : ""}
-        ${tx.comments ? `<div class="tx-comments dim">${_esc(tx.comments)}</div>` : ""}
+        ${tx.comments ? `<div class="tx-comments" style="font-size:.72rem;color:var(--color-text-dim,#9ca3af);margin-top:.25rem;padding:0 .25rem">${_esc(tx.comments)}</div>` : ""}
       </div>`;
   }
 
@@ -425,7 +425,7 @@ const DLRTransactions = (() => {
 
       // The drop segment is pipe-delimited: "faab|droppedPid" or "|faab|" or "|0.00|"
       // We want the last non-empty, non-numeric-looking segment as the dropped pid.
-      const dropParts = dropSeg.split("|").map(s => s.trim()).filter(Boolean);
+      const dropParts = dropSeg.split("|").map(s => s.trim().replace(/,$/, "")).filter(Boolean);
       let droppedPid = null;
       let faab       = null;
 
