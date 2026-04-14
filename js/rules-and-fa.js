@@ -395,7 +395,7 @@ const DLRFreeAgents = (() => {
     }
 
     await Promise.all(teams.map(async t => {
-      const players = await MFLAPI.getRoster(bundle, t.id, _season, weekRosters);
+      const players = await MFLAPI.getRoster(bundle, t.id, _season, weekRosters, leagueId);
       players.forEach(p => {
         const key = `mfl_${p.id}`;
         rostered.add(key);

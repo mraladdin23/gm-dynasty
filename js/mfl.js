@@ -299,7 +299,7 @@ const MFLAPI = (() => {
    *
    * Pass rostersData to use a week-specific roster snapshot instead of bundle.rosters.
    */
-  async function getRoster(bundle, teamId, year, rostersData) {
+  async function getRoster(bundle, teamId, year, rostersData, leagueId) {
     // Use week-specific rosters when provided, otherwise fall back to bundle
     const source = rostersData || bundle;
     const raw = source?.rosters?.rosters?.franchise;
@@ -312,7 +312,7 @@ const MFLAPI = (() => {
     const playerArr = Array.isArray(players) ? players : [players];
 
     // Use session-cached player universe for current names/positions/teams
-    const playerLookup = await getPlayers(year);
+    const playerLookup = await getPlayers(year, leagueId);
 
     return playerArr.map(p => {
       const info = playerLookup[p.id] || {};

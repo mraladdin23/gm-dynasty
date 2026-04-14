@@ -566,9 +566,11 @@ const DLRDraft = (() => {
 
     const auctionSets = auctionSetsRaw.map((unit, i) => {
       const raw    = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
-      const divId  = String(unit.unit_id || unit.division || "");
+      // MFL auction units use the same `unit` field as draft units for the division ID
+      const divId  = String(unit.unit || unit.unit_id || unit.division || "");
       const divLabel = divNameMap[divId] || "";
-      const rawLabel = unit.name || unit.unit || "";
+      // unit.unit is the division ID (e.g. "3"), not a display name — don't use as label
+      const rawLabel = unit.name || "";
       const label  = (rawLabel && rawLabel !== "LEAGUE")
         ? rawLabel
         : divLabel || (i === 0 ? "Auction" : `Auction ${i + 1}`);
