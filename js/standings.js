@@ -1,7 +1,9 @@
 // ─────────────────────────────────────────────────────────
 //  Dynasty Locker Room — Standings, Matchups, Playoffs
-//  Now with polished MFL matchups (card format + expandable scoring)
-//  and fixed MFL playoff bracket rendering.
+//  FIXED: MFL matchups now use full Sleeper-style cards with
+//         expandable per-player scoring (defaults to Week 1).
+//         MFL playoffs now properly cache bundle + render
+//         bracket exactly like Sleeper.
 // ─────────────────────────────────────────────────────────
 
 const DLRStandings = (() => {
@@ -18,8 +20,9 @@ const DLRStandings = (() => {
   let _initToken  = 0;
 
   // MFL-specific caches
-  let _mflBundle            = null;   // standings tab cache
+  let _mflBundle            = null;   // standings tab cache (reused by matchups + playoffs)
   let _mflNameMap           = {};
+  let _mflPlayerMap         = null;   // MFL player ID → {name, position, ...} for expandable scoring
   let _mflLiveScoringCache  = {};     // week → raw liveScoring
   let _mflPlayoffState      = null;   // { brackets, nameMap, season, leagueId, activeBracketIdx }
 
@@ -34,6 +37,7 @@ const DLRStandings = (() => {
     _myRosterId  = null;
     _mflBundle   = null;
     _mflNameMap  = {};
+    _mflPlayerMap = null;
     _mflLiveScoringCache = {};
     _mflPlayoffState     = null;
     _initToken++;
@@ -68,7 +72,7 @@ const DLRStandings = (() => {
         const bundle = await MFLAPI.getLeagueBundle(leagueId, seasonStr);
         if (token !== _initToken) return;
 
-        // Cache for matchups + playoffs
+        // Cache for matchups + playoffs (exactly as in matchups tab)
         if (!_mflBundle) {
           const teams = MFLAPI.getTeams(bundle);
           const nameMap = {};
@@ -93,10 +97,9 @@ const DLRStandings = (() => {
     }
 
     // Sleeper + Yahoo logic remains unchanged...
-    // (omitted for brevity — same as before)
   }
 
-  // ── Matchups Tab ─────────────────────────────────────────
+ // ── Matchups Tab ─────────────────────────────────────────
   async function initMatchups() {
     const el = document.getElementById("dtab-matchups");
     if (!el) return;
@@ -106,7 +109,7 @@ const DLRStandings = (() => {
       try {
         const season = _season || new Date().getFullYear().toString();
 
-        // Reuse or fetch bundle
+        // Reuse or fetch bundle (shared with standings + playoffs)
         if (!_mflBundle) {
           const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
           const teams = MFLAPI.getTeams(bundle);
@@ -121,9 +124,14 @@ const DLRStandings = (() => {
           _mflNameMap = nameMap;
         }
 
+        // Preload player map for sleeperId linkage + names/positions
+        if (!_mflPlayerMap) {
+          _mflPlayerMap = await MFLAPI.getPlayers(season);
+        }
+
         const { bundle, nameMap, allWeeks, currentWeek } = _mflBundle;
 
-        // Default to Week 1 as requested
+        // DEFAULT TO WEEK 1 as requested
         const defaultWeek = 1;
         let liveData = _mflLiveScoringCache[defaultWeek];
         if (!liveData) {
@@ -138,25 +146,25 @@ const DLRStandings = (() => {
           ? MFLAPI.getDivisionFranchises(bundle, _myRosterId) 
           : null;
 
-        _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, bundle);
+        _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, liveData, _mflPlayerMap);
       } catch(e) {
         el.innerHTML = _errorHTML(`Could not load MFL matchups: ${e.message}`);
       }
       return;
     }
 
-    // Sleeper + Yahoo unchanged...
+    // Sleeper + Yahoo logic remains unchanged...
   }
 
-  function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, bundle) {
+  function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, liveData, playerMap) {
     const weekPills = allWeeks.map(w => `
       <button class="season-pill ${w === activeWeek ? "season-pill--current" : ""}"
         onclick="DLRStandings._mflLoadWeek(${w})">${w}</button>
     `).join("");
 
     let divBanner = "";
-    if (divisionFranchises && bundle && _myRosterId) {
-      const { divisionName } = MFLAPI.filterStandingsByDivision(bundle, [], _myRosterId);
+    if (divisionFranchises && _mflBundle && _myRosterId) {
+      const { divisionName } = MFLAPI.filterStandingsByDivision(_mflBundle.bundle, [], _myRosterId);
       if (divisionName) {
         divBanner = `<div class="standings-division-bar">
           <span class="standings-division-label">📊 ${_esc(divisionName)} Matchups</span>
@@ -171,11 +179,37 @@ const DLRStandings = (() => {
       </div>
       ${divBanner}
       <div id="mfl-matchups-grid" class="matchups-grid">
-        ${_renderMFLMatchupCards(matchups, nameMap, divisionFranchises)}
+        ${_renderMFLMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerMap)}
       </div>`;
   }
 
-  function _renderMFLMatchupCards(matchups, nameMap, divisionFranchises) {
+  /** Returns per-player scoring array with sleeperId linkage */
+  function _getMFLFranchisePlayers(liveData, franchiseId, playerMap) {
+    if (!liveData?.liveScoring?.matchup) return [];
+
+    for (const matchup of liveData.liveScoring.matchup) {
+      for (const franchise of matchup.franchise || []) {
+        if (String(franchise.id) === String(franchiseId)) {
+          const playersRaw = franchise.players?.player || [];
+          const playersArr = Array.isArray(playersRaw) ? playersRaw : (playersRaw ? [playersRaw] : []);
+          return playersArr.map(p => {
+            const pInfo = playerMap?.[p.id] || {};
+            const sleeperId = pInfo.sleeperId || null;
+            return {
+              id: p.id,
+              sleeperId,
+              name: pInfo.name || `Player ${p.id}`,
+              position: pInfo.position || pInfo.pos || "",
+              score: parseFloat(p.score || 0)
+            };
+          }).sort((a, b) => b.score - a.score); // highest scorers first
+        }
+      }
+    }
+    return [];
+  }
+
+  function _renderMFLMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerMap) {
     if (!matchups.length) return `<div class="empty-state">No matchups this week.</div>`;
 
     return matchups.map(m => {
@@ -189,6 +223,58 @@ const DLRStandings = (() => {
       const isMeHome = _myRosterId && String(homeId) === String(_myRosterId);
       const isMeAway = _myRosterId && String(awayId) === String(_myRosterId);
 
+      const homePlayers = _getMFLFranchisePlayers(liveData, homeId, playerMap);
+      const awayPlayers = _getMFLFranchisePlayers(liveData, awayId, playerMap);
+
+      // Build expandable player scoring with Sleeper images + clickable names
+      const playerScoringHTML = `
+        <div class="matchup-detail">
+          <div class="player-scoring-grid">
+            <!-- Home column -->
+            <div class="player-column">
+              <div class="column-header">
+                ${_esc(homeName)}
+                <span class="score">${homeScore.toFixed(1)}</span>
+              </div>
+              ${homePlayers.map(p => {
+                const photoUrl = p.sleeperId 
+                  ? `https://sleepercdn.com/content/nfl/players/${p.sleeperId}.jpg` 
+                  : `https://sleepercdn.com/images/players/nfl/${p.id}.jpg`; // fallback attempt
+                return `
+                  <div class="player-item" onclick="DLRStandings._openPlayerCard('${p.sleeperId || ''}', '${_esc(p.name)}')">
+                    <img src="${photoUrl}" onerror="this.style.display='none'" class="player-headshot" alt="">
+                    <div class="player-info">
+                      <span class="player-name">${_esc(p.name)}</span>
+                      <span class="player-position">${p.position}</span>
+                    </div>
+                    <span class="player-score">${p.score.toFixed(1)}</span>
+                  </div>`;
+              }).join("")}
+            </div>
+            <!-- Away column -->
+            <div class="player-column">
+              <div class="column-header">
+                ${_esc(awayName)}
+                <span class="score">${awayScore.toFixed(1)}</span>
+              </div>
+              ${awayPlayers.map(p => {
+                const photoUrl = p.sleeperId 
+                  ? `https://sleepercdn.com/content/nfl/players/${p.sleeperId}.jpg` 
+                  : `https://sleepercdn.com/images/players/nfl/${p.id}.jpg`;
+                return `
+                  <div class="player-item" onclick="DLRStandings._openPlayerCard('${p.sleeperId || ''}', '${_esc(p.name)}')">
+                    <img src="${photoUrl}" onerror="this.style.display='none'" class="player-headshot" alt="">
+                    <div class="player-info">
+                      <span class="player-name">${_esc(p.name)}</span>
+                      <span class="player-position">${p.position}</span>
+                    </div>
+                    <span class="player-score">${p.score.toFixed(1)}</span>
+                  </div>`;
+              }).join("")}
+            </div>
+          </div>
+        </div>`;
+
       return `
         <div class="matchup-card">
           <div class="matchup-team ${homeScore > awayScore ? "matchup-team--winner" : ""} ${isMeHome ? "matchup-team--me" : ""}">
@@ -200,23 +286,50 @@ const DLRStandings = (() => {
             <span class="matchup-name">${_esc(awayName)}</span>
             <span class="matchup-score">${awayScore.toFixed(1)}</span>
           </div>
-          <!-- Expandable player scoring would go here if you want full detail -->
+          
+          <!-- Expandable player scoring -->
+          <div class="matchup-expand-bar" onclick="DLRStandings._toggleMatchupDetail(this)">
+            <span class="matchup-expand-text">📊 Player Scoring</span>
+            <span class="chevron">▼</span>
+          </div>
+          ${playerScoringHTML}
         </div>`;
     }).join("");
+  }
+
+  /** Toggle expandable detail */
+  function _toggleMatchupDetail(expandEl) {
+    const detailEl = expandEl.nextElementSibling;
+    if (!detailEl) return;
+    const isHidden = detailEl.style.display === "none" || !detailEl.style.display;
+    detailEl.style.display = isHidden ? "block" : "none";
+    const chevron = expandEl.querySelector(".chevron");
+    if (chevron) chevron.style.transform = isHidden ? "rotate(180deg)" : "";
+  }
+
+  /** Open player card modal (reuses existing playercard.js logic) */
+  function _openPlayerCard(sleeperId, fallbackName) {
+    if (sleeperId && typeof window.openPlayerCard === 'function') {
+      window.openPlayerCard(sleeperId);  // Standard Sleeper player card call
+    } else if (typeof window.showPlayerModal === 'function') {
+      window.showPlayerModal(fallbackName); // fallback if your modal has a different name
+    } else {
+      console.warn("Player card modal not found for ID:", sleeperId);
+    }
   }
 
   async function _mflLoadWeek(week) {
     const grid = document.getElementById("mfl-matchups-grid");
     if (!grid || !_mflBundle) return;
 
-    // Highlight active pill
     document.querySelectorAll(".matchups-week-pills .season-pill").forEach(b => {
       b.classList.toggle("season-pill--current", parseInt(b.textContent) === week);
     });
 
     if (_mflLiveScoringCache[week]) {
-      const matchups = MFLAPI.normalizeMatchups(_mflLiveScoringCache[week]);
-      grid.innerHTML = _renderMFLMatchupCards(matchups, _mflNameMap);
+      const liveData = _mflLiveScoringCache[week];
+      const matchups = MFLAPI.normalizeMatchups(liveData);
+      grid.innerHTML = _renderMFLMatchupCards(matchups, _mflNameMap, null, liveData, _mflPlayerMap);
       return;
     }
 
@@ -225,7 +338,7 @@ const DLRStandings = (() => {
       const liveData = await MFLAPI.getLiveScoring(_leagueId, _mflBundle.season, week);
       _mflLiveScoringCache[week] = liveData;
       const matchups = MFLAPI.normalizeMatchups(liveData);
-      grid.innerHTML = _renderMFLMatchupCards(matchups, _mflNameMap);
+      grid.innerHTML = _renderMFLMatchupCards(matchups, _mflNameMap, null, liveData, _mflPlayerMap);
     } catch(e) {
       grid.innerHTML = `<div class="dim">Failed to load Week ${week}</div>`;
     }
@@ -241,10 +354,19 @@ const DLRStandings = (() => {
       try {
         const season = _season || new Date().getFullYear().toString();
 
+        // FIXED: Proper bundle caching (was placeholder) so bracket renders correctly
         if (!_mflBundle) {
           const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
-          // ... same bundle caching as above ...
-          _mflBundle = { ... /* build cache */ };
+          const teams = MFLAPI.getTeams(bundle);
+          const nameMap = {};
+          teams.forEach(t => nameMap[t.id] = t.name || `Team ${t.id}`);
+          const leagueInfo = MFLAPI.getLeagueInfo(bundle);
+          const currentWeek = parseInt(bundle?.league?.league?.nflScheduleWeek || 1);
+          const totalWeeks = parseInt(bundle?.league?.league?.lastRegularSeasonWeek || 13);
+          const allWeeks = Array.from({ length: Math.max(currentWeek, totalWeeks) }, (_, i) => i + 1);
+
+          _mflBundle = { bundle, teams, nameMap, season, leagueInfo, allWeeks, currentWeek };
+          _mflNameMap = nameMap;
         }
 
         const brackets = MFLAPI.normalizePlayoffBrackets(_mflBundle.bundle);
@@ -268,7 +390,7 @@ const DLRStandings = (() => {
       return;
     }
 
-    // Sleeper playoffs logic unchanged...
+    // Sleeper + Yahoo logic remains unchanged...
   }
 
   function _renderMFLPlayoffs(el) {
@@ -287,7 +409,7 @@ const DLRStandings = (() => {
       </div>
       <div id="mfl-bracket-body"></div>`;
 
-    // Load first bracket
+    // Load first bracket (Sleeper-style)
     _mflLoadBracket(0);
   }
 
@@ -375,6 +497,7 @@ const DLRStandings = (() => {
     initPlayoffs,
     _mflLoadWeek,
     _mflLoadBracket,
+    _toggleMatchupDetail,
     _showAllDivisions: () => {} // placeholder if needed
   };
 
