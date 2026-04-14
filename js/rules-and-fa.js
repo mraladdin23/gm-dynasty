@@ -363,6 +363,13 @@ const DLRFreeAgents = (() => {
 
   // ── MFL Players tab ───────────────────────────────────────
   async function _loadMFLRosterData(leagueId, token) {
+    // Load DLRPlayers FIRST — MFLAPI.getRoster() and getPlayers() both call
+    // DLRPlayers.getByMflId() internally to resolve sleeperId. If mappings aren't
+    // loaded yet, sleeperId comes back null for every player and gets baked into
+    // the sessionStorage cache, breaking photos until the cache is cleared.
+    await DLRPlayers.load();
+    if (token !== _initToken) return;
+
     const bundle = await MFLAPI.getLeagueBundle(leagueId, _season);
     if (token !== _initToken) return;
 
@@ -372,20 +379,21 @@ const DLRFreeAgents = (() => {
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
     _rosterLookup = {};
-    const rostered = new Set();
+    const rostered  = new Set();
+    const irIds     = new Set();   // mfl_XXXX keys on IR
+    const taxiIds   = new Set();   // mfl_XXXX keys on Taxi
 
     // getRoster is async — must await each call (uses session-cached player universe)
     await Promise.all(teams.map(async t => {
       const players = await MFLAPI.getRoster(bundle, t.id, _season);
       players.forEach(p => {
-        rostered.add(`mfl_${p.id}`);
-        _rosterLookup[`mfl_${p.id}`] = t.name || `Team ${t.id}`;
+        const key = `mfl_${p.id}`;
+        rostered.add(key);
+        _rosterLookup[key] = t.name || `Team ${t.id}`;
+        if (p.status === "IR")   irIds.add(key);
+        if (p.status === "TAXI") taxiIds.add(key);
       });
     }));
-    if (token !== _initToken) return;
-
-    // Ensure DLRPlayers (Sleeper DB + DynastyProcess mappings) are loaded
-    await DLRPlayers.load();
     if (token !== _initToken) return;
 
     // Fetch Sleeper stats for selected year (for cross-platform consistency)
@@ -428,8 +436,10 @@ const DLRFreeAgents = (() => {
       // Sleeper record when a mapping exists; returns CSV-only bio as fallback.
       const full = DLRPlayers.getFullPlayer(mflId, "mfl");
 
-      // Resolve Sleeper ID for photo + historical stats (already in mflPlayerUniverse)
-      const sleeperId = p.sleeperId || null;
+      // Resolve Sleeper ID for photo + historical stats.
+      // Prefer getSleeperIdFromMfl (DynastyProcess CSV mapping) — more reliable than
+      // the name-match fallback getPlayers() uses. Fall back to whatever getPlayers() resolved.
+      const sleeperId = DLRPlayers.getSleeperIdFromMfl(mflId) || p.sleeperId || null;
 
       // Points: use Sleeper historical stats keyed by sleeperId, then MFL YTD
       const sleeperPts = sleeperId ? (sleeperStats[sleeperId]?.pts_ppr || null) : null;
@@ -453,6 +463,7 @@ const DLRFreeAgents = (() => {
         status:     full.injury_status || null,
         isRostered: rostered.has(`mfl_${mflId}`),
         rosterTeam: _rosterLookup[`mfl_${mflId}`] || null,
+        rosterSlot: irIds.has(`mfl_${mflId}`) ? "IR" : taxiIds.has(`mfl_${mflId}`) ? "TAXI" : null,
         isWon:      false,
         _mflId:     mflId,
       };
@@ -650,7 +661,7 @@ const DLRFreeAgents = (() => {
           <div class="fa-pos-dot" style="background:${color}22;color:${color};border-color:${color}55">${p.pos}</div>
           <div class="fa-info">
             <div class="fa-name">${_esc(p.name)}${p.status ? ` <span class="fa-injury">${p.status}</span>` : ""}</div>
-            <div class="fa-meta">${p.team !== "FA" ? p.team : "Free Agent"}${p.age ? ` · Age ${p.age}` : ""}${p.isRostered ? ` · <span style="color:var(--color-text-dim)">${_esc(p.rosterTeam||"Rostered")}</span>` : ""}</div>
+            <div class="fa-meta">${p.team !== "FA" ? p.team : "Free Agent"}${p.age ? ` · Age ${p.age}` : ""}${p.rosterSlot === "IR" ? ` · <span style="color:var(--color-red);font-weight:600">🏥 IR</span>` : p.rosterSlot === "TAXI" ? ` · <span style="color:var(--color-gold);font-weight:600">🚕 Taxi</span>` : p.isRostered ? ` · <span style="color:var(--color-text-dim)">${_esc(p.rosterTeam||"Rostered")}</span>` : ""}</div>
           </div>
           <div class="fa-stats">
             <div class="fa-stat-val">${_sortMode === "pts" ? pts : rank}</div>
