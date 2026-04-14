@@ -390,6 +390,7 @@ const DLRRoster = (() => {
       if (!SKILL.includes(pos)) return;
 
       const fullPlayer = DLRPlayers.getFullPlayer(mflId, "mfl");
+      const pos = (fullPlayer.position || p.pos || "?").toUpperCase();
 
       playerLookup[`mfl_${mflId}`] = {
         pid:        `mfl_${mflId}`,
@@ -406,11 +407,11 @@ const DLRRoster = (() => {
         isWon:      false,
         _sleeperId: DLRPlayers.getSleeperIdFromMfl(mflId)
       };
-    });
+    };
     });
 
     // Merge into _players
-    Object.assign(_players, mflPlayerLookup);
+    Object.assign(_players, playerLookup);
 
     _rosterData = { teams, league: MFLAPI.getLeagueInfo(bundle) };
     _filter = "all";
