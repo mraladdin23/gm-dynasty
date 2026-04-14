@@ -1811,6 +1811,17 @@ select option { background: var(--color-bg-2); }
   white-space: nowrap;
 }
 
+.draft-order-row > .draft-pick {
+  min-height: 0;        /* 🔥 overrides the 72px */
+  height: 100%;
+  flex-direction: row;  /* prevent vertical stacking stretch */
+}
+
+.draft-order-row > .draft-team,
+.draft-order-row > .draft-maxpf {
+  height: 100%;
+}
+
 /* Loading/error states */
 .detail-loading {
   display: flex;
