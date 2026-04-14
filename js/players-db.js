@@ -59,36 +59,51 @@ const DLRPlayers = (() => {
   }
 
   // ── Height formatter (inches → 6'0") ──────────────────────
-  function formatHeight(inches) {
-    if (!inches) return "";
+function formatHeight(inches) {
+    if (!inches || isNaN(inches)) return "";
     const ft = Math.floor(inches / 12);
-    const ins = inches % 12;
+    const ins = Math.round(inches % 12);
     return `${ft}'${ins}"`;
   }
 
-  // Enhanced bio (uses mapping when Sleeper is incomplete)
+// ── Years experience from draft year ─────────────────────
+  function getYearsExperience(draftYear) {
+    if (!draftYear || isNaN(draftYear)) return null;
+    const currentYear = new Date().getFullYear();
+    const exp = currentYear - parseInt(draftYear);
+    return exp <= 0 ? "Rookie" : `Yr ${exp + 1}`;
+  }
+
+// ── Enhanced formatBio (works for both Sleeper and mapped players) ──
   function formatBio(p, mapping = null) {
     const parts = [];
+
+    // Age
     const age = p.age ?? (mapping?.age ? parseFloat(mapping.age) : null);
     if (age != null) parts.push(`Age ${Math.floor(age)}`);
 
-    const h = p.height ?? (mapping?.height ? formatHeight(parseInt(mapping.height)) : null);
-    if (h) parts.push(h);
+    // Height (prefer formatted)
+    const heightInches = p.height ?? (mapping?.height ? parseInt(mapping.height) : null);
+    if (heightInches) parts.push(formatHeight(heightInches));
 
-    const w = p.weight ?? mapping?.weight;
-    if (w) parts.push(`${w} lbs`);
+    // Weight
+    const weight = p.weight ?? (mapping?.weight ? parseInt(mapping.weight) : null);
+    if (weight) parts.push(`${weight} lbs`);
 
+    // College
     if (p.college || mapping?.college) parts.push(p.college || mapping.college);
 
-    const dy = mapping?.draft_year ? parseInt(mapping.draft_year) : null;
-    if (dy) {
-      const exp = new Date().getFullYear() - dy;
-      parts.push(exp <= 0 ? "Rookie" : `Yr ${exp + 1}`);
+    // Experience / Draft Year
+    const draftYear = mapping?.draft_year ? parseInt(mapping.draft_year) : null;
+    if (draftYear) {
+      parts.push(getYearsExperience(draftYear));
+    } else if (p.years_exp != null) {
+      const exp = parseInt(p.years_exp);
+      parts.push(exp === 0 ? "Rookie" : `Yr ${exp + 1}`);
     }
 
     return parts.length ? parts.join(" · ") : null;
   }
-
   // ── Load both Sleeper + Mappings ──────────────────────────
   async function load(force = false) {
     if (_sleeperCache && _mappings && !force) return _sleeperCache;

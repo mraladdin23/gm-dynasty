@@ -131,15 +131,31 @@ const DLRPlayerCard = (() => {
     modal.addEventListener("click", e => { if (e.target === modal) close(); });
   }
 
-  // ── Render header ─────────────────────────────────────────
+// ── Render header ─────────────────────────────────────────
   function _renderHeader(p, playerId, fallbackName) {
-    const name  = p.first_name ? `${p.first_name} ${p.last_name}` : (fallbackName || "Unknown");
-    const pos   = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
-    const team  = p.team || "FA";
+    // Use enriched player data (handles MFL via mapping)
+    const enriched = playerId && playerId.toString().startsWith("mfl_") 
+      ? DLRPlayers.getFullPlayer(playerId.replace("mfl_", ""), "mfl")
+      : (p || DLRPlayers.get(playerId) || {});
+
+    const name  = enriched.first_name 
+      ? `${enriched.first_name} ${enriched.last_name}`.trim() 
+      : (fallbackName || "Unknown");
+
+    const pos   = (enriched.fantasy_positions?.[0] || enriched.position || "—").toUpperCase();
+    const team  = enriched.team || "FA";
     const color = POS_COLOR[pos] || "#9ca3af";
 
     const photoEl = document.getElementById("pc-photo");
-    if (playerId && photoEl) photoEl.src = `https://sleepercdn.com/content/nfl/players/${playerId}.jpg`;
+    if (photoEl) {
+      const sleeperId = DLRPlayers.getSleeperIdFromMfl(playerId?.replace("mfl_", "")) 
+                     || (playerId && !playerId.toString().startsWith("mfl_") ? playerId : null);
+      if (sleeperId) {
+        photoEl.src = `https://sleepercdn.com/content/nfl/players/${sleeperId}.jpg`;
+      } else {
+        photoEl.style.display = "none";
+      }
+    }
 
     const posEl = document.getElementById("pc-pos-badge");
     if (posEl) {
@@ -151,24 +167,29 @@ const DLRPlayerCard = (() => {
 
     const nameEl = document.getElementById("pc-name");
     if (nameEl) nameEl.textContent = name;
+
     const teamEl = document.getElementById("pc-team");
     if (teamEl) teamEl.textContent = `${team} · ${pos}`;
 
-    // Bio using DLRPlayers.formatBio — handles all field formats
-    const bioStr = DLRPlayers.formatBio(p);
+    // Improved bio using mapping when needed
+    const mapping = playerId && playerId.toString().startsWith("mfl_") 
+      ? DLRPlayers.getByMflId(playerId.replace("mfl_", "")) 
+      : null;
+
+    const bioStr = DLRPlayers.formatBio(enriched, mapping);
     const alerts = [];
-    if (p.status && p.status !== "Active") alerts.push(`⚠️ ${p.status}`);
-    if (p.injury_status) alerts.push(`🏥 ${p.injury_status}`);
+    if (enriched.status && enriched.status !== "Active") alerts.push(`⚠️ ${enriched.status}`);
+    if (enriched.injury_status) alerts.push(`🏥 ${enriched.injury_status}`);
 
     const bioEl = document.getElementById("pc-bio");
     if (bioEl) {
       bioEl.innerHTML =
-        (bioStr    ? `<div>${bioStr}</div>` : "") +
+        (bioStr ? `<div>${bioStr}</div>` : "") +
         (alerts.length ? `<div style="color:var(--color-red);font-size:.75rem;margin-top:3px;">${alerts.join(" · ")}</div>` : "") +
         (!bioStr && !alerts.length ? `<div style="color:var(--color-text-dim);font-size:.78rem;">Bio not available</div>` : "");
     }
 
-    // Year tabs
+    // Year tabs (unchanged)
     const tabsEl = document.getElementById("pc-year-tabs");
     if (tabsEl) {
       tabsEl.innerHTML = YEARS.map(y =>
