@@ -865,7 +865,7 @@ function assignStartersToSlots(slots, players, playerLookup) {
   }));
 
   const used   = new Array(enriched.length).fill(false);
-  const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));
+  const result = slots.map(slot => ({ slot, displaySlot: slot, player: null }));   // ← displaySlot starts as the slot name
 
   const named = result.map((r, i) => i).filter(i => !FLEX_SLOTS.has(result[i].slot));
   const sf    = result.map((r, i) => i).filter(i => result[i].slot === "SF");
@@ -880,8 +880,7 @@ function assignStartersToSlots(slots, players, playerLookup) {
       if (validSlots.includes(slot)) {
         result[si].player = enriched[pi];
         used[pi] = true;
-        // ── REMOVED: do NOT override displaySlot with player's pos ──
-        // FLEX/SF slots now correctly display "FLEX" or "SF"
+        // Do NOT override displaySlot for FLEX/SF — keep the league-defined slot name
         break;
       }
     }
