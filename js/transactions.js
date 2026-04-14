@@ -432,15 +432,15 @@ const DLRTransactions = (() => {
       // Drop block — pipe-delimited; numeric tokens = FAAB, non-numeric = dropped pid
       let droppedPid = null;
       let faab       = null;
+
       if (dropStr) {
-        dropStr.split("|").map(s => s.replace(/,$/, "").trim()).filter(Boolean)
-          .forEach(part => {
-            if (/^\d+(\.\d+)?$/.test(part)) {
-              if (!faab) faab = part;
-            } else {
-              droppedPid = part;
-            }
-          });
+        const parts = dropStr
+        .split("|")
+        .map(s => s.replace(/,$/, "").trim())
+        .filter(Boolean);
+
+        if (parts.length >= 1) faab = parts[0];
+        if (parts.length >= 2) droppedPid = parts[1];
       }
 
       return { addedPids, droppedPid, faab };
