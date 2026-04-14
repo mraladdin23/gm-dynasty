@@ -506,14 +506,14 @@ async function _loadMFLDraft(leagueId, season, token) {
   const teamMap = {};
   teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-  // Division name map — this is what makes the pills show real names
+  // Division name map
   const { divisions } = MFLAPI.getDivisions(bundle);
   const divNameMap = {};
   divisions.forEach(d => {
     divNameMap[String(d.id)] = d.name || `Division ${d.id}`;
   });
 
-  // Safe array conversion (MFL sometimes returns a single object instead of array)
+  // Safe array conversion
   let unitArr = bundle.draft?.draftResults?.draftUnit || [];
   if (!Array.isArray(unitArr)) unitArr = unitArr ? [unitArr] : [];
 
@@ -525,15 +525,11 @@ async function _loadMFLDraft(leagueId, season, token) {
     const divId    = String(unit.unit || unit.division || unit.id || "");
     const divLabel = divNameMap[divId] || "";
     const rawLabel = unit.name || unit.unit || "";
-
-    // Prioritize division name, then unit name, then generic fallback
     let label = divLabel;
     if (!label && rawLabel && rawLabel !== "LEAGUE" && rawLabel.trim() !== "") label = rawLabel;
     if (!label) label = i === 0 ? "Startup" : `Draft ${i + 1}`;
 
-    const rawPicks = unit.draftPick
-      ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick])
-      : [];
+    const rawPicks = unit.draftPick ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]) : [];
     const picks = rawPicks.map(p => ({
       id:        String(p.player || p.playerId || ""),
       round:     Number(p.round || 0),
@@ -564,8 +560,7 @@ async function _loadMFLDraft(leagueId, season, token) {
 
   Object.keys(auctionByDiv).forEach((divId, i) => {
     const divLabel = divNameMap[divId] || "";
-    let label = divLabel;
-    if (!label) label = `Auction ${i + 1}`;
+    let label = divLabel || `Auction ${i + 1}`;
     const picks = auctionByDiv[divId].map(p => ({
       id:        String(p.player || p.playerId || ""),
       franchise: String(p.franchise || p.franchiseId || ""),
@@ -587,12 +582,11 @@ async function _loadMFLDraft(leagueId, season, token) {
     });
   }
 
-  // Flatten + defaults
   const allPicks  = draftSets.flatMap(s => s.picks);
   const salaryArr = auctionSets.flatMap(s => s.picks);
 
   const hasAuction = auctionSets.length > 0;
-  const hasDraft   = draftSets.length  > 0;
+  const hasDraft   = draftSets.length > 0;
 
   const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
 
@@ -617,14 +611,15 @@ async function _loadMFLDraft(leagueId, season, token) {
   };
 
   // Default view
-  if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
-  if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
+  if (_viewMode === "draft" && !hasDraft && hasAuction) _viewMode = "auction";
+  if (_viewMode === "auction" && !hasAuction && hasDraft) _viewMode = "draft";
   if (_viewMode !== "draft" && _viewMode !== "auction") {
     _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
   }
 
   _renderMFLDraftBoard(el);
 }
+
 
 
 function _renderMFLDraftBoard(el) {
