@@ -303,6 +303,7 @@ All MFL API responses go through `r.text()` then `JSON.parse()` in a try/catch. 
 62. rules-and-fa.js — MFL Players tab: photo resolved via `DLRPlayers.getSleeperIdFromMfl()` first (more reliable than name-match fallback). IR/Taxi tracked via `irIds`/`taxiIds` Sets from `MFLAPI.getRoster()` `p.status`; shown as 🏥 IR / 🚕 Taxi badge in player list.
 63. playercard.js — Added `_statsId` (resolved Sleeper ID) alongside `_playerId`. Any ID format works as input. Photo and stats always use `_statsId`. Clean "No Sleeper stats" message when no mapping exists.
 64. draft.js — MFL pick clicks: `window.open(mfl.com)` fallback replaced with `DLRPlayerCard.show('mfl_${pid}', name)` in both list and grid view.
+65. transactions.js — Fixed the MFL parsing of transactions so that API correctly parses adds, drops and trades.
 
 ---
 
