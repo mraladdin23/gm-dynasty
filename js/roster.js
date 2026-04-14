@@ -178,7 +178,7 @@ const DLRRoster = (() => {
     const taxiSet    = new Set(team.taxi);
     const mainRoster = team.players.filter(id => !reserveSet.has(id) && !taxiSet.has(id));
 
-    // Group main roster by position, sorted by Sleeper rank within group
+    // Group main roster by position, sorted by rank within group
     const byPos = {};
     POS_ORDER.forEach(p => { byPos[p] = []; });
     byPos["—"] = [];
@@ -251,27 +251,56 @@ const DLRRoster = (() => {
       </div>`;
   }
 
+  // ── Player row — works for Sleeper, MFL, and Yahoo IDs ───
   function _playerRowHTML(playerId, slot) {
-    const p = DLRPlayers.getFullPlayer(playerId.replace("mfl_", ""), "mfl");
-    const name = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : playerId;
-    const pos  = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
-    const nflTeam = p.team || "FA";
-    const color = POS_COLOR[pos] || "#9ca3af";
-    const dim      = slot === "ir" || slot === "taxi";
+    const isMfl   = playerId?.toString().startsWith("mfl_");
+    const isYahoo = playerId?.toString().startsWith("yahoo_");
 
-    const sleeperId = DLRPlayers.getSleeperIdFromMfl(playerId.replace("mfl_", "")) || null;
-    const photoHTML = sleeperId 
-      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${sleeperId}.jpg" onerror="this.style.display='none'" loading="lazy" />`
+    // Resolve best available player object via DLRPlayers
+    let p;
+    if (isMfl) {
+      const mflId = playerId.replace("mfl_", "");
+      p = DLRPlayers.getFullPlayer(mflId, "mfl");
+    } else if (isYahoo) {
+      // Yahoo IDs don't map to DynastyProcess — use the stub in _players if present
+      p = _players[playerId] || {};
+    } else {
+      // Sleeper: prefer full Sleeper record from the loaded DB
+      p = _players[playerId] || DLRPlayers.get(playerId) || {};
+    }
+
+    const name    = p.first_name ? `${p.first_name} ${p.last_name}`.trim() : playerId;
+    const pos     = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
+    const nflTeam = p.team || "FA";
+    const color   = POS_COLOR[pos] || "#9ca3af";
+
+    // Photo: resolve Sleeper CDN ID for all platforms
+    let photoPid = null;
+    if (isMfl) {
+      photoPid = DLRPlayers.getSleeperIdFromMfl(playerId.replace("mfl_", "")) || null;
+    } else if (!isYahoo) {
+      photoPid = playerId;  // Sleeper ID is already the photo key
+    }
+
+    const photoHTML = photoPid
+      ? `<img src="https://sleepercdn.com/content/nfl/players/thumb/${photoPid}.jpg" onerror="this.style.display='none'" loading="lazy" />`
       : `<div class="roster-player-photo-fallback" style="color:${color};">${pos}</div>`;
 
+    // Player card click: use photoPid (Sleeper ID) when available, otherwise full prefixed ID
+    const cardId = photoPid || playerId;
+
+    // Bio string via DLRPlayers.formatBio — works for both Sleeper and CSV-mapped players
+    const mapping = isMfl ? DLRPlayers.getByMflId(playerId.replace("mfl_", "")) : null;
+    const bioStr  = DLRPlayers.formatBio(p, mapping);
+
     return `
-      <div class="roster-player-row" onclick="DLRPlayerCard.show('${sleeperId || playerId}','${_escAttr(name)}')">
+      <div class="roster-player-row" onclick="DLRPlayerCard.show('${_escAttr(cardId)}','${_escAttr(name)}')">
         <div class="roster-player-photo">${photoHTML}</div>
         <div class="roster-player-info">
           <div class="roster-player-name">${_esc(name)}</div>
           <div class="roster-player-meta">
             <span class="roster-nfl-team">${nflTeam}</span>
-            ${DLRPlayers.formatBio(p) ? `<span class="roster-bio dim">${DLRPlayers.formatBio(p)}</span>` : ""}
+            ${bioStr ? `<span class="roster-bio dim">${bioStr}</span>` : ""}
           </div>
         </div>
       </div>`;
@@ -312,7 +341,7 @@ const DLRRoster = (() => {
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Yahoo player IDs don't match Sleeper — show name as ID for now
+    // Yahoo player IDs don't map to DynastyProcess — stub entries so _playerRowHTML degrades gracefully
     const yahooPlayerLookup = {};
     mappedTeams.forEach(t => {
       t.players.forEach(pid => {
@@ -333,28 +362,26 @@ const DLRRoster = (() => {
   }
 
   async function _loadMFLData(leagueId, token) {
-    const el     = document.getElementById("dtab-roster");
     const season = _season || new Date().getFullYear().toString();
 
-    _players = await DLRPlayers.load();
+    // Load DLRPlayers (Sleeper DB + DynastyProcess mappings) first
+    await DLRPlayers.load();
     if (token !== _initToken) return;
 
     // Single bundle fetch — contains everything
-    // getLeagueBundle accepts positional args (leagueId, year) or object
     const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
     // Use MFLAPI helpers to normalize the raw worker response
     const bundleTeams  = MFLAPI.getTeams(bundle);
     const standingsMap = MFLAPI.getStandingsMap(bundle);
-    const playerScores = MFLAPI.getPlayerScores(bundle);  // { mflId: ytdPoints }
 
-    // Fetch once for all rosters — session-cached, includes name/pos/team/sleeperId
+    // Pre-warm session-cached player universe (used by getRoster internally)
     await MFLAPI.getPlayers(season);
+    if (token !== _initToken) return;
 
     const teams = await Promise.all(bundleTeams.map(async t => {
       const s = standingsMap[t.id] || {};
-      // getRoster is now async (uses session-cached player universe)
       const mflPlayers = await MFLAPI.getRoster(bundle, t.id, season);
 
       const mainRoster = mflPlayers.filter(p => p.status !== "IR" && p.status !== "TAXI");
@@ -376,42 +403,13 @@ const DLRRoster = (() => {
         fpts:      s.ptsFor || 0
       };
     }));
+    if (token !== _initToken) return;
+
     teams.sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Build a local player lookup from resolved roster data.
-    // name and sleeperId are already resolved by getRoster() via getPlayers() —
-    // no need to re-derive from raw MFL name format.
-    const playerLookup = {};
-    let mflPlayerUniverse = await MFLAPI.getPlayers(_season);
-
-    Object.entries(mflPlayerUniverse).forEach(([mflId, p]) => {
-      if (!mflId) return;
-      const pos = (p.pos || p.position || "?").toUpperCase();
-      if (!SKILL.includes(pos)) return;
-
-      const fullPlayer = DLRPlayers.getFullPlayer(mflId, "mfl");
-      const pos = (fullPlayer.position || p.pos || "?").toUpperCase();
-
-      playerLookup[`mfl_${mflId}`] = {
-        pid:        `mfl_${mflId}`,
-        photoPid:   DLRPlayers.getSleeperIdFromMfl(mflId) || null,
-        name:       fullPlayer.first_name ? `${fullPlayer.first_name} ${fullPlayer.last_name}`.trim() : (p.name || `Player ${mflId}`),
-        pos,
-        team:       fullPlayer.team || "FA",
-        rank:       fullPlayer.search_rank || 9999,
-        pts:        fullPlayer.pts_season || null,
-        age:        fullPlayer.age,
-        status:     fullPlayer.injury_status || null,
-        isRostered: rostered.has(`mfl_${mflId}`),
-        rosterTeam: _rosterLookup[`mfl_${mflId}`] || null,
-        isWon:      false,
-        _sleeperId: DLRPlayers.getSleeperIdFromMfl(mflId)
-      };
-    };
-    });
-
-    // Merge into _players
-    Object.assign(_players, playerLookup);
+    // _playerRowHTML resolves each player on-demand via DLRPlayers.getFullPlayer()
+    // so no separate player lookup map is needed here — _players stays as the
+    // Sleeper DB loaded above, and MFL IDs fall through to getFullPlayer().
 
     _rosterData = { teams, league: MFLAPI.getLeagueInfo(bundle) };
     _filter = "all";

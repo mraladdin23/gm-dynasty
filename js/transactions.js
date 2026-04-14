@@ -264,32 +264,18 @@ const DLRTransactions = (() => {
     const teamMap = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build player name/pos lookup using the session-cached player universe.
-    // bundle.players is intentionally excluded from the bundle (too large ~500KB).
-    // MFLAPI.getPlayers() fetches once per session from /mfl/players and caches it.
-    const mflPlayerMap = {};
+    // Load DynastyProcess mappings + Sleeper DB so getFullPlayer() works
+    await DLRPlayers.load();
+    if (tok !== _token) return;
+
+    // Load session-cached MFL player universe (name, pos, team, sleeperId per mflId)
+    let mflPlayerMap = {};
     try {
-      const playerUniverse = await MFLAPI.getPlayers(_season);
+      mflPlayerMap = await MFLAPI.getPlayers(_season);
       if (tok !== _token) return;
-      // playerUniverse is keyed by mflId → { name, pos, team, sleeperId }
-      Object.entries(playerUniverse).forEach(([id, p]) => {
-        if (!id) return;
-        // Convert from getPlayers() shape back to the rawName/position shape _loadMFLData expects
-        // getPlayers() returns name already in "First Last" display format
-        mflPlayerMap[id] = {
-          rawName:  p.name || "",           // already display format — mflNameToSleeperId handles both
-          name:     p.name || `Player ${id}`,
-          position: (p.pos || p.position || "").toUpperCase()
-        };
-      });
     } catch(e) {
       console.warn("[Transactions] MFL player universe load failed:", e.message);
     }
-
-    // Load Sleeper player DB first so mflPid() can resolve Sleeper data
-    if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
-    else _players = { ..._players, ...DLRPlayers.all() };
-    if (tok !== _token) return;
 
     // Supplement mflPlayerMap with names from rosters if players endpoint was empty
     if (Object.keys(mflPlayerMap).length < 10) {
@@ -300,7 +286,13 @@ const DLRTransactions = (() => {
           const players = fr.player ? (Array.isArray(fr.player) ? fr.player : [fr.player]) : [];
           players.forEach(p => {
             if (p.id && !mflPlayerMap[p.id]) {
-              mflPlayerMap[p.id] = { rawName: p.name || "", name: MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`, position: (p.position||"").toUpperCase() };
+              mflPlayerMap[p.id] = {
+                name:      MFLAPI.mflNameToDisplay(p.name) || `Player ${p.id}`,
+                pos:       (p.position || "").toUpperCase(),
+                position:  (p.position || "").toUpperCase(),
+                team:      p.team || "FA",
+                sleeperId: null,
+              };
             }
           });
         });
@@ -325,30 +317,41 @@ const DLRTransactions = (() => {
       username:  ""
     })).sort((a,b) => a.teamName.localeCompare(b.teamName));
 
-    // Resolve a MFL player ID to a synthetic key, populating _players for the chip renderer
+    // Resolve a MFL player ID → synthetic key, injecting a player record into _players
+    // for the _chip() renderer. Uses DLRPlayers.getFullPlayer() (DynastyProcess CSV +
+    // Sleeper DB) as the primary source — no fuzzy name matching.
     function mflPid(pid) {
-      const entry   = mflPlayerMap[pid] || {};
-      const rawName = entry.rawName || entry.name || `Player ${pid}`;  // raw = "Last, First"
-      const pos     = entry.position || "";
-
-      // Use raw MFL name format for Sleeper lookup ("Last, First" → matched correctly)
-      const sid  = MFLAPI.mflNameToSleeperId(rawName, pos);
-      const synId = sid || `mfl_${pid}`;
+      // mflPlayerMap[pid].sleeperId was already resolved by MFLAPI.getPlayers()
+      // via DLRPlayers.getByMflId(), so we trust it directly.
+      const entry    = mflPlayerMap[pid] || {};
+      const sleeperId = entry.sleeperId || null;
+      const synId    = sleeperId ? sleeperId : `mfl_${pid}`;
 
       if (!_players[synId]) {
-        const sp = sid ? DLRPlayers.get(sid) : null;
-        if (sp && sp.first_name) {
-          // Use full Sleeper player record — gives photo, pos color, injury status
-          _players[synId] = sp;
-        } else {
-          // Fallback: synthetic entry from MFL data
-          const displayName = MFLAPI.mflNameToDisplay(rawName);
-          _players[synId] = {
-            first_name:        displayName.split(" ")[0] || displayName,
-            last_name:         displayName.split(" ").slice(1).join(" ") || "",
-            position:          pos,
-            fantasy_positions: [pos],
-          };
+        if (sleeperId) {
+          // Prefer the Sleeper DB record — gives photo key, injury status, etc.
+          const sp = DLRPlayers.get(sleeperId);
+          if (sp && sp.first_name) {
+            _players[synId] = sp;
+          }
+        }
+
+        if (!_players[synId]) {
+          // Fall back to DLRPlayers.getFullPlayer() which merges the DynastyProcess
+          // CSV bio (age, height, college) with whatever Sleeper data exists.
+          const full = DLRPlayers.getFullPlayer(pid, "mfl");
+          if (full?.first_name) {
+            _players[synId] = full;
+          } else {
+            // Last resort: stub from mflPlayerMap name
+            const n = entry.name || `Player ${pid}`;
+            _players[synId] = {
+              first_name:        n.split(" ")[0] || n,
+              last_name:         n.split(" ").slice(1).join(" ") || "",
+              position:          entry.pos || entry.position || "?",
+              fantasy_positions: [entry.pos || entry.position || "?"],
+            };
+          }
         }
       }
       return synId;
@@ -365,37 +368,37 @@ const DLRTransactions = (() => {
     };
 
     _allTx = txArr
-      .filter(tx => MFL_TYPE_MAP[tx.type])  // drop IR, TAXI, AUCTION_WON, WAIVER_REQUEST, etc.
+      .filter(tx => MFL_TYPE_MAP[tx.type])
       .map(tx => {
-      const type       = MFL_TYPE_MAP[tx.type] || "free_agent";
-      const franchId   = tx.franchise || tx.franchises || "";
-      const ts         = Number(tx.timestamp || 0) * 1000;
+        const type       = MFL_TYPE_MAP[tx.type] || "free_agent";
+        const franchId   = tx.franchise || tx.franchises || "";
+        const ts         = Number(tx.timestamp || 0) * 1000;
 
-      // Parse "pid|fid,pid|fid" strings
-      function parsePairs(str) {
-        if (!str) return [];
-        return str.split(",").map(p => { const [pid] = p.split("|"); return pid; }).filter(Boolean);
-      }
-      const addedPids   = parsePairs(tx.transaction);
-      const droppedPids = parsePairs(tx.dropped);
+        // Parse "pid|fid,pid|fid" strings
+        function parsePairs(str) {
+          if (!str) return [];
+          return str.split(",").map(p => { const [pid] = p.split("|"); return pid; }).filter(Boolean);
+        }
+        const addedPids   = parsePairs(tx.transaction);
+        const droppedPids = parsePairs(tx.dropped);
 
-      const adds  = {};
-      const drops = {};
-      addedPids.forEach(pid  => { adds[mflPid(pid)]  = franchId; });
-      droppedPids.forEach(pid => { drops[mflPid(pid)] = franchId; });
+        const adds  = {};
+        const drops = {};
+        addedPids.forEach(pid   => { adds[mflPid(pid)]  = franchId; });
+        droppedPids.forEach(pid => { drops[mflPid(pid)] = franchId; });
 
-      return {
-        type,
-        created:    ts,
-        status:     "complete",
-        roster_ids: [franchId],
-        adds,
-        drops,
-        draft_picks: [],
-        settings:   { waiver_bid: tx.bid ? Number(tx.bid) : undefined },
-        _mflType:   tx.type,   // keep raw MFL type for display
-      };
-    }).sort((a,b) => b.created - a.created);
+        return {
+          type,
+          created:    ts,
+          status:     "complete",
+          roster_ids: [franchId],
+          adds,
+          drops,
+          draft_picks: [],
+          settings:   { waiver_bid: tx.bid ? Number(tx.bid) : undefined },
+          _mflType:   tx.type,
+        };
+      }).sort((a,b) => b.created - a.created);
 
     _renderView(el);
   }
