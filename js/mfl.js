@@ -399,7 +399,6 @@ const MFLAPI = (() => {
   // ── Cached MFL player universe ───────────────────────────
   // Fetched once per session from /mfl/players and stored in sessionStorage.
   // Key is year-scoped so rookies are always current within a browser session.
-  let _playersMemCache = null;  // in-memory reference for the current page load
 
  let _playersMemCache = null;
 
