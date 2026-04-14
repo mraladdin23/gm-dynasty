@@ -693,6 +693,31 @@ const MFLAPI = (() => {
   }
 
   /**
+   * For guillotine leagues: when 2 teams remain and both show eliminated:"",
+   * resolves winner vs last-eliminated using liveScoring total scores.
+   * Pass aliveTeamIds = [id1, id2] and liveData from getLiveScoring.
+   * Returns { winnerId, eliminatedId } or null if unresolvable.
+   */
+  function resolveGuillotineFinal(aliveTeamIds, liveData) {
+    if (!Array.isArray(aliveTeamIds) || aliveTeamIds.length !== 2) return null;
+    const ls  = liveData?.liveScoring;
+    if (!ls) return null;
+    const raw = ls.franchise;
+    if (!raw) return null;
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const scores = {};
+    arr.forEach(f => {
+      const id = String(f.id || "");
+      if (aliveTeamIds.includes(id)) scores[id] = parseFloat(f.score || 0);
+    });
+    const [a, b] = aliveTeamIds;
+    if (scores[a] == null || scores[b] == null) return null;
+    const winnerId     = scores[a] >= scores[b] ? a : b;
+    const eliminatedId = winnerId === a ? b : a;
+    return { winnerId, eliminatedId };
+  }
+
+  /**
    * Debug helper — inspect raw bundle from the browser console:
    *   MFLAPI.debugBundle("LEAGUE_ID", "2025").then(r => console.log(JSON.stringify(r._paths, null, 2)))
    */
@@ -735,44 +760,101 @@ const MFLAPI = (() => {
 
   /**
    * Returns playoff brackets metadata from bundle.playoffBrackets:
-   * [{ id, name, rounds, teams }]
+   * [{ id, name, startWeek, teams }]
+   *
+   * Real MFL shape:
+   *   bundle.playoffBrackets.playoffBrackets.playoffBracket[{id, name, startWeek, teamsInvolved}]
+   * (Note: the array key is "playoffBracket" not "bracket")
    */
   function normalizePlayoffBrackets(bundle) {
-    const raw = bundle?.playoffBrackets?.playoffBrackets?.bracket;
+    const pb  = bundle?.playoffBrackets?.playoffBrackets;
+    if (!pb) return [];
+    // Try both field names — "playoffBracket" is the real shape, "bracket" is legacy
+    const raw = pb.playoffBracket || pb.bracket;
     if (!raw) return [];
     const arr = Array.isArray(raw) ? raw : [raw];
     return arr.map(b => ({
-      id:     String(b.id     || b.bracket_id || ""),
-      name:   b.name          || `Bracket ${b.id || ""}`,
-      rounds: parseInt(b.rounds || 0),
-      teams:  parseInt(b.teams  || 0),
+      id:        String(b.id || b.bracket_id || ""),
+      name:      b.name || `Bracket ${b.id || ""}`,
+      startWeek: parseInt(b.startWeek || b.start_week || 0),
+      teams:     parseInt(b.teamsInvolved || b.teams || 0),
     }));
   }
 
   /**
    * Normalizes a full playoff bracket result from /mfl/playoffBracket response.
-   * Returns: [{ round, matchups: [{ home: {id, score, won}, away: {id, score, won} }] }]
    *
-   * MFL shape: { playoffBracket: { bracket: { round: [{matchup:[{away,home,winner}]}] } } }
+   * Real MFL shape:
+   *   { playoffBracket: {
+   *       bracket_id: "5",
+   *       playoffRound: [
+   *         { week: "15", playoffGame: [
+   *             { game_id:"1",
+   *               home: { franchise_id:"0006", points:"246.84", seed:"3" },
+   *               away: { franchise_id:"0001", points:"273.89", seed:"6" }
+   *             }, ...
+   *         ]},
+   *         { week: "16", playoffGame: [
+   *             { game_id:"3",
+   *               home: { franchise_id:"0012", points:"287.12", seed:"2" },
+   *               away: { franchise_id:"0001", winner_of_game:"1", points:"255.49" }
+   *             }, ...
+   *         ]}
+   *       ]
+   *   }}
+   *
+   * Returns: [{
+   *   round: N, week: "15",
+   *   matchups: [{
+   *     gameId, home: {id, score, seed, wonGameId, won}, away: {id, score, seed, wonGameId, won}
+   *   }]
+   * }]
    */
   function normalizePlayoffBracketResult(data) {
-    const raw = data?.playoffBracket?.bracket?.round;
-    if (!raw) return [];
-    const rounds = Array.isArray(raw) ? raw : [raw];
+    const pb = data?.playoffBracket;
+    if (!pb) return [];
+
+    // Support both old shape (bracket.round) and new real shape (playoffRound)
+    const rawRounds = pb.playoffRound || pb.bracket?.round;
+    if (!rawRounds) return [];
+
+    const rounds = Array.isArray(rawRounds) ? rawRounds : [rawRounds];
+
     return rounds.map((r, ri) => {
-      const matchups = Array.isArray(r.matchup) ? r.matchup : (r.matchup ? [r.matchup] : []);
-      return {
-        round: ri + 1,
-        matchups: matchups.map(m => {
-          const winner = String(m.winner || "");
-          const homeId = String(m.home?.id || m.home || "");
-          const awayId = String(m.away?.id || m.away || "");
-          return {
-            home: { id: homeId, score: parseFloat(m.home?.score || 0), won: winner === homeId },
-            away: { id: awayId, score: parseFloat(m.away?.score || 0), won: winner === awayId },
-          };
-        })
-      };
+      const rawGames = r.playoffGame || r.matchup;
+      const gamesArr = Array.isArray(rawGames) ? rawGames : (rawGames ? [rawGames] : []);
+
+      const matchups = gamesArr.map(g => {
+        const h = g.home || {};
+        const a = g.away || {};
+        // Real shape uses franchise_id; old shape used id
+        const hId    = String(h.franchise_id || h.id || "");
+        const aId    = String(a.franchise_id || a.id || "");
+        const hScore = parseFloat(h.points || h.score || 0);
+        const aScore = parseFloat(a.points || a.score || 0);
+        // Winner: compare scores if both played; respect explicit winner field if present
+        const hWon = hScore > 0 && aScore > 0 ? hScore > aScore : false;
+        const aWon = hScore > 0 && aScore > 0 ? aScore > hScore : false;
+        return {
+          gameId:   String(g.game_id || g.id || ""),
+          home: {
+            id:         hId,
+            score:      hScore,
+            seed:       h.seed ? parseInt(h.seed) : null,
+            wonGameId:  String(h.winner_of_game || ""),  // populated in later rounds
+            won:        hWon,
+          },
+          away: {
+            id:         aId,
+            score:      aScore,
+            seed:       a.seed ? parseInt(a.seed) : null,
+            wonGameId:  String(a.winner_of_game || ""),
+            won:        aWon,
+          },
+        };
+      });
+
+      return { round: ri + 1, week: String(r.week || ""), matchups };
     });
   }
 
@@ -835,6 +917,7 @@ const MFLAPI = (() => {
     getLeagueInfo,
     getAuctionResults,
     getAuctionResultsDirect,
+    resolveGuillotineFinal,
     buildMFLToSleeperIndex,
     mflNameToSleeperId,
     mflNameToDisplay,

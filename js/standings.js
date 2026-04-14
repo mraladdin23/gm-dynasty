@@ -502,7 +502,9 @@ const DLRStandings = (() => {
 
         const playerRows = (arr, isBench) => arr.map(p => {
           const pName = playerLookup ? (playerLookup[p.id]?.name || p.id) : p.id;
-          const pos   = p.position || "?";
+          // Position: liveScoring has no position field — resolve from playerLookup
+          const pos   = (playerLookup ? (playerLookup[p.id]?.pos || playerLookup[p.id]?.position) : null)
+                      || p.position || "?";
           const col   = POS_COLOR[pos] || "var(--color-text-dim)";
           return `<div class="mu-sbs-row${isBench ? " mu-sbs-row--bench" : ""}">
             <span class="mu-slot" style="color:${col}">${pos}</span>
@@ -585,7 +587,10 @@ const DLRStandings = (() => {
             let rows = "";
             for (let i = 0; i < maxSt; i++) {
               const ph = stH[i], pa = stA[i];
-              const pos = (ph?.position || pa?.position || "?");
+              const pos = playerLookup
+                ? (playerLookup[ph?.id]?.pos || playerLookup[ph?.id]?.position
+                || playerLookup[pa?.id]?.pos || playerLookup[pa?.id]?.position || "?")
+                : "?";
               const col = POS_COLOR[pos] || "var(--color-text-dim)";
               const ptsH = ph ? ph.score : null;
               const ptsA = pa ? pa.score : null;
@@ -1044,31 +1049,35 @@ const DLRStandings = (() => {
         standings.forEach((s, i) => { seedMap[String(s.franchiseId)] = i + 1; });
       }
 
-      function teamLabel(id) {
+      function teamLabel(id, seed) {
         if (!id) return "TBD";
-        const name = nameMap[id] || `Team ${id}`;
-        const seed = seedMap[id];
-        return `${_esc(name)}${seed ? ` <span class="seed-tag">#${seed}</span>` : ""}`;
+        const name     = nameMap[id] || `Team ${id}`;
+        const seedNum  = seed || seedMap[id];
+        const isMe     = _myRosterId && String(id) === String(_myRosterId);
+        const meStyle  = isMe ? " style='color:var(--color-gold);font-weight:700'" : "";
+        return `<span${meStyle}>${_esc(name)}</span>${seedNum ? ` <span class="seed-tag">#${seedNum}</span>` : ""}`;
       }
 
-      function bracketMatchCard(m) {
-        const hId  = m.home.id;
-        const aId  = m.away.id;
-        const hSc  = m.home.score;
-        const aSc  = m.away.score;
-        const hWon = m.home.won;
-        const aWon = m.away.won;
-        const decided  = hWon || aWon;
-        const isMe_h   = _myRosterId && hId && hId === String(_myRosterId);
-        const isMe_a   = _myRosterId && aId && aId === String(_myRosterId);
+      function bracketCard(m) {
+        const hId  = m.home.id, aId = m.away.id;
+        const hSc  = m.home.score, aSc = m.away.score;
+        const hWon = m.home.won,   aWon = m.away.won;
+        const decided = hWon || aWon;
+        const isMe_h  = _myRosterId && hId && String(hId) === String(_myRosterId);
+        const isMe_a  = _myRosterId && aId && String(aId) === String(_myRosterId);
+        // If id is empty but wonGameId is set, show "Winner of Game N" placeholder
+        const hLabel = hId ? teamLabel(hId, m.home.seed)
+          : m.home.wonGameId ? `<span class="dim">Winner of Game ${m.home.wonGameId}</span>` : "TBD";
+        const aLabel = aId ? teamLabel(aId, m.away.seed)
+          : m.away.wonGameId ? `<span class="dim">Winner of Game ${m.away.wonGameId}</span>` : "TBD";
         return `<div class="bracket-match">
           <div class="bracket-slot ${hWon ? "bracket-slot--win" : decided ? "bracket-slot--lose" : ""}${isMe_h ? " bracket-slot--me" : ""}">
-            <span class="bracket-team">${teamLabel(hId)}</span>
+            <span class="bracket-team">${hLabel}</span>
             ${hSc > 0 ? `<span class="bracket-score">${hSc.toFixed(1)}</span>` : ""}
             ${hWon ? '<span class="bracket-check">✓</span>' : ""}
           </div>
           <div class="bracket-slot ${aWon ? "bracket-slot--win" : decided ? "bracket-slot--lose" : ""}${isMe_a ? " bracket-slot--me" : ""}">
-            <span class="bracket-team">${teamLabel(aId)}</span>
+            <span class="bracket-team">${aLabel}</span>
             ${aSc > 0 ? `<span class="bracket-score">${aSc.toFixed(1)}</span>` : ""}
             ${aWon ? '<span class="bracket-check">✓</span>' : ""}
           </div>
@@ -1076,40 +1085,48 @@ const DLRStandings = (() => {
         </div>`;
       }
 
-      // Separate championship (last) round from earlier rounds
+      // Label rounds by position: first=Quarterfinals/First Round, last=Championship
+      // Use week numbers from the data to give context ("Week 15", "Week 16"…)
+      const totalRounds = rounds.length;
       const earlyRounds = rounds.slice(0, -1);
-      const finalRound  = rounds[rounds.length - 1];
+      const finalRound  = rounds[totalRounds - 1];
 
-      const roundLabels = ["First Round", "Quarterfinals", "Semifinals", "Semifinals"];
+      function roundLabel(r, ri) {
+        const remaining = totalRounds - 1 - ri;  // 0 = this IS the final
+        const weekLabel = r.week ? ` · Wk ${r.week}` : "";
+        if (remaining === 0) return `🏆 Championship${weekLabel}`;
+        if (remaining === 1 && totalRounds > 2) return `Semifinals${weekLabel}`;
+        if (remaining === 1) return `Semifinals${weekLabel}`;
+        if (remaining === 2) return `Quarterfinals${weekLabel}`;
+        return `Round ${r.round}${weekLabel}`;
+      }
 
       const cols = earlyRounds.map((r, ri) => {
-        const label = roundLabels[ri] || `Round ${r.round}`;
-        const games = r.matchups.map(m => bracketMatchCard(m)).join("");
+        const games = r.matchups.map(m => bracketCard(m)).join("");
         return `<div class="bracket-section">
-          <div class="bracket-section-label">${label}</div>
+          <div class="bracket-section-label">${roundLabel(r, ri)}</div>
           <div class="bracket-section-games">${games || '<div class="bracket-tbd">TBD</div>'}</div>
         </div>`;
       }).join("");
 
-      // Championship / finals — one game per "place" in the final round
-      // MFL final round may have multiple matchups (champ + consolation)
+      // Final round — handle 1 game (champ only) or multiple (champ + consolation)
       const finalMatchups = finalRound?.matchups || [];
       let finalsHTML = "";
+      const weekLabel = finalRound?.week ? ` · Wk ${finalRound.week}` : "";
       if (finalMatchups.length === 1) {
         finalsHTML = `<div class="bracket-finals">
           <div class="bracket-finals-game">
-            <div class="bracket-finals-label">🏆 Championship</div>
-            ${bracketMatchCard(finalMatchups[0])}
+            <div class="bracket-finals-label">🏆 Championship${weekLabel}</div>
+            ${bracketCard(finalMatchups[0])}
           </div>
         </div>`;
       } else if (finalMatchups.length > 1) {
-        // Multiple games in final round — label them Championship, 3rd, 5th...
-        const placeLabels = ["🏆 Championship", "🥉 3rd Place", "5th Place", "7th Place"];
+        const placeLabels = [`🏆 Championship${weekLabel}`, `🥉 3rd Place${weekLabel}`, `5th Place${weekLabel}`, `7th Place${weekLabel}`];
         finalsHTML = `<div class="bracket-finals">
           ${finalMatchups.map((m, i) => `
             <div class="bracket-finals-game">
               <div class="bracket-finals-label${i > 0 ? " place-" + (2*i+1) : ""}">${placeLabels[i] || `Place ${2*i+1}`}</div>
-              ${bracketMatchCard(m)}
+              ${bracketCard(m)}
             </div>`).join("")}
         </div>`;
       }
@@ -1237,36 +1254,56 @@ const DLRStandings = (() => {
     const isGuillotine = leagueInfo?.isGuillotine  || standings.some(s => s.isGuillotine);
     const isSpecial    = isEliminator || isGuillotine;
 
+    // ── Guillotine: resolve final 2 un-eliminated teams ──────
+    // When only 2 teams remain with eliminated:"", we use liveScoring from the
+    // most recent week to determine winner (higher score) vs last eliminated.
+    let guillotineFinalMap = {};  // { franchiseId: "winner" | "runnerup" }
+    if (isGuillotine) {
+      const aliveTeams = standings.filter(s => !s.eliminated);
+      if (aliveTeams.length === 2) {
+        const ids = aliveTeams.map(s => String(s.franchiseId));
+        // Try to resolve from any cached liveScoring week (most recent non-zero)
+        const cachedWeeks = Object.keys(_mflLiveScoringCache).map(Number).sort((a,b) => b-a);
+        for (const w of cachedWeeks) {
+          const result = MFLAPI.resolveGuillotineFinal(ids, _mflLiveScoringCache[w]);
+          if (result) {
+            guillotineFinalMap[result.winnerId]     = "winner";
+            guillotineFinalMap[result.eliminatedId] = "runnerup";
+            break;
+          }
+        }
+        // If we couldn't resolve from cache, fall back to bundle liveScoring
+        if (!Object.keys(guillotineFinalMap).length && bundle?.liveScoring) {
+          const result = MFLAPI.resolveGuillotineFinal(ids, bundle.liveScoring);
+          if (result) {
+            guillotineFinalMap[result.winnerId]     = "winner";
+            guillotineFinalMap[result.eliminatedId] = "runnerup";
+          }
+        }
+      }
+    }
+
     // ── Division filter ──────────────────────────────────────
     let displayStandings = standings;
     let divisionBannerHTML = "";
     if (bundle) {
       const { divisions, franchiseDivision } = MFLAPI.getDivisions(bundle);
       if (divisions.length) {
-        const myDivId   = myRosterId ? franchiseDivision[String(myRosterId)] : null;
-        // Resolve active div: explicit selection > user's own div > null (all)
+        const myDivId     = myRosterId ? franchiseDivision[String(myRosterId)] : null;
         const activeDivId = _mflSelectedDivId === "all" ? null
                           : (_mflSelectedDivId || myDivId || null);
-
         if (activeDivId) {
           displayStandings = standings.filter(s => franchiseDivision[String(s.franchiseId)] === activeDivId);
         }
         const activeDivName = activeDivId ? (divisions.find(d => d.id === activeDivId)?.name || activeDivId) : null;
-
-        // Build pill bar — always render when divisions exist
-        const allPill = `<button class="standings-div-pill ${!activeDivId ? "standings-div-pill--active" : ""}"
+        const allPill  = `<button class="standings-div-pill ${!activeDivId ? "standings-div-pill--active" : ""}"
           onclick="DLRStandings._selectDivision('all')">All Teams</button>`;
         const divPills = divisions.map(d =>
           `<button class="standings-div-pill ${d.id === activeDivId ? "standings-div-pill--active" : ""}"
             onclick="DLRStandings._selectDivision('${_esc(d.id)}')">${_esc(d.name)}</button>`
         ).join("");
-        const label = activeDivName
-          ? `📊 ${_esc(activeDivName)}`
-          : `📊 All Divisions`;
-        divisionBannerHTML = `<div class="standings-division-bar">${allPill}${divPills}</div>`;
-        // Prepend the label span
         divisionBannerHTML = `<div class="standings-division-bar">
-          <span class="standings-division-label">${label}</span>
+          <span class="standings-division-label">📊 ${activeDivName ? _esc(activeDivName) : "All Divisions"}</span>
           ${allPill}${divPills}
         </div>`;
       }
@@ -1277,81 +1314,123 @@ const DLRStandings = (() => {
       || (rawLeague?.playoffTeams ? parseInt(rawLeague.playoffTeams) : null)
       || Math.floor(totalTeams / 2);
 
-    const typeLabel = isGuillotine ? " \u00b7 Guillotine" : isEliminator ? " \u00b7 Eliminator" : "";
+    const typeLabel  = isGuillotine ? " · Guillotine" : isEliminator ? " · Eliminator" : "";
     const leagueLabel = (leagueInfo?.name || rawLeague?.name || "MFL League") + typeLabel;
+
+    // ── Column headers ───────────────────────────────────────
+    const theadCols = isSpecial
+      ? `<th>Status</th><th title="Points For">PF</th>`
+      : `<th>W</th><th>L</th><th>T</th><th title="Points For">PF</th><th title="Points Against">PA</th>`;
+
+    // ── Rows ─────────────────────────────────────────────────
+    const rows = displayStandings.map((s, i) => {
+      const rank   = s.rank || i + 1;
+      const name   = teamName(s.franchiseId);
+      const initial = (name || "?")[0].toUpperCase();
+      const isMe   = myRosterId && String(s.franchiseId) === String(myRosterId);
+      const inPO   = !isSpecial && rank <= playoffSpots;
+      const bubble = !isSpecial && rank === playoffSpots;
+
+      // Border color
+      const borderColor = inPO
+        ? (bubble ? "var(--color-gold-dim)" : "var(--color-gold)")
+        : isSpecial && !s.eliminated
+          ? (guillotineFinalMap[String(s.franchiseId)] === "winner" ? "var(--color-gold)" : "#18e07a")
+          : isSpecial && s.eliminated
+            ? "var(--color-text-dim)"
+            : "transparent";
+
+      // Avatar — MFL has no avatar URLs; use initial bubble matching Sleeper style
+      const avStyle = isMe
+        ? "background:var(--color-gold);color:#000;font-weight:700;"
+        : "";
+      const avatar = `<div class="st-av" style="${avStyle}">${initial}</div>`;
+
+      // Status cell (guillotine / eliminator only)
+      let statusCell = "";
+      if (isGuillotine) {
+        const finalStatus = guillotineFinalMap[String(s.franchiseId)];
+        let label;
+        if (finalStatus === "winner") {
+          label = `<span style="color:var(--color-gold);font-weight:700;">👑 Champion</span>`;
+        } else if (finalStatus === "runnerup") {
+          label = `<span style="color:var(--color-text-dim)">⚔️ Out Wk ${s.weekEliminated || "?"}</span>`;
+        } else if (!s.eliminated) {
+          label = `<span style="color:#18e07a">Active</span>`;
+        } else {
+          label = `<span style="color:var(--color-text-dim)">⚔️ Out Wk ${s.weekEliminated || "?"}</span>`;
+        }
+        statusCell = `<td style="font-size:.75rem;">${label}</td>
+          <td class="standings-num">${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "—"}</td>`;
+      } else if (isEliminator) {
+        const label = rank === 1
+          ? `<span style="color:var(--color-gold);font-weight:700;">🏆 Winner</span>`
+          : s.eliminated
+            ? `<span style="color:var(--color-text-dim)">Out Rd ${s.weekEliminated || "?"}</span>`
+            : `<span style="color:#18e07a">Active</span>`;
+        statusCell = `<td style="font-size:.75rem;">${label}</td>
+          <td class="standings-num">${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "—"}</td>`;
+      }
+
+      const dataCells = isSpecial
+        ? statusCell
+        : `<td class="standings-win">${s.wins}</td>
+           <td class="standings-loss">${s.losses}</td>
+           <td class="standings-tie">${s.ties}</td>
+           <td class="standings-num">${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "—"}</td>
+           <td class="standings-num dim">${s.ptsAgainst > 0 ? s.ptsAgainst.toFixed(1) : "—"}</td>`;
+
+      const rowClasses = [
+        inPO  ? "standings-row--playoff"  : "",
+        isMe  ? "standings-row--me"       : "",
+        isSpecial && s.eliminated ? "standings-row--eliminated" : "",
+      ].filter(Boolean).join(" ");
+
+      return `<tr class="${rowClasses}" style="border-left:3px solid ${borderColor}">
+        <td class="standings-rank">${rank}</td>
+        <td class="team-col">
+          <div class="standings-team-cell">
+            ${avatar}
+            <div>
+              <div class="standings-team-name">
+                ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}
+              </div>
+              ${bubble ? `<span class="bubble-tag">bubble</span>` : ""}
+            </div>
+          </div>
+        </td>
+        ${dataCells}
+      </tr>`;
+    }).join("");
+
+    // ── Legend ───────────────────────────────────────────────
+    const legend = isSpecial
+      ? `<div class="standings-legend">
+          <span class="legend-dot" style="background:#18e07a"></span>Active
+          <span class="legend-dot" style="background:var(--color-text-dim);margin-left:8px;"></span>Eliminated
+         </div>`
+      : `<div class="standings-legend">
+          <span class="legend-dot" style="background:var(--color-gold)"></span>Playoff spot
+          <span class="legend-dot" style="background:var(--color-gold-dim);margin-left:8px;"></span>Bubble
+         </div>`;
 
     el.innerHTML = `
       <div class="standings-meta">
-        <span>${leagueLabel} \u00b7 ${season}</span>
+        <span>${_esc(leagueLabel)} · ${season}</span>
         <a href="https://www42.myfantasyleague.com/${season}/home/${leagueId}" target="_blank"
-          style="font-size:.75rem;color:var(--color-gold);">View on MFL \u2197</a>
+          style="font-size:.75rem;color:var(--color-gold);">View on MFL ↗</a>
       </div>
       ${divisionBannerHTML}
       <div class="standings-table-wrap">
         <table class="standings-table">
           <thead><tr>
             <th>#</th><th class="team-col">Team</th>
-            ${isSpecial
-              ? `<th>Status</th><th>PF</th>`
-              : `<th>W</th><th>L</th><th>T</th><th>PF</th><th>PA</th>`}
+            ${theadCols}
           </tr></thead>
-          <tbody>
-            ${displayStandings.map((s, i) => {
-              const rank   = s.rank || i + 1;
-              const name   = teamName(s.franchiseId);
-              const isMe   = myRosterId && String(s.franchiseId) === String(myRosterId);
-              const inPO   = !isSpecial && rank <= playoffSpots;
-              const bubble = !isSpecial && rank === playoffSpots;
-              const border = inPO
-                ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}`
-                : isSpecial && s.eliminated
-                  ? "border-left:3px solid var(--color-text-dim)"
-                  : isSpecial && !s.eliminated
-                    ? "border-left:3px solid #18e07a"
-                    : "border-left:3px solid transparent";
-
-              let statusCell = "";
-              if (isGuillotine) {
-                statusCell = `<td style="font-size:.75rem;">${
-                  rank === 1 && !s.eliminated
-                    ? `<span style="color:var(--color-gold);font-weight:700;">Survivor \u2605</span>`
-                    : s.eliminated
-                      ? `<span style="color:var(--color-text-dim)">\u2694\ufe0f Out Wk ${s.weekEliminated || "?"}</span>`
-                      : `<span style="color:#18e07a">Active</span>`
-                }</td><td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>`;
-              } else if (isEliminator) {
-                statusCell = `<td style="font-size:.75rem;">${
-                  rank === 1
-                    ? `<span style="color:var(--color-gold);font-weight:700;">Winner</span>`
-                    : s.eliminated
-                      ? `<span style="color:var(--color-text-dim)">Out Rd ${s.weekEliminated || "?"}</span>`
-                      : `<span style="color:#18e07a">Active</span>`
-                }</td><td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>`;
-              }
-
-              const dataCells = isSpecial
-                ? statusCell
-                : `<td>${s.wins}</td><td>${s.losses}</td><td>${s.ties}</td>
-                   <td>${s.ptsFor > 0 ? s.ptsFor.toFixed(1) : "\u2014"}</td>
-                   <td class="dim">${s.ptsAgainst > 0 ? s.ptsAgainst.toFixed(1) : "\u2014"}</td>`;
-
-              return `<tr class="${inPO ? "standings-row--playoff" : ""} ${isMe ? "standings-row--me" : ""} ${isSpecial && s.eliminated ? "standings-row--eliminated" : ""}"
-                style="${border}">
-                <td class="standings-rank">${rank}</td>
-                <td class="team-col">
-                  <div class="standings-team-cell">
-                    <div class="st-av" style="${isMe ? "background:var(--color-gold);color:#000;" : ""}">${name[0]?.toUpperCase() || "?"}</div>
-                    <div>
-                      <div class="standings-team-name">${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">\u2605</span>' : ""}</div>
-                    </div>
-                  </div>
-                </td>
-                ${dataCells}
-              </tr>`;
-            }).join("")}
-          </tbody>
+          <tbody>${rows}</tbody>
         </table>
-      </div>`;
+      </div>
+      ${legend}`;
   }
 
   // Called when user clicks any division pill ("all" or a specific division ID)
