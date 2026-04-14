@@ -399,47 +399,51 @@ const DLRTransactions = (() => {
 
     // Parses the MFL `transaction` field used by WAIVER, BBID_WAIVER, and FREE_AGENT.
     //
-    // MFL format:  "<added_pid>,<pipe_delimited_drop_segment>"
-    //   WAIVER example:     "16191,|0.00|"
-    //     → added: "16191", faab: "0.00", dropped: ""
-    //   BBID_WAIVER example: "16191,50.00|14358"
-    //     → added: "16191", faab: "50.00", dropped: "14358"
-    //   FREE_AGENT example:  "|14358,"
-    //     → added: "14358" (first non-empty pipe segment before comma), dropped: ""
-    //   FREE_AGENT with drop: "|14358,|13200"  (rare)
-    //     → added: "14358", dropped: "13200"
+    // Observed formats:
+    //   "16333,|0.00|14799,"   → add 16333,       faab 0.00, drop 14799
+    //   "16191,|0.00|"         → add 16191,       faab 0.00, no drop
+    //   "17062,|0.00|17087,"   → add 17062,       faab 0.00, drop 17087
+    //   "|15292,"              → add 15292,       no faab,   no drop
+    //   "|15692,16207,"        → add 15692+16207, no faab,   no drop
     //
-    // Returns { addedPid, droppedPid, faab }
-    function parseTransactionField(str, mflType) {
-      if (!str) return { addedPid: null, droppedPid: null, faab: null };
+    // Key rule: the drop/faab block always starts with "|" immediately after a comma
+    // (",|"). If no ",|" exists, everything in the string is added players.
+    //
+    // Returns { addedPids[], droppedPid, faab }
+    function parseTransactionField(str) {
+      if (!str) return { addedPids: [], droppedPid: null, faab: null };
 
-      const commaIdx = str.indexOf(",");
-      // Everything before the first comma is the "add" segment
-      const addSeg  = commaIdx >= 0 ? str.slice(0, commaIdx) : str;
-      // Everything after the first comma is the "drop/faab" segment
-      const dropSeg = commaIdx >= 0 ? str.slice(commaIdx + 1) : "";
+      // Locate the drop block — flagged by the first ",|" in the string
+      const dropBlockIdx = str.indexOf(",|");
 
-      // The add segment may be prefixed with a pipe for FREE_AGENT (e.g. "|14358")
-      // or be a plain pid for WAIVER/BBID_WAIVER (e.g. "16191").
-      const addedPid = addSeg.split("|").map(s => s.trim()).filter(Boolean)[0] || null;
+      let addStr, dropStr;
+      if (dropBlockIdx >= 0) {
+        addStr  = str.slice(0, dropBlockIdx);
+        dropStr = str.slice(dropBlockIdx + 1); // keep leading | so pipe-split works
+      } else {
+        addStr  = str;
+        dropStr = "";
+      }
 
-      // The drop segment is pipe-delimited: "faab|droppedPid" or "|faab|" or "|0.00|"
-      // We want the last non-empty, non-numeric-looking segment as the dropped pid.
-      const dropParts = dropSeg.split("|").map(s => s.trim().replace(/,$/, "")).filter(Boolean);
+      // Added player IDs — strip leading pipe (FREE_AGENT style), split on comma
+      const addedPids = addStr.replace(/^\|/, "").split(",")
+        .map(s => s.trim()).filter(Boolean);
+
+      // Drop block — pipe-delimited; numeric tokens = FAAB, non-numeric = dropped pid
       let droppedPid = null;
       let faab       = null;
+      if (dropStr) {
+        dropStr.split("|").map(s => s.replace(/,$/, "").trim()).filter(Boolean)
+          .forEach(part => {
+            if (/^\d+(\.\d+)?$/.test(part)) {
+              if (!faab) faab = part;
+            } else {
+              droppedPid = part;
+            }
+          });
+      }
 
-      dropParts.forEach(part => {
-        if (/^\d+(\.\d+)?$/.test(part)) {
-          // Numeric → FAAB amount
-          if (!faab) faab = part;
-        } else if (part.length > 0) {
-          // Non-numeric, non-empty → player ID being dropped
-          droppedPid = part;
-        }
-      });
-
-      return { addedPid, droppedPid, faab };
+      return { addedPids, droppedPid, faab };
     }
 
     _allTx = txArr
@@ -490,9 +494,9 @@ const DLRTransactions = (() => {
         } else {
           // ── WAIVER / BBID_WAIVER / FREE_AGENT ──────────────────────
           const franchId = (tx.franchise || "").trim();
-          const { addedPid, droppedPid, faab } = parseTransactionField(tx.transaction, tx.type);
+          const { addedPids, droppedPid, faab } = parseTransactionField(tx.transaction);
 
-          if (addedPid)   adds[mflPid(addedPid)]   = franchId;
+          addedPids.forEach(pid => { adds[mflPid(pid)] = franchId; });
           if (droppedPid) drops[mflPid(droppedPid)] = franchId;
 
           // FAAB: use parsed pipe amount for BBID_WAIVER; fall back to tx.bid attribute.
