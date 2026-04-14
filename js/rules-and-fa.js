@@ -384,6 +384,10 @@ const DLRFreeAgents = (() => {
     }));
     if (token !== _initToken) return;
 
+    // Ensure DLRPlayers (Sleeper DB + DynastyProcess mappings) are loaded
+    await DLRPlayers.load();
+    if (token !== _initToken) return;
+
     // Fetch Sleeper stats for selected year (for cross-platform consistency)
     const currentYear = parseInt(_season) || new Date().getFullYear();
     const statsYear   = _statsYear || (currentYear - 1);
@@ -403,10 +407,8 @@ const DLRFreeAgents = (() => {
 
     const SKILL = ["QB","RB","WR","TE"];
 
-    // Use MFLAPI.getPlayers() — the session-cached player universe fetched from
-    // /mfl/players on-demand. This is NOT in the bundle (intentionally excluded
-    // due to size). getPlayers() caches in sessionStorage after the first call.
-    const playerLookup = {};
+    // Session-cached MFL player universe — keyed by mflId → { name, pos, team, sleeperId, … }
+    // getPlayers() already resolved sleeperId via DLRPlayers.getByMflId(), so we trust it.
     let mflPlayerUniverse = {};
     try {
       mflPlayerUniverse = await MFLAPI.getPlayers(_season);
@@ -415,41 +417,43 @@ const DLRFreeAgents = (() => {
     }
     if (token !== _initToken) return;
 
-    // mflPlayerUniverse is keyed by mflId → { name, pos, team, sleeperId }
-    // (shape returned by MFLAPI.getPlayers)
+    const playerLookup = {};
+
     Object.entries(mflPlayerUniverse).forEach(([mflId, p]) => {
       if (!mflId) return;
       const pos = (p.pos || p.position || "?").toUpperCase();
       if (!SKILL.includes(pos)) return;
 
-      const sleeperId  = p.sleeperId || null;
-      const sleeperP   = sleeperId ? DLRPlayers.get(sleeperId) : null;
+      // Primary: DLRPlayers.getFullPlayer() — merges DynastyProcess CSV bio with
+      // Sleeper record when a mapping exists; returns CSV-only bio as fallback.
+      const full = DLRPlayers.getFullPlayer(mflId, "mfl");
 
-      // Points: use Sleeper historical stats for selected year,
-      // fall back to MFL league-specific score for current season
+      // Resolve Sleeper ID for photo + historical stats (already in mflPlayerUniverse)
+      const sleeperId = p.sleeperId || null;
+
+      // Points: use Sleeper historical stats keyed by sleeperId, then MFL YTD
       const sleeperPts = sleeperId ? (sleeperStats[sleeperId]?.pts_ppr || null) : null;
       const mflPts     = mflScores[mflId] > 0 ? mflScores[mflId] : null;
       const pts        = sleeperPts ?? mflPts;
 
-      // Use Sleeper name/bio when matched — more reliable and consistent
-      const name = sleeperP?.first_name
-        ? `${sleeperP.first_name} ${sleeperP.last_name}`.trim()
+      // Name: prefer full player object (from Sleeper DB or CSV), fall back to mflPlayerUniverse
+      const name = full.first_name
+        ? `${full.first_name} ${full.last_name}`.trim()
         : (p.name || `Player ${mflId}`);
 
       playerLookup[`mfl_${mflId}`] = {
         pid:        `mfl_${mflId}`,
-        photoPid:   sleeperId || null,
+        photoPid:   sleeperId || null,    // Sleeper CDN key for photo
         name,
         pos,
-        team:       sleeperP?.team || p.team || "FA",
-        rank:       sleeperP?.search_rank || 9999,
+        team:       full.team || p.team || "FA",
+        rank:       full.search_rank || 9999,
         pts,
-        age:        sleeperP?.age || (p.age ? parseInt(p.age) : null),
-        status:     sleeperP?.injury_status || null,
+        age:        full.age != null ? Math.floor(full.age) : null,
+        status:     full.injury_status || null,
         isRostered: rostered.has(`mfl_${mflId}`),
         rosterTeam: _rosterLookup[`mfl_${mflId}`] || null,
         isWon:      false,
-        _sleeperId: sleeperId,
         _mflId:     mflId,
       };
     });
@@ -484,7 +488,6 @@ const DLRFreeAgents = (() => {
     });
 
     // Yahoo doesn't have a bulk player list — show rostered players only
-    const SKILL = ["QB","RB","WR","TE","K"];
     _cachedData = [...rostered].map(key => ({
       pid:        key,
       name:       key.replace("yahoo_", "Player "),
@@ -609,12 +612,10 @@ const DLRFreeAgents = (() => {
       const starIcon = p.starred ? "⭐" : "☆";
       const starClr  = p.starred ? "var(--color-gold)" : "var(--color-text-dim)";
 
-      // Photo: use Sleeper ID for MFL/Yahoo players so photo actually loads
+      // Photo: use Sleeper CDN ID (photoPid) for MFL/Yahoo players so photos load
       const photoPid = p.photoPid || p.pid;
 
-      // Auction status column — compact letter badges (C/A/R) or nominate button.
-      // Commissioners always see the active button for available players so they
-      // can nominate on behalf of any team. The modal handles eligibility feedback.
+      // Auction status column
       let auctionCol = "";
       if (_auctionEnabled) {
         if (p.isWon) {
