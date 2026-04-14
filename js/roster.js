@@ -381,9 +381,16 @@ const DLRRoster = (() => {
     await MFLAPI.getPlayers(season);
     if (token !== _initToken) return;
 
+    // Fetch rosters at the latest scored week so IR/Taxi status is end-of-season accurate.
+    // Falls back to bundle.rosters if the /mfl/rosters worker endpoint isn't available yet.
+    const latestWeek = MFLAPI.getLatestScoredWeek(bundle);
+    const weekRosters = latestWeek > 0
+      ? await MFLAPI.getRostersAtWeek(leagueId, season, latestWeek)
+      : null;
+
     const teams = await Promise.all(bundleTeams.map(async t => {
       const s = standingsMap[t.id] || {};
-      const mflPlayers = await MFLAPI.getRoster(bundle, t.id, season);
+      const mflPlayers = await MFLAPI.getRoster(bundle, t.id, season, weekRosters);
 
       const mainRoster = mflPlayers.filter(p => p.status !== "IR" && p.status !== "TAXI");
       const irRoster   = mflPlayers.filter(p => p.status === "IR");

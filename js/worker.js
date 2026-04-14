@@ -253,6 +253,23 @@ export default {
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
+      // On-demand: fetch rosters for a specific week so IR/Taxi status is accurate.
+      // The bundle's TYPE=rosters fetch has no W= param and returns current-snapshot
+      // status which may not reflect end-of-season slot assignments.
+      if (path === "/mfl/rosters" && req.method === "POST") {
+        const { leagueId, year, week, cookie } = await req.json();
+        if (!leagueId) return new Response(JSON.stringify({ error: "Missing leagueId" }), { status: 400, headers: corsHeaders() });
+        const season    = year || new Date().getFullYear();
+        const cookieHdr = cookie ? `MFL_USER_ID=${cookie}` : "";
+        const headers   = mflHeaders(cookieHdr ? { Cookie: cookieHdr } : {});
+        const weekParam = week ? `&W=${week}` : "";
+        const r    = await fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=rosters&L=${leagueId}${weekParam}&JSON=1`, { headers });
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch(e) { data = {}; }
+        return new Response(JSON.stringify(data), { headers: corsHeaders() });
+      }
+
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders() });
