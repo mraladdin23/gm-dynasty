@@ -377,8 +377,9 @@ const DLRRoster = (() => {
     const bundleTeams  = MFLAPI.getTeams(bundle);
     const standingsMap = MFLAPI.getStandingsMap(bundle);
 
-    // Pre-warm session-cached player universe (used by getRoster internally)
-    await MFLAPI.getPlayers(season);
+    // Pre-warm session-cached player universe (used by getRoster internally).
+    // Pass leagueId so league-custom players (draft pick proxies etc.) are included.
+    await MFLAPI.getPlayers(season, leagueId);
     if (token !== _initToken) return;
 
     // Fetch rosters at the latest scored week so IR/Taxi status is end-of-season accurate.
@@ -395,7 +396,7 @@ const DLRRoster = (() => {
 
     const teams = await Promise.all(bundleTeams.map(async t => {
       const s = standingsMap[t.id] || {};
-      const mflPlayers = await MFLAPI.getRoster(bundle, t.id, season, weekRosters);
+      const mflPlayers = await MFLAPI.getRoster(bundle, t.id, season, weekRosters, leagueId);
 
       const mainRoster = mflPlayers.filter(p => p.status !== "IR" && p.status !== "TAXI");
       const irRoster   = mflPlayers.filter(p => p.status === "IR");
