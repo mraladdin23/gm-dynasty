@@ -401,13 +401,15 @@ const MFLAPI = (() => {
   // Key is year-scoped so rookies are always current within a browser session.
   let _playersMemCache = null;  // in-memory reference for the current page load
 
+ let _playersMemCache = null;
+
   async function getPlayers(year) {
     if (_playersMemCache) return _playersMemCache;
 
     const season   = year || new Date().getFullYear().toString();
     const cacheKey = `mfl_players_${season}`;
 
-    // Try sessionStorage — survives tab switches within the same session
+    // Try sessionStorage first (fast path)
     try {
       const stored = sessionStorage.getItem(cacheKey);
       if (stored) {
@@ -416,30 +418,48 @@ const MFLAPI = (() => {
       }
     } catch(e) {}
 
-    // Fetch from worker
-    const data = await post("/mfl/players", { year: season });
-    const raw  = data?.players?.player;
-    if (!raw) return {};
+    // Ensure cross-platform mappings are loaded
+    await DLRPlayers.load();
 
-    const arr = Array.isArray(raw) ? raw : [raw];
+    // Fetch raw MFL player list from worker
+    const data = await post("/mfl/players", { year: season });
+    const raw  = data?.players?.player || [];
+    const arr  = Array.isArray(raw) ? raw : [raw];
+
     const map = {};
     arr.forEach(p => {
-      if (p.id) {
-        const displayName = mflNameToDisplay(p.name);
-        const sleeperId   = mflNameToSleeperId(p.name, p.position);
-        const pos         = (p.position || "?").toUpperCase();
-        map[p.id] = {
-          name:      displayName || p.name || "",
-          position:  pos,   // used by getRoster()
-          pos:       pos,   // used by draft.js render
-          team:      p.team || "FA",
-          sleeperId,
-        };
-      }
+      if (!p.id) return;
+
+      const rawName     = p.name || "";
+      const displayName = mflNameToDisplay(rawName);   // your existing helper
+      const pos         = (p.position || "?").toUpperCase();
+
+      // NEW: Use reliable ID mapping from DynastyProcess CSV
+      const mapping   = DLRPlayers.getByMflId(p.id);
+      const sleeperId = mapping?.sleeper_id || mflNameToSleeperId(rawName, pos); // fallback to old name match
+
+      map[p.id] = {
+        name:      mapping?.name || displayName || `Player ${p.id}`,
+        position:  mapping?.position || pos,
+        pos:       mapping?.position || pos,
+        team:      mapping?.team || p.team || "FA",
+        sleeperId: sleeperId,
+        // Extra bio fields from CSV when Sleeper match is missing
+        age:       mapping?.age,
+        height:    mapping?.height,
+        weight:    mapping?.weight,
+        college:   mapping?.college,
+        draft_year: mapping?.draft_year
+      };
     });
 
     _playersMemCache = map;
-    try { sessionStorage.setItem(cacheKey, JSON.stringify(map)); } catch(e) {}
+
+    // Cache in sessionStorage for this browser session
+    try {
+      sessionStorage.setItem(cacheKey, JSON.stringify(map));
+    } catch(e) {}
+
     return map;
   }
 
@@ -703,6 +723,22 @@ const MFLAPI = (() => {
   async function getPlayoffBracket(leagueId, year, bracketId, username, password) {
     return post("/mfl/playoffBracket", { leagueId, year, bracketId, username, password });
   }
+
+/**
+   * Convenience: Get enriched player data for any MFL player ID
+   * Returns object with name, pos, team, sleeperId, and bio fields
+   */
+  function getSleeperPlayerData(mflId) {
+    const mapping = DLRPlayers.getByMflId(mflId);
+    if (mapping) {
+      const sleeperP = mapping.sleeper_id ? DLRPlayers.get(mapping.sleeper_id) : null;
+      return sleeperP || DLRPlayers.getFullPlayer(mflId, "mfl");
+    }
+    return DLRPlayers.getFullPlayer(mflId, "mfl");
+  }
+
+  // Keep your existing name helpers as fallback
+  // (mflNameToSleeperId and mflNameToDisplay can stay unchanged)
 
   return {
     login,
