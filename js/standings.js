@@ -357,7 +357,7 @@ const DLRStandings = (() => {
     // lastPlayoffWeek covers eliminator/guillotine/playoff leagues that run past regular season
     const lastPlayoff    = parseInt(l.lastPlayoffWeek || l.playoffWeeks || 0);
     // Never exceed 18 (max NFL regular + playoff weeks)
-    const maxWeek = Math.min(Math.max(currentWeek, lastRegular, lastPlayoff || 0), 18);
+    const maxWeek = Math.max(currentWeek, lastRegular, lastPlayoff, 18);
     const allWeeks = Array.from({ length: maxWeek }, (_, i) => i + 1);
 
     return {
