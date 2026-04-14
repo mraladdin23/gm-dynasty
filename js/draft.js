@@ -496,6 +496,7 @@ const DLRDraft = (() => {
   }
 
   // ── MFL draft + auction history ───────────────────────────
+// ── MFL draft + auction history ───────────────────────────
 async function _loadMFLDraft(leagueId, season, token) {
   const el = document.getElementById("dtab-draft");
   const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
@@ -512,26 +513,25 @@ async function _loadMFLDraft(leagueId, season, token) {
     divNameMap[String(d.id)] = d.name || `Division ${d.id}`;
   });
 
-  // FIX: draftUnit can be a single object or missing → force array
+  // Safe array conversion (draftUnit can be object or missing)
   let unitArr = bundle.draft?.draftResults?.draftUnit || [];
   if (!Array.isArray(unitArr)) unitArr = unitArr ? [unitArr] : [];
 
   const playerLookup = await MFLAPI.getPlayers(season, leagueId).catch(() => ({}));
 
-  // ── Draft sets (non-auction) ──
+  // ── Draft sets (non-auction units) ──
   const draftUnits = unitArr.filter(u => String(u.type || "").toLowerCase() !== "auction");
   const draftSets = draftUnits.map((unit, i) => {
     const divId     = String(unit.unit || unit.division || unit.id || "");
     const divLabel  = divNameMap[divId] || "";
     const rawLabel  = unit.name || unit.unit || "";
-    const label     = (rawLabel && rawLabel !== "LEAGUE")
+    const label     = (rawLabel && rawLabel !== "LEAGUE" && rawLabel.trim() !== "")
       ? rawLabel
       : (divLabel || (i === 0 ? "Startup" : `Draft ${i + 1}`));
 
     const rawPicks = unit.draftPick
       ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick])
       : [];
-
     const picks = rawPicks.map(p => ({
       id:        String(p.player || p.playerId || ""),
       round:     Number(p.round || 0),
@@ -547,7 +547,7 @@ async function _loadMFLDraft(leagueId, season, token) {
   // ── Auction sets ──
   let auctionRaw = bundle.auctionResults?.auctionResults?.auction || [];
   if (!auctionRaw.length) {
-    const auctionUnits = unitArr.filter(u => String(u.type || "") === "auction");
+    const auctionUnits = unitArr.filter(u => String(u.type || "").toLowerCase() === "auction");
     auctionRaw = auctionUnits.flatMap(u => u.draftPick || []);
   }
   const auctionPicks = Array.isArray(auctionRaw) ? auctionRaw : (auctionRaw ? [auctionRaw] : []);
@@ -562,7 +562,7 @@ async function _loadMFLDraft(leagueId, season, token) {
 
   Object.keys(auctionByDiv).forEach((divId, i) => {
     const divLabel = divNameMap[divId] || "";
-    const label    = divLabel || `Auction ${i + 1}`;
+    const label    = (divLabel && divLabel.trim() !== "") ? divLabel : `Auction ${i + 1}`;
     const picks = auctionByDiv[divId].map(p => ({
       id:        String(p.player || p.playerId || ""),
       franchise: String(p.franchise || p.franchiseId || ""),
@@ -584,7 +584,7 @@ async function _loadMFLDraft(leagueId, season, token) {
     });
   }
 
-  // ── Flatten for legacy paths + compute defaults ──
+  // Flatten for legacy code + compute defaults
   const allPicks  = draftSets.flatMap(s => s.picks);
   const salaryArr = auctionSets.flatMap(s => s.picks);
 
@@ -622,8 +622,9 @@ async function _loadMFLDraft(leagueId, season, token) {
   }
 
   _renderMFLDraftBoard(el);
-}
-  function _renderMFLDraftBoard(el) {
+}  
+
+function _renderMFLDraftBoard(el) {
     if (!el) el = document.getElementById("dtab-draft");
     if (!el || !_mflCache) return;
     const { teamMap, playerLookup, hasAuction, hasDraft, season, leagueId,
