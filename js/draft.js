@@ -505,19 +505,21 @@ async function _loadMFLDraft(leagueId, season, token) {
   const teamMap = {};
   teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-  // ── NEW: division name map so pills show real division names ──
+  // Division name map for proper pill labels
   const { divisions } = MFLAPI.getDivisions(bundle);
   const divNameMap = {};
   divisions.forEach(d => {
     divNameMap[String(d.id)] = d.name || `Division ${d.id}`;
   });
 
-  const unitArr = bundle.draft?.draftResults?.draftUnit || [];
+  // FIX: draftUnit can be a single object or missing → force array
+  let unitArr = bundle.draft?.draftResults?.draftUnit || [];
+  if (!Array.isArray(unitArr)) unitArr = unitArr ? [unitArr] : [];
 
   const playerLookup = await MFLAPI.getPlayers(season, leagueId).catch(() => ({}));
 
-  // ── Draft sets (non-auction units) ──
-  const draftUnits = unitArr.filter(u => (u.type || "").toLowerCase() !== "auction");
+  // ── Draft sets (non-auction) ──
+  const draftUnits = unitArr.filter(u => String(u.type || "").toLowerCase() !== "auction");
   const draftSets = draftUnits.map((unit, i) => {
     const divId     = String(unit.unit || unit.division || unit.id || "");
     const divLabel  = divNameMap[divId] || "";
@@ -529,6 +531,7 @@ async function _loadMFLDraft(leagueId, season, token) {
     const rawPicks = unit.draftPick
       ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick])
       : [];
+
     const picks = rawPicks.map(p => ({
       id:        String(p.player || p.playerId || ""),
       round:     Number(p.round || 0),
@@ -541,13 +544,13 @@ async function _loadMFLDraft(leagueId, season, token) {
     return { label, divId, type: "draft", picks };
   });
 
-  // ── Auction sets (from auctionResults or auction-type units) ──
+  // ── Auction sets ──
   let auctionRaw = bundle.auctionResults?.auctionResults?.auction || [];
   if (!auctionRaw.length) {
-    const auctionUnits = unitArr.filter(u => u.type === "auction");
+    const auctionUnits = unitArr.filter(u => String(u.type || "") === "auction");
     auctionRaw = auctionUnits.flatMap(u => u.draftPick || []);
   }
-  const auctionPicks = Array.isArray(auctionRaw) ? auctionRaw : [auctionRaw];
+  const auctionPicks = Array.isArray(auctionRaw) ? auctionRaw : (auctionRaw ? [auctionRaw] : []);
 
   const auctionSets = [];
   const auctionByDiv = {};
@@ -581,26 +584,45 @@ async function _loadMFLDraft(leagueId, season, token) {
     });
   }
 
-    _mflCache = {
-      allPicks, salaryArr, teamMap, playerLookup,
-      hasAuction, hasDraft, season, leagueId,
-      draftSets, auctionSets,
-      _activeDraftSetIdx:   defaultDraftIdx,
-      _activeAuctionSetIdx: defaultAuctionIdx,
-    };
+  // ── Flatten for legacy paths + compute defaults ──
+  const allPicks  = draftSets.flatMap(s => s.picks);
+  const salaryArr = auctionSets.flatMap(s => s.picks);
 
-    // Default view: auction if no draft data, draft otherwise. Only override if
-    // current _viewMode doesn't match what's available.
-    if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
-    if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
-    // Fresh init with no selection — pick sensibly
-    if (_viewMode !== "draft" && _viewMode !== "auction") {
-      _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
-    }
+  const hasAuction = auctionSets.length > 0;
+  const hasDraft   = draftSets.length  > 0;
 
-    _renderMFLDraftBoard(el);
+  // Default to user's division when possible
+  const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
+
+  let defaultDraftIdx = 0;
+  if (myDivId && draftSets.length > 1) {
+    const byDiv = draftSets.findIndex(s => s.divId === String(myDivId));
+    defaultDraftIdx = byDiv >= 0 ? byDiv : 0;
   }
 
+  let defaultAuctionIdx = 0;
+  if (myDivId && auctionSets.length > 1) {
+    const byDiv = auctionSets.findIndex(s => s.divId === String(myDivId));
+    defaultAuctionIdx = byDiv >= 0 ? byDiv : 0;
+  }
+
+  _mflCache = {
+    allPicks, salaryArr, teamMap, playerLookup,
+    hasAuction, hasDraft, season, leagueId,
+    draftSets, auctionSets,
+    _activeDraftSetIdx:   defaultDraftIdx,
+    _activeAuctionSetIdx: defaultAuctionIdx,
+  };
+
+  // Default view logic
+  if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
+  if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
+  if (_viewMode !== "draft" && _viewMode !== "auction") {
+    _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
+  }
+
+  _renderMFLDraftBoard(el);
+}
   function _renderMFLDraftBoard(el) {
     if (!el) el = document.getElementById("dtab-draft");
     if (!el || !_mflCache) return;
