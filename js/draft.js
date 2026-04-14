@@ -527,29 +527,45 @@ const DLRDraft = (() => {
       };
     }).filter(s => s.picks.length > 0);
 
-    // ── Auction results — support multiple sets ──────────────
-    // auctionResults.auctionResults can be a single object or array of objects
-    const auctionResultsRoot = bundle?.auctionResults?.auctionResults;
-    let auctionSetsRaw = [];
-    if (auctionResultsRoot) {
-      // Multiple sets: top-level array of auctionResults objects
-      if (Array.isArray(auctionResultsRoot)) {
-        auctionSetsRaw = auctionResultsRoot;
-      } else if (auctionResultsRoot.auction) {
-        auctionSetsRaw = [auctionResultsRoot];
+    // ── Auction results — support multiple units ─────────────
+    // Real MFL shape from /mfl/auctionResults:
+    //   { auctionResults: { auctionUnit: { auction: [...], unit: "LEAGUE" } } }
+    //   OR multiple units: { auctionResults: { auctionUnit: [{...},{...}] } }
+    // The bundle key is `auctionResults` → value is the full auctionResults response.
+    // So bundle.auctionResults.auctionResults.auctionUnit is the unit or unit array.
+    let auctionResultsRoot = bundle?.auctionResults?.auctionResults?.auctionUnit
+                          || bundle?.auctionResults?.auctionUnit;  // direct shape from standalone fetch
+
+    // If not in bundle (null/undefined), try a targeted fetch (non-fatal)
+    if (!auctionResultsRoot) {
+      try {
+        const auctionData = await MFLAPI.getAuctionResultsDirect(leagueId, season);
+        if (token !== _initToken) return;
+        // Standalone response shape: { auctionResults: { auctionUnit: {...} } }
+        auctionResultsRoot = auctionData?.auctionResults?.auctionUnit;
+      } catch(e) {
+        // Auction results not available — fine for draft-only leagues
       }
     }
 
-    const auctionSets = auctionSetsRaw.map((set, i) => {
-      const raw = set.auction ? (Array.isArray(set.auction) ? set.auction : [set.auction]) : [];
+    // Normalize auctionUnit (single object or array) into auctionSets
+    let auctionSetsRaw = [];
+    if (auctionResultsRoot) {
+      const unitArr = Array.isArray(auctionResultsRoot) ? auctionResultsRoot : [auctionResultsRoot];
+      auctionSetsRaw = unitArr;
+    }
+
+    const auctionSets = auctionSetsRaw.map((unit, i) => {
+      const raw = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
+      const label = unit.name || unit.unit || (i === 0 ? "Auction" : `Auction ${i + 1}`);
       return {
-        label: set.name || (i === 0 ? "Auction" : `Auction ${i + 1}`),
+        label: label === "LEAGUE" ? "Auction" : label,
         type:  "auction",
         picks: raw.map(p => ({
-          id:        p.player    || p.playerId || "",
-          franchise: p.franchise || p.franchiseId || "",
-          salary:    parseFloat(p.amount || p.bid || p.winningBid || 0),
-          amount:    parseFloat(p.amount || p.bid || p.winningBid || 0),
+          id:        String(p.player    || p.playerId || ""),
+          franchise: String(p.franchise || p.franchiseId || ""),
+          salary:    parseFloat(p.winningBid || p.amount || p.bid || 0),
+          amount:    parseFloat(p.winningBid || p.amount || p.bid || 0),
         })).filter(p => p.id)
       };
     }).filter(s => s.picks.length > 0);
@@ -574,9 +590,14 @@ const DLRDraft = (() => {
       _activeAuctionSetIdx: 0,
     };
 
-    // Default view: show auction if no draft data, else draft
-    if (!_viewMode || (_viewMode === "draft"   && !hasDraft   && hasAuction)) _viewMode = "auction";
-    if (!_viewMode || (_viewMode === "auction" && !hasAuction && hasDraft))   _viewMode = "draft";
+    // Default view: auction if no draft data, draft otherwise. Only override if
+    // current _viewMode doesn't match what's available.
+    if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
+    if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
+    // Fresh init with no selection — pick sensibly
+    if (_viewMode !== "draft" && _viewMode !== "auction") {
+      _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
+    }
 
     _renderMFLDraftBoard(el);
   }
