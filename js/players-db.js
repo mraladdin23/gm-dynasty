@@ -8,7 +8,7 @@ const DLRPlayers = (() => {
   const SLEEPER_KEY = "dlr_players_v4";
   const MAPPINGS_KEY = "dlr_player_mappings";
   const MAPPINGS_VER_KEY = "dlr_mappings_ver";
-  const MAPPINGS_VERSION = "2026-04";   // bump when you want to force refresh
+  const MAPPINGS_VERSION = "2026-04b";  // bumped: filter rows without birthdate
 
   let _sleeperCache = null;
   let _mappings = null;   // { byMfl: {}, byYahoo: {}, bySleeper: {} }
@@ -175,8 +175,16 @@ function formatHeight(inches) {
         draft_year: row.draft_year ? parseInt(row.draft_year) : null,
       };
 
-      if (entry.mfl_id)   byMfl[entry.mfl_id] = entry;
-      if (entry.yahoo_id) byYahoo[entry.yahoo_id] = entry;
+      // Skip rows with no valid birthdate — filters out stale/legacy duplicate entries
+      // (e.g. retired players like Drew Bledsoe sharing a name with a current player).
+      // The current/active entry always has a birthdate; the stale one typically doesn't.
+      const bd = row.birth_date || row.birthdate || row.dob || "";
+      const hasBirthdate = bd && bd.trim() !== "" && bd.trim().toLowerCase() !== "na"
+                        && bd.trim().toLowerCase() !== "null" && bd.trim() !== "0";
+      if (!hasBirthdate) continue;
+
+      if (entry.mfl_id)     byMfl[entry.mfl_id]         = entry;
+      if (entry.yahoo_id)   byYahoo[entry.yahoo_id]     = entry;
       if (entry.sleeper_id) bySleeper[entry.sleeper_id] = entry;
     }
 
