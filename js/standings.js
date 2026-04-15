@@ -72,6 +72,27 @@ const DLRStandings = (() => {
 
         const standings  = MFLAPI.normalizeStandings(bundle);
         const leagueInfo = MFLAPI.getLeagueInfo(bundle);
+
+        // For guillotine leagues: pre-fetch the final matchup week's live scoring so
+        // _renderMFLStandings can resolve winner vs runner-up with the correct week number.
+        // This must happen before render (sync) so the cache is populated in time.
+        if (leagueInfo.isGuillotine) {
+          const aliveTeams  = standings.filter(s => !s.eliminated);
+          if (aliveTeams.length === 2) {
+            const elimWeeks = standings
+              .filter(s => s.eliminated && s.weekEliminated)
+              .map(s => Number(s.weekEliminated));
+            const lastElimWeek   = elimWeeks.length ? Math.max(...elimWeeks) : null;
+            const finalMatchWeek = lastElimWeek ? lastElimWeek + 1 : null;
+            if (finalMatchWeek && !_mflLiveScoringCache[finalMatchWeek]) {
+              try {
+                const d = await MFLAPI.getLiveScoring(leagueId, season, finalMatchWeek);
+                _mflLiveScoringCache[finalMatchWeek] = d;
+              } catch(e) { /* non-fatal */ }
+            }
+          }
+        }
+
         _renderMFLStandings(el, bundle.league?.league, standings, leagueId, season, leagueInfo, _myRosterId, bundle);
       } catch(e) {
         if (token !== _initToken) return;
@@ -282,19 +303,24 @@ const DLRStandings = (() => {
           _mflNameMap = bundleState.nameMap;
         }
 
-        const { bundle, nameMap, allWeeks, currentWeek } = bundleState;
+        const { bundle, nameMap, allWeeks, currentWeek, leagueInfo } = bundleState;
 
-        // Fetch week 1 live scoring for initial render (default week = 1)
-        let liveData = _mflLiveScoringCache[1];
+        // For eliminator/guillotine leagues default to the most recent week with data.
+        // For standard leagues default to week 1 so users see full season history.
+        const isSpecial   = leagueInfo?.isEliminator || leagueInfo?.isGuillotine;
+        const defaultWeek = isSpecial ? currentWeek : (allWeeks[0] || 1);
+
+        // Pre-fetch the default week's live scoring so the first render is instant.
+        let liveData = _mflLiveScoringCache[defaultWeek];
         if (!liveData) {
-          liveData = await MFLAPI.getLiveScoring(_leagueId, season, 1);
-          _mflLiveScoringCache[1] = liveData;
+          liveData = await MFLAPI.getLiveScoring(_leagueId, season, defaultWeek);
+          _mflLiveScoringCache[defaultWeek] = liveData;
         }
 
-        // If week 1 is empty (pre-season), also cache current week for the week switcher
-        if (!_mflLiveScoringCache[currentWeek] && currentWeek !== 1) {
-          MFLAPI.getLiveScoring(_leagueId, season, currentWeek)
-            .then(d => { _mflLiveScoringCache[currentWeek] = d; })
+        // Also warm week 1 cache for standard leagues (background, non-blocking)
+        if (!isSpecial && !_mflLiveScoringCache[1] && defaultWeek !== 1) {
+          MFLAPI.getLiveScoring(_leagueId, season, 1)
+            .then(d => { _mflLiveScoringCache[1] = d; })
             .catch(() => {});
         }
 
@@ -309,7 +335,7 @@ const DLRStandings = (() => {
           ? MFLAPI.getDivisionFranchises(bundle, _myRosterId)
           : null;
 
-        _renderMFLMatchupsShell(el, nameMap, allWeeks, 1, matchups, divisionFranchises, liveData, playerLookup, bundleState.starterSlots || []);
+        _renderMFLMatchupsShell(el, nameMap, allWeeks, defaultWeek, matchups, divisionFranchises, liveData, playerLookup, bundleState.starterSlots || []);
       } catch(e) {
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
           <div style="margin-bottom:var(--space-2)">Could not load MFL matchups: ${e.message}</div>
@@ -377,11 +403,10 @@ const DLRStandings = (() => {
   }
 
   function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, liveData, playerLookup, starterSlots) {
-    // Default week: for eliminator/guillotine leagues use currentWeek (most recent data);
-    // for standard leagues default to week 1 so users see the full history.
-    const leagueInfo  = _mflBundle?.leagueInfo || {};
-    const isSpecial   = leagueInfo.isEliminator || leagueInfo.isGuillotine;
-    const displayWeek = isSpecial ? (activeWeek || allWeeks[allWeeks.length - 1] || 1) : 1;
+    // activeWeek is now passed correctly by the caller:
+    //   - eliminator/guillotine leagues → currentWeek (most recent)
+    //   - standard leagues → startWeek (week 1 / first week of season)
+    const displayWeek = activeWeek || allWeeks[0] || 1;
 
     const weekPills = allWeeks.map(w =>
       `<button class="season-pill ${w === displayWeek ? "season-pill--current" : ""}"
