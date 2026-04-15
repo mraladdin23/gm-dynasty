@@ -429,7 +429,7 @@ const DLRFreeAgents = (() => {
     // getPlayers() already resolved sleeperId via DLRPlayers.getByMflId(), so we trust it.
     let mflPlayerUniverse = {};
     try {
-      mflPlayerUniverse = await MFLAPI.getPlayers(_season, leagueId);
+      mflPlayerUniverse = await MFLAPI.getPlayers(_season);
     } catch(e) {
       console.warn("[Players] Could not load MFL player universe:", e.message);
     }

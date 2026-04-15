@@ -1457,35 +1457,20 @@ function _computeLeader(a) {
   }
 
   // ── History ───────────────────────────────────────────────
-// Keep pagination state outside so it persists across renders
-let _historyLimit = 25;
-let _historyCache = [];
-
-function _renderHistory(el, ended) {
-  // Cache full dataset
-  _historyCache = ended || [];
-
-  if (!_historyCache.length) {
-    el.innerHTML = `<div class="auc-empty">No auction history yet.</div>`;
-    return;
-  }
-
-  // Sort once (important for consistency)
-  const sorted = [..._historyCache].sort(
-    (a, b) => (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)
-  );
-
-  const visible = sorted.slice(0, _historyLimit);
-
-  el.innerHTML = `
-    <div class="auc-history-list">
-      ${visible.map(a => {
+  function _renderHistory(el, ended) {
+    if (!ended.length) {
+      el.innerHTML = `<div class="auc-empty">No auction history yet.</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="auc-history-list">
+      ${ended.sort((a, b) => (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)).slice(0, 60).map(a => {
         const p      = _players[a.playerId] || {};
         const name   = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
 
+        // Always prefer stored winner/winningBid — these are set at claim time and are authoritative.
+        // Fall back to _computeLeader only for unprocessed expired auctions.
         let winRosterId = a.winner != null ? Number(a.winner) : null;
         let winPrice    = a.winningBid || 0;
-
         if (!winRosterId && !a.cancelled) {
           const leader = _computeLeader(a);
           winRosterId  = leader.rosterId;
@@ -1518,15 +1503,8 @@ function _renderHistory(el, ended) {
             </div>
           </div>`;
       }).join("")}
-    </div>
-
-    ${sorted.length > _historyLimit ? `
-      <div style="text-align:center;margin-top:10px">
-        <button class="btn-secondary btn-sm" onclick="DLRAuction.loadMoreHistory()">Load More</button>
-      </div>
-    ` : ""}
-  `;
-}
+    </div>`;
+  }
 
   // ── Settings (commissioner) ───────────────────────────────
   function _renderSettings(el) {
