@@ -102,6 +102,10 @@ const DLRSalaryCap = (() => {
 
       _render();
       _startTxMonitor();
+
+      // Heal any auction wins that were claimed before the salary module was loaded.
+      // Runs silently — only writes missing entries, never overwrites existing ones.
+      reconcileAuctionWins(leagueKey).catch(() => {});
     } catch(e) {
       if (token !== _initToken) return;
       el.innerHTML = _errorHTML("Could not load salary data: " + e.message);
@@ -1023,6 +1027,73 @@ const DLRSalaryCap = (() => {
     } catch(e) { console.warn("[Salary] addAuctionWin save failed:", e.message); }
   }
 
+  // ── Auction reconciliation ─────────────────────────────────
+  // Reads all processed auction wins from Firebase and writes any whose salary
+  // is missing from the salary ledger. Runs automatically on init so timing
+  // gaps between auto-claim and module load are always healed.
+  // Safe to call multiple times — only writes entries not already present.
+  async function reconcileAuctionWins(leagueKey) {
+    const key = leagueKey || _leagueKey;
+    if (!key || !_salaryData || !_rosterData) return;
+
+    let bids;
+    try {
+      const snap = await GMD.child(`auctions/${key}/bids`).once("value");
+      bids = snap.val();
+    } catch(e) {
+      console.warn("[Salary] reconcileAuctionWins: could not read auction bids:", e.message);
+      return;
+    }
+    if (!bids) return;
+
+    // Build roster_id → username map
+    const rosterToUsername = {};
+    (_rosterData || []).forEach(r => {
+      rosterToUsername[String(r.roster_id)] = r.username;
+      if (r.ownerId) rosterToUsername[String(r.ownerId)] = r.username;
+    });
+
+    let changed = false;
+    Object.values(bids).forEach(a => {
+      if (!a.processed || a.cancelled) return;
+      const winnerId = a.winner != null ? String(a.winner) : null;
+      const salary   = Number(a.winningBid || 0);
+      const playerId = a.playerId ? String(a.playerId) : null;
+      if (!winnerId || !salary || !playerId) return;
+
+      const username = rosterToUsername[winnerId];
+      if (!username) return;
+
+      // Check if this player already has a salary entry for this team
+      const existing = (_salaryData[username]?.players || [])
+        .find(p => String(p.playerId) === playerId);
+      if (existing) return; // already recorded — don't overwrite manual edits
+
+      // Missing entry — write it
+      if (!_salaryData[username]) _salaryData[username] = { players: [] };
+      _salaryData[username].players.push({
+        playerId,
+        salary,
+        years:      1,
+        holdout:    false,
+        auctionWin: true,
+        reconciled: true,  // flag so we can identify auto-reconciled entries
+      });
+      changed = true;
+      console.log(`[Salary] Reconciled auction win: ${a.playerName || playerId} → ${username} @ ${salary}`);
+    });
+
+    if (changed) {
+      try {
+        await _saveSalaryData();
+        _renderView();
+        console.log("[Salary] Auction reconciliation saved.");
+      } catch(e) {
+        console.warn("[Salary] reconcileAuctionWins save failed:", e.message);
+      }
+    }
+  }
+
   async function savePlayerSalary(pid, username) {
     const salary  = parseFloat(document.getElementById("sal-edit-amount")?.value) || 0;
     const years   = parseInt(document.getElementById("sal-edit-years")?.value)    || 1;
@@ -1331,7 +1402,7 @@ const DLRSalaryCap = (() => {
 
   return {
     init, preloadCap, reset, setView, setPos, selectTeam,
-    openEditModal, savePlayerSalary, addAuctionWin,
+    openEditModal, savePlayerSalary, addAuctionWin, reconcileAuctionWins,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
     getCapData, getTeamSalaryEntries,

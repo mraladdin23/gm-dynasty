@@ -377,8 +377,12 @@ const DLRStandings = (() => {
   }
 
   function _renderMFLMatchupsShell(el, nameMap, allWeeks, activeWeek, matchups, divisionFranchises, liveData, playerLookup, starterSlots) {
-    // Default to week 1 display (pills highlight week 1, not current week)
-    const displayWeek = 1;
+    // Default week: for eliminator/guillotine leagues use currentWeek (most recent data);
+    // for standard leagues default to week 1 so users see the full history.
+    const leagueInfo  = _mflBundle?.leagueInfo || {};
+    const isSpecial   = leagueInfo.isEliminator || leagueInfo.isGuillotine;
+    const displayWeek = isSpecial ? (activeWeek || allWeeks[allWeeks.length - 1] || 1) : 1;
+
     const weekPills = allWeeks.map(w =>
       `<button class="season-pill ${w === displayWeek ? "season-pill--current" : ""}"
         onclick="DLRStandings._mflLoadWeek(${w})">${w}</button>`
@@ -412,13 +416,12 @@ const DLRStandings = (() => {
       </div>
       ${divBanner}
       <div id="mfl-matchups-grid" class="matchups-grid">
-        ${_mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup, starterSlots, _mflBundle?.standings || [], displayWeek)}
+        <div class="detail-loading"><div class="spinner"></div><span>Loading week ${displayWeek}…</span></div>
       </div>`;
 
-    // Immediately load week 1 data (which may differ from activeWeek)
-    if (displayWeek !== activeWeek) {
-      _mflLoadWeek(displayWeek);
-    }
+    // Always load via _mflLoadWeek so week-switching and caching work consistently.
+    // This also ensures the alive-team filter runs with the correct week number.
+    _mflLoadWeek(displayWeek);
   }
 
   async function _mflLoadWeek(week) {
@@ -1368,35 +1371,53 @@ const DLRStandings = (() => {
     const isSpecial    = isEliminator || isGuillotine;
 
     // ── Guillotine: resolve final 2 un-eliminated teams ──────
-    // When only 2 teams remain with eliminated:"", we use liveScoring from the
-    // most recent week to determine winner (higher score) vs last eliminated.
-    // We also capture the week number so the runner-up shows "Out Wk N".
-    let guillotineFinalMap = {};  // { franchiseId: { status:"winner"|"runnerup", week:N } }
+    // When only 2 teams remain with eliminated:"", use the highest week in which
+    // any team was eliminated to find the right liveScoring data, then identify
+    // winner vs runner-up by score. The runner-up's "Out Wk N" = that matchup week.
+    let guillotineFinalMap = {};
     if (isGuillotine) {
       const aliveTeams = standings.filter(s => !s.eliminated);
       if (aliveTeams.length === 2) {
         const ids = aliveTeams.map(s => String(s.franchiseId));
-        // Try cached liveScoring weeks, most recent first
+
+        // The final matchup week = 1 + the week the second-to-last team was eliminated.
+        // Find the highest weekEliminated among eliminated teams — that's the penultimate week.
+        // The final was played the week after that.
+        const elimWeeks = standings
+          .filter(s => s.eliminated && s.weekEliminated)
+          .map(s => Number(s.weekEliminated));
+        const lastElimWeek = elimWeeks.length ? Math.max(...elimWeeks) : null;
+        // Final match week = lastElimWeek + 1, or fall back to highest cached week
+        const finalMatchWeek = lastElimWeek ? lastElimWeek + 1 : null;
+
+        // Prefer the cached liveScoring for the exact final match week,
+        // then try nearby weeks, then fall back to most-recent cached week.
         const cachedWeeks = Object.keys(_mflLiveScoringCache).map(Number).sort((a,b) => b-a);
+        const weeksToTry  = finalMatchWeek
+          ? [finalMatchWeek, finalMatchWeek - 1, finalMatchWeek + 1, ...cachedWeeks]
+          : cachedWeeks;
+        const uniqueWeeks = [...new Set(weeksToTry)].filter(w => _mflLiveScoringCache[w]);
+
         let resolved = false;
-        for (const w of cachedWeeks) {
-          const liveD = _mflLiveScoringCache[w];
+        for (const w of uniqueWeeks) {
+          const liveD  = _mflLiveScoringCache[w];
           const result = MFLAPI.resolveGuillotineFinal(ids, liveD);
           if (result) {
-            const liveWeek = parseInt(liveD?.liveScoring?.week || w);
-            guillotineFinalMap[result.winnerId]     = { status: "winner",   week: liveWeek };
-            guillotineFinalMap[result.eliminatedId] = { status: "runnerup", week: liveWeek };
+            // Use the actual week from liveScoring data, not the NFL schedule week
+            const matchWeek = parseInt(liveD?.liveScoring?.week || w);
+            guillotineFinalMap[result.winnerId]     = { status: "winner",   week: matchWeek };
+            guillotineFinalMap[result.eliminatedId] = { status: "runnerup", week: matchWeek };
             resolved = true;
             break;
           }
         }
-        // Fall back to bundle liveScoring if nothing cached
+        // Fall back to bundle liveScoring
         if (!resolved && bundle?.liveScoring) {
           const result = MFLAPI.resolveGuillotineFinal(ids, bundle.liveScoring);
           if (result) {
-            const liveWeek = parseInt(bundle.liveScoring?.liveScoring?.week || 0);
-            guillotineFinalMap[result.winnerId]     = { status: "winner",   week: liveWeek };
-            guillotineFinalMap[result.eliminatedId] = { status: "runnerup", week: liveWeek };
+            const matchWeek = parseInt(bundle.liveScoring?.liveScoring?.week || 0);
+            guillotineFinalMap[result.winnerId]     = { status: "winner",   week: matchWeek };
+            guillotineFinalMap[result.eliminatedId] = { status: "runnerup", week: matchWeek };
           }
         }
       }
