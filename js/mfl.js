@@ -467,7 +467,7 @@ const MFLAPI = (() => {
     return result;
   }
 
-  // ── Playoff helpers (now included) ───────────────────────────────────────
+  // ── Playoff helpers ───────────────────────────────────────────────────────
   function normalizePlayoffBrackets(bundle) {
     const pb = bundle?.playoffBrackets?.playoffBrackets;
     if (!pb) return [];
@@ -516,6 +516,7 @@ const MFLAPI = (() => {
     });
   }
 
+  // ── On-demand API calls ───────────────────────────────────────────────────
   async function getLiveScoring(leagueId, year, week, username, password) {
     return post("/mfl/liveScoring", {
       leagueId, year, week: week != null ? String(week) : undefined, username, password
@@ -528,6 +529,26 @@ const MFLAPI = (() => {
 
   async function getAuctionResultsDirect(leagueId, year, cookie, username, password) {
     return post("/mfl/auctionResults", { leagueId, year, cookie, username, password });
+  }
+
+  // ── Guillotine final resolver ─────────────────────────────────────────────
+  function resolveGuillotineFinal(aliveTeamIds, liveData) {
+    if (!Array.isArray(aliveTeamIds) || aliveTeamIds.length !== 2) return null;
+    const ls = liveData?.liveScoring;
+    if (!ls) return null;
+    const raw = ls.franchise;
+    if (!raw) return null;
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const scores = {};
+    arr.forEach(f => {
+      const id = String(f.id || "");
+      if (aliveTeamIds.includes(id)) scores[id] = parseFloat(f.score || 0);
+    });
+    const [a, b] = aliveTeamIds;
+    if (scores[a] == null || scores[b] == null) return null;
+    const winnerId = scores[a] >= scores[b] ? a : b;
+    const eliminatedId = winnerId === a ? b : a;
+    return { winnerId, eliminatedId };
   }
 
   // ── Division helpers ──────────────────────────────────────────────────────
@@ -612,8 +633,8 @@ const MFLAPI = (() => {
     getLatestScoredWeek,
     normalizeLiveScoring,
     normalizeMatchups,
-    normalizePlayoffBrackets,        // ← now defined
-    normalizePlayoffBracketResult,   // ← now defined
+    normalizePlayoffBrackets,
+    normalizePlayoffBracketResult,
     getLiveScoring,
     getPlayoffBracket,
     getPlayers,
