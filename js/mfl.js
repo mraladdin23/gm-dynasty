@@ -469,7 +469,9 @@ const MFLAPI = (() => {
 
   async function getPlayers(year, leagueId) {
     const season   = year ? String(year) : new Date().getFullYear().toString();
-    const cacheKey = `mfl_players_${season}_${leagueId || "global"}`;
+    // v2: cache key includes version so stale sessionStorage entries are ignored
+    // after the isCustom detection fix (was incorrectly flagging real players).
+    const cacheKey = `mfl_players_v2_${season}_${leagueId || "global"}`;
 
     // In-memory cache: keyed by cacheKey to support multiple leagues per session
     if (!_playersMemCache) _playersMemCache = {};
@@ -531,7 +533,7 @@ const MFLAPI = (() => {
     _playersMemCache[cacheKey] = map;
 
     // Also merge into the global cache so lookups without leagueId still hit known players
-    const globalKey = `mfl_players_${season}_global`;
+    const globalKey = `mfl_players_v2_${season}_global`;
     if (leagueId && !_playersMemCache[globalKey]) {
       _playersMemCache[globalKey] = { ...map };
     } else if (leagueId && _playersMemCache[globalKey]) {
@@ -991,12 +993,8 @@ const MFLAPI = (() => {
       }
     }
 
-    // Set displaySlot: named slots keep their label; SF/FLEX show the player's actual position
-    result.forEach(r => {
-      if ((r.slot === "SF" || r.slot === "FLEX") && r.player) {
-        r.displaySlot = r.player.pos || r.slot;
-      }
-    });
+    // displaySlot stays as the slot label (QB, RB, WR, TE, SF, FLEX etc.)
+    // The center column shows the slot name, not the player's actual position.
 
     return result;
   }
