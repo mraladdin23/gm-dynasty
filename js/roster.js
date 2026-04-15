@@ -423,7 +423,7 @@ const DLRRoster = (() => {
 
     // Populate _players with mfl_-keyed stubs so _teamCardHTML can read
     // pos and rank for position grouping. getFullPlayer() is the source of truth.
-    const mflPlayerUniverse = await MFLAPI.getPlayers(season, leagueID);
+    const mflPlayerUniverse = await MFLAPI.getPlayers(season);
     if (token !== _initToken) return;
     Object.entries(mflPlayerUniverse).forEach(([mflId, p]) => {
       const key  = `mfl_${mflId}`;
