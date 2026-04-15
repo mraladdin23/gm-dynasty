@@ -42,6 +42,7 @@ const DLRAuction = (() => {
   const HIST_PAGE_SIZE = 25;
   let _histPage     = 0;   // 0-based current page
   let _histSort     = "date";  // "date" | "price" | "name"
+  let _histTeam     = "";     // "" = all teams, or roster_id string
 
   // ── Firebase refs ──────────────────────────────────────────
   const _listRef     = () => GMD.child(`auctions/${_leagueKey}/bids`);
@@ -270,6 +271,7 @@ const DLRAuction = (() => {
     _auctions  = [];
     _histPage  = 0;
     _histSort  = "date";
+    _histTeam  = "";
     _initToken++;
   }
 
@@ -607,7 +609,7 @@ function _computeLeader(a) {
   }
 
   function setView(mode) {
-    if (mode === "history") _histPage = 0;  // always start at page 1 when entering history
+    if (mode === "history") { _histPage = 0; _histTeam = ""; }  // reset filters on tab entry
     _viewMode = mode;
     const now   = Date.now();
     const live  = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
@@ -1482,14 +1484,81 @@ function _computeLeader(a) {
     if (el) _renderHistory(el, ended);
   }
 
+  function _histSetTeam(rosterId) {
+    _histTeam = rosterId || "";
+    _histPage = 0;
+    const now   = Date.now();
+    const ended = _auctions.filter(a => a.cancelled || a.processed || a.expiresAt <= now);
+    const el    = document.getElementById("auc-content");
+    if (el) _renderHistory(el, ended);
+  }
+
+  function _histExportCSV() {
+    const now   = Date.now();
+    const ended = _auctions.filter(a => a.cancelled || a.processed || a.expiresAt <= now);
+
+    // Build all rows (respects current team filter but exports all pages)
+    const filtered = _histTeam
+      ? ended.filter(a => {
+          let rid = a.winner != null ? Number(a.winner) : null;
+          if (!rid && !a.cancelled) rid = _computeLeader(a).rosterId;
+          return rid != null && String(rid) === String(_histTeam);
+        })
+      : ended;
+
+    const sorted = [...filtered].sort((a, b) =>
+      (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)
+    );
+
+    const csvRows = [["Player", "Position", "Team", "Price", "Status", "Date"]];
+    sorted.forEach(a => {
+      const p       = _players[a.playerId] || {};
+      const name    = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId || "");
+      const pos     = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
+      let winRosterId = a.winner != null ? Number(a.winner) : null;
+      let winPrice    = a.winningBid || 0;
+      if (!winRosterId && !a.cancelled) {
+        const leader = _computeLeader(a);
+        winRosterId  = leader.rosterId;
+        winPrice     = leader.displayBid;
+      }
+      const team    = winRosterId
+        ? (_rosterData.find(r => Number(r.roster_id) === winRosterId)?.teamName || `#${winRosterId}`)
+        : "—";
+      const status  = a.cancelled ? "Cancelled" : a.processed ? "Claimed" : "Expired";
+      const dateTs  = a.claimedAt || a.expiresAt || a.startTime;
+      const date    = dateTs ? new Date(dateTs).toLocaleDateString() : "—";
+      const priceFmt = winPrice ? `$${(winPrice / 1_000_000).toFixed(2)}M` : "—";
+      csvRows.push([`"${name.replace(/"/g,'""')}"`, pos, `"${team.replace(/"/g,'""')}"`, priceFmt, status, date]);
+    });
+
+    const csv     = csvRows.map(r => r.join(",")).join("\n");
+    const blob    = new Blob([csv], { type: "text/csv" });
+    const url     = URL.createObjectURL(blob);
+    const a       = document.createElement("a");
+    a.href        = url;
+    a.download    = `auction-history.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function _renderHistory(el, ended) {
     if (!ended.length) {
       el.innerHTML = `<div class="auc-empty">No auction history yet.</div>`;
       return;
     }
 
+    // Apply team filter first
+    const teamFiltered = _histTeam
+      ? ended.filter(a => {
+          let rid = a.winner != null ? Number(a.winner) : null;
+          if (!rid && !a.cancelled) rid = _computeLeader(a).rosterId;
+          return rid != null && String(rid) === String(_histTeam);
+        })
+      : ended;
+
     // Sort
-    const sorted = [...ended].sort((a, b) => {
+    const sorted = [...teamFiltered].sort((a, b) => {
       if (_histSort === "price") {
         return (b.winningBid || 0) - (a.winningBid || 0);
       }
@@ -1500,7 +1569,6 @@ function _computeLeader(a) {
         const nb = pb.first_name ? `${pb.first_name} ${pb.last_name}` : (b.playerName || b.playerId || "");
         return na.localeCompare(nb);
       }
-      // default: date descending (most recent first)
       return (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0);
     });
 
@@ -1509,17 +1577,29 @@ function _computeLeader(a) {
     const page       = Math.max(0, Math.min(_histPage, totalPages - 1));
     const pageItems  = sorted.slice(page * HIST_PAGE_SIZE, (page + 1) * HIST_PAGE_SIZE);
 
-    // Sort toolbar
-    const sortBar = `
+    // Team filter dropdown
+    const teamOpts = [
+      `<option value="">All Teams</option>`,
+      ...[..._rosterData].sort((a, b) => a.teamName.localeCompare(b.teamName)).map(t =>
+        `<option value="${t.roster_id}" ${String(t.roster_id) === String(_histTeam) ? "selected" : ""}>${_esc(t.teamName)}</option>`
+      )
+    ].join("");
+
+    // Toolbar: sort + team filter + export
+    const toolbar = `
       <div class="auc-hist-toolbar" style="display:flex;align-items:center;gap:6px;padding:var(--space-2) 0 var(--space-3);flex-wrap:wrap">
-        <span class="dim" style="font-size:.78rem;margin-right:4px">Sort:</span>
+        <span class="dim" style="font-size:.78rem;margin-right:2px">Sort:</span>
         <button class="draft-toggle-btn ${_histSort==="date"  ? "draft-toggle-btn--active":""}"
           onclick="DLRAuction._histSetSort('date')">📅 Date</button>
         <button class="draft-toggle-btn ${_histSort==="price" ? "draft-toggle-btn--active":""}"
           onclick="DLRAuction._histSetSort('price')">💰 Price</button>
         <button class="draft-toggle-btn ${_histSort==="name"  ? "draft-toggle-btn--active":""}"
           onclick="DLRAuction._histSetSort('name')">A–Z Name</button>
-        <span class="dim" style="margin-left:auto;font-size:.75rem">${sorted.length} total</span>
+        <select class="roster-team-select" style="font-size:.78rem;padding:3px 6px;max-width:160px;margin-left:4px"
+          onchange="DLRAuction._histSetTeam(this.value)">${teamOpts}</select>
+        <button class="btn-secondary btn-sm" style="margin-left:auto;font-size:.75rem"
+          onclick="DLRAuction._histExportCSV()" title="Export to CSV">⬇ CSV</button>
+        <span class="dim" style="font-size:.75rem">${sorted.length} result${sorted.length !== 1 ? "s" : ""}</span>
       </div>`;
 
     // Rows
@@ -1577,7 +1657,7 @@ function _computeLeader(a) {
         </div>`;
     }
 
-    el.innerHTML = sortBar + `<div class="auc-history-list">${rows}</div>` + paginator;
+    el.innerHTML = toolbar + `<div class="auc-history-list">${rows}</div>` + paginator;
   }
 
   // ── Settings (commissioner) ───────────────────────────────
@@ -2353,7 +2433,7 @@ function _computeLeader(a) {
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
     canNominate, canNominateFor, isReady, getActiveNominations,
-    _histSetSort, _histSetPage
+    _histSetSort, _histSetPage, _histSetTeam, _histExportCSV
   };
 
 })();
