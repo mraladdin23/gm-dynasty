@@ -1463,7 +1463,7 @@ function _computeLeader(a) {
       return;
     }
     el.innerHTML = `<div class="auc-history-list">
-      ${ended.sort((a, b) => (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)).slice(0, 60).map(a => {
+      ${ended.sort((a, b) => (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)).slice(0, 500).map(a => {
         const p      = _players[a.playerId] || {};
         const name   = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
 
