@@ -257,13 +257,35 @@ const DLRRoster = (() => {
     const isYahoo = playerId?.toString().startsWith("yahoo_");
 
     // Resolve best available player object via DLRPlayers
-    let p;
+    let p, mapping;
     if (isMfl) {
       const mflId = playerId.replace("mfl_", "");
+      mapping = DLRPlayers.getByMflId(mflId);
       p = DLRPlayers.getFullPlayer(mflId, "mfl");
     } else if (isYahoo) {
-      // Yahoo IDs don't map to DynastyProcess — use the stub in _players if present
-      p = _players[playerId] || {};
+      const yahooId = playerId.replace("yahoo_", "");
+      mapping = DLRPlayers.getByYahooId(yahooId);
+      // If we have a Sleeper ID via the CSV mapping, use the full Sleeper record
+      p = (mapping?.sleeper_id ? DLRPlayers.get(mapping.sleeper_id) : null)
+          || _players[playerId]
+          || {};
+      // Backfill from CSV mapping when Sleeper record is thin
+      if (mapping && (!p.first_name || !p.position)) {
+        const parts = (mapping.name || "").trim().split(" ");
+        p = {
+          first_name:        parts.slice(0, -1).join(" ") || mapping.name || "",
+          last_name:         parts.slice(-1)[0]           || "",
+          position:          mapping.position             || p.position || "?",
+          fantasy_positions: [mapping.position            || p.position || "?"],
+          team:              mapping.team                 || p.team || "FA",
+          age:               mapping.age                  ?? p.age  ?? null,
+          height:            mapping.height               ?? p.height ?? null,
+          weight:            mapping.weight               ?? p.weight ?? null,
+          college:           mapping.college              || p.college || "",
+          draft_year:        mapping.draft_year           ?? p.draft_year ?? null,
+          search_rank:       p.search_rank               || 9999,
+        };
+      }
     } else {
       // Sleeper: prefer full Sleeper record from the loaded DB
       p = _players[playerId] || DLRPlayers.get(playerId) || {};
@@ -278,7 +300,10 @@ const DLRRoster = (() => {
     let photoPid = null;
     if (isMfl) {
       photoPid = DLRPlayers.getSleeperIdFromMfl(playerId.replace("mfl_", "")) || null;
-    } else if (!isYahoo) {
+    } else if (isYahoo) {
+      // Use Sleeper ID from DynastyProcess CSV mapping if available
+      photoPid = DLRPlayers.getByYahooId(playerId.replace("yahoo_", ""))?.sleeper_id || null;
+    } else {
       photoPid = playerId;  // Sleeper ID is already the photo key
     }
 
@@ -287,12 +312,11 @@ const DLRRoster = (() => {
       : `<div class="roster-player-photo-fallback" style="color:${color};">${pos}</div>`;
 
     // Player card click: pass the original playerId — playercard.js resolves
-    // the Sleeper ID internally for stats. This means mfl_ IDs work correctly.
+    // the Sleeper ID internally for stats. This means mfl_ and yahoo_ IDs work correctly.
     const cardId = playerId;
 
-    // Bio string via DLRPlayers.formatBio — works for both Sleeper and CSV-mapped players
-    const mapping = isMfl ? DLRPlayers.getByMflId(playerId.replace("mfl_", "")) : null;
-    const bioStr  = DLRPlayers.formatBio(p, mapping);
+    // Bio string via DLRPlayers.formatBio — works for Sleeper, MFL, and Yahoo CSV-mapped players
+    const bioStr = DLRPlayers.formatBio(p, mapping || null);
 
     return `
       <div class="roster-player-row" onclick="DLRPlayerCard.show('${_escAttr(cardId)}','${_escAttr(name)}')">
@@ -309,7 +333,11 @@ const DLRRoster = (() => {
 
   // ── Helpers ────────────────────────────────────────────
   async function _loadYahooData(leagueId, token) {
-    // Use stored leagueKey (full "nfl.l.XXXXX" format required by Yahoo API)
+    // Load DLRPlayers (Sleeper DB + DynastyProcess mappings) first — same as MFL.
+    // This gives us yahoo_id → sleeper_id mapping for names, photos, and bio.
+    await DLRPlayers.load();
+    if (token !== _initToken) return;
+
     const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
     const bundle = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
@@ -318,45 +346,72 @@ const DLRRoster = (() => {
     const rosters   = bundle.rosters   || [];
     const standings = bundle.standings || [];
 
+    // normalizeBundle uses camelCase teamId throughout
     const standingsMap = {};
-    standings.forEach(s => { standingsMap[s.team_id] = s; });
+    standings.forEach(s => { standingsMap[String(s.teamId)] = s; });
 
+    // Build roster map: teamId → player ID array
     const rosterMap = {};
-    rosters.forEach(r => { rosterMap[r.team_id] = r.player || []; });
+    rosters.forEach(r => { rosterMap[String(r.teamId)] = r.players || []; });
 
     const mappedTeams = teams.map(t => {
-      const s       = standingsMap[t.id] || {};
-      const players = rosterMap[t.id]    || [];
+      const tid    = String(t.id);
+      const s      = standingsMap[tid] || {};
+      const pIds   = rosterMap[tid]    || [];
       return {
-        roster_id: t.id,
-        owner_id:  t.id,
-        teamName:  t.name       || `Team ${t.id}`,
+        roster_id: tid,
+        owner_id:  tid,
+        teamName:  t.name        || `Team ${tid}`,
         username:  (t.owner_name || "").toLowerCase(),
         avatar:    null,
-        players:   players.map(pid => `yahoo_${pid}`),
+        players:   pIds.map(pid => `yahoo_${pid}`),
         reserve:   [],
         taxi:      [],
-        wins:      s.wins       || 0,
-        losses:    s.losses     || 0,
-        fpts:      s.points_for || 0
+        wins:      s.wins   || 0,
+        losses:    s.losses || 0,
+        fpts:      s.ptsFor || 0
       };
     }).sort((a, b) => b.wins - a.wins || b.fpts - a.fpts);
 
-    // Yahoo player IDs don't map to DynastyProcess — stub entries so _playerRowHTML degrades gracefully
-    const yahooPlayerLookup = {};
-    mappedTeams.forEach(t => {
-      t.players.forEach(pid => {
-        yahooPlayerLookup[pid] = {
-          first_name: pid.replace("yahoo_", "Player "),
-          last_name: "",
-          position: "?",
-          fantasy_positions: ["?"],
-          team: "—",
-          search_rank: 9999
+    // Populate _players for every yahoo_ ID on any roster.
+    // Primary path: DynastyProcess CSV mapping (yahoo_id → sleeper_id → full player record).
+    // Fallback: basic stub so _playerRowHTML never crashes.
+    const allPrefixedIds = new Set(mappedTeams.flatMap(t => t.players));
+    allPrefixedIds.forEach(prefixedId => {
+      if (_players[prefixedId]) return;
+      const rawId  = prefixedId.replace("yahoo_", "");
+      const map    = DLRPlayers.getByYahooId(rawId);
+      if (map) {
+        // Use Sleeper record if available (has injury_status, search_rank, etc.)
+        const sleeperP = map.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+        if (sleeperP && Object.keys(sleeperP).length > 5) {
+          _players[prefixedId] = sleeperP;
+        } else {
+          // Fall back to CSV bio — same shape as MFL getFullPlayer fallback
+          const parts = (map.name || "").trim().split(" ");
+          _players[prefixedId] = {
+            first_name:        parts.slice(0, -1).join(" ") || map.name || "",
+            last_name:         parts.slice(-1)[0]           || "",
+            position:          map.position                 || "?",
+            fantasy_positions: [map.position                || "?"],
+            team:              map.team                     || "FA",
+            age:               map.age                      ?? null,
+            height:            map.height                   ?? null,
+            weight:            map.weight                   ?? null,
+            college:           map.college                  || "",
+            draft_year:        map.draft_year               ?? null,
+            search_rank:       9999,
+          };
+        }
+      } else {
+        // No CSV match — minimal stub so the row renders without crashing
+        _players[prefixedId] = {
+          first_name: "Player", last_name: rawId,
+          position: "?", fantasy_positions: ["?"],
+          team: "—", search_rank: 9999
         };
-      });
+      }
     });
-    Object.assign(_players, yahooPlayerLookup);
 
     _rosterData = { teams: mappedTeams, league: bundle.league || {} };
     _render();
