@@ -360,10 +360,14 @@ const DLRStandings = (() => {
     const maxWeek = Math.max(currentWeek, lastRegular, lastPlayoff, 18);
     const allWeeks = Array.from({ length: maxWeek }, (_, i) => i + 1);
 
+    // Pre-normalize standings so eliminator/guillotine week filtering works in matchups
+    const standings = MFLAPI.normalizeStandings(bundle);
+
     return {
       bundle, teams, nameMap, season, leagueInfo,
       allWeeks, currentWeek,
       starterSlots: MFLAPI.getStarterSlots(bundle),
+      standings,  // used by _mflMatchupCards for eliminator team filtering
     };
   }
 
@@ -381,6 +385,7 @@ const DLRStandings = (() => {
     }
     if (playerLookup)  _mflBundle._playerLookup  = playerLookup;
     if (starterSlots)  _mflBundle._starterSlots   = starterSlots;
+    // standings already stored in _mflBundle.standings via _mflBuildBundleState
 
     // Division banner if applicable
     let divBanner = "";
@@ -402,7 +407,7 @@ const DLRStandings = (() => {
       </div>
       ${divBanner}
       <div id="mfl-matchups-grid" class="matchups-grid">
-        ${_mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup, starterSlots)}
+        ${_mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup, starterSlots, _mflBundle?.standings || [], displayWeek)}
       </div>`;
 
     // Immediately load week 1 data (which may differ from activeWeek)
@@ -423,12 +428,13 @@ const DLRStandings = (() => {
     const divisionFranchises = _mflBundle._divisionFranchises || null;
     const playerLookup       = _mflBundle._playerLookup || null;
     const starterSlots       = _mflBundle._starterSlots  || _mflBundle.starterSlots || [];
+    const standings          = _mflBundle.standings || [];
 
     // Use cache if available
     if (_mflLiveScoringCache[week]) {
       const liveData = _mflLiveScoringCache[week];
       const matchups = MFLAPI.normalizeMatchups(liveData);
-      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises, liveData, playerLookup, starterSlots);
+      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises, liveData, playerLookup, starterSlots, standings, week);
       return;
     }
 
@@ -437,7 +443,7 @@ const DLRStandings = (() => {
       const liveData = await MFLAPI.getLiveScoring(_leagueId, _mflBundle.season, week);
       _mflLiveScoringCache[week] = liveData;
       const matchups = MFLAPI.normalizeMatchups(liveData);
-      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises, liveData, playerLookup, starterSlots);
+      grid.innerHTML = _mflMatchupCards(matchups, _mflNameMap, divisionFranchises, liveData, playerLookup, starterSlots, standings, week);
     } catch(e) {
       grid.innerHTML = `<div class="dim" style="padding:var(--space-4)">Could not load week ${week}: ${e.message}</div>`;
     }
@@ -486,8 +492,9 @@ const DLRStandings = (() => {
 
   // Render MFL matchup cards — two paths:
   //   1. Standard matchups (head-to-head): click to expand slot-ordered side-by-side player breakdown
-  //   2. No-roster scoring leagues: sorted score cards with per-position breakdown on expand
-  function _mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup, starterSlots) {
+  //   2. No-roster scoring leagues: sorted score cards with slot-ordered breakdown on expand
+  // `standings` and `week` are used to filter eliminated teams in eliminator/guillotine leagues.
+  function _mflMatchupCards(matchups, nameMap, divisionFranchises, liveData, playerLookup, starterSlots, standings, week) {
     const POS_COLOR = {
       QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)",
       TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)",
@@ -495,45 +502,93 @@ const DLRStandings = (() => {
       P:"var(--color-text-dim)", COACH:"var(--color-gold-dim)"
     };
 
-    // ── No-roster / pick-a-player league path ────────────────
+    // Build alive-team filter for eliminator/guillotine leagues.
+    // getAliveTeamsForWeek returns a Set<string> of franchise IDs still active in `week`,
+    // or null if the league has no elimination data.
+    const aliveSet = (standings && standings.length && week)
+      ? MFLAPI.getAliveTeamsForWeek(standings, week)
+      : null;
+
+    // ── No-roster / overall-points league path ───────────────
     if (liveData && _isMFLNoRosterLeague(liveData)) {
-      const teams = _normalizeMFLNoRosterScores(liveData);
+      let teams = _normalizeMFLNoRosterScores(liveData);
+
+      // Filter by alive teams for eliminator leagues
+      if (aliveSet) {
+        teams = teams.filter(t => aliveSet.has(String(t.teamId)));
+      }
+
       const filtered = divisionFranchises
         ? teams.filter(t => divisionFranchises.includes(t.teamId))
         : teams;
       if (!filtered.length) return `<div class="dim" style="padding:var(--space-4)">No scores this week.</div>`;
 
-      const POS_ORDER = ["QB","RB","WR","TE","K","DEF","DL","LB","DB","P",""];
-      const posRank = p => { const i = POS_ORDER.indexOf(p); return i < 0 ? 99 : i; };
-
       return filtered.map((t, rank) => {
-        const name = _esc(nameMap[t.teamId] || t.teamId || "TBD");
-        const scoreFmt = t.score > 0 ? t.score.toFixed(2) : "—";
-        const sorted = [...t.players].sort((a, b) => {
-          const posA = playerLookup?.[a.id]?.pos || a.position || "?";
-          const posB = playerLookup?.[b.id]?.pos || b.position || "?";
-          const pr = posRank(posA.toUpperCase()) - posRank(posB.toUpperCase());
-          return pr !== 0 ? pr : b.score - a.score;
-        });
-        const starters = sorted.filter(p => p.status === "starter" || p.status === "");
-        const bench    = sorted.filter(p => p.status !== "starter" && p.status !== "");
-        const hasDetail = sorted.length > 0;
+        const name      = _esc(nameMap[t.teamId] || t.teamId || "TBD");
+        const scoreFmt  = t.score > 0 ? t.score.toFixed(2) : "—";
+        const isMe      = _myRosterId && String(t.teamId) === String(_myRosterId);
 
-        const playerRows = (arr, isBench) => arr.map(p => {
-          const pName = playerLookup ? (playerLookup[p.id]?.name || p.id) : p.id;
+        const starters  = t.players.filter(p => p.status === "starter" || p.status === "");
+        const bench     = t.players.filter(p => p.status !== "starter" && p.status !== "");
+        const hasDetail = t.players.length > 0;
+
+        // Use assignStartersToSlots when we have the league slot config —
+        // this gives proper QB/RB/WR/TE/SF/FLEX labels instead of raw positions.
+        let starterRows = "";
+        if (starterSlots && starterSlots.length > 0 && playerLookup) {
+          const assigned = MFLAPI.assignStartersToSlots(starterSlots, starters, playerLookup);
+          starterRows = assigned.map(r => {
+            const p     = r.player;
+            const label = r.displaySlot || r.slot;
+            const col   = POS_COLOR[label] || POS_COLOR[r.slot] || "var(--color-text-dim)";
+            const pName = p ? _esc(playerLookup[p.id]?.name || p.id) : "—";
+            const pts   = p ? (p.score > 0 ? p.score.toFixed(2) : "—") : "—";
+            return `<div class="mu-sbs-row">
+              <span class="mu-slot" style="color:${col}">${label}</span>
+              <span class="mu-name mu-name--left" style="flex:1">${pName}</span>
+              <span class="mu-pts" style="margin-left:auto">${pts}</span>
+            </div>`;
+          }).join("");
+        } else {
+          // Fallback: sort by canonical position order and show raw position label
+          const POS_ORDER = ["QB","RB","WR","TE","K","DEF","DL","LB","DB","P",""];
+          const posRank   = p => { const i = POS_ORDER.indexOf(p); return i < 0 ? 99 : i; };
+          const sortedSt  = [...starters].sort((a, b) => {
+            const pa = (playerLookup?.[a.id]?.pos || a.position || "?").toUpperCase();
+            const pb = (playerLookup?.[b.id]?.pos || b.position || "?").toUpperCase();
+            const pr = posRank(pa) - posRank(pb);
+            return pr !== 0 ? pr : b.score - a.score;
+          });
+          starterRows = sortedSt.map(p => {
+            const pName = playerLookup ? _esc(playerLookup[p.id]?.name || p.id) : p.id;
+            const pos   = ((playerLookup?.[p.id]?.pos || playerLookup?.[p.id]?.position) || p.position || "?").toUpperCase();
+            const col   = POS_COLOR[pos] || "var(--color-text-dim)";
+            return `<div class="mu-sbs-row">
+              <span class="mu-slot" style="color:${col}">${pos}</span>
+              <span class="mu-name mu-name--left" style="flex:1">${pName}</span>
+              <span class="mu-pts" style="margin-left:auto">${p.score > 0 ? p.score.toFixed(2) : "—"}</span>
+            </div>`;
+          }).join("");
+        }
+
+        const benchRows = bench.map(p => {
+          const pName = playerLookup ? _esc(playerLookup[p.id]?.name || p.id) : p.id;
           const pos   = ((playerLookup?.[p.id]?.pos || playerLookup?.[p.id]?.position) || p.position || "?").toUpperCase();
           const col   = POS_COLOR[pos] || "var(--color-text-dim)";
-          return `<div class="mu-sbs-row${isBench ? " mu-sbs-row--bench" : ""}">
-            <span class="mu-slot" style="color:${col}">${pos}</span>
-            <span class="mu-name mu-name--left${isBench ? " dim" : ""}" style="flex:1">${_esc(pName)}</span>
-            <span class="mu-pts${isBench ? " dim" : ""}" style="margin-left:auto">${p.score > 0 ? p.score.toFixed(2) : "—"}</span>
+          return `<div class="mu-sbs-row mu-sbs-row--bench">
+            <span class="mu-slot dim">${pos}</span>
+            <span class="mu-name mu-name--left dim" style="flex:1">${pName}</span>
+            <span class="mu-pts dim" style="margin-left:auto">${p.score > 0 ? p.score.toFixed(2) : "—"}</span>
           </div>`;
         }).join("");
 
+        const avStyle = isMe ? "background:var(--color-gold);color:#000;font-weight:700;" : "";
         return `<div class="mu-card" onclick="this.querySelector('.mu-detail').classList.toggle('hidden')">
           <div class="mu-header">
-            <div class="mu-team"><div class="st-av">${(nameMap[t.teamId]||"?")[0].toUpperCase()}</div>
-              <span>${name}</span></div>
+            <div class="mu-team">
+              <div class="st-av" style="${avStyle}">${(nameMap[t.teamId]||"?")[0].toUpperCase()}</div>
+              <span${isMe ? " style='font-weight:700;color:var(--color-gold)'" : ""}>${name}</span>
+            </div>
             <div class="mu-scores">
               <span class="mu-score mu-score--win">${scoreFmt}</span>
             </div>
@@ -541,8 +596,8 @@ const DLRStandings = (() => {
           </div>
           ${hasDetail
             ? `<div class="mu-detail hidden" style="padding:var(--space-3) var(--space-4)">
-                ${starters.length ? playerRows(starters, false) : ""}
-                ${bench.length ? `<div class="mu-bench-header">Bench</div>${playerRows(bench, true)}` : ""}
+                ${starterRows}
+                ${bench.length ? `<div class="mu-bench-header">Bench</div>${benchRows}` : ""}
               </div>`
             : `<div class="mu-no-detail">No player data yet</div>`}
         </div>`;
@@ -550,11 +605,18 @@ const DLRStandings = (() => {
     }
 
     // ── Standard head-to-head matchups ───────────────────────
-    const filtered = divisionFranchises
+    let filtered = divisionFranchises
       ? matchups.filter(m =>
           divisionFranchises.includes(String(m.home.teamId)) ||
           divisionFranchises.includes(String(m.away.teamId)))
       : matchups;
+
+    // Filter out matchups where both teams were already eliminated before this week
+    if (aliveSet) {
+      filtered = filtered.filter(m =>
+        aliveSet.has(String(m.home.teamId)) || aliveSet.has(String(m.away.teamId))
+      );
+    }
 
     if (!filtered.length) {
       return `<div class="dim" style="padding:var(--space-4)">No matchups this week.</div>`;
