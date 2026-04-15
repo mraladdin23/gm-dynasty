@@ -83,3 +83,15 @@
 /* ── Forms ────────────────────────────────────────────── */
 .auth-form { display: none; }
 .auth-form.active { display: block; }
+
+/* ── iOS input zoom prevention ───────────────────────────
+   iOS Safari zooms on inputs with font-size < 16px.
+   Force 16px on auth inputs at mobile — desktop is
+   unaffected since these inputs have no font-size set
+   there and inherit naturally from base.css.
+   ──────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .auth-form input {
+    font-size: 16px !important;
+  }
+}
