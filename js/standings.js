@@ -32,6 +32,7 @@ const DLRStandings = (() => {
     _mflLiveScoringCache = {};
     _mflPlayoffState     = null;
     _mflSelectedDivId    = null;
+    _yahooBundle         = null;
     _initToken++;
   }
 
@@ -90,9 +91,9 @@ const DLRStandings = (() => {
     if (_platform === "yahoo") {
       try {
         const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
-        const bundle = await YahooAPI.getLeagueBundle(leagueKey);
+        if (!_yahooBundle) _yahooBundle = await YahooAPI.getLeagueBundle(leagueKey);
         if (token !== _initToken) return;
-        _renderYahooStandings(el, bundle, leagueId);
+        _renderYahooStandings(el, _yahooBundle, leagueId);
       } catch(e) {
         if (token !== _initToken) return;
         const isNetwork = e.message?.includes("fetch") || e.message?.includes("network") || e.message?.includes("disconnected");
@@ -258,8 +259,8 @@ const DLRStandings = (() => {
       el.innerHTML = _loadingHTML("Loading Yahoo matchups…");
       try {
         const leagueKey = _leagueKey || `nfl.l.${_leagueId}`;
-        const bundle = await YahooAPI.getLeagueBundle(leagueKey);
-        _renderYahooMatchups(el, bundle);
+        if (!_yahooBundle) _yahooBundle = await YahooAPI.getLeagueBundle(leagueKey);
+        _renderYahooMatchups(el, _yahooBundle);
       } catch(e) {
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
           Could not load Yahoo matchups: ${e.message}
@@ -342,6 +343,9 @@ const DLRStandings = (() => {
   let _mflPlayoffState      = null;   // { brackets, nameMap, season, leagueId, activeBracketIdx }
   // Persistent division selection: null = user's own division, "all" = show all, divId = specific div
   let _mflSelectedDivId     = null;   // set when user clicks a division pill
+
+  // ── Yahoo bundle cache — shared across standings + matchups tabs ──
+  let _yahooBundle          = null;   // normalized bundle, cleared on league change
 
   // Build the bundle state object, shared across all three bundle-fetch sites.
   // Computes allWeeks correctly for eliminator/guillotine leagues that run beyond lastRegularSeasonWeek.

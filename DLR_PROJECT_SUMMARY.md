@@ -234,7 +234,7 @@ All MFL API responses go through `r.text()` then `JSON.parse()` in a try/catch. 
 
 - **Home router** blocks `workers.dev` and `firebaseio.com` WebSocket — use mobile data or disable router security for MFL/Yahoo testing
 - **Firebase long-polling** fallback works on home network (WebSocket blocked but REST works)
-- **Mobile fix (partial):** `auth.js` has 8-second timeout on `onAuthStateChanged`. `firebase-db.js` has 8-second `AbortController` on all `fetch()` calls. `index.html` has 10-second global safety net. **Viewport zoom issue and auth loop on mobile still open** — see Roadmap.
+- **Mobile fix (complete):** `auth.js` has 8-second timeout on `onAuthStateChanged`. `firebase-db.js` has 8-second `AbortController` on all `fetch()` calls. `index.html` has 10-second global safety net. Viewport zoom on input focus fixed (April 15 session 3) — see completed sessions log. Auth loop was a non-issue: `auth.js` has one listener with a proper `_isRegistering` guard; `hallway.js` registers no auth listeners.
 - **CDN:** Firebase SDK loaded at bottom of `<body>` (not `<head>`) — prevents mobile blank screen while SDK downloads
 
 ---
@@ -242,10 +242,6 @@ All MFL API responses go through `r.text()` then `JSON.parse()` in a try/catch. 
 ## Roadmap — Open Issues
 
 ### 🔴 Next Priority
-
-**Mobile — Viewport zoom + auth loop**
-On mobile the screen zooms in on input focus and auth state may re-check in a loop. Fix: add `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">` to `index.html`. Audit `auth.js` for redundant `onAuthStateChanged` triggers (check `hallway.js` too — it may register its own listener).
-Files to attach: `index.html`, `auth.js`, `hallway.js`
 
 **Yahoo — End-to-end tab completion**
 OAuth flow works. Need to build/test: matchups tab (not built), analytics (not connected), and verify standings/roster/draft/transactions end-to-end once OAuth is accessible on a non-blocked network.
@@ -279,10 +275,6 @@ Today I want to work on: [specific task]
 Here are the relevant files: [attach files]
 ```
 
-### For the mobile session:
-Attach: `index.html`, `auth.js`, `hallway.js`
-Ask: *"On mobile the screen zooms in on input focus and auth state may loop. Add the viewport meta tag and audit auth.js / hallway.js for redundant onAuthStateChanged listeners."*
-
 ### For the Yahoo session:
 Attach: `yahoo.js`, `standings.js`, `analytics.js` (and any other tab file needed)
 Ask: *"Yahoo OAuth works. I need to build the matchups tab and connect analytics. Here's what Sleeper's versions look like for reference — match that format."*
@@ -313,7 +305,9 @@ Ask: *"Yahoo OAuth works. I need to build the matchups tab and connect analytics
 
 **April 15 (session 2):** Guillotine week range via `weekEliminated` in standings (not guessed league API fields). Guillotine final week pre-fetched before standings render. Matchups default week = `currentWeek` for special leagues. `displaySlot` fixed to show "SF"/"FLEX" not player position. `players-db.js` birthdate filter for duplicate CSV entries (MAPPINGS_VERSION `2026-04b`). Auction history team filter + CSV export. `salary.js` `reconcileAuctionWins()` for timing gap fix.
 
+**April 15 (session 3):** Mobile viewport zoom fix. `index.html` viewport meta tag updated to `maximum-scale=1.0, user-scalable=no`. Root cause: `base.css` global input `font-size: .95rem` = 14.25px at 15px base, below iOS 16px zoom threshold. Fixed with `@media (max-width: 768px)` block in `base.css` forcing `16px` on all `input[type=text/email/password]`. Matching overrides added to `auth.css` (`.auth-form input`) and `locker.css` (7 named inputs with their own font-size declarations). Auth loop was a non-issue — `auth.js` single listener with `_isRegistering` guard is correct; `hallway.js` has no auth listeners.
+
 ---
 
 *Document updated: April 15, 2026*
-*MFL: fully working. Next: mobile fixes + Yahoo completion.*
+*MFL: fully working. Mobile: fixed. Next: Yahoo completion.*

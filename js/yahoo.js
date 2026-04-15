@@ -132,107 +132,106 @@ const YahooAPI = (() => {
   }
 
   /**
-   * Normalize Yahoo response into frontend-friendly structure
+   * Normalize Yahoo bundle into frontend-friendly structure.
+   *
+   * The worker (yahooLeagueBundle) already parses Yahoo's deeply-nested JSON and
+   * returns flat arrays for teams, standings, rosters, matchups, draft, and
+   * transactions. This function just validates shape and fills in any gaps so
+   * downstream tab modules always get a consistent object regardless of which
+   * worker version returned the data.
+   *
+   * Field contract (all arrays use camelCase IDs):
+   *   teams[]      — { id, name, owner_name, ownerName }
+   *   standings[]  — { teamId, wins, losses, ties, ptsFor, ptsAgainst, rank }
+   *   rosters[]    — { teamId, players: [playerId, ...], playerDetails: [{id,name,position,nflTeam,status},...] }
+   *   matchups[]   — { week, home: {teamId, score}, away: {teamId, score} }
+   *   draft[]      — { pick, round, teamId, playerId, name, position, cost }
+   *   transactions[] — { id, type, status, timestamp, teamId, description }
    */
   function normalizeBundle(raw) {
     if (!raw) return {};
 
-    const bundle = {
-      league: raw.league || null,
-      teams: [],
-      rosters: [],
-      standings: [],
-      matchups: [],
-      players: [],
-      draft: [],
-      futurePicks: [],
-      transactions: raw.transactions || [],
-      auctions: raw.auctions || [],
-      rules: raw.rules || {}
+    // Worker already returns flat arrays — pass them through with shape guarantee.
+    // Defensively handle both camelCase (new worker) and snake_case (legacy paths).
+    const _arr = v => (Array.isArray(v) ? v : v ? [v] : []);
+    const _int = v => parseInt(v ?? 0) || 0;
+    const _flt = v => parseFloat(v ?? 0) || 0;
+    const _str = v => v != null ? String(v) : "";
+
+    // Teams — normalize to { id, name, owner_name, ownerName }
+    const teams = _arr(raw.teams).map(t => ({
+      id:         _str(t.id         ?? t.team_id),
+      name:       t.name            || `Team ${t.id ?? t.team_id}`,
+      owner_name: t.owner_name      || t.ownerName || "",
+      ownerName:  t.ownerName       || t.owner_name || "",
+    }));
+
+    // Standings — normalize to { teamId, wins, losses, ties, ptsFor, ptsAgainst, rank }
+    const standings = _arr(raw.standings).map((s, i) => ({
+      teamId:     _str(s.teamId     ?? s.team_id),
+      wins:       _int(s.wins),
+      losses:     _int(s.losses),
+      ties:       _int(s.ties),
+      ptsFor:     _flt(s.ptsFor     ?? s.points_for),
+      ptsAgainst: _flt(s.ptsAgainst ?? s.points_against),
+      rank:       _int(s.rank)      || i + 1,
+    }));
+
+    // Rosters — normalize to { teamId, players: [id,...], playerDetails: [...] }
+    // Worker returns playerDetails when it expands roster with player info.
+    const rosters = _arr(raw.rosters).map(r => ({
+      teamId:        _str(r.teamId ?? r.team_id),
+      players:       _arr(r.players).map(p => _str(p)),
+      playerDetails: _arr(r.playerDetails).map(p => ({
+        id:       _str(p.id       ?? p.player_id),
+        name:     p.name          || "",
+        position: p.position      || "?",
+        nflTeam:  p.nflTeam       || p.team || "—",
+        status:   p.status        || "",
+      })),
+    }));
+
+    // Matchups — normalize to { week, home: {teamId, score}, away: {teamId, score} }
+    const matchups = _arr(raw.matchups).map(mu => ({
+      week: _int(mu.week),
+      home: { teamId: _str(mu.home?.teamId ?? mu.home?.team_id), score: _flt(mu.home?.score) },
+      away: { teamId: _str(mu.away?.teamId ?? mu.away?.team_id), score: _flt(mu.away?.score) },
+    }));
+
+    // Draft — normalize to { pick, round, teamId, playerId, name, position, cost }
+    const draft = _arr(raw.draft).map(p => ({
+      pick:     _int(p.pick),
+      round:    _int(p.round),
+      teamId:   _str(p.teamId   ?? p.team_id),
+      playerId: _str(p.playerId ?? p.player_id),
+      name:     p.name          || "",
+      position: p.position      || "?",
+      cost:     p.cost != null  ? _int(p.cost) : null,
+    }));
+
+    // Transactions — already parsed by worker, pass through with shape guarantee
+    const transactions = _arr(raw.transactions).map(tx => ({
+      id:          _str(tx.id),
+      type:        tx.type        || "",
+      status:      tx.status      || "",
+      timestamp:   tx.timestamp   || "",
+      teamId:      _str(tx.teamId ?? tx.team_id),
+      description: tx.description || "",
+    }));
+
+    return {
+      league:       raw.league       || null,
+      teams,
+      standings,
+      rosters,
+      matchups,
+      draft,
+      transactions,
+      players:      _arr(raw.players),
+      futurePicks:  _arr(raw.futurePicks),
+      auctions:     _arr(raw.auctions),
+      rules:        raw.rules        || {},
     };
-
-    // Teams / Franchises
-    if (raw.teams?.team) {
-      const arr = Array.isArray(raw.teams.team) ? raw.teams.team : [raw.teams.team];
-      bundle.teams = arr.map(t => ({
-        id: t.team_id,
-        name: t.name,
-        owner_name: t.owner_name,
-        ownerName: t.owner_name
-      }));
-    }
-
-    // Rosters
-    if (raw.rosters?.franchise) {
-      const arr = Array.isArray(raw.rosters.franchise) ? raw.rosters.franchise : [raw.rosters.franchise];
-      bundle.rosters = arr.map(r => ({
-        teamId: r.team_id,
-        players: r.player ? (Array.isArray(r.player) ? r.player.map(p => p.player_id) : [r.player.player_id]) : []
-      }));
-    }
-
-    // Players
-    if (raw.players?.player) {
-      const arr = Array.isArray(raw.players.player) ? raw.players.player : [raw.players.player];
-      bundle.players = arr.map(p => ({
-        id: p.player_id,
-        name: p.name,
-        position: p.position,
-        team: p.team,
-        status: p.status
-      }));
-    }
-
-    // Standings
-    if (raw.standings?.franchise) {
-      const arr = Array.isArray(raw.standings.franchise) ? raw.standings.franchise : [raw.standings.franchise];
-      bundle.standings = arr.map((s, i) => ({
-        teamId: s.team_id,
-        wins: parseInt(s.wins || 0),
-        losses: parseInt(s.losses || 0),
-        ties: parseInt(s.ties || 0),
-        ptsFor: parseFloat(s.points_for || 0),
-        ptsAgainst: parseFloat(s.points_against || 0),
-        rank: i + 1
-      }));
-    }
-
-    // Matchups
-    if (raw.matchups?.matchup) {
-      const arr = Array.isArray(raw.matchups.matchup) ? raw.matchups.matchup : [raw.matchups.matchup];
-      bundle.matchups = arr.map(mu => {
-        const home = mu.home_team || {};
-        const away = mu.away_team || {};
-        return {
-          week: mu.week || 0,
-          home: { teamId: home.team_id || "", score: parseFloat(home.score || 0) },
-          away: { teamId: away.team_id || "", score: parseFloat(away.score || 0) }
-        };
-      });
-    }
-
-    // Draft
-    if (raw.draft?.pick) {
-      const arr = Array.isArray(raw.draft.pick) ? raw.draft.pick : [raw.draft.pick];
-      bundle.draft = arr.map(p => ({
-        round: parseInt(p.round || 0),
-        pick: parseInt(p.pick || 0),
-        teamId: p.team_id,
-        playerId: p.player_id
-      }));
-    }
-
-    // Future Picks
-    if (raw.futurePicks?.pick) {
-      const arr = Array.isArray(raw.futurePicks.pick) ? raw.futurePicks.pick : [raw.futurePicks.pick];
-      bundle.futurePicks = arr.map(p => ({
-        round: parseInt(p.round || 0),
-        teamId: p.team_id,
-        originalTeamId: p.original_team_id
-      }));
-    }
-
-    return bundle;
   }
 
   return { login, getLeagues, getLeagueBundle, storeTokens };
