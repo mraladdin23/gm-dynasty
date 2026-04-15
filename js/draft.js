@@ -243,7 +243,6 @@ const DLRDraft = (() => {
   }
 
   // ── Draft label helper ────────────────────────────────────
-  // Returns a short human-readable label for a Sleeper draft object
   function _draftLabel(d, index) {
     const typeLabel = {
       snake:   "Startup",
@@ -473,129 +472,102 @@ const DLRDraft = (() => {
           <span>Pick</span><span>Pos</span><span>Player</span><span>Team</span>
         </div>
         ${sorted.map(p => {
-          const display  = isSnake && p.round % 2 === 0 ? (teams + 1 - p.draft_slot) : p.draft_slot;
-          const overall  = (p.round - 1) * teams + display;
-          const pickLabel = isSnake ? overall : `${p.round}.${String(p.draft_slot).padStart(2,"0")}`;
-          const pos   = (p.metadata?.position || "—").toUpperCase();
+          const pName = `${p.metadata.first_name} ${p.metadata.last_name}`;
+          const pos = (p.metadata.position || "—").toUpperCase();
           const color = POS_COLOR[pos] || "#9ca3af";
-          const name  = `${p.metadata.first_name} ${p.metadata.last_name}`;
-          const nfl   = p.metadata?.team || "FA";
-          const picker = rosterMap[p.roster_id]?.teamName || "";
+          const nfl = p.metadata.team || "FA";
+          const pickerRoster = rosterMap[p.roster_id];
+          const pickLabel = `${p.round}.${String(p.draft_slot).padStart(2,"0")}`;
+
           return `
-            <div class="draft-auction-row" onclick="DLRPlayerCard.show('${p.player_id}','${_escAttr(name)}')" style="cursor:pointer">
+            <div class="draft-auction-row" onclick="DLRPlayerCard.show('${p.player_id}','${_escAttr(pName)}')">
               <span class="draft-auction-rank dim">${pickLabel}</span>
               <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
               <div>
-                <div class="draft-auction-name">${_esc(name)}</div>
-                <div class="dim" style="font-size:.7rem">${nfl}</div>
+                <div class="draft-auction-name">${_esc(pName)}</div>
+                <div class="draft-pick-nfl dim">${nfl}</div>
               </div>
-              <span class="draft-auction-team dim">${_esc(picker)}</span>
+              <span class="draft-auction-team dim">${_esc(pickerRoster?.teamName || "")}</span>
             </div>`;
         }).join("")}
       </div>`;
   }
 
-  // ── MFL draft + auction history ───────────────────────────
+  // ── MFL Draft & Auction Loading ───────────────────────────
   async function _loadMFLDraft(leagueId, season, token) {
     const el = document.getElementById("dtab-draft");
+    season = season || new Date().getFullYear().toString();
+
     const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
-    const teams = MFLAPI.getTeams(bundle);
+    const unitArr = bundle?.draft?.draftResults?.draftUnit || [];
     const teamMap = {};
-    teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+    MFLAPI.getTeams(bundle).forEach(t => {
+      teamMap[String(t.id)] = t.name || `Team ${t.id}`;
+    });
 
-    // Fetch session-cached player universe including league-custom players (pick proxies etc.)
+    // Pre-warm player universe with leagueId so custom players are included
     const playerLookup = await MFLAPI.getPlayers(season, leagueId);
-    if (token !== _initToken) return;
 
-    // Build division name map for labelling multi-unit drafts/auctions
+    // ── Multi-draft / multi-auction set parsing with proper division names ──
     const { divisions } = MFLAPI.getDivisions(bundle);
-    const divNameMap = {};  // divisionId → name
-    divisions.forEach(d => { divNameMap[String(d.id)] = d.name; });
 
-    // ── Draft units — keep per-unit for multi-draft selector ─
-    const unitsRaw  = bundle?.draft?.draftResults?.draftUnit;
-    const unitArr   = unitsRaw ? (Array.isArray(unitsRaw) ? unitsRaw : [unitsRaw]) : [];
-
-    // Normalize each unit's picks into a flat array tagged with unitIndex
-    const draftSets = unitArr.map((u, i) => {
+    const draftSets = (unitArr || []).filter(u => {
       const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
-      // Label: prefer explicit name, then division name, then fallback
-      const divId    = String(u.unit || u.division || "");
-      const divLabel = divNameMap[divId] || "";
-      const label    = u.name || divLabel || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`);
+      return picks.length > 0 && !u.isAuction;
+    }).map((unit, i) => {
+      const divIdRaw = unit.unit || unit.id || "";
+      const divId = divIdRaw.replace(/^DIVISION/i, "");
+      const divInfo = divisions.find(d => String(d.id) === divId);
+      const divLabel = divInfo ? divInfo.name : "";
+      const rawLabel = unit.name || "";
+
+      const label = (rawLabel && rawLabel !== "LEAGUE")
+        ? rawLabel
+        : (divLabel || (i === 0 ? "Startup Draft" : `Draft Unit ${i + 1}`));
+
       return {
         label,
-        divId,
-        type:  "draft",
-        picks: picks.map(p => ({
-          ...p,
-          franchise: p.franchise || p.franchiseId || p.franchise_id || ""
+        divId: divId || null,
+        type: "draft",
+        picks: (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]).filter(Boolean).map(p => ({
+          id:        String(p.player    || p.playerId || ""),
+          franchise: String(p.franchise || p.franchiseId || ""),
+          round:     parseInt(p.round || 0),
+          pick:      parseInt(p.pick  || p.overall || 0),
         }))
       };
     }).filter(s => s.picks.length > 0);
 
-    // ── Auction results — support multiple units ─────────────
-    // Real MFL shape from /mfl/auctionResults:
-    //   { auctionResults: { auctionUnit: { auction: [...], unit: "LEAGUE" } } }
-    //   OR multiple units: { auctionResults: { auctionUnit: [{...},{...}] } }
-    // The bundle key is `auctionResults` → value is the full auctionResults response.
-    // So bundle.auctionResults.auctionResults.auctionUnit is the unit or unit array.
-    let auctionResultsRoot = bundle?.auctionResults?.auctionResults?.auctionUnit
-                          || bundle?.auctionResults?.auctionUnit;  // direct shape from standalone fetch
-
-    // If not in bundle (null/undefined), try a targeted fetch (non-fatal)
-    if (!auctionResultsRoot) {
-      try {
-        const auctionData = await MFLAPI.getAuctionResultsDirect(leagueId, season);
-        if (token !== _initToken) return;
-        // Standalone response shape: { auctionResults: { auctionUnit: {...} } }
-        auctionResultsRoot = auctionData?.auctionResults?.auctionUnit;
-      } catch(e) {
-        // Auction results not available — fine for draft-only leagues
-      }
-    }
-
-    // Normalize auctionUnit (single object or array) into auctionSets
-    let auctionSetsRaw = [];
-    if (auctionResultsRoot) {
-      const unitArr = Array.isArray(auctionResultsRoot) ? auctionResultsRoot : [auctionResultsRoot];
-      auctionSetsRaw = unitArr;
-    }
-
-    const auctionSets = auctionSetsRaw.map((unit, i) => {
-      const raw    = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
-      // MFL auction units use the same `unit` field as draft units for the division ID
-      const divId  = String(unit.unit || unit.unit_id || unit.division || "");
-      const divLabel = divNameMap[divId] || "";
-      // unit.unit is the division ID (e.g. "3"), not a display name — don't use as label
+    const auctionSets = (unitArr || []).filter(u => {
+      const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
+      return picks.length > 0 && (u.isAuction || u.type === "auction");
+    }).map((unit, i) => {
+      const divIdRaw = unit.unit || unit.id || "";
+      const divId = divIdRaw.replace(/^DIVISION/i, "");
+      const divInfo = divisions.find(d => String(d.id) === divId);
+      const divLabel = divInfo ? divInfo.name : "";
       const rawLabel = unit.name || "";
-      const label  = (rawLabel && rawLabel !== "LEAGUE")
+
+      const label = (rawLabel && rawLabel !== "LEAGUE")
         ? rawLabel
-        : divLabel || (i === 0 ? "Auction" : `Auction ${i + 1}`);
+        : (divLabel || (i === 0 ? "Auction" : `Auction ${i + 1}`));
+
       return {
         label,
-        divId,
-        type:  "auction",
-        picks: raw.map(p => ({
+        divId: divId || null,
+        type: "auction",
+        picks: (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]).filter(Boolean).map(p => ({
           id:        String(p.player    || p.playerId || ""),
           franchise: String(p.franchise || p.franchiseId || ""),
           salary:    parseFloat(p.winningBid || p.amount || p.bid || 0),
           amount:    parseFloat(p.winningBid || p.amount || p.bid || 0),
-        })).filter(p => p.id)
+        }))
       };
     }).filter(s => s.picks.length > 0);
 
-    const hasAuction = auctionSets.length > 0;
-    const hasDraft   = draftSets.length  > 0;
-
-    // Flatten for legacy code paths
-    const allPicks  = draftSets.flatMap(s => s.picks);
-    const salaryArr = auctionSets.flatMap(s => s.picks);
-
     // Default to the draft/auction unit matching the user's division.
-    // Try by divId first (new), then fall back to existing getMyDraftUnitIndex logic.
     const myDivId = _myRosterId ? MFLAPI.getFranchiseDivision(bundle, _myRosterId) : null;
 
     let defaultDraftIdx = 0;
@@ -613,20 +585,19 @@ const DLRDraft = (() => {
     }
 
     _mflCache = {
-      allPicks, salaryArr, teamMap, playerLookup,
-      hasAuction, hasDraft, season, leagueId,
+      teamMap, playerLookup,
+      hasAuction: auctionSets.length > 0,
+      hasDraft:   draftSets.length > 0,
+      season, leagueId,
       draftSets, auctionSets,
       _activeDraftSetIdx:   defaultDraftIdx,
       _activeAuctionSetIdx: defaultAuctionIdx,
     };
 
-    // Default view: auction if no draft data, draft otherwise. Only override if
-    // current _viewMode doesn't match what's available.
-    if (_viewMode === "draft"   && !hasDraft   && hasAuction) _viewMode = "auction";
-    if (_viewMode === "auction" && !hasAuction && hasDraft)   _viewMode = "draft";
-    // Fresh init with no selection — pick sensibly
+    if (_viewMode === "draft"   && !draftSets.length   && auctionSets.length) _viewMode = "auction";
+    if (_viewMode === "auction" && !auctionSets.length && draftSets.length)   _viewMode = "draft";
     if (_viewMode !== "draft" && _viewMode !== "auction") {
-      _viewMode = hasAuction && !hasDraft ? "auction" : "draft";
+      _viewMode = auctionSets.length && !draftSets.length ? "auction" : "draft";
     }
 
     _renderMFLDraftBoard(el);
@@ -640,18 +611,17 @@ const DLRDraft = (() => {
 
     const showAuction = _viewMode === "auction";
 
-    // Resolve active set + picks for current view
     let activeSet, allPicks, salaryArr;
     if (showAuction) {
       const idx  = Math.min(_mflCache._activeAuctionSetIdx || 0, (auctionSets?.length || 1) - 1);
       activeSet  = auctionSets?.[idx];
-      salaryArr  = activeSet?.picks || _mflCache.salaryArr;
-      allPicks   = _mflCache.allPicks;
+      salaryArr  = activeSet?.picks || [];
+      allPicks   = _mflCache.allPicks || [];
     } else {
       const idx  = Math.min(_mflCache._activeDraftSetIdx || 0, (draftSets?.length || 1) - 1);
       activeSet  = draftSets?.[idx];
-      allPicks   = activeSet?.picks || _mflCache.allPicks;
-      salaryArr  = _mflCache.salaryArr;
+      allPicks   = activeSet?.picks || [];
+      salaryArr  = [];
     }
 
     // ── Multi-set pill selector ──────────────────────────────
@@ -666,7 +636,7 @@ const DLRDraft = (() => {
          </div>`
       : "";
 
-    // Toggle bar: Draft Board / Auction Board + layout/sort toggles
+    // Toggle bar
     let toggleBar = "";
     if (hasAuction || hasDraft) {
       toggleBar = `<div class="draft-toggle-bar">`;
@@ -706,7 +676,7 @@ const DLRDraft = (() => {
           const nb = (playerLookup[b.id]?.name || b.id || "").toLowerCase();
           return na.localeCompare(nb);
         }
-        return Number(b.salary || b.amount || 0) - Number(a.salary || a.amount || 0);
+        return Number(b.salary || b.amount || 0) - Number(a.salary || b.amount || 0);
       });
       el.innerHTML = setPills + toggleBar + `
         <div class="draft-auction-list">
@@ -715,10 +685,8 @@ const DLRDraft = (() => {
           </div>
           ${sorted.map((p, i) => {
             const info   = playerLookup[p.id] || {};
-            // Resolve position — custom players may only have 'pos' or 'position'
             const pos    = (info.pos || info.position || "?").toUpperCase();
             const color  = POS_COLOR[pos] || "#9ca3af";
-            // Name: use lookup name, fall back to a readable ID label
             const name   = info.name || (p.id ? `Player #${p.id}` : "Unknown");
             const tid    = String(p.franchise || p.franchiseId || "");
             const team   = teamMap[tid] || "—";
@@ -726,13 +694,13 @@ const DLRDraft = (() => {
             const salFmt = sal >= 1000000 ? `$${(sal/1000000).toFixed(sal%1000000===0?0:2)}M`
                          : sal > 0 ? `$${sal.toLocaleString()}` : "—";
             const sid    = info.sleeperId;
-            // For custom players (draft picks), no player card — just show a dimmed indicator
-            const isCustom = info.isCustom || (!info.name && !sid);
+            const isCustom = !info.name && !sid;
             const clickAttr = sid
-              ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')" style="cursor:pointer"`
-              : "";
+              ? `onclick="DLRPlayerCard.show('${sid}','${_escAttr(name)}')"`
+              : `onclick="DLRPlayerCard.show('mfl_${p.id}','${_escAttr(name)}')"`;
+
             return `
-              <div class="draft-auction-row" ${clickAttr}>
+              <div class="draft-auction-row" ${clickAttr} style="cursor:pointer">
                 <span class="draft-auction-rank dim">${i+1}</span>
                 <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
                 <div>
@@ -766,7 +734,6 @@ const DLRDraft = (() => {
     });
 
     if (_layoutMode === "list") {
-      // List view
       el.innerHTML = setPills + toggleBar + `
         <div class="draft-auction-list">
           <div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
@@ -782,15 +749,13 @@ const DLRDraft = (() => {
             const round    = Number(p.round || 0);
             const pickNum  = Number(p.pick || 0);
             const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
-            // Always open the DLR player card. Pass Sleeper ID when available so
-            // stats load immediately; fall back to mfl_XXXX — playercard.js resolves
-            // the Sleeper ID internally and still shows bio + photo via DynastyProcess.
             const sid      = info.sleeperId;
             const cardId   = sid ? sid : (pid ? `mfl_${pid}` : null);
             const clickAttr = cardId
-              ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"` : "";
+              ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')"` : "";
+
             return `
-              <div class="draft-auction-row" ${clickAttr}>
+              <div class="draft-auction-row" ${clickAttr} style="cursor:pointer">
                 <span class="draft-auction-rank dim">${pickLabel}</span>
                 <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
                 <div>
@@ -803,22 +768,19 @@ const DLRDraft = (() => {
       return;
     }
 
-    // Grid view — build round-by-round grid similar to Sleeper
-    // Group picks by round and franchise
+    // Grid view
     const rounds = Math.max(...sorted.map(p => Number(p.round || 0)), 0);
     const teamIds = Object.keys(teamMap).length
       ? Object.keys(teamMap)
       : [...new Set(sorted.map(p => String(p.franchise||"")))];
     const numTeams = teamIds.length;
 
-    // Build pick lookup: "round-franchise" → pick
     const pickMap = {};
     sorted.forEach(p => { pickMap[`${p.round}-${p.franchise}`] = p; });
 
     let boardHTML = "";
     for (let r = 1; r <= rounds; r++) {
       boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${r}</div><div class="draft-picks-row">`;
-      // For MFL we don't have snake ordering info, just show picks in franchise order
       sorted.filter(p => Number(p.round) === r).forEach(p => {
         const pid   = p.player || p.playerId || "";
         const info  = playerLookup[pid] || {};
@@ -832,7 +794,7 @@ const DLRDraft = (() => {
         const sid   = info.sleeperId;
         const cardId = sid ? sid : (pid ? `mfl_${pid}` : null);
         const clickAttr = cardId
-          ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"` : "";
+          ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')"` : "";
 
         if (name && name !== "—") {
           boardHTML += `
@@ -884,7 +846,6 @@ const DLRDraft = (() => {
       return;
     }
 
-    // Yahoo draft picks have a "cost" field for auction leagues
     const auctionPicks = draft.filter(p => p.cost != null && Number(p.cost) > 0);
     const hasAuction   = auctionPicks.length > 0;
     const showAuction  = _viewMode === "auction" && hasAuction;
