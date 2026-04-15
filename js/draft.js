@@ -521,8 +521,20 @@ const DLRDraft = (() => {
     // Normalize each unit's picks into a flat array tagged with unitIndex
     const draftSets = unitArr.map((u, i) => {
       const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
-      // Label: prefer explicit name, then division name, then fallback
-      const divId    = String(u.unit || u.division || "");
+      // Label: prefer explicit name, then division name, then fallback.
+      // MFL encodes division ID as "DIVISION00", "DIVISION01", etc. in the unit field —
+      // strip the prefix and zero-pad to match the division id from the league API (e.g. "00" → "0").
+      let rawUnit = String(u.unit || u.division || "");
+      let divId   = rawUnit;
+      const divMatch = rawUnit.match(/^DIVISION(\d+)$/i);
+      if (divMatch) {
+        // MFL zero-pads to 2 digits; division IDs in the league API may be bare integers ("0","1")
+        // or zero-padded ("00","01"). Try both.
+        const n = parseInt(divMatch[1], 10);
+        divId = divNameMap[String(n)] ? String(n)
+              : divNameMap[String(n).padStart(2, "0")] ? String(n).padStart(2, "0")
+              : rawUnit;
+      }
       const divLabel = divNameMap[divId] || "";
       const label    = u.name || divLabel || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`);
       return {
@@ -565,13 +577,20 @@ const DLRDraft = (() => {
     }
 
     const auctionSets = auctionSetsRaw.map((unit, i) => {
-      const raw    = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
-      // MFL auction units use the same `unit` field as draft units for the division ID
-      const divId  = String(unit.unit || unit.unit_id || unit.division || "");
+      const raw     = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
+      // MFL auction units: resolve division name from DIVISION00/01 pattern same as draft units
+      let rawUnit   = String(unit.unit || unit.unit_id || unit.division || "");
+      let divId     = rawUnit;
+      const divMatchA = rawUnit.match(/^DIVISION(\d+)$/i);
+      if (divMatchA) {
+        const n = parseInt(divMatchA[1], 10);
+        divId = divNameMap[String(n)] ? String(n)
+              : divNameMap[String(n).padStart(2, "0")] ? String(n).padStart(2, "0")
+              : rawUnit;
+      }
       const divLabel = divNameMap[divId] || "";
-      // unit.unit is the division ID (e.g. "3"), not a display name — don't use as label
       const rawLabel = unit.name || "";
-      const label  = (rawLabel && rawLabel !== "LEAGUE")
+      const label    = (rawLabel && rawLabel !== "LEAGUE")
         ? rawLabel
         : divLabel || (i === 0 ? "Auction" : `Auction ${i + 1}`);
       return {
@@ -795,6 +814,7 @@ const DLRDraft = (() => {
                 <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
                 <div>
                   <div class="draft-auction-name">${_esc(name)}</div>
+                  ${info.isCustom ? `<div class="dim" style="font-size:.7rem">Draft Pick</div>` : ""}
                 </div>
                 <span class="draft-auction-team dim">${_esc(team)}</span>
               </div>`;

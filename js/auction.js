@@ -38,6 +38,11 @@ const DLRAuction = (() => {
   let _capLoadTriggered = false;
   let _capSettings  = null;
 
+  // ── History tab state ─────────────────────────────────────
+  const HIST_PAGE_SIZE = 25;
+  let _histPage     = 0;   // 0-based current page
+  let _histSort     = "date";  // "date" | "price" | "name"
+
   // ── Firebase refs ──────────────────────────────────────────
   const _listRef     = () => GMD.child(`auctions/${_leagueKey}/bids`);
   const _auctRef     = (id) => GMD.child(`auctions/${_leagueKey}/bids/${id}`);
@@ -263,6 +268,8 @@ const DLRAuction = (() => {
     if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
     _leagueKey = null;
     _auctions  = [];
+    _histPage  = 0;
+    _histSort  = "date";
     _initToken++;
   }
 
@@ -600,6 +607,7 @@ function _computeLeader(a) {
   }
 
   function setView(mode) {
+    if (mode === "history") _histPage = 0;  // always start at page 1 when entering history
     _viewMode = mode;
     const now   = Date.now();
     const live  = _auctions.filter(a => !a.cancelled && !a.processed && a.expiresAt > now);
@@ -1457,53 +1465,119 @@ function _computeLeader(a) {
   }
 
   // ── History ───────────────────────────────────────────────
+  function _histSetSort(sort) {
+    _histSort = sort;
+    _histPage = 0;
+    const now   = Date.now();
+    const ended = _auctions.filter(a => a.cancelled || a.processed || a.expiresAt <= now);
+    const el    = document.getElementById("auc-content");
+    if (el) _renderHistory(el, ended);
+  }
+
+  function _histSetPage(page) {
+    _histPage = page;
+    const now   = Date.now();
+    const ended = _auctions.filter(a => a.cancelled || a.processed || a.expiresAt <= now);
+    const el    = document.getElementById("auc-content");
+    if (el) _renderHistory(el, ended);
+  }
+
   function _renderHistory(el, ended) {
     if (!ended.length) {
       el.innerHTML = `<div class="auc-empty">No auction history yet.</div>`;
       return;
     }
-    el.innerHTML = `<div class="auc-history-list">
-      ${ended.sort((a, b) => (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0)).slice(0, 500).map(a => {
-        const p      = _players[a.playerId] || {};
-        const name   = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
 
-        // Always prefer stored winner/winningBid — these are set at claim time and are authoritative.
-        // Fall back to _computeLeader only for unprocessed expired auctions.
-        let winRosterId = a.winner != null ? Number(a.winner) : null;
-        let winPrice    = a.winningBid || 0;
-        if (!winRosterId && !a.cancelled) {
-          const leader = _computeLeader(a);
-          winRosterId  = leader.rosterId;
-          winPrice     = leader.displayBid;
-        }
+    // Sort
+    const sorted = [...ended].sort((a, b) => {
+      if (_histSort === "price") {
+        return (b.winningBid || 0) - (a.winningBid || 0);
+      }
+      if (_histSort === "name") {
+        const pa = _players[a.playerId] || {};
+        const pb = _players[b.playerId] || {};
+        const na = pa.first_name ? `${pa.first_name} ${pa.last_name}` : (a.playerName || a.playerId || "");
+        const nb = pb.first_name ? `${pb.first_name} ${pb.last_name}` : (b.playerName || b.playerId || "");
+        return na.localeCompare(nb);
+      }
+      // default: date descending (most recent first)
+      return (b.claimedAt || b.expiresAt || 0) - (a.claimedAt || a.expiresAt || 0);
+    });
 
-        const winTeam = winRosterId
-          ? (_rosterData.find(r => Number(r.roster_id) === winRosterId)?.teamName || `#${winRosterId}`)
-          : "—";
+    // Pagination
+    const totalPages = Math.ceil(sorted.length / HIST_PAGE_SIZE);
+    const page       = Math.max(0, Math.min(_histPage, totalPages - 1));
+    const pageItems  = sorted.slice(page * HIST_PAGE_SIZE, (page + 1) * HIST_PAGE_SIZE);
 
-        const status  = a.cancelled ? "Cancelled" : a.processed ? "Claimed" : "Expired";
-        const sColor  = a.cancelled ? "var(--color-text-dim)" : a.processed ? "var(--color-green)" : "var(--color-gold)";
-        const dateTs  = a.claimedAt || a.expiresAt || a.startTime;
-        const date    = dateTs ? new Date(dateTs).toLocaleDateString() : "—";
+    // Sort toolbar
+    const sortBar = `
+      <div class="auc-hist-toolbar" style="display:flex;align-items:center;gap:6px;padding:var(--space-2) 0 var(--space-3);flex-wrap:wrap">
+        <span class="dim" style="font-size:.78rem;margin-right:4px">Sort:</span>
+        <button class="draft-toggle-btn ${_histSort==="date"  ? "draft-toggle-btn--active":""}"
+          onclick="DLRAuction._histSetSort('date')">📅 Date</button>
+        <button class="draft-toggle-btn ${_histSort==="price" ? "draft-toggle-btn--active":""}"
+          onclick="DLRAuction._histSetSort('price')">💰 Price</button>
+        <button class="draft-toggle-btn ${_histSort==="name"  ? "draft-toggle-btn--active":""}"
+          onclick="DLRAuction._histSetSort('name')">A–Z Name</button>
+        <span class="dim" style="margin-left:auto;font-size:.75rem">${sorted.length} total</span>
+      </div>`;
 
-        return `
-          <div class="auc-history-row" onclick="DLRAuction.showBidHistory('${a.id}')" style="cursor:pointer" title="Click to view bid history">
-            <img class="auc-hist-photo" src="https://sleepercdn.com/content/nfl/players/thumb/${a.playerId}.jpg" onerror="this.style.display='none'" loading="lazy"/>
-            <div class="auc-hist-info">
-              <div style="font-weight:600;font-size:.85rem">${_esc(name)}</div>
-              <div class="dim" style="font-size:.72rem">${_esc(winTeam)}</div>
-            </div>
-            <div style="text-align:right;flex-shrink:0">
-              <div style="font-family:var(--font-display);font-weight:700">${winPrice ? _fmtSal(winPrice) : "—"}</div>
-              <div style="font-size:.65rem;color:${sColor}">${status} · ${date}</div>
-              ${!a.processed && !a.cancelled && winRosterId && _isCommish
-                ? `<button class="btn-secondary btn-sm" style="font-size:.65rem;margin-top:4px"
-                    onclick="event.stopPropagation();DLRAuction.claimAuction('${a.id}','${_escA(name)}')">Claim</button>`
-                : ""}
-            </div>
-          </div>`;
-      }).join("")}
-    </div>`;
+    // Rows
+    const rows = pageItems.map(a => {
+      const p      = _players[a.playerId] || {};
+      const name   = p.first_name ? `${p.first_name} ${p.last_name}` : (a.playerName || a.playerId);
+
+      let winRosterId = a.winner != null ? Number(a.winner) : null;
+      let winPrice    = a.winningBid || 0;
+      if (!winRosterId && !a.cancelled) {
+        const leader = _computeLeader(a);
+        winRosterId  = leader.rosterId;
+        winPrice     = leader.displayBid;
+      }
+
+      const winTeam = winRosterId
+        ? (_rosterData.find(r => Number(r.roster_id) === winRosterId)?.teamName || `#${winRosterId}`)
+        : "—";
+
+      const status  = a.cancelled ? "Cancelled" : a.processed ? "Claimed" : "Expired";
+      const sColor  = a.cancelled ? "var(--color-text-dim)" : a.processed ? "var(--color-green)" : "var(--color-gold)";
+      const dateTs  = a.claimedAt || a.expiresAt || a.startTime;
+      const date    = dateTs ? new Date(dateTs).toLocaleDateString() : "—";
+
+      return `
+        <div class="auc-history-row" onclick="DLRAuction.showBidHistory('${a.id}')" style="cursor:pointer" title="Click to view bid history">
+          <img class="auc-hist-photo" src="https://sleepercdn.com/content/nfl/players/thumb/${a.playerId}.jpg" onerror="this.style.display='none'" loading="lazy"/>
+          <div class="auc-hist-info">
+            <div style="font-weight:600;font-size:.85rem">${_esc(name)}</div>
+            <div class="dim" style="font-size:.72rem">${_esc(winTeam)}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-family:var(--font-display);font-weight:700">${winPrice ? _fmtSal(winPrice) : "—"}</div>
+            <div style="font-size:.65rem;color:${sColor}">${status} · ${date}</div>
+            ${!a.processed && !a.cancelled && winRosterId && _isCommish
+              ? `<button class="btn-secondary btn-sm" style="font-size:.65rem;margin-top:4px"
+                  onclick="event.stopPropagation();DLRAuction.claimAuction('${a.id}','${_escA(name)}')">Claim</button>`
+              : ""}
+          </div>
+        </div>`;
+    }).join("");
+
+    // Pagination controls
+    let paginator = "";
+    if (totalPages > 1) {
+      const prevDis = page === 0 ? "disabled style='opacity:.35'" : "";
+      const nextDis = page >= totalPages - 1 ? "disabled style='opacity:.35'" : "";
+      const start   = page * HIST_PAGE_SIZE + 1;
+      const end     = Math.min((page + 1) * HIST_PAGE_SIZE, sorted.length);
+      paginator = `
+        <div class="auc-hist-paginator" style="display:flex;align-items:center;justify-content:center;gap:var(--space-2);padding:var(--space-3) 0;border-top:1px solid var(--color-border)">
+          <button class="btn-secondary btn-sm" ${prevDis} onclick="DLRAuction._histSetPage(${page - 1})">‹ Prev</button>
+          <span class="dim" style="font-size:.78rem">${start}–${end} of ${sorted.length}</span>
+          <button class="btn-secondary btn-sm" ${nextDis} onclick="DLRAuction._histSetPage(${page + 1})">Next ›</button>
+        </div>`;
+    }
+
+    el.innerHTML = sortBar + `<div class="auc-history-list">${rows}</div>` + paginator;
   }
 
   // ── Settings (commissioner) ───────────────────────────────
@@ -2278,7 +2352,8 @@ function _computeLeader(a) {
     closeNominations, reopenNominations,
     saveSettings, renderFloatingBadge,
     toggleTeamDetail, editRosterSize,
-    canNominate, canNominateFor, isReady, getActiveNominations
+    canNominate, canNominateFor, isReady, getActiveNominations,
+    _histSetSort, _histSetPage
   };
 
 })();

@@ -583,14 +583,17 @@ const MFLAPI = (() => {
     ) && !l.franchises_eliminated;  // not an eliminator league
 
     return {
-      name:          l.name         || "MFL League",
-      numTeams:      parseInt(l.franchises) || 12,
-      season:        l.baseURL?.match(/\/(\d{4})\//)?.[1] || new Date().getFullYear().toString(),
-      playoffTeams:  parseInt(l.playoffTeams || l.settings?.playoffTeams || 0) || null,
-      franchises:    l.franchises,
-      standingsSort: l.standingsSort || "H2H",
-      isEliminator:  !!(l.franchises_eliminated && String(l.franchises_eliminated).trim()),
+      name:             l.name         || "MFL League",
+      numTeams:         parseInt(l.franchises) || 12,
+      season:           l.baseURL?.match(/\/(\d{4})\//)?.[1] || new Date().getFullYear().toString(),
+      playoffTeams:     parseInt(l.playoffTeams || l.settings?.playoffTeams || 0) || null,
+      franchises:       l.franchises,
+      standingsSort:    l.standingsSort || "H2H",
+      isEliminator:     !!(l.franchises_eliminated && String(l.franchises_eliminated).trim()),
       isGuillotine,
+      // Overall-points leagues: no head-to-head matchups, teams are ranked purely by points.
+      // Detected by standingsSort containing "PF" or "POINTS" or explicit no-schedule flags.
+      isOverallPoints:  /^PF|^POINTS|^OVERALL/i.test(l.standingsSort || "") || l.noSchedule === "1",
     };
   }
 
@@ -716,6 +719,36 @@ const MFLAPI = (() => {
   }
 
   /**
+   * For eliminator/guillotine leagues: given a normalized standings array
+   * (each entry has franchiseId + weekEliminated) and a week number,
+   * returns the Set of franchiseIds that were still ALIVE (i.e. playing) in that week.
+   *
+   * A team eliminated in week W was still competing in week W (they played and lost),
+   * so they are included for week W but excluded from week W+1 onward.
+   *
+   * Pass the full standings array from normalizeStandings() and the week to display.
+   * Returns a Set<string> of franchiseIds to show. If standings has no elimination
+   * data, returns null (caller should show all teams).
+   */
+  function getAliveTeamsForWeek(standings, week) {
+    if (!standings || !standings.length) return null;
+    const hasElim = standings.some(s => s.weekEliminated != null);
+    if (!hasElim) return null;
+
+    const w = Number(week);
+    const alive = new Set();
+    standings.forEach(s => {
+      const wOut = s.weekEliminated != null ? Number(s.weekEliminated) : null;
+      // Team is in this week's matchup if they hadn't been eliminated yet before this week,
+      // i.e. wOut is null (still alive) OR wOut >= w (eliminated this week or later).
+      if (wOut == null || wOut >= w) {
+        alive.add(String(s.franchiseId));
+      }
+    });
+    return alive.size > 0 ? alive : null;
+  }
+
+  /**
    * For guillotine leagues: when 2 teams remain and both show eliminated:"",
    * resolves winner vs last-eliminated using liveScoring total scores.
    * Pass aliveTeamIds = [id1, id2] and liveData from getLiveScoring.
@@ -767,7 +800,13 @@ const MFLAPI = (() => {
     const startersRaw = bundle?.league?.league?.starters;
     if (!startersRaw) return [];
 
-    const totalCount = parseInt(startersRaw.count || 0);
+    // count may be a range like "7-10" — use the max for slot generation so we capture
+    // all possible starters; the min is the forced floor.
+    const countStr   = String(startersRaw.count || "0");
+    const countParts = countStr.includes("-") ? countStr.split("-") : [countStr, countStr];
+    const minCount   = parseInt(countParts[0]) || 0;
+    const maxCount   = parseInt(countParts[1]) || minCount;
+    const totalCount = maxCount;  // generate slots for the maximum possible starters
     if (!totalCount) return [];
 
     const rawPositions = startersRaw.position;
@@ -788,19 +827,38 @@ const MFLAPI = (() => {
     let slots = [];
 
     if (!allMinsZero) {
-      // ── Case A: some forced positions ────────────────────────
+      // ── Case A: some forced positions (min > 0) ───────────────
+      // Step 1: push one slot per forced (min) position
       let namedTotal = 0;
       for (const p of parsed) {
         if (p.min === 0) continue;
         for (let i = 0; i < p.min; i++) { slots.push(p.name); namedTotal++; }
       }
-      const hasQBFlex = parsed.some(p => p.name === "QB" && p.min === 0 && p.max > 0);
-      for (let i = namedTotal; i < totalCount; i++) {
-        slots.push(hasQBFlex ? "SF" : "FLEX");
+
+      // Step 2: determine whether remaining flex slots are SF-eligible
+      // SF is warranted when:
+      //   (a) QB has min=0, max>0 (QB-optional flex that allows QBs), OR
+      //   (b) QB has min>0 but max > min (extra QB slots beyond the forced minimum).
+      // In both cases, produce SF slots for the QB-eligible overflow, then FLEX for the rest.
+      const qbRule      = parsed.find(p => p.name === "QB");
+      const qbCanFlex   = qbRule && qbRule.max > qbRule.min;  // QB has headroom above its min
+      const qbIsOptional = qbRule && qbRule.min === 0 && qbRule.max > 0; // QB entirely optional
+      const hasSF       = qbCanFlex || qbIsOptional;
+
+      if (hasSF && qbRule) {
+        // How many extra QB slots are allowed beyond the already-forced minimum?
+        const qbExtra  = qbRule.max - qbRule.min;  // e.g. limit="1-2" → qbExtra=1
+        const flexTotal = totalCount - namedTotal;
+        const sfCount   = Math.min(qbExtra, flexTotal);
+        const flexCount = flexTotal - sfCount;
+        for (let i = 0; i < sfCount;   i++) slots.push("SF");
+        for (let i = 0; i < flexCount; i++) slots.push("FLEX");
+      } else {
+        for (let i = namedTotal; i < totalCount; i++) slots.push("FLEX");
       }
     } else {
-      const qbRule   = parsed.find(p => p.name === "QB");
-      const qbMax    = qbRule?.max ?? totalCount;
+      const qbRule     = parsed.find(p => p.name === "QB");
+      const qbMax      = qbRule?.max ?? totalCount;
       const allMaxFull = parsed.every(p => p.max >= totalCount);
 
       if (allMaxFull) {
@@ -848,16 +906,25 @@ const MFLAPI = (() => {
    */
 
 function assignStartersToSlots(slots, players, playerLookup) {
+  // Valid slots per position for Pass 1 (named slots) and Pass 2/3 (SF/FLEX).
+  // NOTE: RB/WR/TE do NOT include "SF" here — they can physically fill an SF slot
+  // only as a fallback (Pass 2 inner loop) but they should NEVER be placed into an
+  // SF slot before a QB has been tried. Keeping SF out of their valid-slot list
+  // for the greedy pass ensures QBs always win SF in Pass 1 (which skips SF anyway)
+  // and that Pass 2 correctly tries QBs first before falling back.
   const POS_VALID_SLOTS = {
     QB:    ["QB", "SF", "FLEX"],
-    RB:    ["RB", "SF", "FLEX"],
-    WR:    ["WR", "SF", "FLEX"],
-    TE:    ["TE", "SF", "FLEX"],
+    RB:    ["RB", "FLEX"],
+    WR:    ["WR", "FLEX"],
+    TE:    ["TE", "FLEX"],
     K:     ["K",  "FLEX"],
     DEF:   ["DEF","FLEX"],
     P:     ["P",  "FLEX"],
     COACH: ["COACH","FLEX"],
   };
+
+  // Skill positions that can physically fill an SF slot as a fallback
+  const SF_ELIGIBLE = new Set(["QB", "RB", "WR", "TE"]);
 
   const enriched = players.map(p => ({
     ...p,
@@ -900,12 +967,11 @@ function assignStartersToSlots(slots, players, playerLookup) {
         break;
       }
     }
-    // If no QB left, take any skill position that can fill SF
+    // If no QB left, take any skill position that can fill SF (RB/WR/TE as fallback)
     if (!assigned) {
       for (let pi = 0; pi < enriched.length; pi++) {
         if (used[pi]) continue;
-        const valid = POS_VALID_SLOTS[enriched[pi].pos] || ["FLEX"];
-        if (valid.includes("SF")) {
+        if (SF_ELIGIBLE.has(enriched[pi].pos)) {
           result[si].player = enriched[pi];
           used[pi] = true;
           break;
@@ -927,6 +993,14 @@ function assignStartersToSlots(slots, players, playerLookup) {
       }
     }
   }
+
+  // Set displaySlot: named slots keep their label; SF/FLEX show the player's actual position
+  // when filled, otherwise fall back to the slot label itself.
+  result.forEach(r => {
+    if ((r.slot === "SF" || r.slot === "FLEX") && r.player) {
+      r.displaySlot = r.player.pos || r.slot;
+    }
+  });
 
   return result;
 }
@@ -1131,12 +1205,14 @@ function assignStartersToSlots(slots, players, playerLookup) {
     getAuctionResults,
     getAuctionResultsDirect,
     resolveGuillotineFinal,
+    getAliveTeamsForWeek,
     getStarterSlots,
     assignStartersToSlots,
     buildMFLToSleeperIndex,
     mflNameToSleeperId,
     mflNameToDisplay,
     getPlayerScores,
+    getSleeperPlayerData,
     debugBundle,
     // Division helpers
     getDivisions,
