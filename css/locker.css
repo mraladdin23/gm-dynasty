@@ -5352,3 +5352,22 @@ select option { background: var(--color-bg-2); }
 .draft-auction-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .draft-auction-team { font-size:.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .draft-auction-bid  { font-size:.88rem; text-align:right; white-space:nowrap; }
+
+/* ── iOS input zoom prevention ───────────────────────────
+   iOS Safari zooms on any input with font-size < 16px.
+   The viewport maximum-scale=1 handles this globally, but
+   as a belt-and-suspenders fix we also force 16px on all
+   user-facing text inputs at mobile breakpoints.
+   font-size is only overridden — layout/padding unchanged.
+   ──────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .chat-input,
+  .hallway-search-input,
+  .auc-bid-input,
+  .sal-edit-input,
+  .sal-bulk-salary-input,
+  .sal-bulk-year-input,
+  #ms-input {
+    font-size: 16px !important;
+  }
+}
