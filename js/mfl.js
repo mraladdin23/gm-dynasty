@@ -309,7 +309,7 @@ const MFLAPI = (() => {
             position: p.position || "?",
             pos:      p.position || "?",
             team:     p.team     || "FA",
-            sleeperId: p.sleeperId || null   // if MFL ever provides it
+            sleeperId: p.sleeperId || null
           };
         }
       });
@@ -323,7 +323,7 @@ const MFLAPI = (() => {
     }
   }
 
-  // ── Updated Starter Slots (your requested logic) ─────────────────────────
+  // ── Starter Slots (fixed for your SF/flex example) ───────────────────────
   function _normalizeMFLPos(raw) {
     const s = String(raw || "").toUpperCase().trim();
     if (s === "PK") return "K";
@@ -467,57 +467,7 @@ const MFLAPI = (() => {
     return result;
   }
 
-  // ── Remaining functions (kept from your original) ───────────────────────
-  // (normalizePlayoffBrackets, normalizePlayoffBracketResult, getLiveScoring, getPlayoffBracket, debugBundle, division helpers, etc.)
-
-  function normalizePlayoffBrackets(bundle) {
-    const pb = bundle?.playoffBrackets?.playoffBrackets;
-    if (!pb) return [];
-    const raw = pb.playoffBracket || pb.bracket;
-    if (!raw) return [];
-    const arr = Array.isArray(raw) ? raw : [raw];
-    return arr.map(b => ({
-      id:        String(b.id || b.bracket_id || ""),
-      name:      b.name || `Bracket ${b.id || ""}`,
-      startWeek: parseInt(b.startWeek || b.start_week || 0),
-      teams:     parseInt(b.teamsInvolved || b.teams || 0),
-    }));
-  }
-
-  function normalizePlayoffBracketResult(data) {
-    const pb = data?.playoffBracket;
-    if (!pb) return [];
-
-    const rawRounds = pb.playoffRound || pb.bracket?.round;
-    if (!rawRounds) return [];
-
-    const rounds = Array.isArray(rawRounds) ? rawRounds : [rawRounds];
-
-    return rounds.map((r, ri) => {
-      const rawGames = r.playoffGame || r.matchup;
-      const gamesArr = Array.isArray(rawGames) ? rawGames : (rawGames ? [rawGames] : []);
-
-      const matchups = gamesArr.map(g => {
-        const h = g.home || {};
-        const a = g.away || {};
-        const hId = String(h.franchise_id || h.id || "");
-        const aId = String(a.franchise_id || a.id || "");
-        const hScore = parseFloat(h.points || h.score || 0);
-        const aScore = parseFloat(a.points || a.score || 0);
-        const hWon = hScore > 0 && aScore > 0 ? hScore > aScore : false;
-        const aWon = hScore > 0 && aScore > 0 ? aScore > hScore : false;
-
-        return {
-          gameId: String(g.game_id || g.id || ""),
-          home: { id: hId, score: hScore, seed: h.seed ? parseInt(h.seed) : null, wonGameId: String(h.winner_of_game || ""), won: hWon },
-          away: { id: aId, score: aScore, seed: a.seed ? parseInt(a.seed) : null, wonGameId: String(a.winner_of_game || ""), won: aWon }
-        };
-      });
-
-      return { round: ri + 1, week: String(r.week || ""), matchups };
-    });
-  }
-
+  // ── On-demand helpers ─────────────────────────────────────────────────────
   async function getLiveScoring(leagueId, year, week, username, password) {
     return post("/mfl/liveScoring", {
       leagueId, year, week: week != null ? String(week) : undefined, username, password
@@ -528,7 +478,11 @@ const MFLAPI = (() => {
     return post("/mfl/playoffBracket", { leagueId, year, bracketId, username, password });
   }
 
-  // Division helpers (unchanged)
+  async function getAuctionResultsDirect(leagueId, year, cookie, username, password) {
+    return post("/mfl/auctionResults", { leagueId, year, cookie, username, password });
+  }
+
+  // ── Division helpers ──────────────────────────────────────────────────────
   function getDivisions(bundle) {
     const divisionsRaw = bundle?.league?.league?.divisions?.division;
     if (!divisionsRaw) return { divisions: [], franchiseDivision: {} };
@@ -597,6 +551,7 @@ const MFLAPI = (() => {
     return bundle;
   }
 
+  // ── Public API ───────────────────────────────────────────────────────────
   return {
     login,
     getUserLeagues,
@@ -604,7 +559,7 @@ const MFLAPI = (() => {
     getTeams,
     normalizeStandings,
     getStandingsMap,
-    getRoster,                    // ← restored
+    getRoster,
     getRostersAtWeek,
     getLatestScoredWeek,
     normalizeLiveScoring,
@@ -613,10 +568,9 @@ const MFLAPI = (() => {
     normalizePlayoffBracketResult,
     getLiveScoring,
     getPlayoffBracket,
-    getPlayers,                   // ← restored (with leagueId support)
+    getPlayers,
     getLeagueInfo: (bundle) => bundle?.league?.league || {},
-    getAuctionResults: () => ({}), // placeholder if needed
-    getAuctionResultsDirect,
+    getAuctionResultsDirect,          // ← fixed (now defined)
     resolveGuillotineFinal,
     getStarterSlots,
     assignStartersToSlots,
