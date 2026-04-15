@@ -1528,6 +1528,18 @@ function _renderHistory(el, ended) {
   `;
 }
 
+// Load more handler
+DLRAuction.loadMoreHistory = function() {
+  _historyLimit += 25;
+  const el = document.querySelector(".auc-history-list")?.parentElement;
+  if (el) _renderHistory(el, _historyCache);
+};
+
+// Optional: reset when opening a new league/history view
+DLRAuction.resetHistoryPagination = function() {
+  _historyLimit = 25;
+};
+
   // ── Settings (commissioner) ───────────────────────────────
   function _renderSettings(el) {
     if (!_isCommish) { el.innerHTML = `<div class="auc-empty">Commissioner only.</div>`; return; }
