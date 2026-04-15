@@ -352,22 +352,27 @@ const DLRStandings = (() => {
     const leagueInfo  = MFLAPI.getLeagueInfo(bundle);
     const l = bundle?.league?.league || {};
 
-    const currentWeek    = parseInt(l.nflScheduleWeek || 1);
-    const lastRegular    = parseInt(l.lastRegularSeasonWeek || 13);
-    // lastPlayoffWeek covers eliminator/guillotine/playoff leagues that run past regular season
-    const lastPlayoff    = parseInt(l.lastPlayoffWeek || l.playoffWeeks || 0);
-    // Never exceed 18 (max NFL regular + playoff weeks)
-    const maxWeek = Math.max(currentWeek, lastRegular, lastPlayoff, 18);
-    const allWeeks = Array.from({ length: maxWeek }, (_, i) => i + 1);
+    const currentWeek = parseInt(l.nflScheduleWeek || 1);
+
+    // Use the league's own startWeek/endWeek to bound the week pill range.
+    // startWeek is the first week of regular season (usually 1).
+    // endWeek / lastRegularSeasonWeek is the last week to show (includes playoffs for
+    // eliminator/guillotine leagues that use lastPlayoffWeek instead).
+    const startWeek   = Math.max(1, parseInt(l.startWeek || l.firstRegularSeasonWeek || 1));
+    const lastRegular = parseInt(l.lastRegularSeasonWeek || l.endWeek || 13);
+    const lastPlayoff = parseInt(l.lastPlayoffWeek || l.playoffWeeks || 0);
+    // Cap at the higher of lastRegular, lastPlayoff, or currentWeek — never go below startWeek
+    const endWeek     = Math.max(startWeek, currentWeek, lastRegular, lastPlayoff);
+    const allWeeks    = Array.from({ length: endWeek - startWeek + 1 }, (_, i) => startWeek + i);
 
     // Pre-normalize standings so eliminator/guillotine week filtering works in matchups
     const standings = MFLAPI.normalizeStandings(bundle);
 
     return {
       bundle, teams, nameMap, season, leagueInfo,
-      allWeeks, currentWeek,
+      allWeeks, currentWeek, startWeek, endWeek,
       starterSlots: MFLAPI.getStarterSlots(bundle),
-      standings,  // used by _mflMatchupCards for eliminator team filtering
+      standings,
     };
   }
 
@@ -403,7 +408,7 @@ const DLRStandings = (() => {
     el.innerHTML = `
       <div class="matchups-week-bar">
         <span class="matchups-week-label">Week:</span>
-        <div class="matchups-week-pills" style="overflow-x:auto;flex-wrap:nowrap">${weekPills}</div>
+        <div class="matchups-week-pills">${weekPills}</div>
       </div>
       ${divBanner}
       <div id="mfl-matchups-grid" class="matchups-grid">
