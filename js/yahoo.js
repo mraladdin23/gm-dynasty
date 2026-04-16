@@ -272,6 +272,7 @@ const YahooAPI = (() => {
       futurePicks:  _arr(raw.futurePicks),
       auctions:     _arr(raw.auctions),
       rules:        raw.rules        || {},
+      _draftDebug:  raw._draftDebug  || null, 
     };
   }
 

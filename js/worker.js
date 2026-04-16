@@ -393,7 +393,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       fetch(`${base}/league/${leagueKey}/teams;out=roster?format=json`,                  { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/scoreboard?format=json`,                        { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/transactions;types=add,drop,trade?format=json`, { headers: authHdr }),
-      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,                      { headers: authHdr }),
+      fetch(`${base}/league/${leagueKey}/draftresults;out=draft_results?format=json`,                      { headers: authHdr }),
     ]);
 
   async function toJson(s) {
