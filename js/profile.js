@@ -1840,6 +1840,42 @@ const Profile = (() => {
       } catch(e) { /* render with what we have */ }
     }
 
+    // ── Yahoo: live-fetch to resolve myTeamId (team_id from is_owned_by_current_login)
+    // and update teamName/record if not yet stored. Runs once per league load when
+    // myRosterId is null (newly imported leagues) or teamName is blank.
+    const needsYahooFetch = league.platform === "yahoo" && (
+      !league.myRosterId || !league.teamName || league.teamName === ""
+    );
+    if (needsYahooFetch) {
+      el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
+      try {
+        const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
+        const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+        const myId     = bundle.myTeamId || null;
+        if (myId) {
+          const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
+          const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
+          league = {
+            ...league,
+            myRosterId:   String(myId),
+            teamName:     myTeam.name    || league.teamName,
+            wins:         mySt.wins      ?? league.wins    ?? 0,
+            losses:       mySt.losses    ?? league.losses  ?? 0,
+            ties:         mySt.ties      ?? league.ties    ?? 0,
+            standing:     mySt.rank      || league.standing || null,
+            pointsFor:    mySt.ptsFor    || league.pointsFor  || 0,
+            pointsAgainst:mySt.ptsAgainst|| league.pointsAgainst || 0,
+          };
+          if (_allLeagues[leagueKey]) Object.assign(_allLeagues[leagueKey], league);
+          if (_detailLeagueKey === leagueKey) _detailLeague = { ..._detailLeague, ...league };
+          if (_currentUsername) {
+            _renderLeagues();
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+          }
+        }
+      } catch(e) { /* render with what we have */ }
+    }
+
     _renderOverviewHTML(el, leagueKey, league);
   }
 

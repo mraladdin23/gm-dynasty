@@ -526,6 +526,11 @@ const DLRTransactions = (() => {
   async function _loadYahooData(tok) {
     const el  = document.getElementById("dtab-transactions");
     const key = _leagueKey || `nfl.l.${_leagueId}`;
+
+    // Load DynastyProcess mappings first so yahoo_id → sleeper player lookup works
+    await DLRPlayers.load();
+    if (tok !== _token) return;
+
     const bundle = await YahooAPI.getLeagueBundle(key);
     if (tok !== _token) return;
 
@@ -545,37 +550,73 @@ const DLRTransactions = (() => {
       return;
     }
 
-    _players = _players && Object.keys(_players).length > 100 ? _players : DLRPlayers.all();
-
-    // Normalize Yahoo transactions into Sleeper format
     const YAHOO_TYPE_MAP = { "add": "free_agent", "drop": "free_agent", "trade": "trade", "waiver": "waiver" };
 
     _allTx = txArr.map(tx => {
-      const type    = YAHOO_TYPE_MAP[tx.type] || "free_agent";
-      const teamId  = String(tx.teamId || "");
-      const ts      = Number(tx.timestamp || 0) * 1000;
-      // Yahoo description is pre-formatted, store as a synthetic single add
+      const type   = YAHOO_TYPE_MAP[tx.type] || "free_agent";
+      const teamId = String(tx.teamId || "");
+      const ts     = Number(tx.timestamp || 0) * 1000;
       const adds = {}, drops = {};
-      if (tx.description) {
-        // description like "+Patrick Mahomes, -Dak Prescott"
+
+      // Use moves[] (structured player data with bare numeric pid) if available,
+      // otherwise fall back to parsing the description string.
+      const moves = tx.moves || [];
+      if (moves.length) {
+        moves.forEach(m => {
+          const prefixedId = `yahoo_${m.pid}`;
+          // Populate _players via DynastyProcess CSV if not already present
+          if (!_players[prefixedId] && m.pid) {
+            const map = DLRPlayers.getByYahooId(m.pid);
+            if (map) {
+              const sleeperP = map.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+              if (sleeperP && Object.keys(sleeperP).length > 5) {
+                _players[prefixedId] = sleeperP;
+              } else {
+                const parts = (map.name || "").trim().split(" ");
+                _players[prefixedId] = {
+                  first_name: parts.slice(0, -1).join(" ") || map.name || "",
+                  last_name:  parts.slice(-1)[0] || "",
+                  position: map.position || "?",
+                  fantasy_positions: [map.position || "?"]
+                };
+              }
+            } else if (m.name) {
+              // Not in CSV — use the name from the transaction itself
+              const parts = m.name.trim().split(" ");
+              _players[prefixedId] = {
+                first_name: parts.slice(0, -1).join(" ") || m.name,
+                last_name:  parts.slice(-1)[0] || "",
+                position: "?", fantasy_positions: ["?"]
+              };
+            }
+          }
+          const destId = m.destTeamId ? String(m.destTeamId) : teamId;
+          if (m.action === "add")  adds[prefixedId]  = destId;
+          if (m.action === "drop") drops[prefixedId] = teamId;
+          if (m.action === "trade" || (!m.action && m.destTeamId)) {
+            adds[prefixedId] = destId;
+          }
+        });
+      } else if (tx.description) {
+        // Legacy: description like "+Patrick Mahomes, -Dak Prescott"
         tx.description.split(",").forEach(part => {
           const p = part.trim();
-          if (p.startsWith("+")) adds[`yahoo_${p.slice(1)}`]  = teamId;
-          if (p.startsWith("-")) drops[`yahoo_${p.slice(1)}`] = teamId;
-          if (p.startsWith("~")) adds[`yahoo_${p.slice(1)}`]  = teamId;
+          const name = p.slice(1).trim();
+          const synId = `yahoo_name_${name.replace(/\s+/g, "_")}`;
+          if (!_players[synId] && name) {
+            const parts = name.split(" ");
+            _players[synId] = {
+              first_name: parts.slice(0,-1).join(" ") || name,
+              last_name:  parts.slice(-1)[0] || "",
+              position: "?", fantasy_positions: ["?"]
+            };
+          }
+          if (p.startsWith("+")) adds[synId]  = teamId;
+          if (p.startsWith("-")) drops[synId] = teamId;
+          if (p.startsWith("~")) adds[synId]  = teamId;
         });
       }
-      // Inject display names into _players
-      Object.keys({...adds,...drops}).forEach(synId => {
-        if (!_players[synId]) {
-          const pname = synId.replace("yahoo_", "");
-          _players[synId] = {
-            first_name: pname.split(" ")[0] || pname,
-            last_name:  pname.split(" ").slice(1).join(" ") || "",
-            position: "?", fantasy_positions: ["?"]
-          };
-        }
-      });
+
       return { type, created: ts, status: "complete", roster_ids: [teamId], adds, drops, draft_picks: [], settings: {} };
     }).sort((a,b) => b.created - a.created);
 

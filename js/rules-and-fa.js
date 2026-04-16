@@ -486,6 +486,10 @@ const DLRFreeAgents = (() => {
 
   // ── Yahoo Players tab ──────────────────────────────────────
   async function _loadYahooRosterData(leagueId, token) {
+    // Load DynastyProcess mappings so yahoo_id resolves to real names
+    await DLRPlayers.load();
+    if (token !== _initToken) return;
+
     const key    = _platformLeagueKey || `nfl.l.${leagueId}`;
     const bundle = await YahooAPI.getLeagueBundle(key);
     if (token !== _initToken) return;
@@ -508,20 +512,41 @@ const DLRFreeAgents = (() => {
       });
     });
 
-    // Yahoo doesn't have a bulk player list — show rostered players only
-    _cachedData = [...rostered].map(key => ({
-      pid:        key,
-      name:       key.replace("yahoo_", "Player "),
-      pos:        "?",
-      nflTeam:    "—",
-      rank:       9999,
-      pts:        null,
-      age:        null,
-      status:     null,
-      isRostered: true,
-      rosterTeam: _rosterLookup[key] || null,
-      isWon:      false
-    }));
+    // Resolve each player via DynastyProcess CSV (yahoo_id → sleeper record or CSV bio)
+    _cachedData = [...rostered].map(prefixedId => {
+      const rawId  = prefixedId.replace("yahoo_", "");
+      const map    = DLRPlayers.getByYahooId(rawId);
+      let name = prefixedId, pos = "?", nflTeam = "—", age = null;
+
+      if (map) {
+        const sleeperP = map.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+        if (sleeperP && sleeperP.first_name) {
+          name    = `${sleeperP.first_name} ${sleeperP.last_name}`.trim();
+          pos     = sleeperP.fantasy_positions?.[0] || sleeperP.position || map.position || "?";
+          nflTeam = sleeperP.team || map.team || "FA";
+          age     = sleeperP.age  || null;
+        } else if (map.name) {
+          name    = map.name;
+          pos     = map.position || "?";
+          nflTeam = map.team     || "FA";
+          age     = map.age      ? parseFloat(map.age) : null;
+        }
+      }
+
+      return {
+        pid:        prefixedId,
+        name,
+        pos:        pos.toUpperCase(),
+        nflTeam,
+        rank:       9999,
+        pts:        null,
+        age,
+        status:     null,
+        isRostered: true,
+        rosterTeam: _rosterLookup[prefixedId] || null,
+        isWon:      false
+      };
+    });
 
     if (token !== _initToken) return;
     _render();
