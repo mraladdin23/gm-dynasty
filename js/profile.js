@@ -400,6 +400,51 @@ const Profile = (() => {
     return matched;
   }
 
+  // ── Background Yahoo identity resolution ───────────────
+  // Finds Yahoo leagues missing myRosterId or teamName, fetches their bundle
+  // non-blocking in small batches, and persists results to Firebase.
+  // Runs once after renderLocker — leagues with stored data are skipped.
+  async function _resolveYahooIdentities(username) {
+    if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
+    const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
+      l.platform === "yahoo" && (!l.myRosterId || !l.teamName || l.teamName === "")
+    );
+    if (!allYahoo.length) return;
+
+    const CONCURRENCY = 2;  // Yahoo rate limits — keep concurrency low
+    for (let i = 0; i < allYahoo.length; i += CONCURRENCY) {
+      const batch = allYahoo.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
+        try {
+          const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
+          const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+          const myId     = bundle.myTeamId || null;
+          if (!myId) return;
+          const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
+          const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
+          if (_allLeagues[leagueKey]) {
+            Object.assign(_allLeagues[leagueKey], {
+              myRosterId:    String(myId),
+              teamName:      myTeam.name      || _allLeagues[leagueKey].teamName || "",
+              wins:          mySt.wins        ?? _allLeagues[leagueKey].wins    ?? 0,
+              losses:        mySt.losses      ?? _allLeagues[leagueKey].losses  ?? 0,
+              ties:          mySt.ties        ?? _allLeagues[leagueKey].ties    ?? 0,
+              standing:      mySt.rank        || _allLeagues[leagueKey].standing || null,
+              pointsFor:     mySt.ptsFor      || _allLeagues[leagueKey].pointsFor  || 0,
+              pointsAgainst: mySt.ptsAgainst  || _allLeagues[leagueKey].pointsAgainst || 0,
+            });
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+          }
+        } catch(e) { /* skip failed league silently */ }
+      }));
+      // Small delay between batches to avoid Yahoo rate limiting
+      if (i + CONCURRENCY < allYahoo.length) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+    _renderLeagues();  // re-render cards with resolved data
+  }
+
   // ── Main locker render ─────────────────────────────────
 
   async function renderLocker(profile) {
@@ -460,6 +505,14 @@ const Profile = (() => {
     _renderLeagueFilters();
     _renderLeagues();
     _renderCareerSummary(profile);
+
+    // ── Background Yahoo identity resolution ─────────────────
+    // Non-blocking: resolve myTeamId + teamName/record for any Yahoo league
+    // that doesn't yet have them stored. Same pattern as syncMFLTeams.
+    // Runs after first paint so it doesn't block the initial render.
+    if (profile.platforms?.yahoo?.linked) {
+      setTimeout(() => _resolveYahooIdentities(_currentUsername), 200);
+    }
   }
 
   function _renderAvatar(profile) {

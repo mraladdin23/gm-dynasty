@@ -45,8 +45,11 @@ const DLRAnalytics = (() => {
           // For MFL we already know the roster ID — pass it directly
           _myRosterId = myRosterId || null;
           await _renderMFLAnalytics(el, leagueId, token);
+        } else if (_platform === "yahoo") {
+          _myRosterId = myRosterId || null;
+          await _renderYahooAnalytics(el, leagueId, token);
         } else {
-          el.innerHTML = `<div class="az-placeholder">Analytics for Yahoo leagues coming soon.</div>`;
+          el.innerHTML = `<div class="az-placeholder">Analytics not available for this platform.</div>`;
         }
       } catch(e) {
         el.innerHTML = `<div class="az-placeholder">Could not load analytics: ${e.message}</div>`;
@@ -715,6 +718,401 @@ const DLRAnalytics = (() => {
   }
 
   // ══════════════════════════════════════════════════════════
+  //  YAHOO ANALYTICS — mirrors MFL tab structure
+  //  Uses allMatchups from bundle for week-by-week scores
+  // ══════════════════════════════════════════════════════════
+
+  const YAHOO_TABS = [
+    { id:"power",   label:"🏆 Power Rankings", fn: _yahooRenderPower   },
+    { id:"luck",    label:"🍀 Luck Index",      fn: _yahooRenderLuck    },
+    { id:"trades",  label:"🔄 Trade Map",        fn: _yahooRenderTrades  },
+    { id:"draft",   label:"📋 Draft Recap",      fn: _yahooRenderDraft   },
+    { id:"waivers", label:"💎 Waivers",          fn: _yahooRenderWaivers },
+  ];
+
+  let _yahooBundle    = null;
+  let _yahooTeamMap   = {};
+  let _yahooStandings = [];
+  let _yahooActiveTab = 0;
+  let _yahooWeekData  = null;
+
+  async function _renderYahooAnalytics(el, leagueId, token) {
+    const leagueKey = `nfl.l.${leagueId}`;
+    _yahooBundle    = await YahooAPI.getLeagueBundle(leagueKey);
+    if (token !== _initToken) return;
+
+    _yahooTeamMap   = {};
+    (_yahooBundle.teams || []).forEach(t => { _yahooTeamMap[String(t.id)] = t.name || `Team ${t.id}`; });
+    _yahooStandings = _yahooBundle.standings || [];
+    _yahooWeekData  = null;
+    _yahooActiveTab = 0;
+
+    el.innerHTML = `
+      <div class="az-tabs" id="az-tab-bar">
+        ${YAHOO_TABS.map((t, i) =>
+          `<button class="az-tab ${i === 0 ? "az-tab--active" : ""}" data-idx="${i}"
+            onclick="DLRAnalytics.showYahooTab(${i})">${t.label}</button>`
+        ).join("")}
+      </div>
+      <div class="az-content" id="az-content">
+        <div class="detail-loading"><div class="spinner"></div><span>Loading…</span></div>
+      </div>`;
+
+    _yahooShowTab(0);
+  }
+
+  function _yahooShowTab(idx) {
+    _yahooActiveTab = idx;
+    document.querySelectorAll(".az-tab").forEach((t, i) => t.classList.toggle("az-tab--active", i === idx));
+    const content = document.getElementById("az-content");
+    if (!content) return;
+    content.innerHTML = _loadingHTML("Loading…");
+    YAHOO_TABS[idx]?.fn(content);
+  }
+
+  // Build week-by-week score map from allMatchups
+  function _yahooGetWeekData() {
+    if (_yahooWeekData) return _yahooWeekData;
+    const allMu = _yahooBundle?.allMatchups || {};
+    const lm    = _yahooBundle?.leagueMeta  || {};
+    const poStart = lm.playoff_start_week   || 999;
+    const byTeam = {}, allMatchups = [], weeks = [];
+
+    Object.entries(allMu).forEach(([wStr, mus]) => {
+      const w = parseInt(wStr);
+      if (w >= poStart) return;  // regular season only
+      if (!mus.length) return;
+      weeks.push(w);
+      mus.forEach(m => {
+        const hId = String(m.home?.teamId ?? "");
+        const aId = String(m.away?.teamId ?? "");
+        const hSc = m.home?.score ?? 0;
+        const aSc = m.away?.score ?? 0;
+        if (!hId || !aId || (hSc === 0 && aSc === 0)) return;
+        if (!byTeam[hId]) byTeam[hId] = {};
+        if (!byTeam[aId]) byTeam[aId] = {};
+        byTeam[hId][w] = hSc;
+        byTeam[aId][w] = aSc;
+        allMatchups.push({ week: w, home: { teamId: hId, score: hSc }, away: { teamId: aId, score: aSc },
+          winnerTeamId: m.winnerTeamId });
+      });
+    });
+
+    _yahooWeekData = { byTeam, allMatchups, weeks: weeks.sort((a,b) => a-b) };
+    return _yahooWeekData;
+  }
+
+  // ── Yahoo Tab 1: Power Rankings ──────────────────────────
+  function _yahooRenderPower(el) {
+    try {
+      const { byTeam } = _yahooGetWeekData();
+      const standings = _yahooStandings;
+      if (!standings.length) { el.innerHTML = _noData("No standings data."); return; }
+
+      const rankings = standings.map(s => {
+        const tid    = String(s.teamId);
+        const name   = _yahooTeamMap[tid] || `Team ${tid}`;
+        const wins   = s.wins || 0, losses = s.losses || 0, ties = s.ties || 0;
+        const total  = wins + losses + ties || 1;
+        const winPct = wins / total;
+        const isMe   = _myRosterId && tid === String(_myRosterId);
+
+        let avgAll = s.ptsFor / total, avgRecent = avgAll;
+        let trend = "→", trendColor = "var(--color-text-dim)";
+        if (byTeam[tid]) {
+          const wScores = byTeam[tid];
+          const allWks  = Object.values(wScores).filter(p => p > 0);
+          avgAll        = allWks.length ? allWks.reduce((a,b) => a+b, 0) / allWks.length : avgAll;
+          const maxWk   = Math.max(...Object.keys(wScores).map(Number));
+          const recent  = [maxWk, maxWk-1, maxWk-2].filter(w => w > 0)
+            .map(w => wScores[w]).filter(p => p != null && p > 0);
+          avgRecent = recent.length ? recent.reduce((a,b) => a+b, 0) / recent.length : avgAll;
+          trend     = avgRecent > avgAll * 1.05 ? "↑" : avgRecent < avgAll * 0.9 ? "↓" : "→";
+          trendColor = trend === "↑" ? "var(--color-green)" : trend === "↓" ? "var(--color-red)" : "var(--color-text-dim)";
+        }
+        const power = avgRecent * 0.4 + avgAll * 0.3 + winPct * 100 * 0.3;
+        return { tid, name, wins, losses, ties, avgAll, avgRecent, power, trend, trendColor, isMe };
+      }).filter(r => r.power > 0).sort((a,b) => b.power - a.power);
+
+      if (!rankings.length) { el.innerHTML = _noData("Not enough data yet."); return; }
+      const maxPower = rankings[0].power;
+      const medals   = ["🥇","🥈","🥉"];
+
+      el.innerHTML = `
+        <div class="az-section-title">Power Rankings</div>
+        <div class="az-desc">40% recent form (last 3 wks) + 30% season avg + 30% win%</div>
+        <div class="az-list">
+          ${rankings.map((r, i) => {
+            const pct    = (r.power / maxPower * 100).toFixed(1);
+            const record = `${r.wins}–${r.losses}${r.ties ? `–${r.ties}` : ""}`;
+            return `
+              <div class="az-list-row ${r.isMe ? "az-list-row--me" : ""}">
+                <div class="az-rank">${medals[i] || `#${i+1}`}</div>
+                <div class="az-team-name">${_esc(r.name)}${r.isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</div>
+                <div class="az-record">${record}</div>
+                <div class="az-bar-wrap"><div class="az-bar" style="width:${pct}%"></div></div>
+                <div class="az-stat-sm">${r.avgAll.toFixed(1)} avg</div>
+                <div class="az-trend" style="color:${r.trendColor}">${r.trend}</div>
+              </div>`;
+          }).join("")}
+        </div>`;
+    } catch(e) { el.innerHTML = _errMsg("Could not load power rankings: " + e.message); }
+  }
+
+  // ── Yahoo Tab 2: Luck Index ──────────────────────────────
+  function _yahooRenderLuck(el) {
+    try {
+      const { allMatchups } = _yahooGetWeekData();
+      if (!allMatchups.length) { el.innerHTML = _noData("Not enough matchup data yet."); return; }
+
+      const weeklyScores = {}, actualRecord = {};
+      allMatchups.forEach(m => {
+        const hId = m.home.teamId, aId = m.away.teamId;
+        if (!hId || !aId) return;
+        if (!weeklyScores[hId]) weeklyScores[hId] = [];
+        if (!weeklyScores[aId]) weeklyScores[aId] = [];
+        weeklyScores[hId].push(m.home.score);
+        weeklyScores[aId].push(m.away.score);
+        if (!actualRecord[hId]) actualRecord[hId] = { w:0, l:0 };
+        if (!actualRecord[aId]) actualRecord[aId] = { w:0, l:0 };
+        if (m.home.score >= m.away.score) { actualRecord[hId].w++; actualRecord[aId].l++; }
+        else                              { actualRecord[aId].w++; actualRecord[hId].l++; }
+      });
+
+      const allScores = Object.values(weeklyScores).flat().filter(s => s > 0);
+      if (!allScores.length) { el.innerHTML = _noData("Not enough scoring data yet."); return; }
+
+      const results = _yahooStandings.map(s => {
+        const tid    = String(s.teamId);
+        const scores = weeklyScores[tid] || [];
+        const actual = actualRecord[tid] || { w:0, l:0 };
+        if (!scores.length) return null;
+        const sortedAll    = [...allScores].sort((a,b) => a-b);
+        const expectedWins = scores.filter(sc => sortedAll.filter(x => x < sc).length > sortedAll.length / 2).length;
+        return {
+          tid, name: _yahooTeamMap[tid] || `Team ${tid}`,
+          actual, expectedWins,
+          luckScore: actual.w - expectedWins,
+          avgScore:  scores.length ? (scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(1) : "0",
+          isMe: _myRosterId && tid === String(_myRosterId)
+        };
+      }).filter(Boolean).sort((a,b) => b.luckScore - a.luckScore);
+
+      const maxLuck = Math.max(...results.map(r => Math.abs(r.luckScore)), 1);
+      el.innerHTML = `
+        <div class="az-section-title">Luck Index</div>
+        <div class="az-desc">Actual Wins − Expected Wins vs league-wide weekly median.</div>
+        <div class="az-list">
+          ${results.map(r => {
+            const pct   = (Math.abs(r.luckScore) / maxLuck) * 40;
+            const color = r.luckScore > 0 ? "var(--color-green)" : r.luckScore < 0 ? "var(--color-red)" : "var(--color-text-dim)";
+            const emoji = r.luckScore >= 2 ? "🍀" : r.luckScore <= -2 ? "😤" : "😐";
+            return `
+              <div class="az-list-row ${r.isMe ? "az-list-row--me" : ""}">
+                <div class="az-rank" style="font-size:1.1rem">${emoji}</div>
+                <div class="az-team-name">${_esc(r.name)}${r.isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</div>
+                <div class="az-record">${r.actual.w}–${r.actual.l}</div>
+                <div class="az-luck-bar-wrap">
+                  <div class="az-luck-bar ${r.luckScore >= 0 ? "az-luck-bar--pos" : "az-luck-bar--neg"}"
+                    style="width:${pct}%;${r.luckScore >= 0 ? "margin-left:50%;" : `margin-left:${50-pct}%;`}"></div>
+                  <div class="az-luck-zero"></div>
+                </div>
+                <div class="az-stat-sm" style="color:${color};font-weight:700;">${r.luckScore > 0 ? "+" : ""}${r.luckScore}</div>
+              </div>`;
+          }).join("")}
+        </div>`;
+    } catch(e) { el.innerHTML = _errMsg("Could not load luck data: " + e.message); }
+  }
+
+  // ── Yahoo Tab 3: Trade Map ────────────────────────────────
+  function _yahooRenderTrades(el) {
+    try {
+      const txArr  = (_yahooBundle?.transactions || []).filter(tx => tx.type === "trade");
+      if (!txArr.length) { el.innerHTML = _noData("No trades found this season."); return; }
+
+      const pairs = {}, counts = {};
+      txArr.forEach(tx => {
+        // Collect all team IDs involved via moves
+        const involved = new Set();
+        if (tx.teamId) involved.add(String(tx.teamId));
+        (tx.moves || []).forEach(m => {
+          if (m.destTeamId) involved.add(String(m.destTeamId));
+          if (m.srcTeamId)  involved.add(String(m.srcTeamId));
+        });
+        const ids = [...involved].sort();
+        if (ids.length >= 2) {
+          const key = ids.join("-");
+          pairs[key] = (pairs[key] || 0) + 1;
+          ids.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+        }
+      });
+
+      const sorted   = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+      const maxCount = sorted[0]?.[1] || 1;
+
+      el.innerHTML = `
+        <div class="az-section-title">Trade Activity</div>
+        <div class="az-list" style="margin-bottom:var(--space-5);">
+          ${sorted.map(([tid, n]) => `
+            <div class="az-list-row ${_myRosterId && tid === String(_myRosterId) ? "az-list-row--me" : ""}">
+              <div class="az-team-name">${_esc(_yahooTeamMap[tid] || `Team ${tid}`)}</div>
+              <div class="az-bar-wrap"><div class="az-bar" style="width:${(n/maxCount*100).toFixed(0)}%"></div></div>
+              <div class="az-stat-sm">${n} trade${n !== 1 ? "s" : ""}</div>
+            </div>`).join("")}
+        </div>
+        <div class="az-section-title">Trading Partners</div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+          ${Object.entries(pairs).sort((a,b) => b[1]-a[1]).map(([key, n]) => {
+            const [a, b] = key.split("-");
+            const isMe = _myRosterId && (a === String(_myRosterId) || b === String(_myRosterId));
+            return `<div class="az-trade-chip ${isMe ? "az-trade-chip--me" : ""}">
+              ${_esc(_yahooTeamMap[a] || `T${a}`)} <span class="az-trade-arrow">↔</span> ${_esc(_yahooTeamMap[b] || `T${b}`)}
+              <span class="az-trade-count">${n}×</span>
+            </div>`;
+          }).join("")}
+        </div>`;
+    } catch(e) { el.innerHTML = _errMsg("Could not load trade data: " + e.message); }
+  }
+
+  // ── Yahoo Tab 4: Draft Recap ──────────────────────────────
+  function _yahooRenderDraft(el) {
+    try {
+      const draft = _yahooBundle?.draft || [];
+      if (!draft.length) { el.innerHTML = _noData("No draft data available."); return; }
+
+      const hasAuction = draft.some(p => p.cost != null && Number(p.cost) > 0);
+
+      if (hasAuction) {
+        const sorted  = [...draft].sort((a,b) => Number(b.cost||0) - Number(a.cost||0));
+        const maxCost = Number(sorted[0]?.cost || 1);
+        el.innerHTML = `
+          <div class="az-section-title">Auction Draft Recap</div>
+          <div class="az-desc">Sorted by winning bid · ${draft.length} players</div>
+          <div class="az-list">
+            ${sorted.map((p, i) => {
+              const tid  = String(p.teamId || "");
+              const cost = Number(p.cost || 0);
+              const pos  = (p.position || "?").toUpperCase();
+              const col  = POS_COLOR[pos] || "#9ca3af";
+              const isMe = _myRosterId && tid === String(_myRosterId);
+              const pct  = (cost / maxCost * 100).toFixed(1);
+              return `
+                <div class="az-list-row ${isMe ? "az-list-row--me" : ""}">
+                  <div class="az-rank dim">${i+1}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;font-size:.85rem">${_esc(p.name || `Player ${p.playerId}`)}</div>
+                    <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:2px">
+                      <span class="az-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
+                      <span style="font-size:.75rem;color:var(--color-text-dim)">${_esc(_yahooTeamMap[tid] || `Team ${tid}`)}</span>
+                      <div style="flex:1;height:3px;background:var(--color-border);border-radius:2px;max-width:80px">
+                        <div style="height:100%;width:${pct}%;background:var(--color-gold);border-radius:2px"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style="font-weight:700;color:var(--color-gold);font-family:var(--font-display)">$${cost}</div>
+                </div>`;
+            }).join("")}
+          </div>`;
+      } else {
+        // Snake draft — group by team
+        const byTeam = {};
+        draft.forEach(p => {
+          const tid = String(p.teamId || "");
+          if (!byTeam[tid]) byTeam[tid] = { name: _yahooTeamMap[tid] || `Team ${tid}`, picks: [], posMap: {} };
+          byTeam[tid].picks.push(p);
+          const pos = (p.position || "?").toUpperCase();
+          byTeam[tid].posMap[pos] = (byTeam[tid].posMap[pos] || 0) + 1;
+        });
+        const sorted = Object.values(byTeam).sort((a,b) => a.name.localeCompare(b.name));
+        const isMe   = tid => _myRosterId && tid === String(_myRosterId);
+        el.innerHTML = `
+          <div class="az-section-title">Draft Recap</div>
+          <div class="az-desc">${draft.length} picks · ${sorted.length} teams</div>
+          <div class="az-list">
+            ${sorted.map(s => {
+              const earlyPick = s.picks.sort((a,b) => a.pick - b.pick)[0];
+              const tid = Object.keys(byTeam).find(k => byTeam[k] === s) || "";
+              return `
+                <div class="az-list-row ${isMe(tid) ? "az-list-row--me" : ""}">
+                  <div class="az-rank" style="color:var(--color-text-dim);min-width:2.5rem">#${earlyPick?.pick||"?"}</div>
+                  <div style="flex:1">
+                    <span class="az-team-name">${_esc(s.name)}${isMe(tid) ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</span>
+                    <span class="az-stat-sm">${s.picks.length} picks</span>
+                  </div>
+                  <div class="az-pos-badges">
+                    ${Object.entries(s.posMap).map(([pos, n]) => {
+                      const col = POS_COLOR[pos] || "#9ca3af";
+                      return `<span class="az-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}×${n}</span>`;
+                    }).join("")}
+                  </div>
+                </div>`;
+            }).join("")}
+          </div>`;
+      }
+    } catch(e) { el.innerHTML = _errMsg("Could not load draft data: " + e.message); }
+  }
+
+  // ── Yahoo Tab 5: Waiver Analysis ──────────────────────────
+  function _yahooRenderWaivers(el) {
+    try {
+      const waivers = (_yahooBundle?.transactions || []).filter(tx =>
+        tx.type === "add" || tx.type === "drop" || tx.type === "free_agent" || tx.type === "waiver"
+      );
+      if (!waivers.length) { el.innerHTML = _noData("No waiver activity found this season."); return; }
+
+      const teamPickups = {}, playerClaims = {};
+      waivers.forEach(tx => {
+        (tx.moves || []).forEach(m => {
+          const act = (m.action || "").toLowerCase().replace(/ped$/,"p").replace(/ed$/,"");
+          const tid = act === "drop"
+            ? (m.srcTeamId  || tx.teamId || "")
+            : (m.destTeamId || tx.teamId || "");
+          if (!tid) return;
+          if (!teamPickups[tid]) teamPickups[tid] = { adds:0, drops:0 };
+          if (act === "add")  { teamPickups[tid].adds++;  if (m.pid) playerClaims[m.pid] = (playerClaims[m.pid]||0) + 1; }
+          if (act === "drop") { teamPickups[tid].drops++; }
+        });
+      });
+
+      // Resolve player names: DynastyProcess first, then bundle's transactions name field
+      const hotPlayers = Object.entries(playerClaims)
+        .filter(([,n]) => n > 1).sort((a,b) => b[1]-a[1]).slice(0, 12)
+        .map(([pid, n]) => {
+          const map = DLRPlayers.getByYahooId(pid);
+          const name = map?.name
+            || waivers.flatMap(tx => tx.moves||[]).find(m => m.pid === pid)?.name
+            || `Player ${pid}`;
+          return { name, n };
+        });
+
+      const teamRows = Object.entries(teamPickups)
+        .map(([tid, {adds, drops}]) => ({
+          name: _yahooTeamMap[tid] || `Team ${tid}`,
+          adds, drops, isMe: _myRosterId && tid === String(_myRosterId)
+        })).sort((a,b) => b.adds - a.adds);
+      const maxAdds = teamRows[0]?.adds || 1;
+
+      el.innerHTML = `
+        <div class="az-section-title">Waiver Activity by Team</div>
+        <div class="az-list" style="margin-bottom:var(--space-5);">
+          ${teamRows.map(r => `
+            <div class="az-list-row ${r.isMe ? "az-list-row--me" : ""}">
+              <div class="az-team-name">${_esc(r.name)}${r.isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</div>
+              <div class="az-bar-wrap"><div class="az-bar" style="width:${(r.adds/maxAdds*100).toFixed(0)}%"></div></div>
+              <div class="az-stat-sm">${r.adds} adds · ${r.drops} drops</div>
+            </div>`).join("")}
+        </div>
+        ${hotPlayers.length ? `
+        <div class="az-section-title">Most Claimed Players</div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+          ${hotPlayers.map(({name, n}) =>
+            `<div class="az-trade-chip">${_esc(name)} <span class="az-trade-count">${n}×</span></div>`
+          ).join("")}
+        </div>` : ""}`;
+    } catch(e) { el.innerHTML = _errMsg("Could not load waiver data: " + e.message); }
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  MFL ANALYTICS — full tab parity with Sleeper
   // ══════════════════════════════════════════════════════════
 
@@ -1247,6 +1645,11 @@ const DLRAnalytics = (() => {
     }
   }
 
-  return { init, reset, showTab, showMFLTab: _mflShowTab, _mflSwitchDraftSet: (i) => _mflRenderDraftSet(DLRAnalytics._mflDraftSets?.[i], i) };
+  return {
+    init, reset, showTab,
+    showMFLTab: _mflShowTab,
+    showYahooTab: _yahooShowTab,
+    _mflSwitchDraftSet: (i) => _mflRenderDraftSet(DLRAnalytics._mflDraftSets?.[i], i)
+  };
 
 })();
