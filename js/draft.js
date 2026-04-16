@@ -887,12 +887,18 @@ const DLRDraft = (() => {
   async function _loadYahooDraft(leagueId, leagueKey, token) {
     const el  = document.getElementById("dtab-draft");
     const key = leagueKey || `nfl.l.${leagueId}`;
+
+    // Load DynastyProcess mappings so we can enrich position when worker returns "?"
+    await DLRPlayers.load();
+    if (token !== _initToken) return;
+
     const bundle = await YahooAPI.getLeagueBundle(key);
     if (token !== _initToken) return;
 
-    const teams    = bundle.teams    || [];
-    const draft    = bundle.draft    || [];
-    const teamMap  = {};
+    const teams     = bundle.teams    || [];
+    const draft     = bundle.draft    || [];
+    const myTeamId  = bundle.myTeamId || _myRosterId || null;
+    const teamMap   = {};
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
     if (!draft.length) {
@@ -929,17 +935,24 @@ const DLRDraft = (() => {
             : `<span>Pick</span><span>Player</span><span>Team</span>`}
         </div>
         ${displayPicks.map((p, i) => {
-          const pos   = (p.position || "?").toUpperCase();
-          const color = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
-          const pid   = String(p.playerId || p.player_id || "");
-          const name  = p.name || p.player_name || `Player ${pid}`;
-          const team  = teamMap[String(p.teamId || p.team_id || "")] || "—";
+          const pid      = String(p.playerId || p.player_id || "");
+          // Enrich position via DynastyProcess when worker returns "?" (e.g. older draft results)
+          let pos = (p.position || "?").toUpperCase();
+          if (pos === "?" && pid) {
+            const map = DLRPlayers.getByYahooId(pid);
+            if (map?.position) pos = map.position.toUpperCase();
+          }
+          const color   = { QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d" }[pos] || "#9ca3af";
+          const name    = p.name || p.player_name || `Player ${pid}`;
+          const fantTeam = teamMap[String(p.teamId || p.team_id || "")] || "—";
+          const isMe    = myTeamId && String(p.teamId || p.team_id || "") === String(myTeamId);
           return `
-            <div class="draft-auction-row">
+            <div class="draft-auction-row${isMe ? " draft-auction-row--mine" : ""}"
+              ${isMe ? `style="background:var(--color-surface-2)"` : ""}>
               <span class="draft-auction-rank dim">${showAuction ? i+1 : (p.pick || `${p.round}.${p.pick_in_round||"?"}`)}</span>
               <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
               <span class="draft-auction-name">${_esc(name)}</span>
-              <span class="draft-auction-team dim">${_esc(team)}</span>
+              <span class="draft-auction-team dim">${_esc(fantTeam)}${isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">▶</span>' : ""}</span>
               ${showAuction ? `<span class="draft-auction-bid" style="color:var(--color-gold);font-family:var(--font-display);font-weight:700">$${Number(p.cost||0)}</span>` : ""}
             </div>`;
         }).join("")}

@@ -134,71 +134,80 @@ const YahooAPI = (() => {
   /**
    * Normalize Yahoo bundle into frontend-friendly structure.
    *
-   * The worker (yahooLeagueBundle) already parses Yahoo's deeply-nested JSON and
-   * returns flat arrays for teams, standings, rosters, matchups, draft, and
-   * transactions. This function just validates shape and fills in any gaps so
-   * downstream tab modules always get a consistent object regardless of which
-   * worker version returned the data.
+   * The worker (yahooLeagueBundle) parses Yahoo's deeply-nested JSON and returns
+   * flat arrays plus top-level metadata. This function validates shape, fills gaps,
+   * and passes through all new worker fields so tab modules get a consistent object.
    *
    * Field contract (all arrays use camelCase IDs):
-   *   teams[]      — { id, name, owner_name, ownerName }
-   *   standings[]  — { teamId, wins, losses, ties, ptsFor, ptsAgainst, rank }
-   *   rosters[]    — { teamId, players: [playerId, ...], playerDetails: [{id,name,position,nflTeam,status},...] }
-   *   matchups[]   — { week, home: {teamId, score}, away: {teamId, score} }
+   *   myTeamId     — team_id of the logged-in user's team (null if unknown)
+   *   currentWeek  — most-recently-scored week number
+   *   leagueMeta   — { current_week, end_week, playoff_start_week, num_playoff_teams, uses_playoff, scoring_type, season, ... }
+   *   teams[]      — { id, name, owner_name, ownerName, isMyTeam, faab, clinched }
+   *   standings[]  — { teamId, wins, losses, ties, ptsFor, ptsAgainst, rank, playoffSeed, clinched }
+   *   rosters[]    — { teamId, players: [playerId, ...] }
+   *   matchups[]   — { week, home: {teamId, score}, away: {teamId, score}, winnerTeamId, status, isTied }
+   *   allMatchups  — { [week]: matchups[] } — all weeks including playoffs
    *   draft[]      — { pick, round, teamId, playerId, name, position, cost }
-   *   transactions[] — { id, type, status, timestamp, teamId, description }
+   *   transactions[] — { id, type, status, timestamp, teamId, description, moves: [{pid,name,action,destTeamId}] }
    */
   function normalizeBundle(raw) {
     if (!raw) return {};
 
-    // Worker already returns flat arrays — pass them through with shape guarantee.
-    // Defensively handle both camelCase (new worker) and snake_case (legacy paths).
     const _arr = v => (Array.isArray(v) ? v : v ? [v] : []);
     const _int = v => parseInt(v ?? 0) || 0;
     const _flt = v => parseFloat(v ?? 0) || 0;
     const _str = v => v != null ? String(v) : "";
 
-    // Teams — normalize to { id, name, owner_name, ownerName }
+    // Teams — preserve all new flags from worker
     const teams = _arr(raw.teams).map(t => ({
       id:         _str(t.id         ?? t.team_id),
       name:       t.name            || `Team ${t.id ?? t.team_id}`,
       owner_name: t.owner_name      || t.ownerName || "",
       ownerName:  t.ownerName       || t.owner_name || "",
+      isMyTeam:   !!(t.isMyTeam),
+      faab:       t.faab            != null ? _int(t.faab) : null,
+      clinched:   !!(t.clinched),
     }));
 
-    // Standings — normalize to { teamId, wins, losses, ties, ptsFor, ptsAgainst, rank }
+    // Standings — preserve new fields
     const standings = _arr(raw.standings).map((s, i) => ({
-      teamId:     _str(s.teamId     ?? s.team_id),
-      wins:       _int(s.wins),
-      losses:     _int(s.losses),
-      ties:       _int(s.ties),
-      ptsFor:     _flt(s.ptsFor     ?? s.points_for),
-      ptsAgainst: _flt(s.ptsAgainst ?? s.points_against),
-      rank:       _int(s.rank)      || i + 1,
+      teamId:      _str(s.teamId     ?? s.team_id),
+      wins:        _int(s.wins),
+      losses:      _int(s.losses),
+      ties:        _int(s.ties),
+      ptsFor:      _flt(s.ptsFor     ?? s.points_for),
+      ptsAgainst:  _flt(s.ptsAgainst ?? s.points_against),
+      rank:        _int(s.rank)      || i + 1,
+      playoffSeed: _int(s.playoffSeed ?? s.playoff_seed),
+      clinched:    !!(s.clinched),
     }));
 
-    // Rosters — normalize to { teamId, players: [id,...], playerDetails: [...] }
-    // Worker returns playerDetails when it expands roster with player info.
+    // Rosters
     const rosters = _arr(raw.rosters).map(r => ({
-      teamId:        _str(r.teamId ?? r.team_id),
-      players:       _arr(r.players).map(p => _str(p)),
-      playerDetails: _arr(r.playerDetails).map(p => ({
-        id:       _str(p.id       ?? p.player_id),
-        name:     p.name          || "",
-        position: p.position      || "?",
-        nflTeam:  p.nflTeam       || p.team || "—",
-        status:   p.status        || "",
-      })),
+      teamId:  _str(r.teamId ?? r.team_id),
+      players: _arr(r.players).map(p => _str(p)),
     }));
 
-    // Matchups — normalize to { week, home: {teamId, score}, away: {teamId, score} }
-    const matchups = _arr(raw.matchups).map(mu => ({
-      week: _int(mu.week),
-      home: { teamId: _str(mu.home?.teamId ?? mu.home?.team_id), score: _flt(mu.home?.score) },
-      away: { teamId: _str(mu.away?.teamId ?? mu.away?.team_id), score: _flt(mu.away?.score) },
-    }));
+    // Matchups — normalize single-week array (current week)
+    const _normMu = mu => ({
+      week:        _int(mu.week),
+      home:        { teamId: _str(mu.home?.teamId ?? mu.home?.team_id), score: _flt(mu.home?.score) },
+      away:        { teamId: _str(mu.away?.teamId ?? mu.away?.team_id), score: _flt(mu.away?.score) },
+      winnerTeamId: mu.winnerTeamId ? _str(mu.winnerTeamId) : null,
+      status:      mu.status || "",
+      isTied:      !!(mu.isTied),
+    });
+    const matchups = _arr(raw.matchups).map(_normMu);
 
-    // Draft — normalize to { pick, round, teamId, playerId, name, position, cost }
+    // allMatchups — { [week]: matchups[] } — normalize each week's array
+    const allMatchups = {};
+    if (raw.allMatchups && typeof raw.allMatchups === "object") {
+      Object.entries(raw.allMatchups).forEach(([week, wMus]) => {
+        allMatchups[week] = _arr(wMus).map(_normMu);
+      });
+    }
+
+    // Draft
     const draft = _arr(raw.draft).map(p => ({
       pick:     _int(p.pick),
       round:    _int(p.round),
@@ -209,7 +218,7 @@ const YahooAPI = (() => {
       cost:     p.cost != null  ? _int(p.cost) : null,
     }));
 
-    // Transactions — already parsed by worker, pass through with shape guarantee
+    // Transactions — preserve moves array for DynastyProcess resolution
     const transactions = _arr(raw.transactions).map(tx => ({
       id:          _str(tx.id),
       type:        tx.type        || "",
@@ -217,14 +226,39 @@ const YahooAPI = (() => {
       timestamp:   tx.timestamp   || "",
       teamId:      _str(tx.teamId ?? tx.team_id),
       description: tx.description || "",
+      moves:       _arr(tx.moves).map(m => ({
+        pid:        _str(m.pid),
+        name:       m.name       || "",
+        action:     m.action     || "",
+        destTeamId: m.destTeamId ? _str(m.destTeamId) : null,
+      })),
     }));
+
+    // leagueMeta — structured league settings from worker
+    const lm = raw.leagueMeta || {};
+    const leagueMeta = {
+      current_week:       _int(lm.current_week),
+      start_week:         _int(lm.start_week)         || 1,
+      end_week:           _int(lm.end_week)            || 17,
+      is_finished:        _int(lm.is_finished),
+      playoff_start_week: _int(lm.playoff_start_week),
+      num_playoff_teams:  _int(lm.num_playoff_teams),
+      uses_playoff:       _int(lm.uses_playoff),
+      scoring_type:       lm.scoring_type || "head",
+      season:             lm.season       || "",
+      name:               lm.name         || "",
+    };
 
     return {
       league:       raw.league       || null,
+      leagueMeta,
+      myTeamId:     raw.myTeamId     ? _str(raw.myTeamId) : null,
+      currentWeek:  _int(raw.currentWeek || lm.current_week),
       teams,
       standings,
       rosters,
       matchups,
+      allMatchups,
       draft,
       transactions,
       players:      _arr(raw.players),

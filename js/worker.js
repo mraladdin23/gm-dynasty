@@ -358,6 +358,26 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
   const authHdr = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
 
+  // ── Helper: extract Yahoo player_id from player_key (e.g. "449.p.32723" → "32723")
+  // The DynastyProcess CSV uses bare numeric IDs, not Yahoo's prefixed player_key format.
+  function yahooPlayerId(playerKey) {
+    if (!playerKey) return null;
+    const s = String(playerKey);
+    // player_key format: "{game_id}.p.{numeric_id}" — take everything after last dot
+    const parts = s.split(".");
+    return parts[parts.length - 1] || s;
+  }
+
+  // ── Helper: find a key in Yahoo's mixed array/object structures ──────────
+  const findVal = (arr, key) => {
+    if (!Array.isArray(arr)) return arr?.[key] ?? null;
+    for (const obj of arr) { if (obj && typeof obj === "object" && key in obj) return obj[key]; }
+    return null;
+  };
+
+  // ── Fetch all bundle endpoints in parallel ────────────────────────────────
+  // scoreboard with no week param returns the current/most-recent week.
+  // We also fetch settings so we can get playoff_start_week, current_week, end_week.
   const [settingsRes, standingsRes, rostersRes, matchupsRes, transactionsRes, draftRes] =
     await Promise.allSettled([
       fetch(`${base}/league/${leagueKey}/settings?format=json`,                          { headers: authHdr }),
@@ -378,42 +398,81 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   const [settingsData, standingsData, rostersData, matchupsData, transactionsData, draftData] =
     await Promise.all([toJson(settingsRes), toJson(standingsRes), toJson(rostersRes), toJson(matchupsRes), toJson(transactionsRes), toJson(draftRes)]);
 
-  const findVal = (arr, key) => {
-    if (!Array.isArray(arr)) return null;
-    for (const obj of arr) { if (obj && typeof obj === "object" && key in obj) return obj[key]; }
-    return null;
-  };
-
+  // Use standings response for league meta; fall back to settings
   const leagueRaw = standingsData?.fantasy_content?.league || settingsData?.fantasy_content?.league || null;
 
-  // Teams + Standings — use camelCase to match frontend normalizeBundle
-  let teams = [], standings = [];
+  // ── League settings — extract from settings endpoint ─────────────────────
+  // settings response: league[0] has meta, league[1].settings has rules
+  const settLeague   = settingsData?.fantasy_content?.league || leagueRaw;
+  const settMeta     = settLeague?.[0] || {};
+  const settRules    = settLeague?.[1]?.settings?.[0] || {};
+  const leagueMeta = {
+    name:              findVal([settMeta], "name")                || "",
+    current_week:      parseInt(findVal([settMeta], "current_week") || settRules.current_week || 1),
+    start_week:        parseInt(findVal([settMeta], "start_week")   || settRules.start_week   || 1),
+    end_week:          parseInt(findVal([settMeta], "end_week")     || settRules.end_week      || 17),
+    is_finished:       parseInt(findVal([settMeta], "is_finished")  || 0),
+    playoff_start_week:parseInt(settRules.playoff_start_week || 0),
+    num_playoff_teams: parseInt(settRules.num_playoff_teams  || 0),
+    uses_playoff:      parseInt(settRules.uses_playoff       || 0),
+    scoring_type:      findVal([settMeta], "scoring_type")         || "head",
+    draft_status:      findVal([settMeta], "draft_status")         || "",
+    season:            findVal([settMeta], "season")               || "",
+    faab_balance:      null,  // per-team
+  };
+
+  // ── Teams + Standings ─────────────────────────────────────────────────────
+  // standings response: league[1].standings[0].teams is the teams object.
+  // Each team entry: team[0] = array of info objects (name, team_id, managers, etc)
+  //                 team[1] = team_points  (may be absent in some responses)
+  //                 team[2] = team_standings (rank, outcome_totals, points_for/against)
+  // is_owned_by_current_login = 1 appears in team[0] info array when this is the
+  // logged-in user's team — critical for identifying "my team" in the UI.
+  let teams = [], standings = [], myTeamId = null;
   try {
     const teamsObj = leagueRaw?.[1]?.standings?.[0]?.teams || {};
     const count = teamsObj.count || 0;
     for (let i = 0; i < count; i++) {
       const team = teamsObj[String(i)]?.team;
       if (!team) continue;
-      const info = team[0];
+      const info    = team[0];   // array of {team_id}, {name}, {managers}, {is_owned_by_current_login}, etc.
       const statsObj = team[2]?.team_standings;
-      const teamId = findVal(info, "team_id");
-      const teamName = findVal(info, "name");
+      const teamId   = String(findVal(info, "team_id") || "");
+      const teamName = findVal(info, "name") || `Team ${teamId}`;
       const managers = findVal(info, "managers");
-      const ownerName = managers?.[0]?.manager?.nickname || "";
-      teams.push({ id: teamId, name: teamName, owner_name: ownerName });
+      const manager  = managers?.[0]?.manager || {};
+      const ownerName = manager.nickname || manager.guid || "";
+      const isMyTeam  = !!(findVal(info, "is_owned_by_current_login") || manager.is_current_login);
+      const faab      = parseInt(findVal(info, "faab_balance") ?? -1);
+      const clinched  = !!(findVal(info, "clinched_playoffs"));
+      if (isMyTeam) myTeamId = teamId;
+
+      teams.push({
+        id: teamId, name: teamName,
+        owner_name: ownerName, ownerName: ownerName,
+        isMyTeam, faab: faab >= 0 ? faab : null, clinched,
+      });
       standings.push({
         teamId,
-        wins:       parseInt(statsObj?.outcome_totals?.wins   || 0),
-        losses:     parseInt(statsObj?.outcome_totals?.losses || 0),
-        ties:       parseInt(statsObj?.outcome_totals?.ties   || 0),
-        ptsFor:     parseFloat(statsObj?.points_for           || 0),
-        ptsAgainst: parseFloat(statsObj?.points_against       || 0),
-        rank:       parseInt(statsObj?.rank || i + 1)
+        wins:        parseInt(statsObj?.outcome_totals?.wins        || 0),
+        losses:      parseInt(statsObj?.outcome_totals?.losses      || 0),
+        ties:        parseInt(statsObj?.outcome_totals?.ties        || 0),
+        ptsFor:      parseFloat(statsObj?.points_for                || 0),
+        ptsAgainst:  parseFloat(statsObj?.points_against            || 0),
+        rank:        parseInt(statsObj?.rank || i + 1),
+        playoffSeed: parseInt(statsObj?.playoff_seed                || 0),
+        clinched,
       });
     }
   } catch(e) {}
 
-  // Rosters — camelCase
+  // ── Rosters ───────────────────────────────────────────────────────────────
+  // teams;out=roster: rostersData.fantasy_content.league[1].teams[i].team
+  // team[0] = array of info (including team_id)
+  // team[1].roster[0].players[j].player[0] = array of player info objects
+  //   player_key: "449.p.32723"  — strip to "32723" for DynastyProcess lookup
+  //   player_id:  "32723"        — may or may not have game prefix stripped already
+  //   display_position, eligible_positions, name.full, editorial_team_abbr, status
   let rosters = [];
   try {
     const rosLeague = rostersData?.fantasy_content?.league;
@@ -422,44 +481,118 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     for (let i = 0; i < count; i++) {
       const team   = rosTeams[String(i)]?.team;
       if (!team) continue;
-      const teamId = team[0]?.[0]?.team_id || team[0]?.team_id;
-      const roster = team[1]?.roster;
-      const players = roster?.[0]?.players || {};
+      // team[0] is an array of info objects for this team
+      const teamInfo = Array.isArray(team[0]) ? team[0] : [team[0]];
+      const teamId   = String(findVal(teamInfo, "team_id") || "");
+      const roster   = team[1]?.roster;
+      const players  = roster?.[0]?.players || {};
       const playerIds = [];
       const pCount = players.count || 0;
       for (let j = 0; j < pCount; j++) {
-        const p = players[String(j)]?.player?.[0];
-        if (p) {
-          const pid = Array.isArray(p) ? p.find(x => x?.player_id)?.player_id : p?.player_id;
-          if (pid) playerIds.push(String(pid));
-        }
+        const p = players[String(j)]?.player;
+        if (!p) continue;
+        // player[0] = array of info objects, player[1] = selected_position
+        const pInfo = Array.isArray(p[0]) ? p[0] : [p[0]];
+        // Use player_id (numeric) from player info; strip game prefix if present
+        const rawId = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
+        const pid   = yahooPlayerId(rawId);
+        if (pid) playerIds.push(pid);
       }
       rosters.push({ teamId, players: playerIds });
     }
   } catch(e) {}
 
-  // Matchups — camelCase home/away with teamId
+  // ── Matchups (current/most-recent week scoreboard) ────────────────────────
+  // scoreboard response: league[1].scoreboard.week = current week number
+  //   scoreboard["0"].matchups[i].matchup["0"].teams["0"/"1"].team
+  //   team[0] = array of info including team_id, team_key, name
+  //   team[1].team_points.total = score for that week
+  //   matchup.winner_team_key = team_key of winner (or "" if tied/in-progress)
   let matchups = [];
+  let currentWeek = leagueMeta.current_week;
   try {
-    const muLeague    = matchupsData?.fantasy_content?.league;
-    const scoreboard  = muLeague?.[1]?.scoreboard;
-    const week        = scoreboard?.week;
+    const muLeague   = matchupsData?.fantasy_content?.league;
+    const scoreboard = muLeague?.[1]?.scoreboard;
+    const sbWeek     = parseInt(scoreboard?.week || 0);
+    if (sbWeek) currentWeek = sbWeek;
     const matchupsObj = scoreboard?.["0"]?.matchups || {};
     const count = matchupsObj.count || 0;
     for (let i = 0; i < count; i++) {
       const mu = matchupsObj[String(i)]?.matchup;
       if (!mu) continue;
-      const muTeams = mu["0"]?.teams || {};
-      const t0 = muTeams["0"]?.team, t1 = muTeams["1"]?.team;
-      const id0 = t0?.[0]?.[0]?.team_id || t0?.[0]?.team_id;
-      const id1 = t1?.[0]?.[0]?.team_id || t1?.[0]?.team_id;
-      const sc0 = parseFloat(t0?.[1]?.team_points?.total || 0);
-      const sc1 = parseFloat(t1?.[1]?.team_points?.total || 0);
-      matchups.push({ week, home: { teamId: id0, score: sc0 }, away: { teamId: id1, score: sc1 } });
+      const muTeams      = mu["0"]?.teams || {};
+      const t0           = muTeams["0"]?.team;
+      const t1           = muTeams["1"]?.team;
+      const t0Info       = Array.isArray(t0?.[0]) ? t0[0] : [t0?.[0]].filter(Boolean);
+      const t1Info       = Array.isArray(t1?.[0]) ? t1[0] : [t1?.[0]].filter(Boolean);
+      const id0          = String(findVal(t0Info, "team_id") || "");
+      const id1          = String(findVal(t1Info, "team_id") || "");
+      const sc0          = parseFloat(t0?.[1]?.team_points?.total || 0);
+      const sc1          = parseFloat(t1?.[1]?.team_points?.total || 0);
+      const winnerKey    = mu.winner_team_key || "";
+      const winnerTeamId = winnerKey ? String(winnerKey).split(".").pop() : null;
+      matchups.push({
+        week:       sbWeek,
+        home:       { teamId: id0, score: sc0 },
+        away:       { teamId: id1, score: sc1 },
+        winnerTeamId,
+        status:     mu.status || "",
+        isTied:     !!(mu.is_tied),
+      });
     }
   } catch(e) {}
 
-  // Transactions
+  // ── All-weeks scoreboard (fetch weeks 1 → end_week in parallel) ───────────
+  // This powers the week picker and playoffs view. Capped at 17 regular weeks
+  // plus up to 4 playoff weeks. Each per-week fetch is the same scoreboard
+  // endpoint with ;week={n}. We only fetch if we know the week range.
+  let allMatchups = {};  // { [week]: matchups[] }
+  try {
+    const endWeek = leagueMeta.end_week || leagueMeta.current_week || 17;
+    const weeks   = Array.from({ length: endWeek }, (_, i) => i + 1);
+    const weekResults = await Promise.allSettled(
+      weeks.map(w =>
+        fetch(`${base}/league/${leagueKey}/scoreboard;week=${w}?format=json`, { headers: authHdr })
+          .then(r => r.ok ? r.json() : null).catch(() => null)
+      )
+    );
+    weeks.forEach((w, idx) => {
+      const data = weekResults[idx]?.status === "fulfilled" ? weekResults[idx].value : null;
+      if (!data) return;
+      const sb = data?.fantasy_content?.league?.[1]?.scoreboard;
+      if (!sb) return;
+      const muObj = sb?.["0"]?.matchups || {};
+      const wMatchups = [];
+      const count = muObj.count || 0;
+      for (let i = 0; i < count; i++) {
+        const mu = muObj[String(i)]?.matchup;
+        if (!mu) continue;
+        const muTeams   = mu["0"]?.teams || {};
+        const t0        = muTeams["0"]?.team;
+        const t1        = muTeams["1"]?.team;
+        const t0Info    = Array.isArray(t0?.[0]) ? t0[0] : [t0?.[0]].filter(Boolean);
+        const t1Info    = Array.isArray(t1?.[0]) ? t1[0] : [t1?.[0]].filter(Boolean);
+        const id0       = String(findVal(t0Info, "team_id") || "");
+        const id1       = String(findVal(t1Info, "team_id") || "");
+        const sc0       = parseFloat(t0?.[1]?.team_points?.total || 0);
+        const sc1       = parseFloat(t1?.[1]?.team_points?.total || 0);
+        const winnerKey = mu.winner_team_key || "";
+        wMatchups.push({
+          week:        w,
+          home:        { teamId: id0, score: sc0 },
+          away:        { teamId: id1, score: sc1 },
+          winnerTeamId: winnerKey ? String(winnerKey).split(".").pop() : null,
+          status:      mu.status || "",
+          isTied:      !!(mu.is_tied),
+        });
+      }
+      if (wMatchups.length) allMatchups[w] = wMatchups;
+    });
+  } catch(e) {}
+
+  // ── Transactions ──────────────────────────────────────────────────────────
+  // Store player_id (bare numeric) separately from display name so the frontend
+  // can resolve via DynastyProcess CSV (byYahoo[player_id]).
   let transactions = [];
   try {
     const txLeague = transactionsData?.fantasy_content?.league;
@@ -468,29 +601,43 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     for (let i = 0; i < txCount; i++) {
       const tx = txObj[String(i)]?.transaction;
       if (!tx) continue;
-      const meta   = tx[0];
-      const txId   = findVal(meta, "transaction_id");
-      const txType = findVal(meta, "type");
-      const status = findVal(meta, "status");
-      const ts     = findVal(meta, "timestamp");
+      const meta    = tx[0];
+      const txId    = findVal(meta, "transaction_id");
+      const txType  = findVal(meta, "type");
+      const status  = findVal(meta, "status");
+      const ts      = findVal(meta, "timestamp");
       const teamKey = findVal(meta, "trader_team_key") || findVal(meta, "destination_team_key") || findVal(meta, "source_team_key") || null;
       const teamId  = teamKey ? String(teamKey).split(".").pop() : null;
+      // players: each entry has player[0] = info array, player[1].transaction_data[0] = {type,source_type,destination_type}
       const playersObj = tx[1]?.players || {};
-      const pCount = playersObj.count || 0;
-      const playerParts = [];
+      const pCount     = playersObj.count || 0;
+      // Store structured player moves so the frontend can resolve names via DynastyProcess
+      const moves = [];
+      const descParts = [];
       for (let p = 0; p < pCount; p++) {
         const pData = playersObj[String(p)]?.player;
         if (!pData) continue;
-        const pInfo = Array.isArray(pData[0]) ? pData[0] : [pData[0]];
-        const pName = findVal(pInfo, "full_name") || findVal(pInfo, "ascii_first") || "";
-        const action = pData[1]?.transaction_data?.[0]?.type || "";
-        if (pName) playerParts.push(`${action === "add" ? "+" : action === "drop" ? "-" : "~"}${pName}`);
+        const pInfo    = Array.isArray(pData[0]) ? pData[0] : [pData[0]];
+        const pName    = findVal(pInfo, "full_name") || findVal(pInfo, "ascii_first") || "";
+        const rawPid   = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
+        const pid      = yahooPlayerId(rawPid);  // bare numeric id
+        const action   = pData[1]?.transaction_data?.[0]?.type || "";
+        const destKey  = pData[1]?.transaction_data?.[0]?.destination_team_key || "";
+        const destId   = destKey ? String(destKey).split(".").pop() : null;
+        moves.push({ pid, name: pName, action, destTeamId: destId });
+        if (pName) descParts.push(`${action === "add" ? "+" : action === "drop" ? "-" : "~"}${pName}`);
       }
-      transactions.push({ id: txId, type: txType, status, timestamp: ts, teamId, description: playerParts.join(", ") });
+      transactions.push({
+        id: txId, type: txType, status, timestamp: ts, teamId,
+        description: descParts.join(", "),
+        moves,  // structured: [{pid, name, action, destTeamId}]
+      });
     }
   } catch(e) {}
 
-  // Draft results (including auction cost)
+  // ── Draft results ─────────────────────────────────────────────────────────
+  // playerId: strip game prefix from player_key ("449.p.32723" → "32723")
+  // name is included directly by the draftresults endpoint — no secondary lookup needed
   let draft = [];
   try {
     const dLeague  = draftData?.fantasy_content?.league;
@@ -500,12 +647,12 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       draftArr.forEach((pick, i) => {
         if (!pick) return;
         draft.push({
-          pick:     parseInt(pick.pick || i + 1),
-          round:    parseInt(pick.round || 1),
+          pick:     parseInt(pick.pick   || i + 1),
+          round:    parseInt(pick.round  || 1),
           teamId:   String(pick.team_key || "").split(".").pop(),
-          playerId: pick.player_key,
+          playerId: yahooPlayerId(pick.player_key),  // bare numeric — matches DynastyProcess yahoo_id
           name:     pick.player_name || "",
-          position: pick.position   || "?",
+          position: pick.position    || "?",
           cost:     pick.cost != null ? parseInt(pick.cost) : null,
         });
       });
@@ -513,8 +660,13 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   } catch(e) {}
 
   return new Response(JSON.stringify({
-    league: leagueRaw?.[0] || {},
-    teams, standings, rosters, matchups, transactions, draft,
+    league:      leagueRaw?.[0] || {},
+    leagueMeta,          // structured league settings (current_week, playoff_start_week, etc.)
+    myTeamId,            // team_id of the logged-in user's team (null if not found)
+    currentWeek,         // most-recently-scored week
+    teams, standings, rosters, matchups,
+    allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
+    transactions, draft,
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
