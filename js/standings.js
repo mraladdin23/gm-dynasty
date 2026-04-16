@@ -1421,6 +1421,59 @@ const DLRStandings = (() => {
     const leagueName    = lm.name || bundle.league?.name || "Yahoo League";
     const faabEnabled   = teams.some(t => t.faab != null && t.faab >= 0);
 
+    const rows = sorted.map((s, i) => {
+      const rank    = i + 1;
+      const inPO    = rank <= playoffSpots;
+      const bubble  = rank === playoffSpots;
+      const tid     = String(s.teamId ?? "");
+      const t       = teamMap[tid] || {};
+      const name    = t.name || `Team ${tid}`;
+      const initial = (name || "?")[0].toUpperCase();
+      const isMe    = myTeamId && String(tid) === String(myTeamId);
+      const pf      = s.ptsFor     ?? 0;
+      const pa      = s.ptsAgainst ?? 0;
+      const clinch  = s.clinched || t.clinched;
+      const seed    = s.playoffSeed;
+
+      const borderColor = inPO
+        ? (bubble ? "var(--color-gold-dim)" : "var(--color-gold)")
+        : "transparent";
+
+      const avStyle = isMe ? "background:var(--color-gold);color:#000;font-weight:700;" : "";
+
+      const rowClasses = [
+        inPO ? "standings-row--playoff" : "",
+        isMe ? "standings-row--me"      : "",
+      ].filter(Boolean).join(" ");
+
+      return `<tr class="${rowClasses}" style="border-left:3px solid ${borderColor}">
+        <td class="standings-rank">${rank}</td>
+        <td class="team-col">
+          <div class="standings-team-cell">
+            <div class="st-av" style="${avStyle}">${initial}</div>
+            <div>
+              <div class="standings-team-name">
+                ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}
+              </div>
+              ${t.owner_name ? `<div class="dim" style="font-size:.72rem">${_esc(t.owner_name)}</div>` : ""}
+              ${bubble ? `<span class="bubble-tag">bubble</span>` : ""}
+            </div>
+          </div>
+        </td>
+        <td class="standings-win">${s.wins ?? 0}</td>
+        <td class="standings-loss">${s.losses ?? 0}</td>
+        <td class="standings-tie">${s.ties ?? 0}</td>
+        <td class="standings-num">${pf ? pf.toFixed(1) : "—"}</td>
+        <td class="standings-num dim">${pa ? pa.toFixed(1) : "—"}</td>
+        ${faabEnabled ? `<td class="standings-num dim">${t.faab != null ? "$" + t.faab : "—"}</td>` : ""}
+      </tr>
+      ${clinch && inPO ? `<tr class="standings-row-note" style="border-left:3px solid var(--color-gold)">
+        <td colspan="${faabEnabled ? 8 : 7}" style="font-size:.7rem;color:var(--color-gold);padding:0 var(--space-2) var(--space-1);text-align:right">
+          ✓ Clinched${seed ? ` — Seed #${seed}` : ""}
+        </td>
+      </tr>` : ""}`;
+    }).join("");
+
     el.innerHTML = `
       <div class="standings-meta">
         <span>${_esc(leagueName)}</span>
@@ -1432,54 +1485,16 @@ const DLRStandings = (() => {
             <th>#</th>
             <th class="team-col">Team</th>
             <th>W</th><th>L</th><th>T</th>
-            <th>PF</th><th class="dim">PA</th>
+            <th title="Points For">PF</th>
+            <th title="Points Against">PA</th>
             ${faabEnabled ? `<th title="FAAB Remaining">$</th>` : ""}
           </tr></thead>
-          <tbody>
-            ${sorted.map((s, i) => {
-              const rank    = i + 1;
-              const inPO    = rank <= playoffSpots;
-              const bubble  = rank === playoffSpots;
-              const tid     = String(s.teamId ?? "");
-              const t       = teamMap[tid] || {};
-              const name    = t.name || `Team ${tid}`;
-              const isMe    = myTeamId && String(tid) === String(myTeamId);
-              const pf      = s.ptsFor     ?? 0;
-              const pa      = s.ptsAgainst ?? 0;
-              const clinch  = s.clinched || t.clinched;
-              const seed    = s.playoffSeed;
-              const rowBorder = inPO
-                ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}`
-                : "border-left:3px solid transparent";
-              return `<tr class="${inPO ? "standings-row--playoff" : ""}${isMe ? " standings-row--mine" : ""}"
-                style="${rowBorder}${isMe ? ";background:var(--color-surface-2)" : ""}">
-                <td class="standings-rank">${rank}</td>
-                <td class="team-col">
-                  <div class="standings-team-cell">
-                    <div class="st-av" style="${isMe ? "background:var(--color-gold);color:#000" : ""}">
-                      ${name[0]?.toUpperCase() || "?"}
-                    </div>
-                    <div>
-                      <div class="standings-team-name">${_esc(name)}${isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">▶ You</span>' : ""}</div>
-                      ${t.owner_name ? `<div class="dim" style="font-size:.72rem">${_esc(t.owner_name)}</div>` : ""}
-                    </div>
-                  </div>
-                </td>
-                <td>${s.wins}</td>
-                <td>${s.losses}</td>
-                <td>${s.ties ?? 0}</td>
-                <td>${pf ? pf.toFixed(1) : "—"}</td>
-                <td class="dim">${pa ? pa.toFixed(1) : "—"}</td>
-                ${faabEnabled ? `<td class="dim" style="font-size:.8rem">${t.faab != null ? "$" + t.faab : "—"}</td>` : ""}
-              </tr>
-              ${clinch && inPO ? `<tr class="standings-row-note" style="border-left:3px solid var(--color-gold)">
-                <td colspan="${faabEnabled ? 8 : 7}" style="font-size:.7rem;color:var(--color-gold);padding:0 var(--space-2) var(--space-1);text-align:right">
-                  ✓ Clinched${seed ? ` — Seed #${seed}` : ""}
-                </td>
-              </tr>` : ""}`;
-            }).join("")}
-          </tbody>
+          <tbody>${rows}</tbody>
         </table>
+      </div>
+      <div class="standings-legend">
+        <span class="legend-dot" style="background:var(--color-gold)"></span>Playoff spot
+        <span class="legend-dot" style="background:var(--color-gold-dim);margin-left:8px;"></span>Bubble
       </div>`;
   }
 
@@ -1531,8 +1546,19 @@ const DLRStandings = (() => {
         const fmt   = n => (n || 0).toFixed(2);
         const status = m.status || "";
         const inProg = status === "midevent" || status === "postevent" || hSc > 0 || aSc > 0;
+
+        // Look up season record + total points from standings for the expand detail
+        const standingsMap = {};
+        (bundle.standings || []).forEach(s => { standingsMap[String(s.teamId)] = s; });
+        const hSt = standingsMap[hId] || {};
+        const aSt = standingsMap[aId] || {};
+        const hRec = `${hSt.wins ?? "?"}–${hSt.losses ?? "?"}`;
+        const aRec = `${aSt.wins ?? "?"}–${aSt.losses ?? "?"}`;
+        const hPF  = hSt.ptsFor ? hSt.ptsFor.toFixed(1) : "—";
+        const aPF  = aSt.ptsFor ? aSt.ptsFor.toFixed(1) : "—";
+
         return `
-          <div class="mu-card">
+          <div class="mu-card" onclick="this.querySelector('.mu-detail').classList.toggle('hidden')">
             <div class="mu-header">
               <div class="mu-team${hMe ? " mu-team--me" : ""}">
                 <div class="st-av" style="${hMe ? "background:var(--color-gold);color:#000;" : ""}">${hName[0]?.toUpperCase() || "?"}</div>
@@ -1548,8 +1574,8 @@ const DLRStandings = (() => {
                 <div class="st-av" style="${aMe ? "background:var(--color-gold);color:#000;" : ""}">${aName[0]?.toUpperCase() || "?"}</div>
               </div>
             </div>
-            <div class="mu-no-detail dim" style="font-size:.75rem;text-align:center;padding:var(--space-1) 0">
-              ${status === "postevent" ? "Final" : status === "midevent" ? "In Progress" : "Upcoming"}
+            <div class="mu-detail hidden" style="font-size:.75rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) var(--space-3)">
+              ${_esc(hName)}: ${hRec}, ${hPF} pts &nbsp;|&nbsp; ${_esc(aName)}: ${aRec}, ${aPF} pts
             </div>
           </div>`;
       }).join("");
