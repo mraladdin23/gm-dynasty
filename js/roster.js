@@ -181,12 +181,20 @@ const DLRRoster = (() => {
     // Group main roster by position, sorted by rank within group.
     // For Yahoo/MFL use a dynamic pos list built from what's actually on this roster
     // so positions like DL, LB, DB, P, Coach don't silently fall to "—".
+    // For Yahoo/MFL: known positions in preferred order first (QB…Coach),
+    // then any remaining positions (DT, DE, LB, CB, S, etc.) appended alphabetically.
+    const PREFERRED_ORDER = ["QB","RB","WR","TE","K","DEF","PN","Coach"];
     const activePosOrder = _platform === "sleeper"
       ? POS_ORDER
-      : [...new Set(mainRoster.map(id => {
-          const p = _players[id] || {};
-          return (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
-        }).filter(pos => pos !== "—" && pos !== "?"))].sort();
+      : (() => {
+          const onRoster = new Set(mainRoster.map(id => {
+            const p = _players[id] || {};
+            return (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
+          }).filter(pos => pos !== "—" && pos !== "?"));
+          const preferred = PREFERRED_ORDER.filter(p => onRoster.has(p));
+          const extras    = [...onRoster].filter(p => !PREFERRED_ORDER.includes(p)).sort();
+          return [...preferred, ...extras];
+        })();
 
     const byPos = {};
     activePosOrder.forEach(p => { byPos[p] = []; });

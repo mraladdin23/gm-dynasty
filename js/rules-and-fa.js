@@ -490,8 +490,8 @@ const DLRFreeAgents = (() => {
     await DLRPlayers.load();
     if (token !== _initToken) return;
 
-    const key    = _platformLeagueKey || `nfl.l.${leagueId}`;
-    const bundle = await YahooAPI.getLeagueBundle(key);
+    const leagueKey = _platformLeagueKey || `nfl.l.${leagueId}`;
+    const bundle    = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
 
     const teams   = bundle.teams   || [];
@@ -512,14 +512,57 @@ const DLRFreeAgents = (() => {
       });
     });
 
-    // Resolve each player via DynastyProcess CSV (yahoo_id → sleeper record or CSV bio)
+    // Bare numeric Yahoo player IDs (no prefix) — needed for the stats endpoint
+    const allRawIds = [...rostered].map(p => p.replace("yahoo_", ""));
+
+    // ── Fetch Yahoo season stats (YTD from the platform) ─────────────────────
+    // New worker endpoint: /yahoo/playerStats — returns { [playerId]: totalPts }
+    // This covers seasons before 2018 where Sleeper has no data.
+    let yahooStatsMap = {};
+    try {
+      const accessToken = await YahooAPI._getValidToken();
+      const res = await fetch(`${YahooAPI._workerBase}/yahoo/playerStats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: accessToken, league_key: leagueKey, player_ids: allRawIds })
+      });
+      if (res.ok) yahooStatsMap = await res.json();
+    } catch(e) {
+      console.warn("[Yahoo players] Could not load Yahoo stats:", e.message);
+    }
+    if (token !== _initToken) return;
+
+    // ── Fetch Sleeper historical stats (preferred when statsYear < currentYear) ─
+    // Sleeper covers 2018–present; use as override when available for cross-platform
+    // consistency (same scoring as Sleeper leagues). Fall back to Yahoo YTD otherwise.
+    const currentYear = parseInt(_season) || new Date().getFullYear();
+    const statsYear   = _statsYear || (currentYear - 1);
+    let sleeperStats  = {};
+    // Only fetch Sleeper stats for years it actually covers (2018+)
+    if (statsYear >= 2018) {
+      try {
+        const cacheKey = `dlr_stats_${statsYear}`;
+        let cached = await DLRIDB.get(cacheKey).catch(() => null);
+        if (!cached) {
+          const r = await fetch(
+            `https://api.sleeper.app/v1/stats/nfl/regular/${statsYear}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K`
+          );
+          if (r.ok) { cached = await r.json(); try { await DLRIDB.set(cacheKey, cached); } catch(e) {} }
+        }
+        sleeperStats = cached || {};
+      } catch(e) {}
+    }
+    if (token !== _initToken) return;
+
+    // ── Build player list ─────────────────────────────────────────────────────
     _cachedData = [...rostered].map(prefixedId => {
       const rawId  = prefixedId.replace("yahoo_", "");
       const map    = DLRPlayers.getByYahooId(rawId);
-      let name = prefixedId, pos = "?", nflTeam = "—", age = null;
+      let name = prefixedId, pos = "?", nflTeam = "—", age = null, sleeperId = null;
 
       if (map) {
-        const sleeperP = map.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+        sleeperId       = map.sleeper_id || null;
+        const sleeperP  = sleeperId ? DLRPlayers.get(sleeperId) : null;
         if (sleeperP && sleeperP.first_name) {
           name    = `${sleeperP.first_name} ${sleeperP.last_name}`.trim();
           pos     = sleeperP.fantasy_positions?.[0] || sleeperP.position || map.position || "?";
@@ -533,13 +576,19 @@ const DLRFreeAgents = (() => {
         }
       }
 
+      // Points: Sleeper (preferred, 2018+) → Yahoo YTD → null
+      const sleeperPts = sleeperId ? (sleeperStats[sleeperId]?.pts_ppr ?? null) : null;
+      const yahooPts   = yahooStatsMap[rawId] > 0 ? yahooStatsMap[rawId] : null;
+      const pts        = sleeperPts ?? yahooPts;
+
       return {
         pid:        prefixedId,
         name,
         pos:        pos.toUpperCase(),
         nflTeam,
+        team:       nflTeam,
         rank:       9999,
-        pts:        null,
+        pts,
         age,
         status:     null,
         isRostered: true,
@@ -610,34 +659,26 @@ const DLRFreeAgents = (() => {
       ? SKILL_POS
       : [...new Set(_cachedData.map(p => p.pos).filter(p => p && p !== "—" && p !== "?"))].sort();
 
+    // Yahoo now fetches season stats from the platform — show Pts sort for all platforms.
+    // hasPts stays true universally; left as a variable so future platforms can opt out.
+    const hasPts = true;
+
     el.innerHTML = `
       <div class="fa-toolbar">
         <input type="text" class="fa-search" placeholder="Search players…"
           value="${_searchQuery}"
           oninput="DLRFreeAgents.setSearch(this.value)"
-          style="flex:1;min-width:0;padding:var(--space-2) var(--space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-body);font-size:.85rem;outline:none"/>
+          style="flex:1;min-width:120px;padding:var(--space-2) var(--space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-body);font-size:.85rem;outline:none"/>
       </div>
-      <div class="fa-toolbar">
+      <div class="fa-toolbar" style="flex-wrap:wrap;gap:var(--space-2)">
         <select class="fa-sort-btn" style="padding:3px 8px;border-radius:var(--radius-sm)"
           onchange="DLRFreeAgents.setPos(this.value)">
           ${["ALL", ...filterPositions].map(pos =>
             `<option value="${pos}" ${_posFilter === pos ? "selected" : ""}>${pos}</option>`
           ).join("")}
         </select>
-        <div class="fa-sort-toggle">
-          <button class="fa-sort-btn ${_sortMode === "adp" ? "fa-sort-btn--active" : ""}"
-            onclick="DLRFreeAgents.setSort('adp')">ADP Rank</button>
-          <button class="fa-sort-btn ${_sortMode === "pts" ? "fa-sort-btn--active" : ""}"
-            onclick="DLRFreeAgents.setSort('pts')">Pts</button>
-          <label style="font-size:.75rem;color:var(--color-text-dim);display:flex;align-items:center;gap:4px;">
-            Stats Year
-            <select class="fa-sort-btn" style="padding:3px 6px;border-radius:var(--radius-sm)"
-              onchange="DLRFreeAgents.setStatsYear(this.value)">${yearOpts.join("")}</select>
-          </label>
-        </div>
-      </div>
-      <div class="fa-toolbar" style="margin-top:var(--space-2);gap:var(--space-2);flex-wrap:wrap">
-        <select class="fa-sort-btn" style="padding:3px 8px;border-radius:var(--radius-sm)" onchange="DLRFreeAgents.setTeamFilter(this.value)">
+        <select class="fa-sort-btn" style="padding:3px 8px;border-radius:var(--radius-sm)"
+          onchange="DLRFreeAgents.setTeamFilter(this.value)">
           <option value="">All NFL Teams</option>
           ${nflTeams.map(t => `<option value="${t}" ${_teamFilter === t ? "selected" : ""}>${t}</option>`).join("")}
         </select>
@@ -645,7 +686,17 @@ const DLRFreeAgents = (() => {
           onclick="DLRFreeAgents.setFaOnly(${!_faOnly})">🟢 FA Only</button>
         <button class="fa-sort-btn ${_watchlistOnly ? "fa-sort-btn--active" : ""}"
           onclick="DLRFreeAgents.setWatchlistOnly(${!_watchlistOnly})">⭐ Watchlist</button>
-        <span class="dim" style="font-size:.75rem;margin-left:auto" id="fa-count">${sorted.length} players</span>
+        <div class="fa-sort-toggle" style="margin-left:auto">
+          <button class="fa-sort-btn ${_sortMode === "adp" ? "fa-sort-btn--active" : ""}"
+            onclick="DLRFreeAgents.setSort('adp')">ADP</button>
+          ${hasPts ? `
+          <button class="fa-sort-btn ${_sortMode === "pts" ? "fa-sort-btn--active" : ""}"
+            onclick="DLRFreeAgents.setSort('pts')">Pts</button>
+          <select class="fa-sort-btn" style="padding:3px 6px;border-radius:var(--radius-sm)"
+            onchange="DLRFreeAgents.setStatsYear(this.value)">${yearOpts.join("")}</select>
+          ` : ""}
+        </div>
+        <span class="dim" style="font-size:.75rem;white-space:nowrap" id="fa-count">${sorted.length} players</span>
       </div>
       <div class="fa-list" id="fa-list-body">
         ${_buildListHTML(sorted, canNom, auctionReady, statsYear, _isCommish)}

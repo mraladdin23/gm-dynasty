@@ -89,6 +89,14 @@ export default {
         return yahooLeagueBundle(access_token, league_key);
       }
 
+      if (path === "/yahoo/playerStats" && req.method === "POST") {
+        const { access_token, league_key, player_ids } = await req.json();
+        if (!access_token || !league_key || !Array.isArray(player_ids)) {
+          return new Response(JSON.stringify({ error: "Missing access_token, league_key, or player_ids" }), { status: 400, headers: corsHeaders() });
+        }
+        return yahooPlayerStats(access_token, league_key, player_ids);
+      }
+
       if (path === "/mfl/userLeagues" && req.method === "POST") {
         const { username, password } = await req.json();
         if (!username || !password) return new Response(JSON.stringify({ error: "Missing credentials" }), { status: 400, headers: corsHeaders() });
@@ -713,6 +721,82 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     transactions, draft,
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
+}
+
+// ── Yahoo player season stats ─────────────────────────────────────────────────
+// Fetches YTD fantasy points for a list of player IDs from the Yahoo Fantasy API.
+// Yahoo allows up to 25 player keys per request via the players sub-resource.
+// Returns { [playerId]: totalPts } where playerId is the bare numeric ID.
+//
+// Endpoint: GET /league/{key}/players;player_keys={k1,k2,...};out=stats;type=season_stats
+// Response shape (per player):
+//   fantasy_content.league[1].players[i].player[0] = info array (player_id, etc.)
+//   fantasy_content.league[1].players[i].player[1].player_stats[0].stats = stat array
+//   Each stat: { stat_id: "11", value: "247" } — we sum stat_id 0 which is total pts.
+//   Alternatively player[1].player_points.total may be present in some response shapes.
+async function yahooPlayerStats(accessToken, leagueKey, playerIds) {
+  const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
+  const authHdr = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
+  const gameId  = leagueKey.split(".")[0];   // e.g. "449" from "449.l.123456"
+
+  // Build full Yahoo player keys from bare numeric IDs
+  const playerKeys = playerIds.map(id => `${gameId}.p.${id}`);
+
+  // Batch into groups of 25 (Yahoo API limit per request)
+  const BATCH = 25;
+  const batches = [];
+  for (let i = 0; i < playerKeys.length; i += BATCH) {
+    batches.push(playerKeys.slice(i, i + BATCH));
+  }
+
+  const results = await Promise.allSettled(
+    batches.map(batch => {
+      const keysParam = batch.join(",");
+      const url = `${base}/league/${leagueKey}/players;player_keys=${keysParam};out=stats?format=json`;
+      return fetch(url, { headers: authHdr })
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null);
+    })
+  );
+
+  // Parse each batch response into { playerId → totalPts }
+  const statsMap = {};
+  for (const result of results) {
+    if (result.status !== "fulfilled" || !result.value) continue;
+    try {
+      const playersObj = result.value?.fantasy_content?.league?.[1]?.players;
+      if (!playersObj) continue;
+      const count = playersObj.count || 0;
+      for (let i = 0; i < count; i++) {
+        const entry = playersObj[String(i)]?.player;
+        if (!entry) continue;
+        // entry[0] = info array, entry[1] = stats container
+        const pInfo = Array.isArray(entry[0]) ? entry[0] : [entry[0]];
+        const rawId = pInfo.find(o => o?.player_id != null)?.player_id
+                   || pInfo.find(o => o?.player_key != null)?.player_key;
+        if (!rawId) continue;
+        // Strip game prefix — "449.p.32723" → "32723", bare numeric stays as-is
+        const pid = String(rawId).includes(".") ? String(rawId).split(".").pop() : String(rawId);
+
+        // Try player_points.total first (simpler), then sum from stats array
+        const statsContainer = entry[1];
+        let total = parseFloat(statsContainer?.player_points?.total ?? NaN);
+        if (isNaN(total)) {
+          const statsArr = statsContainer?.player_stats?.[0]?.stats?.stat;
+          if (Array.isArray(statsArr)) {
+            // stat_id "0" is the total fantasy points in Yahoo's stat system
+            const totStat = statsArr.find(s => String(s.stat_id) === "0");
+            total = totStat ? parseFloat(totStat.value || 0) : 0;
+          } else {
+            total = 0;
+          }
+        }
+        if (pid && total >= 0) statsMap[pid] = total;
+      }
+    } catch(e) {}
+  }
+
+  return new Response(JSON.stringify(statsMap), { headers: corsHeaders() });
 }
 
 function yahooLogin(env) {
