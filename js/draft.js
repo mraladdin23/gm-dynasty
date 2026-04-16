@@ -895,6 +895,12 @@ const DLRDraft = (() => {
     const bundle = await YahooAPI.getLeagueBundle(key);
     if (token !== _initToken) return;
 
+    // Temporary diagnostic — logs draft parse shape so we can fix the worker path
+    if (bundle._draftDebug) {
+      console.log("[Yahoo draft] debug:", bundle._draftDebug);
+      console.log("[Yahoo draft] picks parsed:", (bundle.draft || []).length);
+    }
+
     const teams     = bundle.teams    || [];
     const draft     = bundle.draft    || [];
     const myTeamId  = bundle.myTeamId || _myRosterId || null;
