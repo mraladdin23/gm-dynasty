@@ -393,7 +393,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       fetch(`${base}/league/${leagueKey}/teams;out=roster?format=json`,                  { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/scoreboard?format=json`,                        { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/transactions;types=add,drop,trade?format=json`, { headers: authHdr }),
-      fetch(`${base}/league/${leagueKey}/draftresults;out=draft_results?format=json`,                      { headers: authHdr }),
+      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,                      { headers: authHdr }),
     ]);
 
   async function toJson(s) {
@@ -402,6 +402,11 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     if (!r.ok) return null;
     try { return await r.json(); } catch { return null; }
   }
+
+  // Capture draft fetch HTTP status for diagnosis — stored in _draftDebug below
+  const _draftFetchStatus = draftRes.status === "fulfilled"
+    ? `HTTP ${draftRes.value.status} ${draftRes.value.statusText || ""}`.trim()
+    : `rejected: ${draftRes.reason}`;
 
   const [settingsData, standingsData, rostersData, matchupsData, transactionsData, draftData] =
     await Promise.all([toJson(settingsRes), toJson(standingsRes), toJson(rostersRes), toJson(matchupsRes), toJson(transactionsRes), toJson(draftRes)]);
@@ -673,61 +678,87 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   } catch(e) {}
 
   // ── Draft results ─────────────────────────────────────────────────────────
-  // Yahoo draftresults JSON shape varies by league/season. Known shapes:
-  //   A) fantasy_content.league[1].draft_results[0].draft_result = array of picks
-  //   B) fantasy_content.league[1].draft_results[0].draft_result = count-keyed object
-  //   C) fantasy_content.league[1].draft_results = count-keyed object (not array)
-  //   D) fantasy_content.league[1].draft_results.draft_result = ... (no array wrapper)
+  // Yahoo draftresults endpoint returns picks in one of several shapes depending
+  // on league age and type. We try the most common shapes in order:
+  //
+  //   Shape 1 (flat array):   { draft_results: [ {pick,round,team_key,player_key}, ... ] }
+  //   Shape 2 (flat object):  { draft_results: { count:N, "0":{...}, "1":{...}, ... } }
+  //   Shape 3 (nested array): fantasy_content.league[1].draft_results[0].draft_result = array
+  //   Shape 4 (nested obj):   fantasy_content.league[1].draft_results[0].draft_result = count-keyed obj
+  //   Shape 5 (nested alt):   fantasy_content.league[1].draft_results = count-keyed obj
+  //
   // _draftDebug is returned in the response so the frontend can log it for diagnosis.
+  // Remove _draftDebug from the return statement once draft parsing is confirmed working.
   let draft = [];
-  let _draftDebug = { shape: null, dLeagueKeys: null, dResultsType: null, dContainerKeys: null, draftRawType: null, draftArrLen: 0, error: null };
+  let _draftDebug = {
+    shape: null, draftArrLen: 0, error: null,
+    draftFetchStatus: _draftFetchStatus,
+    topLevelKeys: null, dLeagueKeys: null, dResultsType: null,
+    dContainerKeys: null, draftRawType: null,
+  };
   try {
-    const dLeague  = draftData?.fantasy_content?.league;
-    _draftDebug.dLeagueKeys = dLeague ? Object.keys(dLeague) : null;
+    _draftDebug.topLevelKeys = draftData ? Object.keys(draftData) : null;
 
-    // league[1] may be an object or array — handle both
-    const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
-    const dResults = dLeague1?.draft_results;
-    _draftDebug.dResultsType = dResults === undefined ? "undefined" : Array.isArray(dResults) ? "array" : typeof dResults;
-
-    // Shape A/B: draft_results is an array, [0] is the container
-    // Shape C/D: draft_results is an object directly containing draft_result
-    let dContainer;
-    if (Array.isArray(dResults)) {
-      dContainer = dResults[0];
-    } else if (dResults && typeof dResults === "object") {
-      // Could be count-keyed {count, "0": {draft_result:...}} or direct {draft_result:...}
-      dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
-    }
-    _draftDebug.dContainerKeys = dContainer ? Object.keys(dContainer).slice(0, 10) : null;
-
-    // The picks may be under draft_result (array) or as count-keyed object
     let draftArr = [];
-    const draftRaw = dContainer?.draft_result;
-    _draftDebug.draftRawType = draftRaw === undefined ? "undefined" : Array.isArray(draftRaw) ? "array" : typeof draftRaw;
-    _draftDebug.shape = `dResults=${_draftDebug.dResultsType} dRaw=${_draftDebug.draftRawType}`;
 
-    if (Array.isArray(draftRaw)) {
-      draftArr = draftRaw;
-    } else if (draftRaw && typeof draftRaw === "object") {
-      // Count-keyed object: { count: N, "0": pick, "1": pick, ... }
-      const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
-      for (let i = 0; i < count; i++) {
-        const pick = draftRaw[String(i)];
-        if (pick) draftArr.push(pick);
+    // ── Shape 1 / 2: draft_results directly on the response object ──────────
+    if (draftData?.draft_results !== undefined) {
+      const dr = draftData.draft_results;
+      if (Array.isArray(dr)) {
+        // Shape 1 — flat array of picks
+        draftArr = dr;
+        _draftDebug.shape = "flat-array";
+      } else if (dr && typeof dr === "object") {
+        // Shape 2 — count-keyed object: { count: N, "0": pick, "1": pick, ... }
+        const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
+        for (let i = 0; i < count; i++) { if (dr[String(i)]) draftArr.push(dr[String(i)]); }
+        _draftDebug.shape = "flat-object";
       }
     }
+
+    // ── Shape 3 / 4 / 5: nested under fantasy_content.league ────────────────
+    if (!draftArr.length) {
+      const dLeague = draftData?.fantasy_content?.league;
+      _draftDebug.dLeagueKeys = dLeague ? Object.keys(dLeague) : null;
+      const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
+      const dResults = dLeague1?.draft_results;
+      _draftDebug.dResultsType = dResults === undefined ? "undefined"
+        : Array.isArray(dResults) ? "array" : typeof dResults;
+
+      let dContainer;
+      if (Array.isArray(dResults)) {
+        dContainer = dResults[0];
+      } else if (dResults && typeof dResults === "object") {
+        dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
+      }
+      _draftDebug.dContainerKeys = dContainer ? Object.keys(dContainer).slice(0, 10) : null;
+
+      const draftRaw = dContainer?.draft_result;
+      _draftDebug.draftRawType = draftRaw === undefined ? "undefined"
+        : Array.isArray(draftRaw) ? "array" : typeof draftRaw;
+
+      if (Array.isArray(draftRaw)) {
+        draftArr = draftRaw;
+        _draftDebug.shape = "nested-array";
+      } else if (draftRaw && typeof draftRaw === "object") {
+        const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
+        for (let i = 0; i < count; i++) { if (draftRaw[String(i)]) draftArr.push(draftRaw[String(i)]); }
+        _draftDebug.shape = "nested-object";
+      }
+    }
+
     _draftDebug.draftArrLen = draftArr.length;
 
     draftArr.forEach((pick, i) => {
       if (!pick) return;
-      // player_id is bare numeric in new responses; player_key has game prefix
-      const rawPid = pick.player_id || pick.player_key;
+      // flat shape uses team_key / player_key; nested shape may also use team_id / player_id
+      const rawPid = pick.player_key || pick.player_id;
+      const rawTid = pick.team_key   || pick.team_id;
       draft.push({
         pick:     parseInt(pick.pick   || i + 1),
         round:    parseInt(pick.round  || 1),
-        teamId:   String(pick.team_key || "").split(".").pop(),
-        playerId: yahooPlayerId(rawPid),   // bare numeric — matches DynastyProcess yahoo_id
+        teamId:   String(rawTid || "").split(".").pop(),   // "449.l.123.t.3" → "3"
+        playerId: yahooPlayerId(rawPid),                   // bare numeric
         name:     pick.player_name || pick.name || "",
         position: pick.position    || "?",
         cost:     pick.cost != null ? parseInt(pick.cost) : null,
