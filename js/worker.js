@@ -673,28 +673,52 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   } catch(e) {}
 
   // ── Draft results ─────────────────────────────────────────────────────────
-  // Yahoo draftresults JSON: fantasy_content.league[1].draft_results[0].draft_result
-  // Each pick: { pick, round, team_key, player_key, cost (auction only) }
-  // The draft_result may be an array OR a count-keyed object {count, "0":{...}, "1":{...}}
+  // Yahoo draftresults JSON shape varies by league/season. Known shapes:
+  //   A) fantasy_content.league[1].draft_results[0].draft_result = array of picks
+  //   B) fantasy_content.league[1].draft_results[0].draft_result = count-keyed object
+  //   C) fantasy_content.league[1].draft_results = count-keyed object (not array)
+  //   D) fantasy_content.league[1].draft_results.draft_result = ... (no array wrapper)
+  // _draftDebug is returned in the response so the frontend can log it for diagnosis.
   let draft = [];
+  let _draftDebug = { shape: null, dLeagueKeys: null, dResultsType: null, dContainerKeys: null, draftRawType: null, draftArrLen: 0, error: null };
   try {
     const dLeague  = draftData?.fantasy_content?.league;
-    const dResults = dLeague?.[1]?.draft_results;
-    // draft_results is an array; [0] contains the actual results object
-    const dContainer = Array.isArray(dResults) ? dResults[0] : dResults;
+    _draftDebug.dLeagueKeys = dLeague ? Object.keys(dLeague) : null;
+
+    // league[1] may be an object or array — handle both
+    const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
+    const dResults = dLeague1?.draft_results;
+    _draftDebug.dResultsType = dResults === undefined ? "undefined" : Array.isArray(dResults) ? "array" : typeof dResults;
+
+    // Shape A/B: draft_results is an array, [0] is the container
+    // Shape C/D: draft_results is an object directly containing draft_result
+    let dContainer;
+    if (Array.isArray(dResults)) {
+      dContainer = dResults[0];
+    } else if (dResults && typeof dResults === "object") {
+      // Could be count-keyed {count, "0": {draft_result:...}} or direct {draft_result:...}
+      dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
+    }
+    _draftDebug.dContainerKeys = dContainer ? Object.keys(dContainer).slice(0, 10) : null;
+
     // The picks may be under draft_result (array) or as count-keyed object
     let draftArr = [];
     const draftRaw = dContainer?.draft_result;
+    _draftDebug.draftRawType = draftRaw === undefined ? "undefined" : Array.isArray(draftRaw) ? "array" : typeof draftRaw;
+    _draftDebug.shape = `dResults=${_draftDebug.dResultsType} dRaw=${_draftDebug.draftRawType}`;
+
     if (Array.isArray(draftRaw)) {
       draftArr = draftRaw;
     } else if (draftRaw && typeof draftRaw === "object") {
       // Count-keyed object: { count: N, "0": pick, "1": pick, ... }
-      const count = draftRaw.count || Object.keys(draftRaw).filter(k => k !== "count").length;
+      const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
       for (let i = 0; i < count; i++) {
         const pick = draftRaw[String(i)];
         if (pick) draftArr.push(pick);
       }
     }
+    _draftDebug.draftArrLen = draftArr.length;
+
     draftArr.forEach((pick, i) => {
       if (!pick) return;
       // player_id is bare numeric in new responses; player_key has game prefix
@@ -709,7 +733,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
         cost:     pick.cost != null ? parseInt(pick.cost) : null,
       });
     });
-  } catch(e) {}
+  } catch(e) { _draftDebug.error = e.message; }
 
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
@@ -719,6 +743,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     teams, standings, rosters, matchups,
     allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
     transactions, draft,
+    _draftDebug,         // temporary diagnostic — remove after draft parsing is confirmed working
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
