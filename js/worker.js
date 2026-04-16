@@ -471,8 +471,9 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   // team[0] = array of info (including team_id)
   // team[1].roster[0].players[j].player[0] = array of player info objects
   //   player_key: "449.p.32723"  — strip to "32723" for DynastyProcess lookup
-  //   player_id:  "32723"        — may or may not have game prefix stripped already
   //   display_position, eligible_positions, name.full, editorial_team_abbr, status
+  // playerDetails carries Yahoo-native bio so the frontend has a fallback for
+  // players that don't resolve via DynastyProcess (e.g. DEF teams, kickers).
   let rosters = [];
   try {
     const rosLeague = rostersData?.fantasy_content?.league;
@@ -486,19 +487,30 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       const teamId   = String(findVal(teamInfo, "team_id") || "");
       const roster   = team[1]?.roster;
       const players  = roster?.[0]?.players || {};
-      const playerIds = [];
+      const playerIds     = [];
+      const playerDetails = [];
       const pCount = players.count || 0;
       for (let j = 0; j < pCount; j++) {
         const p = players[String(j)]?.player;
         if (!p) continue;
         // player[0] = array of info objects, player[1] = selected_position
         const pInfo = Array.isArray(p[0]) ? p[0] : [p[0]];
-        // Use player_id (numeric) from player info; strip game prefix if present
         const rawId = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
         const pid   = yahooPlayerId(rawId);
-        if (pid) playerIds.push(pid);
+        if (!pid) continue;
+        playerIds.push(pid);
+        // Extract Yahoo-native bio — used as fallback when DynastyProcess has no match
+        const nameObj = findVal(pInfo, "name");
+        const fullName   = (typeof nameObj === "object" ? nameObj?.full : nameObj) || "";
+        const dispPos    = findVal(pInfo, "display_position") || findVal(pInfo, "eligible_positions") || "";
+        const pos        = typeof dispPos === "object" ? (dispPos?.position || "") : dispPos;
+        const nflTeam    = findVal(pInfo, "editorial_team_abbr") || "";
+        const statusVal  = findVal(pInfo, "status") || "";
+        if (fullName || pos) {
+          playerDetails.push({ id: pid, name: fullName, position: pos, nflTeam, status: statusVal });
+        }
       }
-      rosters.push({ teamId, players: playerIds });
+      rosters.push({ teamId, players: playerIds, playerDetails });
     }
   } catch(e) {}
 
@@ -606,57 +618,85 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       const txType  = findVal(meta, "type");
       const status  = findVal(meta, "status");
       const ts      = findVal(meta, "timestamp");
-      const teamKey = findVal(meta, "trader_team_key") || findVal(meta, "destination_team_key") || findVal(meta, "source_team_key") || null;
-      const teamId  = teamKey ? String(teamKey).split(".").pop() : null;
-      // players: each entry has player[0] = info array, player[1].transaction_data[0] = {type,source_type,destination_type}
+      // trader_team_key = trade, destination_team_key = add, source_team_key = drop
+      const traderKey  = findVal(meta, "trader_team_key");
+      const destKey    = findVal(meta, "destination_team_key");
+      const srcKey     = findVal(meta, "source_team_key");
+      const teamKey    = traderKey || destKey || srcKey || null;
+      const teamId     = teamKey ? String(teamKey).split(".").pop() : null;
+
+      // players: each entry has player[0] = info array, player[1].transaction_data[0] = action details
       const playersObj = tx[1]?.players || {};
       const pCount     = playersObj.count || 0;
-      // Store structured player moves so the frontend can resolve names via DynastyProcess
       const moves = [];
       const descParts = [];
       for (let p = 0; p < pCount; p++) {
         const pData = playersObj[String(p)]?.player;
         if (!pData) continue;
-        const pInfo    = Array.isArray(pData[0]) ? pData[0] : [pData[0]];
-        const pName    = findVal(pInfo, "full_name") || findVal(pInfo, "ascii_first") || "";
-        const rawPid   = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
-        const pid      = yahooPlayerId(rawPid);  // bare numeric id
-        const action   = pData[1]?.transaction_data?.[0]?.type || "";
-        const destKey  = pData[1]?.transaction_data?.[0]?.destination_team_key || "";
-        const destId   = destKey ? String(destKey).split(".").pop() : null;
-        moves.push({ pid, name: pName, action, destTeamId: destId });
-        if (pName) descParts.push(`${action === "add" ? "+" : action === "drop" ? "-" : "~"}${pName}`);
+        const pInfo  = Array.isArray(pData[0]) ? pData[0] : [pData[0]];
+        const pName  = findVal(pInfo, "full_name") || findVal(pInfo, "ascii_first") || "";
+        const rawPid = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
+        const pid    = yahooPlayerId(rawPid);
+        // transaction_data may be array or single object
+        const txData = pData[1]?.transaction_data;
+        const txDetail = Array.isArray(txData) ? txData[0] : (txData || {});
+        // Yahoo returns "add" or "drop" (sometimes "added"/"dropped" in older responses)
+        let action = (txDetail.type || "").toLowerCase().replace(/ped$/, "p").replace(/ed$/, "");
+        if (action === "dro") action = "drop";  // safety for edge cases
+        // Per-player team resolution: for drops, use source_team_key on the move itself
+        const moveDestKey = txDetail.destination_team_key || "";
+        const moveSrcKey  = txDetail.source_team_key      || "";
+        const moveDestId  = moveDestKey ? String(moveDestKey).split(".").pop() : null;
+        const moveSrcId   = moveSrcKey  ? String(moveSrcKey).split(".").pop()  : null;
+        moves.push({ pid, name: pName, action, destTeamId: moveDestId, srcTeamId: moveSrcId });
+        const sym = action === "add" ? "+" : action === "drop" ? "-" : "~";
+        if (pName) descParts.push(`${sym}${pName}`);
       }
       transactions.push({
         id: txId, type: txType, status, timestamp: ts, teamId,
         description: descParts.join(", "),
-        moves,  // structured: [{pid, name, action, destTeamId}]
+        moves,
       });
     }
   } catch(e) {}
 
   // ── Draft results ─────────────────────────────────────────────────────────
-  // playerId: strip game prefix from player_key ("449.p.32723" → "32723")
-  // name is included directly by the draftresults endpoint — no secondary lookup needed
+  // Yahoo draftresults JSON: fantasy_content.league[1].draft_results[0].draft_result
+  // Each pick: { pick, round, team_key, player_key, cost (auction only) }
+  // The draft_result may be an array OR a count-keyed object {count, "0":{...}, "1":{...}}
   let draft = [];
   try {
     const dLeague  = draftData?.fantasy_content?.league;
-    const draftObj = dLeague?.[1]?.draft_results?.[0]?.draft_result;
-    if (draftObj) {
-      const draftArr = Array.isArray(draftObj) ? draftObj : [draftObj];
-      draftArr.forEach((pick, i) => {
-        if (!pick) return;
-        draft.push({
-          pick:     parseInt(pick.pick   || i + 1),
-          round:    parseInt(pick.round  || 1),
-          teamId:   String(pick.team_key || "").split(".").pop(),
-          playerId: yahooPlayerId(pick.player_key),  // bare numeric — matches DynastyProcess yahoo_id
-          name:     pick.player_name || "",
-          position: pick.position    || "?",
-          cost:     pick.cost != null ? parseInt(pick.cost) : null,
-        });
-      });
+    const dResults = dLeague?.[1]?.draft_results;
+    // draft_results is an array; [0] contains the actual results object
+    const dContainer = Array.isArray(dResults) ? dResults[0] : dResults;
+    // The picks may be under draft_result (array) or as count-keyed object
+    let draftArr = [];
+    const draftRaw = dContainer?.draft_result;
+    if (Array.isArray(draftRaw)) {
+      draftArr = draftRaw;
+    } else if (draftRaw && typeof draftRaw === "object") {
+      // Count-keyed object: { count: N, "0": pick, "1": pick, ... }
+      const count = draftRaw.count || Object.keys(draftRaw).filter(k => k !== "count").length;
+      for (let i = 0; i < count; i++) {
+        const pick = draftRaw[String(i)];
+        if (pick) draftArr.push(pick);
+      }
     }
+    draftArr.forEach((pick, i) => {
+      if (!pick) return;
+      // player_id is bare numeric in new responses; player_key has game prefix
+      const rawPid = pick.player_id || pick.player_key;
+      draft.push({
+        pick:     parseInt(pick.pick   || i + 1),
+        round:    parseInt(pick.round  || 1),
+        teamId:   String(pick.team_key || "").split(".").pop(),
+        playerId: yahooPlayerId(rawPid),   // bare numeric — matches DynastyProcess yahoo_id
+        name:     pick.player_name || pick.name || "",
+        position: pick.position    || "?",
+        cost:     pick.cost != null ? parseInt(pick.cost) : null,
+      });
+    });
   } catch(e) {}
 
   return new Response(JSON.stringify({

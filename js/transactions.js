@@ -591,9 +591,12 @@ const DLRTransactions = (() => {
             }
           }
           const destId = m.destTeamId ? String(m.destTeamId) : teamId;
-          if (m.action === "add")  adds[prefixedId]  = destId;
-          if (m.action === "drop") drops[prefixedId] = teamId;
-          if (m.action === "trade" || (!m.action && m.destTeamId)) {
+          const srcId  = m.srcTeamId  ? String(m.srcTeamId)  : teamId;
+          // Normalize action — Yahoo can return "add", "drop", "added", "dropped"
+          const act = (m.action || "").toLowerCase().replace(/ped$/, "p").replace(/ed$/, "");
+          if (act === "add")   adds[prefixedId]  = destId;
+          if (act === "drop")  drops[prefixedId] = srcId;
+          if (act === "trade" || (!m.action && m.destTeamId)) {
             adds[prefixedId] = destId;
           }
         });
