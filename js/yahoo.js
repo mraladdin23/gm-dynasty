@@ -268,5 +268,5 @@ const YahooAPI = (() => {
     };
   }
 
-  return { login, getLeagues, getLeagueBundle, storeTokens };
+  return { login, getLeagues, getLeagueBundle, storeTokens, _getValidToken, _workerBase: BASE };
 })();
