@@ -14,6 +14,7 @@ const DLRAnalytics = (() => {
   let _teamNames  = {};   // rosterId → display name
   let _myRosterId = null; // current user's roster id
   let _season     = null; // league season year
+  let _leagueKey  = null; // full Yahoo league key e.g. "449.l.123456"
 
   const TABS = [
     { id:"power",    label:"🏆 Power Rankings", fn: _renderPower      },
@@ -26,10 +27,11 @@ const DLRAnalytics = (() => {
   const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d" };
 
   // ── Init ──────────────────────────────────────────────────
-  async function init(leagueId, platform, myUsername, myRosterId, season) {
+  async function init(leagueId, platform, myUsername, myRosterId, season, leagueKey) {
     _leagueId  = leagueId;
     _platform  = platform || "sleeper";
     _season    = season   || null;
+    _leagueKey = leagueKey || null;
     _activeTab = 0;
     _teamNames = {};
     _initToken++;
@@ -93,6 +95,7 @@ const DLRAnalytics = (() => {
     _teamNames  = {};
     _myRosterId = null;
     _season     = null;
+    _leagueKey  = null;
     _initToken++;
   }
 
@@ -737,7 +740,7 @@ const DLRAnalytics = (() => {
   let _yahooWeekData  = null;
 
   async function _renderYahooAnalytics(el, leagueId, token) {
-    const leagueKey = `nfl.l.${leagueId}`;
+    const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
     _yahooBundle    = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
 
@@ -775,7 +778,7 @@ const DLRAnalytics = (() => {
     if (_yahooWeekData) return _yahooWeekData;
     const allMu = _yahooBundle?.allMatchups || {};
     const lm    = _yahooBundle?.leagueMeta  || {};
-    const poStart = lm.playoff_start_week   || 999;
+    const poStart = lm.playoff_start_week > 0 ? lm.playoff_start_week : 999;
     const byTeam = {}, allMatchups = [], weeks = [];
 
     Object.entries(allMu).forEach(([wStr, mus]) => {

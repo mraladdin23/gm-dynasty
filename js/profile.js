@@ -601,6 +601,10 @@ const Profile = (() => {
     // Runs after first paint so it doesn't block the initial render.
     if (profile.platforms?.yahoo?.linked) {
       setTimeout(() => _resolveYahooIdentities(_currentUsername), 200);
+      // Recompute stats non-blocking so header reflects latest Yahoo leagues
+      GMDB.recomputeStats(_currentUsername).then(stats => {
+        if (stats) _renderStatsRow(stats);
+      }).catch(() => {});
     }
   }
 
@@ -1919,7 +1923,7 @@ const Profile = (() => {
     }
     if (tab === "draft")         DLRDraft.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
     if (tab === "transactions")  DLRTransactions.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
-    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername, league.myRosterId || null, league.season || null);
+    if (tab === "analytics")     DLRAnalytics.init(league.leagueId, league.platform, _currentUsername, league.myRosterId || null, league.season || null, league.leagueKey || null);
     if (tab === "rules")         DLRRules.init(league.leagueId, leagueKey, league.isCommissioner);
     if (tab === "auction") {
       const sleeperUid2 = league.sleeperUserId
