@@ -403,7 +403,7 @@ const Profile = (() => {
   // ── Background Yahoo identity resolution ───────────────
   // Finds Yahoo leagues missing myRosterId or teamName, fetches their bundle
   // non-blocking in small batches, and persists results to Firebase.
-  // Runs once after renderLocker — leagues with stored data are skipped.
+  // Also detects playoff finish (champion, runner-up, etc.) from allMatchups.
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
     const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
@@ -411,7 +411,7 @@ const Profile = (() => {
     );
     if (!allYahoo.length) return;
 
-    const CONCURRENCY = 2;  // Yahoo rate limits — keep concurrency low
+    const CONCURRENCY = 2;
     for (let i = 0; i < allYahoo.length; i += CONCURRENCY) {
       const batch = allYahoo.slice(i, i + CONCURRENCY);
       await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
@@ -422,27 +422,116 @@ const Profile = (() => {
           if (!myId) return;
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
           const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
+          const lm     = bundle.leagueMeta || {};
+
+          // Detect playoff finish from allMatchups when league is finished
+          let playoffFinish = league.playoffFinish ?? null;
+          if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
+            playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
+          }
+
+          // Detect league type from Yahoo settings
+          const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "");
+
           if (_allLeagues[leagueKey]) {
             Object.assign(_allLeagues[leagueKey], {
               myRosterId:    String(myId),
-              teamName:      myTeam.name      || _allLeagues[leagueKey].teamName || "",
-              wins:          mySt.wins        ?? _allLeagues[leagueKey].wins    ?? 0,
-              losses:        mySt.losses      ?? _allLeagues[leagueKey].losses  ?? 0,
-              ties:          mySt.ties        ?? _allLeagues[leagueKey].ties    ?? 0,
-              standing:      mySt.rank        || _allLeagues[leagueKey].standing || null,
-              pointsFor:     mySt.ptsFor      || _allLeagues[leagueKey].pointsFor  || 0,
-              pointsAgainst: mySt.ptsAgainst  || _allLeagues[leagueKey].pointsAgainst || 0,
+              teamName:      myTeam.name       || _allLeagues[leagueKey].teamName || "",
+              wins:          mySt.wins         ?? _allLeagues[leagueKey].wins    ?? 0,
+              losses:        mySt.losses       ?? _allLeagues[leagueKey].losses  ?? 0,
+              ties:          mySt.ties         ?? _allLeagues[leagueKey].ties    ?? 0,
+              standing:      mySt.rank         || _allLeagues[leagueKey].standing || null,
+              pointsFor:     mySt.ptsFor       || _allLeagues[leagueKey].pointsFor  || 0,
+              pointsAgainst: mySt.ptsAgainst   || _allLeagues[leagueKey].pointsAgainst || 0,
+              playoffFinish: playoffFinish,
+              isChampion:    playoffFinish === 1,
+              leagueType:    leagueType,
             });
             GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         } catch(e) { /* skip failed league silently */ }
       }));
-      // Small delay between batches to avoid Yahoo rate limiting
       if (i + CONCURRENCY < allYahoo.length) {
         await new Promise(r => setTimeout(r, 500));
       }
     }
-    _renderLeagues();  // re-render cards with resolved data
+
+    // Recompute career stats + refresh header so stats row shows updated numbers
+    try {
+      const stats = await GMDB.recomputeStats(username);
+      if (_currentProfile) _currentProfile.stats = stats;
+      _renderStatsRow(stats);
+    } catch(e) {}
+
+    _renderLeagues();
+    _renderCareerSummary(_currentProfile || {});
+  }
+
+  // Detect playoff finish rank from allMatchups
+  // Championship game is the final playoff week with 1 game; runner-up lost that game.
+  function _detectYahooPlayoffFinish(myId, bundle) {
+    const lm      = bundle.leagueMeta || {};
+    const poStart = lm.playoff_start_week || 0;
+    const allMu   = bundle.allMatchups   || {};
+    if (!poStart) return null;
+
+    const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
+    if (!poWeeks.length) return null;
+
+    const myStr = String(myId);
+
+    // Walk playoff weeks to track how far the user advanced
+    let eliminated = false;
+    let elimWeek   = null;
+    for (const w of poWeeks) {
+      const mus = allMu[w] || [];
+      const myMatchup = mus.find(m =>
+        String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
+      );
+      if (!myMatchup) continue;  // bye or not in this bracket
+      const hId  = String(myMatchup.home?.teamId ?? "");
+      const aId  = String(myMatchup.away?.teamId ?? "");
+      const hSc  = myMatchup.home?.score ?? 0;
+      const aSc  = myMatchup.away?.score ?? 0;
+      const iWon = myMatchup.winnerTeamId
+        ? myMatchup.winnerTeamId === myStr
+        : (hId === myStr ? hSc > aSc : aSc > hSc);
+      if (!iWon) { eliminated = true; elimWeek = w; break; }
+    }
+
+    if (!eliminated) {
+      // Survived all playoff weeks — champion
+      return 1;
+    }
+
+    // Determine placement based on which week eliminated
+    const finalWeek = poWeeks[poWeeks.length - 1];
+    const numTeams  = lm.num_playoff_teams || 0;
+    if (elimWeek === finalWeek) return 2;          // lost championship = runner-up
+    if (elimWeek === poWeeks[poWeeks.length - 2]) {
+      // Lost in semifinal — 3rd or 4th depending on consolation result
+      return 3;
+    }
+    // Earlier elimination — rough placement based on round
+    const roundIdx = poWeeks.indexOf(elimWeek);
+    return (roundIdx + 1) * 2 + 1;  // 5th, 7th, etc.
+  }
+
+  // Detect Yahoo league type from API settings fields + name heuristics
+  // Yahoo settings exposes: uses_roster_import (1=keeper), draft_type ("self"=keeper/salary)
+  function _detectYahooLeagueType(lm, name) {
+    const n = (name || "").toLowerCase();
+    // Name-based detection first (most reliable for self-described leagues)
+    if (n.includes("dynasty"))  return "dynasty";
+    if (n.includes("keeper"))   return "keeper";
+    if (n.includes("redraft"))  return "redraft";
+    if (n.includes("salary") || n.includes("sal cap") || n.includes("auction")) return "salary";
+    // API field detection: uses_roster_import=1 means players carry over = keeper/dynasty
+    if (lm.uses_roster_import === 1 || lm.uses_roster_import === "1") {
+      // dynasty leagues also keep players; no reliable way to distinguish from name alone
+      return "keeper";
+    }
+    return "redraft";
   }
 
   // ── Main locker render ─────────────────────────────────
@@ -675,6 +764,22 @@ const Profile = (() => {
     if (!modal) return;
     modal.classList.remove("hidden");
 
+    // Inject platform + platform-by-year tabs/panels if not already present
+    const tabBar = modal.querySelector(".cs-tabs");
+    if (tabBar && !document.getElementById("cs-platform")) {
+      // Add tab buttons
+      tabBar.insertAdjacentHTML("beforeend", `
+        <button class="cs-tab" data-cstab="platform">By Platform</button>
+        <button class="cs-tab" data-cstab="platform-year">Platform × Year</button>
+      `);
+      // Add panel divs inside the panels container
+      const panelsEl = modal.querySelector(".cs-panels") || modal;
+      panelsEl.insertAdjacentHTML("beforeend", `
+        <div class="cs-panel" id="cs-platform"></div>
+        <div class="cs-panel" id="cs-platform-year"></div>
+      `);
+    }
+
     // Wire tabs (fresh each open)
     document.querySelectorAll(".cs-tab").forEach(tab => {
       const fresh = tab.cloneNode(true);
@@ -707,6 +812,8 @@ const Profile = (() => {
     _renderCSAnnual(leagues);
     _renderCSType(leagues);
     _renderCSMatrix(leagues);
+    _renderCSPlatform(leagues);
+    _renderCSPlatformYear(leagues);
 
     // Reset to overall tab
     document.querySelectorAll(".cs-tab").forEach(t => t.classList.remove("active"));
