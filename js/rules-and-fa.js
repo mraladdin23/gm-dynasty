@@ -498,10 +498,13 @@ const DLRFreeAgents = (() => {
     const rosters = bundle.rosters || [];
 
     _rosterLookup = {};
-    const rostered = new Set();
+    const rostered   = new Set();
     const teamNameMap = {};
     teams.forEach(t => { teamNameMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
+    // detailMap: rawId → Yahoo-native bio from worker (name, position, nflTeam, status)
+    // Covers players that don't resolve via DynastyProcess CSV (DEF, K, obscure players).
+    const detailMap = {};
     rosters.forEach(r => {
       const tid  = String(r.teamId ?? r.team_id);
       const name = teamNameMap[tid] || `Team ${tid}`;
@@ -509,6 +512,9 @@ const DLRFreeAgents = (() => {
         const key = `yahoo_${pid}`;
         rostered.add(key);
         _rosterLookup[key] = name;
+      });
+      (r.playerDetails || []).forEach(d => {
+        if (d.id) detailMap[String(d.id)] = d;
       });
     });
 
@@ -558,20 +564,23 @@ const DLRFreeAgents = (() => {
     _cachedData = [...rostered].map(prefixedId => {
       const rawId  = prefixedId.replace("yahoo_", "");
       const map    = DLRPlayers.getByYahooId(rawId);
-      let name = prefixedId, pos = "?", nflTeam = "—", age = null, sleeperId = null;
+      // Yahoo-native bio from worker (fallback for players missing from DynastyProcess CSV)
+      const detail = detailMap[rawId] || null;
+      let name = detail?.name || prefixedId, pos = detail?.position || "?",
+          nflTeam = detail?.nflTeam || "—", age = null, sleeperId = null;
 
       if (map) {
         sleeperId       = map.sleeper_id || null;
         const sleeperP  = sleeperId ? DLRPlayers.get(sleeperId) : null;
         if (sleeperP && sleeperP.first_name) {
           name    = `${sleeperP.first_name} ${sleeperP.last_name}`.trim();
-          pos     = sleeperP.fantasy_positions?.[0] || sleeperP.position || map.position || "?";
-          nflTeam = sleeperP.team || map.team || "FA";
+          pos     = sleeperP.fantasy_positions?.[0] || sleeperP.position || map.position || detail?.position || "?";
+          nflTeam = sleeperP.team || map.team || detail?.nflTeam || "FA";
           age     = sleeperP.age  || null;
         } else if (map.name) {
           name    = map.name;
-          pos     = map.position || "?";
-          nflTeam = map.team     || "FA";
+          pos     = map.position || detail?.position || "?";
+          nflTeam = map.team     || detail?.nflTeam  || "FA";
           age     = map.age      ? parseFloat(map.age) : null;
         }
       }
@@ -653,11 +662,20 @@ const DLRFreeAgents = (() => {
       yearOpts.push(`<option value="${y}" ${statsYear === y ? "selected" : ""}>${y}</option>`);
     }
 
-    // Build position list from actual cached data for Yahoo/MFL (may include DL, LB, P, etc.)
-    // Sleeper stays pinned to SKILL_POS so the filter never shows DEF/K in free agent context.
+    // Build position list from actual cached data for Yahoo/MFL.
+    // Sleeper stays pinned to SKILL_POS. For Yahoo/MFL: use preferred order first
+    // (QB, RB, WR, TE, K, DEF, ...) then any remaining positions alphabetically.
+    const POS_PREFERRED = ["QB","RB","WR","TE","K","DEF","PN","Coach"];
     const filterPositions = _platform === "sleeper"
       ? SKILL_POS
-      : [...new Set(_cachedData.map(p => p.pos).filter(p => p && p !== "—" && p !== "?"))].sort();
+      : (() => {
+          const onRoster = new Set(
+            _cachedData.map(p => p.pos).filter(p => p && p !== "—" && p !== "?")
+          );
+          const preferred = POS_PREFERRED.filter(p => onRoster.has(p));
+          const extras    = [...onRoster].filter(p => !POS_PREFERRED.includes(p)).sort();
+          return [...preferred, ...extras];
+        })();
 
     // Yahoo now fetches season stats from the platform — show Pts sort for all platforms.
     // hasPts stays true universally; left as a variable so future platforms can opt out.
