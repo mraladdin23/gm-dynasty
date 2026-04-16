@@ -178,15 +178,24 @@ const DLRRoster = (() => {
     const taxiSet    = new Set(team.taxi);
     const mainRoster = team.players.filter(id => !reserveSet.has(id) && !taxiSet.has(id));
 
-    // Group main roster by position, sorted by rank within group
+    // Group main roster by position, sorted by rank within group.
+    // For Yahoo/MFL use a dynamic pos list built from what's actually on this roster
+    // so positions like DL, LB, DB, P, Coach don't silently fall to "—".
+    const activePosOrder = _platform === "sleeper"
+      ? POS_ORDER
+      : [...new Set(mainRoster.map(id => {
+          const p = _players[id] || {};
+          return (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
+        }).filter(pos => pos !== "—" && pos !== "?"))].sort();
+
     const byPos = {};
-    POS_ORDER.forEach(p => { byPos[p] = []; });
+    activePosOrder.forEach(p => { byPos[p] = []; });
     byPos["—"] = [];
 
     mainRoster.forEach(id => {
       const p   = _players[id] || {};
       const pos = (p.fantasy_positions?.[0] || p.position || "—").toUpperCase();
-      const grp = POS_ORDER.includes(pos) ? pos : "—";
+      const grp = activePosOrder.includes(pos) ? pos : "—";
       byPos[grp].push({ id, player: p, rank: p.search_rank || p.rank || 9999 });
     });
 
@@ -195,7 +204,7 @@ const DLRRoster = (() => {
 
     // Build position group sections
     let rosterHTML = "";
-    for (const pos of [...POS_ORDER, "—"]) {
+    for (const pos of [...activePosOrder, "—"]) {
       const group = byPos[pos];
       if (!group.length) continue;
       rosterHTML += `

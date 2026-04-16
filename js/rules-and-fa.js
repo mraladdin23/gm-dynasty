@@ -604,6 +604,12 @@ const DLRFreeAgents = (() => {
       yearOpts.push(`<option value="${y}" ${statsYear === y ? "selected" : ""}>${y}</option>`);
     }
 
+    // Build position list from actual cached data for Yahoo/MFL (may include DL, LB, P, etc.)
+    // Sleeper stays pinned to SKILL_POS so the filter never shows DEF/K in free agent context.
+    const filterPositions = _platform === "sleeper"
+      ? SKILL_POS
+      : [...new Set(_cachedData.map(p => p.pos).filter(p => p && p !== "—" && p !== "?"))].sort();
+
     el.innerHTML = `
       <div class="fa-toolbar">
         <input type="text" class="fa-search" placeholder="Search players…"
@@ -612,19 +618,22 @@ const DLRFreeAgents = (() => {
           style="flex:1;min-width:0;padding:var(--space-2) var(--space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-body);font-size:.85rem;outline:none"/>
       </div>
       <div class="fa-toolbar">
-        <div class="fa-pos-filter">
-          ${["ALL",...SKILL_POS].map(pos =>
-            `<button class="fa-pos-btn ${_posFilter === pos ? "fa-pos-btn--active" : ""}"
-              onclick="DLRFreeAgents.setPos('${pos}')">${pos}</button>`
+        <select class="fa-sort-btn" style="padding:3px 8px;border-radius:var(--radius-sm)"
+          onchange="DLRFreeAgents.setPos(this.value)">
+          ${["ALL", ...filterPositions].map(pos =>
+            `<option value="${pos}" ${_posFilter === pos ? "selected" : ""}>${pos}</option>`
           ).join("")}
-        </div>
+        </select>
         <div class="fa-sort-toggle">
           <button class="fa-sort-btn ${_sortMode === "adp" ? "fa-sort-btn--active" : ""}"
             onclick="DLRFreeAgents.setSort('adp')">ADP Rank</button>
           <button class="fa-sort-btn ${_sortMode === "pts" ? "fa-sort-btn--active" : ""}"
             onclick="DLRFreeAgents.setSort('pts')">Pts</button>
-          <select class="fa-sort-btn" style="padding:3px 6px;border-radius:var(--radius-sm)"
-            onchange="DLRFreeAgents.setStatsYear(this.value)">${yearOpts.join("")}</select>
+          <label style="font-size:.75rem;color:var(--color-text-dim);display:flex;align-items:center;gap:4px;">
+            Stats Year
+            <select class="fa-sort-btn" style="padding:3px 6px;border-radius:var(--radius-sm)"
+              onchange="DLRFreeAgents.setStatsYear(this.value)">${yearOpts.join("")}</select>
+          </label>
         </div>
       </div>
       <div class="fa-toolbar" style="margin-top:var(--space-2);gap:var(--space-2);flex-wrap:wrap">
