@@ -368,8 +368,15 @@ const DLRRoster = (() => {
     standings.forEach(s => { standingsMap[String(s.teamId)] = s; });
 
     // Build roster map: teamId → player ID array
+    // Also build detailMap: rawId → Yahoo-native bio for players missing from DynastyProcess CSV
     const rosterMap = {};
-    rosters.forEach(r => { rosterMap[String(r.teamId)] = r.players || []; });
+    const detailMap = {};
+    rosters.forEach(r => {
+      rosterMap[String(r.teamId)] = r.players || [];
+      (r.playerDetails || []).forEach(d => {
+        if (d.id) detailMap[String(d.id)] = d;
+      });
+    });
 
     const mappedTeams = teams.map(t => {
       const tid    = String(t.id);
@@ -421,12 +428,25 @@ const DLRRoster = (() => {
           };
         }
       } else {
-        // No CSV match — minimal stub so the row renders without crashing
-        _players[prefixedId] = {
-          first_name: "Player", last_name: rawId,
-          position: "?", fantasy_positions: ["?"],
-          team: "—", search_rank: 9999
-        };
+        // No CSV match — use Yahoo-native bio from worker if available, else minimal stub
+        const detail = detailMap[rawId];
+        if (detail?.name) {
+          const parts = detail.name.trim().split(" ");
+          _players[prefixedId] = {
+            first_name:        parts.slice(0, -1).join(" ") || detail.name,
+            last_name:         parts.slice(-1)[0]           || "",
+            position:          detail.position              || "?",
+            fantasy_positions: [detail.position             || "?"],
+            team:              detail.nflTeam               || "FA",
+            search_rank:       9999,
+          };
+        } else {
+          _players[prefixedId] = {
+            first_name: "Player", last_name: rawId,
+            position: "?", fantasy_positions: ["?"],
+            team: "—", search_rank: 9999
+          };
+        }
       }
     });
 

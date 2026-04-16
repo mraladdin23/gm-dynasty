@@ -184,8 +184,15 @@ const YahooAPI = (() => {
 
     // Rosters
     const rosters = _arr(raw.rosters).map(r => ({
-      teamId:  _str(r.teamId ?? r.team_id),
-      players: _arr(r.players).map(p => _str(p)),
+      teamId:        _str(r.teamId ?? r.team_id),
+      players:       _arr(r.players).map(p => _str(p)),
+      playerDetails: _arr(r.playerDetails).map(d => ({
+        id:       _str(d.id),
+        name:     d.name     || "",
+        position: d.position || "?",
+        nflTeam:  d.nflTeam  || "",
+        status:   d.status   || "",
+      })),
     }));
 
     // Matchups — normalize single-week array (current week)
