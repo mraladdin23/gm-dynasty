@@ -407,18 +407,22 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   const settMeta     = settLeague?.[0] || {};
   const settRules    = settLeague?.[1]?.settings?.[0] || {};
   const leagueMeta = {
-    name:              findVal([settMeta], "name")                || "",
-    current_week:      parseInt(findVal([settMeta], "current_week") || settRules.current_week || 1),
-    start_week:        parseInt(findVal([settMeta], "start_week")   || settRules.start_week   || 1),
-    end_week:          parseInt(findVal([settMeta], "end_week")     || settRules.end_week      || 17),
-    is_finished:       parseInt(findVal([settMeta], "is_finished")  || 0),
-    playoff_start_week:parseInt(settRules.playoff_start_week || 0),
-    num_playoff_teams: parseInt(settRules.num_playoff_teams  || 0),
-    uses_playoff:      parseInt(settRules.uses_playoff       || 0),
-    scoring_type:      findVal([settMeta], "scoring_type")         || "head",
-    draft_status:      findVal([settMeta], "draft_status")         || "",
-    season:            findVal([settMeta], "season")               || "",
-    faab_balance:      null,  // per-team
+    name:               findVal([settMeta], "name")                || "",
+    current_week:       parseInt(findVal([settMeta], "current_week") || settRules.current_week || 1),
+    start_week:         parseInt(findVal([settMeta], "start_week")   || settRules.start_week   || 1),
+    end_week:           parseInt(findVal([settMeta], "end_week")     || settRules.end_week      || 17),
+    is_finished:        parseInt(findVal([settMeta], "is_finished")  || 0),
+    playoff_start_week: parseInt(settRules.playoff_start_week || 0),
+    num_playoff_teams:  parseInt(settRules.num_playoff_teams  || 0),
+    uses_playoff:       parseInt(settRules.uses_playoff       || 0),
+    scoring_type:       findVal([settMeta], "scoring_type")         || "head",
+    draft_status:       findVal([settMeta], "draft_status")         || "",
+    season:             findVal([settMeta], "season")               || "",
+    faab_balance:       null,   // per-team
+    // League type detection fields
+    uses_roster_import: parseInt(settRules.uses_roster_import || 0),  // 1 = keeper (players carry over)
+    is_auction_draft:   parseInt(settRules.is_auction_draft   || 0),  // 1 = auction
+    draft_type:         settRules.draft_type || "",                    // "self"=salary/keeper, "live"=live
   };
 
   // ── Teams + Standings ─────────────────────────────────────────────────────
