@@ -1015,6 +1015,115 @@ const Profile = (() => {
       </div>`;
   }
 
+  // ── Career stats: By Platform ──────────────────────────
+  // Same structure as _renderCSType but grouped by platform (sleeper, mfl, yahoo).
+  function _renderCSPlatform(leagues) {
+    const el = document.getElementById("cs-platform");
+    if (!el) return;
+
+    const platforms = [...new Set(leagues.map(l => l.platform).filter(Boolean))].sort();
+
+    const rows = platforms.map(platform => {
+      const rows = leagues.filter(l => l.platform === platform);
+      if (!rows.length) return "";
+      const w      = rows.reduce((s, l) => s + (l.wins   || 0), 0);
+      const lo     = rows.reduce((s, l) => s + (l.losses || 0), 0);
+      const tot    = w + lo;
+      const pct    = tot > 0 ? ((w / tot) * 100).toFixed(0) + "%" : "—";
+      const titles   = rows.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+      const playoffs = rows.filter(l => l.playoffFinish != null && l.playoffFinish <= 7).length;
+      return `<tr>
+        <td class="cs-season">${_platformLabel(platform)}</td>
+        <td class="dim">${rows.length}</td>
+        <td><span class="cs-record">${w}–${lo}</span></td>
+        <td class="dim">${pct}</td>
+        <td>${titles > 0 ? `<span style="color:var(--color-gold)">🏆 ×${titles}</span>` : "—"}</td>
+        <td class="dim">${playoffs > 0 ? `${playoffs}/${rows.length}` : "—"}</td>
+      </tr>`;
+    }).filter(Boolean).join("");
+
+    if (!rows) {
+      el.innerHTML = `<div class="cs-empty dim">No platform data available.</div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="cs-table-wrap">
+        <table class="cs-table">
+          <thead>
+            <tr><th>Platform</th><th>Seasons</th><th>W–L</th><th>Win%</th><th>Titles</th><th>Playoffs</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  // ── Career stats: Platform × Year matrix ───────────────
+  // Same structure as _renderCSMatrix but columns are platforms instead of types.
+  function _renderCSPlatformYear(leagues) {
+    const el = document.getElementById("cs-platform-year");
+    if (!el) return;
+
+    const platforms = [...new Set(leagues.map(l => l.platform).filter(Boolean))].sort();
+    const seasons   = [...new Set(leagues.map(l => l.season).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+
+    if (!platforms.length || !seasons.length) {
+      el.innerHTML = `<div class="cs-empty dim">No data available.</div>`;
+      return;
+    }
+
+    function cell(rows) {
+      if (!rows.length) return `<td class="cs-matrix-empty">—</td>`;
+      const w   = rows.reduce((s, l) => s + (l.wins   || 0), 0);
+      const lo  = rows.reduce((s, l) => s + (l.losses || 0), 0);
+      const tot = w + lo;
+      const pct = tot > 0 ? ((w / tot) * 100).toFixed(0) : "0";
+      const titles = rows.filter(l => l.playoffFinish === 1 || l.isChampion).length;
+      return `<td class="cs-matrix-cell">
+        <span class="cs-mx-record">${w}–${lo}</span>
+        <span class="cs-mx-pct">${pct}%</span>
+        ${titles > 0 ? `<span class="cs-mx-title">🏆</span>` : ""}
+      </td>`;
+    }
+
+    el.innerHTML = `
+      <div class="cs-table-wrap">
+        <table class="cs-table cs-matrix-table">
+          <thead>
+            <tr>
+              <th>Season</th>
+              ${platforms.map(p => `<th>${_platformLabel(p)}</th>`).join("")}
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${seasons.map(s => {
+              const seasonLeagues = leagues.filter(l => l.season === s);
+              const w  = seasonLeagues.reduce((sum, l) => sum + (l.wins   || 0), 0);
+              const lo = seasonLeagues.reduce((sum, l) => sum + (l.losses || 0), 0);
+              const tot = w + lo;
+              const pct = tot > 0 ? ((w / tot) * 100).toFixed(0) : "0";
+              return `<tr>
+                <td class="cs-season">${s}</td>
+                ${platforms.map(p => cell(seasonLeagues.filter(l => l.platform === p))).join("")}
+                <td class="cs-matrix-cell cs-matrix-total">
+                  <span class="cs-mx-record">${w}–${lo}</span>
+                  <span class="cs-mx-pct">${pct}%</span>
+                </td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--color-border)">
+              <td class="cs-season">All-time</td>
+              ${platforms.map(p => cell(leagues.filter(l => l.platform === p))).join("")}
+              ${cell(leagues)}
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+  }
+
   // ── Filter bar ─────────────────────────────────────────
   function _renderLeagueFilters() {
     const customLabels  = new Set();
@@ -1684,7 +1793,7 @@ const Profile = (() => {
 
   // ── Helpers ────────────────────────────────────────────
 
-  function _platformLabel(p) { return { sleeper: "Sleeper", mfl: "MFL" }[p] || p; }
+  function _platformLabel(p) { return { sleeper: "Sleeper", mfl: "MFL", yahoo: "Yahoo" }[p] || (p ? p.charAt(0).toUpperCase() + p.slice(1) : "Unknown"); }
   function _platformUser(p, d) {
     if (p === "sleeper") return d.sleeperUsername || d.displayName || "";
     if (p === "mfl")     return d.mflEmail || d.mflUsername || "";
