@@ -979,8 +979,9 @@ const DLRStandings = (() => {
           return;
         }
 
-        const allMu   = _yahooBundle.allMatchups || {};
-        const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
+        const allMu      = _yahooBundle.allMatchups || {};
+        const numPoTeams = lm.num_playoff_teams || 0;
+        const poWeeks    = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
 
         if (!poWeeks.length) {
           el.innerHTML = `<div class="playoffs-pending">
@@ -989,6 +990,24 @@ const DLRStandings = (() => {
             <div class="playoffs-sub">Playoffs begin week ${poStart}. Regular season ends week ${poStart - 1}.</div>
           </div>`;
           return;
+        }
+
+        // Build playoff team set — only top-N seeds made the championship bracket.
+        // Without this, consolation games (for non-playoff teams) pollute the bracket.
+        let playoffTeamSet = null;
+        if (numPoTeams > 0 && stndgs.length) {
+          const sorted = [...stndgs].sort((a, b) => (a.rank || 99) - (b.rank || 99));
+          playoffTeamSet = new Set(sorted.slice(0, numPoTeams).map(s => String(s.teamId)));
+        }
+
+        // Filter each week's games to championship bracket only
+        function champGames(week) {
+          const mus = allMu[week] || [];
+          if (!playoffTeamSet) return mus;
+          return mus.filter(m =>
+            playoffTeamSet.has(String(m.home?.teamId ?? "")) &&
+            playoffTeamSet.has(String(m.away?.teamId ?? ""))
+          );
         }
 
         function teamLabel(id) {
@@ -1038,10 +1057,10 @@ const DLRStandings = (() => {
         // Split into regular rounds and finals
         const regularWeeks = poWeeks.slice(0, -1);
         const finalWeek    = poWeeks[poWeeks.length - 1];
-        const finalMus     = allMu[finalWeek] || [];
+        const finalMus     = champGames(finalWeek);
 
         const cols = regularWeeks.map((w, ri) => {
-          const games = (allMu[w] || []).map(m => bracketCard(m)).join("");
+          const games = champGames(w).map(m => bracketCard(m)).join("");
           return `<div class="bracket-section">
             <div class="bracket-section-label">${roundLabel(ri)}</div>
             <div class="bracket-section-games">${games || '<div class="bracket-tbd">TBD</div>'}</div>
@@ -1506,56 +1525,110 @@ const DLRStandings = (() => {
     const nameMap    = {};
     teams.forEach(t => { nameMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
+    // Build roster map: teamId → [ { pid, name, pos } ] from bundle.rosters + DLRPlayers
+    const rosterMap = {};
+    (bundle.rosters || []).forEach(r => {
+      const tid = String(r.teamId || "");
+      if (!tid) return;
+      rosterMap[tid] = (r.players || []).map(pid => {
+        const rawId = String(pid).replace("yahoo_", "");
+        const map   = DLRPlayers.getByYahooId(rawId);
+        const sp    = map?.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+        const detail = (r.playerDetails || []).find(d => String(d.id) === rawId);
+        const name  = (sp ? `${sp.first_name||""} ${sp.last_name||""}`.trim() : null)
+                   || map?.name || detail?.name || rawId;
+        const pos   = (sp?.position || map?.position || detail?.position || "?").toUpperCase();
+        return { pid: rawId, name, pos };
+      }).filter(p => p.name && p.name !== p.pid);
+    });
+
+    const POS_ORDER = ["QB","RB","WR","TE","K","DEF","DL","LB","CB","S","DB","P",""];
+    const posRank   = p => { const i = POS_ORDER.indexOf(p); return i < 0 ? 99 : i; };
+    const POS_COLOR = {
+      QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)",
+      TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)"
+    };
+
+    // Build standings lookup for season record
+    const standingsMap = {};
+    (bundle.standings || []).forEach(s => { standingsMap[String(s.teamId)] = s; });
+
     // Determine available weeks
     const availWeeks = Object.keys(allMu).map(Number).filter(w => w > 0).sort((a, b) => a - b);
-    // Fall back to current bundle matchups if allMatchups is empty
     const fallbackMus = bundle.matchups || [];
     if (!availWeeks.length && !fallbackMus.length) {
       el.innerHTML = `<div class="empty-state">No matchup data available.</div>`;
       return;
     }
 
-    // Default to current week or most recent scored week
     const defaultWeek = bundle.currentWeek
       || (availWeeks.length ? availWeeks[availWeeks.length - 1] : (fallbackMus[0]?.week || 1));
     let selectedWeek = _yahooSelectedWeek || defaultWeek;
-    // Clamp to available range
     if (availWeeks.length && !availWeeks.includes(selectedWeek)) {
       selectedWeek = availWeeks[availWeeks.length - 1];
     }
     _yahooSelectedWeek = selectedWeek;
 
     const playoffStart = lm.playoff_start_week || 0;
-    const endWeek      = lm.end_week           || Math.max(...availWeeks, 17);
+
+    function _buildRosterRows(teamId) {
+      const players = rosterMap[String(teamId)] || [];
+      if (!players.length) return "";
+      const sorted = [...players].sort((a, b) => posRank(a.pos) - posRank(b.pos));
+      return sorted.map(p => {
+        const col = POS_COLOR[p.pos] || "var(--color-text-dim)";
+        return `<div class="mu-sbs-row">
+          <span class="mu-slot" style="color:${col};min-width:36px">${p.pos}</span>
+          <span class="mu-name mu-name--left" style="flex:1">${_esc(p.name)}</span>
+        </div>`;
+      }).join("");
+    }
 
     function _renderWeek(week) {
       _yahooSelectedWeek = week;
       const weekMus = allMu[week] || (week === fallbackMus[0]?.week ? fallbackMus : []);
 
       const cards = weekMus.map(m => {
-        const hId  = String(m.home?.teamId ?? "");
-        const aId  = String(m.away?.teamId ?? "");
-        const hSc  = m.home?.score ?? 0;
-        const aSc  = m.away?.score ?? 0;
-        const hWin = m.winnerTeamId ? m.winnerTeamId === hId : hSc > aSc;
-        const aWin = m.winnerTeamId ? m.winnerTeamId === aId : aSc > hSc;
-        const hMe  = myTeamId && hId === String(myTeamId);
-        const aMe  = myTeamId && aId === String(myTeamId);
+        const hId   = String(m.home?.teamId ?? "");
+        const aId   = String(m.away?.teamId ?? "");
+        const hSc   = m.home?.score ?? 0;
+        const aSc   = m.away?.score ?? 0;
+        const hWin  = m.winnerTeamId ? m.winnerTeamId === hId : hSc > aSc && hSc > 0;
+        const aWin  = m.winnerTeamId ? m.winnerTeamId === aId : aSc > hSc && aSc > 0;
+        const hMe   = myTeamId && hId === String(myTeamId);
+        const aMe   = myTeamId && aId === String(myTeamId);
         const hName = nameMap[hId] || `Team ${hId || "?"}`;
         const aName = nameMap[aId] || `Team ${aId || "?"}`;
         const fmt   = n => (n || 0).toFixed(2);
-        const status = m.status || "";
-        const inProg = status === "midevent" || status === "postevent" || hSc > 0 || aSc > 0;
+        const inProg = hSc > 0 || aSc > 0 || !!m.winnerTeamId;
 
-        // Look up season record + total points from standings for the expand detail
-        const standingsMap = {};
-        (bundle.standings || []).forEach(s => { standingsMap[String(s.teamId)] = s; });
-        const hSt = standingsMap[hId] || {};
-        const aSt = standingsMap[aId] || {};
+        // Season record from standings
+        const hSt  = standingsMap[hId] || {};
+        const aSt  = standingsMap[aId] || {};
         const hRec = `${hSt.wins ?? "?"}–${hSt.losses ?? "?"}`;
         const aRec = `${aSt.wins ?? "?"}–${aSt.losses ?? "?"}`;
-        const hPF  = hSt.ptsFor ? hSt.ptsFor.toFixed(1) : "—";
-        const aPF  = aSt.ptsFor ? aSt.ptsFor.toFixed(1) : "—";
+
+        // Roster rows for expand detail
+        const hRows = _buildRosterRows(hId);
+        const aRows = _buildRosterRows(aId);
+        const hasRoster = hRows || aRows;
+
+        const detailHTML = hasRoster
+          ? `<div class="mu-detail hidden">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-3) var(--space-4)">
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;color:var(--color-text-dim);margin-bottom:var(--space-1)">${_esc(hName)} · ${hRec}</div>
+                  ${hRows || '<div class="dim" style="font-size:.75rem">No roster data</div>'}
+                </div>
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;color:var(--color-text-dim);margin-bottom:var(--space-1)">${_esc(aName)} · ${aRec}</div>
+                  ${aRows || '<div class="dim" style="font-size:.75rem">No roster data</div>'}
+                </div>
+              </div>
+            </div>`
+          : `<div class="mu-detail hidden" style="font-size:.75rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) var(--space-3)">
+              ${_esc(hName)}: ${hRec} &nbsp;|&nbsp; ${_esc(aName)}: ${aRec}
+            </div>`;
 
         return `
           <div class="mu-card" onclick="this.querySelector('.mu-detail').classList.toggle('hidden')">
@@ -1574,9 +1647,7 @@ const DLRStandings = (() => {
                 <div class="st-av" style="${aMe ? "background:var(--color-gold);color:#000;" : ""}">${aName[0]?.toUpperCase() || "?"}</div>
               </div>
             </div>
-            <div class="mu-detail hidden" style="font-size:.75rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) var(--space-3)">
-              ${_esc(hName)}: ${hRec}, ${hPF} pts &nbsp;|&nbsp; ${_esc(aName)}: ${aRec}, ${aPF} pts
-            </div>
+            ${detailHTML}
           </div>`;
       }).join("");
 
@@ -1589,23 +1660,22 @@ const DLRStandings = (() => {
       });
     }
 
-    // Build week pill bar
+    // Build week pill bar — same style as MFL/Sleeper
     const pills = availWeeks.map(w => {
-      const isActive  = w === selectedWeek;
-      const isPO      = playoffStart > 0 && w >= playoffStart;
+      const isActive = w === selectedWeek;
+      const isPO     = playoffStart > 0 && w >= playoffStart;
       return `<button class="matchups-week-pill yahoo-week-pill${isActive ? " matchups-week-pill--active" : ""}${isPO ? " matchups-week-pill--playoff" : ""}"
         data-week="${w}" onclick="DLRStandings._yahooPickWeek(${w})">${isPO ? "🏆" : ""}${w}</button>`;
     }).join("");
 
     el.innerHTML = `
-      <div class="matchups-week-bar" style="flex-wrap:wrap;gap:var(--space-1)">
+      <div class="matchups-week-bar">
         <span class="matchups-week-label">Week</span>
         <div class="matchups-week-pills">${pills}</div>
       </div>
       <div id="yahoo-matchups-cards"></div>`;
 
     _renderWeek(selectedWeek);
-    // Expose week picker callback on the module's public surface
     DLRStandings._yahooPickWeek = (w) => _renderWeek(w);
   }
 

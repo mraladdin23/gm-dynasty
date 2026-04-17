@@ -318,32 +318,45 @@ const Profile = (() => {
         const rounds = MFLAPI.normalizePlayoffBracketResult(data);
         if (!rounds.length) return null;
 
+        // Helper: determine winner of a game using scores directly (won flag
+        // is false when one score is 0, so we can't rely on it for decided games)
+        function gameWinner(game) {
+          const hSc = game.home?.score ?? 0;
+          const aSc = game.away?.score ?? 0;
+          if (hSc > 0 && aSc > 0) return hSc > aSc ? game.home.id : game.away.id;
+          if (hSc > 0 && aSc === 0) return game.home.id;  // forfeit / bye
+          if (aSc > 0 && hSc === 0) return game.away.id;
+          return null;  // game not yet played
+        }
+
         const finalRound = rounds[rounds.length - 1];
 
         // Championship game = first game of final round
         const champGame = finalRound?.matchups?.[0];
         if (champGame) {
-          const hId = String(champGame.home?.id || "");
-          const aId = String(champGame.away?.id || "");
-          if ((hId === myId || aId === myId) && (champGame.home.won || champGame.away.won)) {
-            const iWon = hId === myId ? champGame.home.won : champGame.away.won;
-            return iWon ? 1 : 2;
+          const hId   = String(champGame.home?.id || "");
+          const aId   = String(champGame.away?.id || "");
+          const winId = gameWinner(champGame);
+          if (hId === myId || aId === myId) {
+            if (!winId) return null;  // game not yet played
+            return winId === myId ? 1 : 2;
           }
         }
 
-        // Consolation games in the final round (3rd place, 5th place, ...)
+        // Consolation games in final round (3rd place, 5th place, ...)
         for (let gi = 1; gi < (finalRound?.matchups?.length || 0); gi++) {
-          const game = finalRound.matchups[gi];
-          const hId  = String(game.home?.id || "");
-          const aId  = String(game.away?.id || "");
-          if ((hId === myId || aId === myId) && (game.home.won || game.away.won)) {
-            const iWon = hId === myId ? game.home.won : game.away.won;
+          const game  = finalRound.matchups[gi];
+          const hId   = String(game.home?.id || "");
+          const aId   = String(game.away?.id || "");
+          const winId = gameWinner(game);
+          if (hId === myId || aId === myId) {
+            if (!winId) return null;
             const place = gi * 2 + 1;   // 3rd, 5th, 7th...
-            return iWon ? place : place + 1;
+            return winId === myId ? place : place + 1;
           }
         }
 
-        // Not in final round — find the earliest round where they appear
+        // Not in final round — find earliest round where they appear and lost
         for (let ri = rounds.length - 2; ri >= 0; ri--) {
           for (const game of (rounds[ri].matchups || [])) {
             const hId = String(game.home?.id || "");
@@ -354,8 +367,7 @@ const Profile = (() => {
             }
           }
         }
-        // Appeared in no bracket games — didn't make playoffs
-        return null;
+        return null;  // not in any bracket game
       } catch(e) {
         // Bracket fetch failed — fall through to standings fallback
       }
@@ -591,29 +603,50 @@ const Profile = (() => {
     const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
     if (!poWeeks.length) return null;
 
-    const myStr = String(myId);
+    const myStr       = String(myId);
+    const numPoTeams  = lm.num_playoff_teams || 0;
 
-    // Walk playoff weeks to find how far the user advanced.
-    // Only count a result if the game is actually decided (has scores or explicit winner).
+    // Build the set of teams that actually made the playoffs using standings seed/rank.
+    // Yahoo allMatchups includes ALL games per week (both championship AND consolation
+    // bracket), so a team that missed the playoffs can appear in consolation games.
+    // We must filter to only the top-N seeds to avoid false positives.
+    let playoffTeamSet = null;
+    if (numPoTeams > 0 && bundle.standings?.length) {
+      // standings are already sorted by rank; take the top N
+      const sorted = [...bundle.standings].sort((a, b) => (a.rank || 99) - (b.rank || 99));
+      playoffTeamSet = new Set(sorted.slice(0, numPoTeams).map(s => String(s.teamId)));
+    }
+
+    // If we can determine playoff teams and this team isn't in the set → missed playoffs
+    if (playoffTeamSet && !playoffTeamSet.has(myStr)) return null;
+
+    // Walk playoff weeks in order
     let appearedInPlayoffs = false;
     let eliminated  = false;
     let elimWeek    = null;
 
     for (const w of poWeeks) {
       const mus = allMu[w] || [];
-      const myMatchup = mus.find(m =>
+      // Filter to only games between playoff-eligible teams (championship bracket only)
+      const poMus = playoffTeamSet
+        ? mus.filter(m =>
+            playoffTeamSet.has(String(m.home?.teamId ?? "")) &&
+            playoffTeamSet.has(String(m.away?.teamId ?? "")))
+        : mus;
+
+      const myMatchup = poMus.find(m =>
         String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
       );
-      if (!myMatchup) continue;  // not in this week's bracket (consolation or bye)
+      if (!myMatchup) continue;  // bye or not in championship bracket this week
 
       const hId  = String(myMatchup.home?.teamId ?? "");
       const hSc  = myMatchup.home?.score ?? 0;
       const aSc  = myMatchup.away?.score ?? 0;
 
-      // Only process if the game has been decided — skip upcoming/zero-score games
-      const hasWinner  = !!myMatchup.winnerTeamId;
-      const hasScores  = hSc > 0 || aSc > 0;
-      if (!hasWinner && !hasScores) continue;  // game not yet played
+      // Only process decided games
+      const hasWinner = !!myMatchup.winnerTeamId;
+      const hasScores = hSc > 0 || aSc > 0;
+      if (!hasWinner && !hasScores) continue;  // not yet played
 
       appearedInPlayoffs = true;
 
@@ -624,19 +657,13 @@ const Profile = (() => {
       if (!iWon) { eliminated = true; elimWeek = w; break; }
     }
 
-    // Never appeared in any decided playoff game — missed playoffs or data unavailable
     if (!appearedInPlayoffs) return null;
 
-    if (!eliminated) {
-      // Won every decided playoff game — champion
-      return 1;
-    }
+    if (!eliminated) return 1;  // won every decided playoff game = champion
 
-    // Determine placement from which week eliminated
     const finalWeek = poWeeks[poWeeks.length - 1];
-    if (elimWeek === finalWeek)                      return 2;  // lost championship
-    if (elimWeek === poWeeks[poWeeks.length - 2])    return 3;  // lost semifinal
-    // Earlier elimination
+    if (elimWeek === finalWeek)                    return 2;  // lost championship
+    if (elimWeek === poWeeks[poWeeks.length - 2])  return 3;  // lost semifinal
     const roundIdx = poWeeks.indexOf(elimWeek);
     return (roundIdx + 1) * 2 + 1;  // 5th, 7th, etc.
   }
