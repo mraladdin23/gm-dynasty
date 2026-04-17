@@ -171,10 +171,19 @@ const Profile = (() => {
         pointsFor:      Number(mySt.pf        || mySt.PF     || 0),
         pointsAgainst:  Number(mySt.pa        || mySt.PA     || 0),
         standing:       Number(mySt.rank)     || null,
-        playoffFinish:  null,
+        playoffFinish:  null,   // populated below after bracket fetch
         isChampion:     false,
         isGuillotine,
       };
+
+      // Detect playoff finish for past seasons (async bracket fetch)
+      try {
+        const finish = await _detectMFLPlayoffFinish(myFranchiseId, bundle, leagueId, season);
+        if (finish !== null) {
+          leaguesMap[key].playoffFinish = finish;
+          leaguesMap[key].isChampion    = finish === 1;
+        }
+      } catch(e) { /* non-fatal */ }
     }
 
     for (let i = 0; i < leagues.length; i += BUNDLE_BATCH) {
@@ -275,10 +284,90 @@ const Profile = (() => {
   }
 
   function _detectMFLLeagueType(name) {
-    const n = name.toLowerCase();
-    if (n.includes("dynasty")) return "dynasty";
-    if (n.includes("keeper"))  return "keeper";
+    const n = (name || "").toLowerCase();
+    if (n.includes("dynasty"))                                              return "dynasty";
+    if (n.includes("keeper"))                                               return "keeper";
+    if (n.includes("redraft"))                                              return "redraft";
+    if (n.includes("salary") || n.includes("sal cap") || n.includes("auction")) return "salary";
     return "redraft";
+  }
+
+  // ── MFL playoff finish detection ──────────────────────────────────────────
+  // For bracket leagues: parse the championship bracket result via the MFL API.
+  // For no-bracket leagues (guillotine/elimination): fall back to standings rank.
+  // Only runs for past seasons (leagueYear < currentYear).
+  async function _detectMFLPlayoffFinish(myRosterId, bundle, leagueId, season) {
+    if (!myRosterId) return null;
+    const currentYear = new Date().getFullYear();
+    const leagueYear  = parseInt(season) || currentYear;
+    if (leagueYear >= currentYear) return null;
+
+    const myId = String(myRosterId);
+
+    // ── Path 1: Bracket leagues ────────────────────────────────────────────
+    const brackets = MFLAPI.normalizePlayoffBrackets(bundle);
+    if (brackets.length) {
+      // Prefer a bracket whose name contains "champ" or "winner", else use index 0
+      const champBracket = brackets.find(b =>
+        (b.name || "").toLowerCase().includes("champ") ||
+        (b.name || "").toLowerCase().includes("winner")
+      ) || brackets[0];
+
+      try {
+        const data   = await MFLAPI.getPlayoffBracket(leagueId, season, champBracket.id);
+        const rounds = MFLAPI.normalizePlayoffBracketResult(data);
+        if (!rounds.length) return null;
+
+        const finalRound = rounds[rounds.length - 1];
+
+        // Championship game is first game of final round
+        const champGame = finalRound?.matchups?.[0];
+        if (champGame) {
+          const hId = String(champGame.home?.id || "");
+          const aId = String(champGame.away?.id || "");
+          if (hId === myId || aId === myId) {
+            const iWon = hId === myId ? champGame.home.won : champGame.away.won;
+            return iWon ? 1 : 2;
+          }
+        }
+
+        // Consolation games in the final round (3rd place, 5th place, ...)
+        for (let gi = 1; gi < (finalRound?.matchups?.length || 0); gi++) {
+          const game = finalRound.matchups[gi];
+          const hId  = String(game.home?.id || "");
+          const aId  = String(game.away?.id || "");
+          if (hId === myId || aId === myId) {
+            const iWon = hId === myId ? game.home.won : game.away.won;
+            const place = gi * 2 + 1;   // 3rd, 5th, 7th...
+            return iWon ? place : place + 1;
+          }
+        }
+
+        // Not in final round — check earlier rounds for placement
+        for (let ri = rounds.length - 2; ri >= 0; ri--) {
+          for (const game of (rounds[ri].matchups || [])) {
+            const hId = String(game.home?.id || "");
+            const aId = String(game.away?.id || "");
+            if (hId === myId || aId === myId) {
+              const roundsFromFinal = rounds.length - 1 - ri;
+              return Math.pow(2, roundsFromFinal) + 1;   // 5, 3, 2 (rough)
+            }
+          }
+        }
+      } catch(e) {
+        // Bracket fetch failed — fall through to standings fallback
+      }
+    }
+
+    // ── Path 2: No-bracket / guillotine leagues ────────────────────────────
+    const standingsRaw = bundle?.standings?.leagueStandings?.franchise;
+    const standingsArr = standingsRaw
+      ? (Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw])
+      : [];
+    const mySt = standingsArr.find(f => String(f.id) === myId);
+    if (!mySt) return null;
+    const rank = parseInt(mySt.rank) || null;
+    return (rank && rank <= 8) ? rank : null;
   }
 
   // ── League meta (pins, labels, archive) ───────────────
@@ -390,6 +479,18 @@ const Profile = (() => {
             _allLeagues[leagueKey].ties        = mySt.ties         || _allLeagues[leagueKey].ties    || 0;
             _allLeagues[leagueKey].standing    = mySt.rank         || _allLeagues[leagueKey].standing || null;
             _allLeagues[leagueKey].pointsFor   = mySt.ptsFor       || _allLeagues[leagueKey].pointsFor || 0;
+
+            // Detect playoff finish for past seasons not yet resolved
+            if (_allLeagues[leagueKey].playoffFinish == null) {
+              try {
+                const finish = await _detectMFLPlayoffFinish(myRosterId, bundle, league.leagueId, league.season);
+                if (finish !== null) {
+                  _allLeagues[leagueKey].playoffFinish = finish;
+                  _allLeagues[leagueKey].isChampion    = finish === 1;
+                }
+              } catch(e) { /* non-fatal */ }
+            }
+
             GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
             matched++;
           }
@@ -406,9 +507,13 @@ const Profile = (() => {
   // Also detects playoff finish (champion, runner-up, etc.) from allMatchups.
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
-    const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "yahoo" && (!l.myRosterId || !l.teamName || l.teamName === "")
-    );
+    const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
+      if (l.platform !== "yahoo") return false;
+      if (!l.myRosterId || !l.teamName || l.teamName === "") return true;  // identity not yet resolved
+      if (l.playoffFinish == null && l.season)                return true;  // needs playoff check
+      if (l.leagueType === "redraft" && l.season)            return true;  // may be mis-classified
+      return false;
+    });
     if (!allYahoo.length) return;
 
     const CONCURRENCY = 2;
@@ -424,14 +529,20 @@ const Profile = (() => {
           const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
           const lm     = bundle.leagueMeta || {};
 
-          // Detect playoff finish from allMatchups when league is finished
+          // Detect playoff finish — run whenever playoff_start_week is set.
+          // Never overwrite an already-detected non-null finish with null.
           let playoffFinish = league.playoffFinish ?? null;
-          if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
-            playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
+          if (lm.playoff_start_week && bundle.allMatchups) {
+            const detected = _detectYahooPlayoffFinish(myId, bundle);
+            if (detected !== null) playoffFinish = detected;
           }
 
-          // Detect league type from Yahoo settings
-          const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "");
+          // Detect league type — preserve existing non-redraft value to avoid
+          // clobbering a dynasty/keeper league that was already correctly classified.
+          const detectedType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "");
+          const leagueType   = (league.leagueType && league.leagueType !== "redraft")
+            ? league.leagueType
+            : detectedType;
 
           if (_allLeagues[leagueKey]) {
             Object.assign(_allLeagues[leagueKey], {
