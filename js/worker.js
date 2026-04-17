@@ -393,7 +393,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       fetch(`${base}/league/${leagueKey}/teams;out=roster?format=json`,                  { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/scoreboard?format=json`,                        { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/transactions;types=add,drop,trade?format=json`, { headers: authHdr }),
-      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,                      { headers: authHdr }),
+      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,     { headers: authHdr }),
     ]);
 
   async function toJson(s) {
@@ -402,11 +402,6 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     if (!r.ok) return null;
     try { return await r.json(); } catch { return null; }
   }
-
-  // Capture draft fetch HTTP status for diagnosis — stored in _draftDebug below
-  const _draftFetchStatus = draftRes.status === "fulfilled"
-    ? `HTTP ${draftRes.value.status} ${draftRes.value.statusText || ""}`.trim()
-    : `rejected: ${draftRes.reason}`;
 
   const [settingsData, standingsData, rostersData, matchupsData, transactionsData, draftData] =
     await Promise.all([toJson(settingsRes), toJson(standingsRes), toJson(rostersRes), toJson(matchupsRes), toJson(transactionsRes), toJson(draftRes)]);
@@ -677,94 +672,86 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     }
   } catch(e) {}
 
-  // ── Draft results ─────────────────────────────────────────────────────────
-  // Yahoo draftresults endpoint returns picks in one of several shapes depending
-  // on league age and type. We try the most common shapes in order:
-  //
-  //   Shape 1 (flat array):   { draft_results: [ {pick,round,team_key,player_key}, ... ] }
-  //   Shape 2 (flat object):  { draft_results: { count:N, "0":{...}, "1":{...}, ... } }
-  //   Shape 3 (nested array): fantasy_content.league[1].draft_results[0].draft_result = array
-  //   Shape 4 (nested obj):   fantasy_content.league[1].draft_results[0].draft_result = count-keyed obj
-  //   Shape 5 (nested alt):   fantasy_content.league[1].draft_results = count-keyed obj
-  //
-  // _draftDebug is returned in the response so the frontend can log it for diagnosis.
-  // Remove _draftDebug from the return statement once draft parsing is confirmed working.
-  let draft = [];
-  let _draftDebug = {
-    shape: null, draftArrLen: 0, error: null,
-    draftFetchStatus: _draftFetchStatus,
-    topLevelKeys: null, dLeagueKeys: null, dResultsType: null,
-    dContainerKeys: null, draftRawType: null,
-  };
-  try {
-    _draftDebug.topLevelKeys = draftData ? Object.keys(draftData) : null;
+// ── Draft results ─────────────────────────────────────────────────────────
+let draft = [];
 
-    let draftArr = [];
+try {
+  let draftArr = [];
 
-    // ── Shape 1 / 2: draft_results directly on the response object ──────────
-    if (draftData?.draft_results !== undefined) {
-      const dr = draftData.draft_results;
-      if (Array.isArray(dr)) {
-        // Shape 1 — flat array of picks
-        draftArr = dr;
-        _draftDebug.shape = "flat-array";
-      } else if (dr && typeof dr === "object") {
-        // Shape 2 — count-keyed object: { count: N, "0": pick, "1": pick, ... }
-        const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
-        for (let i = 0; i < count; i++) { if (dr[String(i)]) draftArr.push(dr[String(i)]); }
-        _draftDebug.shape = "flat-object";
+  // Shape 1 / 2: direct draft_results
+  if (draftData?.draft_results !== undefined) {
+    const dr = draftData.draft_results;
+
+    if (Array.isArray(dr)) {
+      draftArr = dr;
+    } else if (dr && typeof dr === "object") {
+      const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
+      for (let i = 0; i < count; i++) {
+        if (dr[String(i)]) draftArr.push(dr[String(i)]);
       }
     }
+  }
 
-    // ── Shape 3 / 4 / 5: nested under fantasy_content.league ────────────────
-    if (!draftArr.length) {
-      const dLeague = draftData?.fantasy_content?.league;
-      _draftDebug.dLeagueKeys = dLeague ? Object.keys(dLeague) : null;
-      const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
-      const dResults = dLeague1?.draft_results;
-      _draftDebug.dResultsType = dResults === undefined ? "undefined"
-        : Array.isArray(dResults) ? "array" : typeof dResults;
+  // Shape 3+: nested under fantasy_content.league
+  if (!draftArr.length) {
+    const dLeague  = draftData?.fantasy_content?.league;
+    const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
+    const dResults = dLeague1?.draft_results;
 
-      let dContainer;
-      if (Array.isArray(dResults)) {
-        dContainer = dResults[0];
-      } else if (dResults && typeof dResults === "object") {
-        dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
-      }
-      _draftDebug.dContainerKeys = dContainer ? Object.keys(dContainer).slice(0, 10) : null;
+    let dContainer;
 
-      const draftRaw = dContainer?.draft_result;
-      _draftDebug.draftRawType = draftRaw === undefined ? "undefined"
-        : Array.isArray(draftRaw) ? "array" : typeof draftRaw;
-
-      if (Array.isArray(draftRaw)) {
-        draftArr = draftRaw;
-        _draftDebug.shape = "nested-array";
-      } else if (draftRaw && typeof draftRaw === "object") {
-        const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
-        for (let i = 0; i < count; i++) { if (draftRaw[String(i)]) draftArr.push(draftRaw[String(i)]); }
-        _draftDebug.shape = "nested-object";
-      }
+    if (Array.isArray(dResults)) {
+      dContainer = dResults[0];
+    } else if (dResults && typeof dResults === "object") {
+      dContainer = dResults.draft_result !== undefined
+        ? dResults
+        : (dResults["0"] || dResults);
     }
 
-    _draftDebug.draftArrLen = draftArr.length;
+    let draftRaw;
 
-    draftArr.forEach((pick, i) => {
-      if (!pick) return;
-      // flat shape uses team_key / player_key; nested shape may also use team_id / player_id
-      const rawPid = pick.player_key || pick.player_id;
-      const rawTid = pick.team_key   || pick.team_id;
-      draft.push({
-        pick:     parseInt(pick.pick   || i + 1),
-        round:    parseInt(pick.round  || 1),
-        teamId:   String(rawTid || "").split(".").pop(),   // "449.l.123.t.3" → "3"
-        playerId: yahooPlayerId(rawPid),                   // bare numeric
-        name:     pick.player_name || pick.name || "",
-        position: pick.position    || "?",
-        cost:     pick.cost != null ? parseInt(pick.cost) : null,
-      });
+    if (dResults && typeof dResults === "object" && dResults.count) {
+      draftRaw = dResults;
+    } else if (dContainer?.draft_result) {
+      draftRaw = dContainer.draft_result;
+    } else {
+      draftRaw = dContainer;
+    }
+
+    if (Array.isArray(draftRaw)) {
+      draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
+    } else if (draftRaw && typeof draftRaw === "object") {
+      const numericKeys = Object.keys(draftRaw).filter(k => !isNaN(k));
+
+      if (numericKeys.length > 0) {
+        numericKeys.forEach(k => {
+          const entry = draftRaw[k];
+          if (entry) draftArr.push(entry.draft_result || entry);
+        });
+      } else {
+        draftArr = [draftRaw];
+      }
+    }
+  }
+
+  draftArr.forEach((pick, i) => {
+    if (!pick) return;
+
+    const rawPid = pick.player_key || pick.player_id;
+    const rawTid = pick.team_key   || pick.team_id;
+
+    draft.push({
+      pick:     parseInt(pick.pick || i + 1),
+      round:    parseInt(pick.round || 1),
+      teamId:   String(rawTid || "").split(".").pop(),
+      playerId: yahooPlayerId(rawPid),
+      name:     pick.player_name || pick.name || "",
+      position: pick.position || "?",
+      cost:     pick.cost != null ? parseInt(pick.cost) : null,
     });
-  } catch(e) { _draftDebug.error = e.message; }
+  });
+
+} catch (e) {}
 
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
@@ -773,8 +760,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     currentWeek,         // most-recently-scored week
     teams, standings, rosters, matchups,
     allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
-    transactions, draft,
-    _draftDebug,         // temporary diagnostic — remove after draft parsing is confirmed working
+    transactions, draft, 
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
