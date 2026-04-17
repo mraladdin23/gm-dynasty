@@ -38,6 +38,19 @@ const Profile = (() => {
       avatar:           result.avatar,
       mostRecentSeason: result.mostRecentSeason
     });
+
+    // Mark past complete seasons as resolved at import time
+    const currentYear = new Date().getFullYear();
+    Object.values(result.leagues).forEach(l => {
+      if (parseInt(l.season || 0) < currentYear
+          && l.playoffFinish != null
+          && l.leagueType && l.leagueType !== "redraft"
+          && l.teamName && l.status === "complete") {
+        l.resolved   = true;
+        l.isChampion = l.playoffFinish === 1;
+      }
+    });
+
     await GMDB.saveLeagues(gmdUsername, result.leagues);
     await GMDB.recomputeStats(gmdUsername);
     return result;
@@ -184,6 +197,15 @@ const Profile = (() => {
           leaguesMap[key].isChampion    = finish === 1;
         }
       } catch(e) { /* non-fatal */ }
+
+      // Mark as resolved if all key fields confirmed for a past season
+      if (parseInt(season) < new Date().getFullYear()
+          && leaguesMap[key].playoffFinish != null
+          && leaguesMap[key].leagueType && leaguesMap[key].leagueType !== "redraft"
+          && leaguesMap[key].teamName) {
+        leaguesMap[key].resolved   = true;
+        leaguesMap[key].isChampion = leaguesMap[key].playoffFinish === 1;
+      }
     }
 
     for (let i = 0; i < leagues.length; i += BUNDLE_BATCH) {
@@ -463,7 +485,10 @@ const Profile = (() => {
     // myRosterId was set from the authoritative myleagues response on import.
     if (!_currentUsername || !_currentProfile?.platforms?.mfl?.linked) return 0;
 
-    const allMFL = Object.entries(_allLeagues).filter(([, l]) => l.platform === "mfl");
+    // Skip past-season MFL leagues already fully resolved — historical data never changes
+    const allMFL = Object.entries(_allLeagues).filter(([, l]) =>
+      l.platform === "mfl" && !_isFullyResolved(l)
+    );
     if (!allMFL.length) return 0;
 
     let matched = 0;
@@ -505,6 +530,15 @@ const Profile = (() => {
               } catch(e) { /* non-fatal */ }
             }
 
+            // Mark past-season leagues as resolved once all key fields are confirmed
+            if (_isPastSeason(_allLeagues[leagueKey])
+                && _allLeagues[leagueKey].playoffFinish != null
+                && _allLeagues[leagueKey].leagueType
+                && _allLeagues[leagueKey].leagueType !== "redraft"
+                && _allLeagues[leagueKey].teamName) {
+              _markResolved(_allLeagues[leagueKey]);
+            }
+
             GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
             matched++;
           }
@@ -515,6 +549,67 @@ const Profile = (() => {
     return matched;
   }
 
+  // ── Background Sleeper resolver ────────────────────────
+  // Marks completed past-season Sleeper leagues as resolved so they are never
+  // re-fetched. Sleeper already detects playoffFinish at import time (importUserLeagues
+  // calls getPlayoffFinish for every complete season), so this only needs to
+  // set the resolved flag on leagues that were imported before this logic existed.
+  async function _resolveSleeperIdentities(username) {
+    if (!username || !_currentProfile?.platforms?.sleeper?.linked) return;
+
+    const unresolved = Object.entries(_allLeagues).filter(([, l]) =>
+      l.platform === "sleeper" && _isPastSeason(l) && !l.resolved
+      && l.playoffFinish != null && l.leagueType && l.leagueType !== "redraft" && l.teamName
+    );
+
+    if (!unresolved.length) return;
+
+    for (const [leagueKey, league] of unresolved) {
+      _markResolved(_allLeagues[leagueKey]);
+      GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+    }
+
+    // For Sleeper leagues missing playoffFinish (imported before playoff detection was added),
+    // fetch the bracket now and detect finish.
+    const needsFinish = Object.entries(_allLeagues).filter(([, l]) =>
+      l.platform === "sleeper" && _isPastSeason(l) && !l.resolved
+      && l.playoffFinish == null && l.myRosterId && l.status === "complete"
+    );
+
+    if (!needsFinish.length) return;
+
+    const CONCURRENCY = 3;
+    for (let i = 0; i < needsFinish.length; i += CONCURRENCY) {
+      const batch = needsFinish.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
+        try {
+          const finish = await SleeperAPI.getPlayoffFinish(
+            league.leagueId, league.sleeperUserId || _currentProfile?.platforms?.sleeper?.sleeperUserId
+          );
+          if (_allLeagues[leagueKey]) {
+            _allLeagues[leagueKey].playoffFinish = finish;
+            _allLeagues[leagueKey].isChampion    = finish === 1;
+            _allLeagues[leagueKey].playoffResult = finish === 1 ? "champion"
+              : finish === 2 ? "finalist" : finish === 3 ? "third" : finish != null ? "playoffs" : null;
+            if (finish != null && _allLeagues[leagueKey].leagueType !== "redraft" && _allLeagues[leagueKey].teamName) {
+              _markResolved(_allLeagues[leagueKey]);
+            }
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+          }
+        } catch(e) { /* skip */ }
+      }));
+    }
+
+    try {
+      const stats = await GMDB.recomputeStats(username);
+      if (_currentProfile) _currentProfile.stats = stats;
+      _renderStatsRow(stats);
+    } catch(e) {}
+
+    _renderLeagues();
+    _renderCareerSummary(_currentProfile || {});
+  }
+
   // ── Background Yahoo identity resolution ───────────────
   // Finds Yahoo leagues missing myRosterId or teamName, fetches their bundle
   // non-blocking in small batches, and persists results to Firebase.
@@ -523,10 +618,11 @@ const Profile = (() => {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
     const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
       if (l.platform !== "yahoo") return false;
+      if (_isFullyResolved(l)) return false;                               // past season fully cached — skip
       if (!l.myRosterId || !l.teamName || l.teamName === "") return true;  // identity not yet resolved
       if (l.playoffFinish == null && l.season)                return true;  // needs playoff check
       if (l.leagueType === "redraft" && l.season)            return true;  // may be mis-classified
-      return false;
+      return true;                                                          // current season always refreshes
     });
     if (!allYahoo.length) return;
 
@@ -572,6 +668,11 @@ const Profile = (() => {
               isChampion:    playoffFinish === 1,
               leagueType:    leagueType,
             });
+            // Mark past-season leagues as resolved so they are never re-fetched
+            if (_isPastSeason(_allLeagues[leagueKey]) && playoffFinish !== null
+                && leagueType && leagueType !== "redraft") {
+              _markResolved(_allLeagues[leagueKey]);
+            }
             GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         } catch(e) { /* skip failed league silently */ }
@@ -685,6 +786,32 @@ const Profile = (() => {
     return "redraft";
   }
 
+  // ── Resolved flag helpers ────────────────────────────────────────────────
+  // A past-season league is "fully resolved" when all key fields are confirmed.
+  // Once resolved, it is NEVER re-fetched — historical data doesn't change.
+  const _CURRENT_YEAR = new Date().getFullYear();
+
+  function _isPastSeason(league) {
+    return parseInt(league.season || 0) < _CURRENT_YEAR;
+  }
+
+  function _isFullyResolved(league) {
+    if (!_isPastSeason(league)) return false;         // current season always re-checks
+    if (!league.resolved) return false;               // not yet marked resolved
+    return true;
+  }
+
+  // Mark a league as fully resolved — call after confirming all key fields are set.
+  // Also clears any stale isChampion=true that contradicts playoffFinish.
+  function _markResolved(leagueObj) {
+    leagueObj.resolved   = true;
+    // Ensure isChampion is consistent with playoffFinish
+    if (leagueObj.playoffFinish != null) {
+      leagueObj.isChampion = leagueObj.playoffFinish === 1;
+    }
+    return leagueObj;
+  }
+
   // ── Main locker render ─────────────────────────────────
 
   async function renderLocker(profile) {
@@ -746,17 +873,19 @@ const Profile = (() => {
     _renderLeagues();
     _renderCareerSummary(profile);
 
-    // ── Background Yahoo identity resolution ─────────────────
-    // Non-blocking: resolve myTeamId + teamName/record for any Yahoo league
-    // that doesn't yet have them stored. Same pattern as syncMFLTeams.
-    // Runs after first paint so it doesn't block the initial render.
-    if (profile.platforms?.yahoo?.linked) {
-      setTimeout(() => _resolveYahooIdentities(_currentUsername), 200);
-      // Recompute stats non-blocking so header reflects latest Yahoo leagues
-      GMDB.recomputeStats(_currentUsername).then(stats => {
-        if (stats) _renderStatsRow(stats);
-      }).catch(() => {});
+    // ── Background identity resolution (all platforms) ────────
+    // Non-blocking: resolves missing fields and marks fully-resolved past-season
+    // leagues so they are never re-fetched on subsequent page loads.
+    if (profile.platforms?.sleeper?.linked) {
+      setTimeout(() => _resolveSleeperIdentities(_currentUsername), 300);
     }
+    if (profile.platforms?.yahoo?.linked) {
+      setTimeout(() => _resolveYahooIdentities(_currentUsername), 500);
+    }
+    // Recompute stats so header reflects all platforms
+    GMDB.recomputeStats(_currentUsername).then(stats => {
+      if (stats) _renderStatsRow(stats);
+    }).catch(() => {});
   }
 
   function _renderAvatar(profile) {
