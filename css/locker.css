@@ -1592,6 +1592,19 @@ select option { background: var(--color-bg-2); }
   border-color: rgba(0,212,255,.4);
   color: var(--color-blue);
 }
+.draft-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.draft-pagination .draft-toggle-btn[disabled] {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
 
 .season-bar-label {
   font-size: .72rem;
