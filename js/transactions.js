@@ -617,16 +617,17 @@ const DLRTransactions = (() => {
                 };
               }
             } else {
-              // Not in CSV — try roster detailMap first, then tx name
-              const detail = detailMap[String(m.pid)];
+              // Not in CSV — try roster detailMap first, then move-level name/position
+              const detail  = detailMap[String(m.pid)];
               const nameStr = detail?.name || m.name || "";
+              const posStr  = detail?.position || m.position || "?";
               if (nameStr) {
                 const parts = nameStr.trim().split(" ");
                 _players[prefixedId] = {
                   first_name: parts.slice(0, -1).join(" ") || nameStr,
                   last_name:  parts.slice(-1)[0] || "",
-                  position: detail?.position || "?",
-                  fantasy_positions: [detail?.position || "?"],
+                  position: posStr,
+                  fantasy_positions: [posStr],
                   team: detail?.nflTeam || "FA",
                 };
               }
