@@ -16,6 +16,7 @@ const DLRTransactions = (() => {
   let _typeFilter  = "all";
   let _teamFilter  = "all";
   let _myRosterId  = null;   // current user's team ID — used to default-filter
+  let _txPage      = 0;      // current pagination page (25 per page)
 
   const TYPE_LABELS = {
     trade:      "🔄 Trades",
@@ -32,6 +33,7 @@ const DLRTransactions = (() => {
     _myRosterId  = myRosterId || null;
     _typeFilter  = "all";
     _teamFilter  = "all";
+    _txPage      = 0;
     _allTx       = [];
     _rosters     = [];
     _token++;
@@ -106,6 +108,8 @@ const DLRTransactions = (() => {
   }
 
   // ── Render full view with toolbar ────────────────────────
+  const TX_PAGE_SIZE = 25;
+
   function _renderView(el) {
     if (!el) el = document.getElementById("dtab-transactions");
     if (!el) return;
@@ -113,7 +117,10 @@ const DLRTransactions = (() => {
     const typeCounts = { all: _allTx.length };
     _allTx.forEach(t => { typeCounts[t.type] = (typeCounts[t.type]||0) + 1; });
 
-    const filtered = _filterTx();
+    const filtered   = _filterTx();
+    const totalPages = Math.ceil(filtered.length / TX_PAGE_SIZE);
+    const safePage   = Math.max(0, Math.min(_txPage, totalPages - 1));
+    const pageSlice  = filtered.slice(safePage * TX_PAGE_SIZE, safePage * TX_PAGE_SIZE + TX_PAGE_SIZE);
 
     // Team dropdown options
     const teamOpts = [
@@ -128,6 +135,15 @@ const DLRTransactions = (() => {
       ...Object.entries(TYPE_LABELS).map(([k,v]) =>
         `<option value="${k}" ${_typeFilter===k?"selected":""}>${v} (${typeCounts[k]||0})</option>`)
     ].join("");
+
+    const pagination = totalPages > 1 ? `
+      <div class="tx-pagination">
+        <button class="tx-page-btn" ${safePage === 0 ? "disabled" : ""}
+          onclick="DLRTransactions.setPage(${safePage - 1})">‹ Prev</button>
+        <span class="dim" style="font-size:.85rem">Page ${safePage + 1} of ${totalPages}</span>
+        <button class="tx-page-btn" ${safePage >= totalPages - 1 ? "disabled" : ""}
+          onclick="DLRTransactions.setPage(${safePage + 1})">Next ›</button>
+      </div>` : "";
 
     el.innerHTML = `
       <div class="tx-toolbar">
@@ -144,12 +160,11 @@ const DLRTransactions = (() => {
         </div>
       </div>
       <div class="tx-list">
-        ${filtered.length
-          ? filtered.slice(0,150).map(tx => _txRow(tx)).join("")
+        ${pageSlice.length
+          ? pageSlice.map(tx => _txRow(tx)).join("")
           : `<div class="tx-empty">No transactions match the selected filters.</div>`}
-        ${filtered.length > 150
-          ? `<div class="tx-more dim">Showing 150 of ${filtered.length}</div>` : ""}
-      </div>`;
+      </div>
+      ${pagination}`;
   }
 
   // ── Filter logic ──────────────────────────────────────────
@@ -254,7 +269,9 @@ const DLRTransactions = (() => {
 
     const name = p.first_name
       ? `${p.first_name[0]}. ${p.last_name}`
-      : pid?.startsWith("mfl_") ? `#${pid.slice(4)}` : (pid||"?");
+      : pid?.startsWith("mfl_")   ? `#${pid.slice(4)}`
+      : pid?.startsWith("yahoo_") ? `Player ${pid.slice(6)}`
+      : (pid||"?");
     const pos  = (p.fantasy_positions?.[0] || p.position || "").toUpperCase();
     const posColor = {QB:"#b89ffe",RB:"#18e07a",WR:"#00d4ff",TE:"#ffc94d"}[pos] || "#9ca3af";
     const cls  = `tx-chip tx-chip--${chipType}`;
@@ -539,10 +556,17 @@ const DLRTransactions = (() => {
     teams.forEach(t => { teamMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
     _rosters = teams.map(t => ({
-      roster_id: t.id,
+      roster_id: String(t.id),
       teamName:  t.name || `Team ${t.id}`,
       username:  ""
     })).sort((a,b) => a.teamName.localeCompare(b.teamName));
+
+    // Build detailMap from roster playerDetails for player bio fallback
+    // (covers players not in DynastyProcess CSV — DEF, kickers, older players)
+    const detailMap = {};
+    (bundle.rosters || []).forEach(r => {
+      (r.playerDetails || []).forEach(d => { if (d.id) detailMap[String(d.id)] = d; });
+    });
 
     const txArr = bundle.transactions || [];
     if (!txArr.length) {
@@ -554,17 +578,28 @@ const DLRTransactions = (() => {
 
     _allTx = txArr.map(tx => {
       const type   = YAHOO_TYPE_MAP[tx.type] || "free_agent";
-      const teamId = String(tx.teamId || "");
       const ts     = Number(tx.timestamp || 0) * 1000;
       const adds = {}, drops = {};
 
       // Use moves[] (structured player data with bare numeric pid) if available,
       // otherwise fall back to parsing the description string.
       const moves = tx.moves || [];
+
+      // Derive teamId: tx.teamId is set for adds/drops at the tx level, but for
+      // some Yahoo response shapes it may be empty. Fall back to first destTeamId
+      // or srcTeamId found in moves so _teamName() always has something to work with.
+      let teamId = String(tx.teamId || "");
+      if (!teamId && moves.length) {
+        for (const m of moves) {
+          teamId = String(m.destTeamId || m.srcTeamId || "");
+          if (teamId) break;
+        }
+      }
+
       if (moves.length) {
         moves.forEach(m => {
           const prefixedId = `yahoo_${m.pid}`;
-          // Populate _players via DynastyProcess CSV if not already present
+          // Populate _players via DynastyProcess CSV → Sleeper → detailMap → tx name
           if (!_players[prefixedId] && m.pid) {
             const map = DLRPlayers.getByYahooId(m.pid);
             if (map) {
@@ -577,17 +612,24 @@ const DLRTransactions = (() => {
                   first_name: parts.slice(0, -1).join(" ") || map.name || "",
                   last_name:  parts.slice(-1)[0] || "",
                   position: map.position || "?",
-                  fantasy_positions: [map.position || "?"]
+                  fantasy_positions: [map.position || "?"],
+                  team: map.team || "FA",
                 };
               }
-            } else if (m.name) {
-              // Not in CSV — use the name from the transaction itself
-              const parts = m.name.trim().split(" ");
-              _players[prefixedId] = {
-                first_name: parts.slice(0, -1).join(" ") || m.name,
-                last_name:  parts.slice(-1)[0] || "",
-                position: "?", fantasy_positions: ["?"]
-              };
+            } else {
+              // Not in CSV — try roster detailMap first, then tx name
+              const detail = detailMap[String(m.pid)];
+              const nameStr = detail?.name || m.name || "";
+              if (nameStr) {
+                const parts = nameStr.trim().split(" ");
+                _players[prefixedId] = {
+                  first_name: parts.slice(0, -1).join(" ") || nameStr,
+                  last_name:  parts.slice(-1)[0] || "",
+                  position: detail?.position || "?",
+                  fantasy_positions: [detail?.position || "?"],
+                  team: detail?.nflTeam || "FA",
+                };
+              }
             }
           }
           const destId = m.destTeamId ? String(m.destTeamId) : teamId;
@@ -633,11 +675,18 @@ const DLRTransactions = (() => {
   // ── Public filter setters ─────────────────────────────────
   function setType(t) {
     _typeFilter = t;
+    _txPage     = 0;   // reset to first page on filter change
     _renderView();
   }
 
   function setTeam(t) {
     _teamFilter = t;
+    _txPage     = 0;   // reset to first page on filter change
+    _renderView();
+  }
+
+  function setPage(p) {
+    _txPage = p;
     _renderView();
   }
 
@@ -649,5 +698,5 @@ const DLRTransactions = (() => {
     return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
-  return { init, setType, setTeam };
+  return { init, setType, setTeam, setPage };
 })();

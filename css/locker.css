@@ -5336,6 +5336,30 @@ select option { background: var(--color-bg-2); }
 .tx-empty { padding: var(--space-8); text-align: center; color: var(--color-text-dim); font-size: .88rem; }
 .tx-more  { text-align: center; padding: var(--space-3); font-size: .78rem; }
 
+.tx-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.tx-page-btn {
+  /* reuse draft-toggle-btn styles or define standalone */
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: .85rem;
+}
+.tx-page-btn[disabled] {
+  opacity: .35;
+  cursor: default;
+  pointer-events: none;
+}
+
 @media (max-width: 640px) {
   .tx-filters { gap: var(--space-2); }
   .tx-select  { font-size: .72rem; padding: 3px 6px; }
