@@ -141,8 +141,7 @@ img { max-width: 100%; display: block; }
 /* ── Screens ──────────────────────────────────────────── */
 .screen {
   display: none;
-  min-height: 100vh;    /* fallback */
-  min-height: 100dvh;   /* dynamic: excludes browser chrome on mobile */
+  min-height: 100vh;
   width: 100vw;        /* always full viewport width */
   max-width: 100%;
   position: relative;

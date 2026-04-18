@@ -979,9 +979,8 @@ const DLRStandings = (() => {
           return;
         }
 
-        const allMu      = _yahooBundle.allMatchups || {};
-        const numPoTeams = lm.num_playoff_teams || 0;
-        const poWeeks    = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
+        const allMu   = _yahooBundle.allMatchups || {};
+        const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
 
         if (!poWeeks.length) {
           el.innerHTML = `<div class="playoffs-pending">
@@ -990,24 +989,6 @@ const DLRStandings = (() => {
             <div class="playoffs-sub">Playoffs begin week ${poStart}. Regular season ends week ${poStart - 1}.</div>
           </div>`;
           return;
-        }
-
-        // Build playoff team set — only top-N seeds made the championship bracket.
-        // Without this, consolation games (for non-playoff teams) pollute the bracket.
-        let playoffTeamSet = null;
-        if (numPoTeams > 0 && stndgs.length) {
-          const sorted = [...stndgs].sort((a, b) => (a.rank || 99) - (b.rank || 99));
-          playoffTeamSet = new Set(sorted.slice(0, numPoTeams).map(s => String(s.teamId)));
-        }
-
-        // Filter each week's games to championship bracket only
-        function champGames(week) {
-          const mus = allMu[week] || [];
-          if (!playoffTeamSet) return mus;
-          return mus.filter(m =>
-            playoffTeamSet.has(String(m.home?.teamId ?? "")) &&
-            playoffTeamSet.has(String(m.away?.teamId ?? ""))
-          );
         }
 
         function teamLabel(id) {
@@ -1057,10 +1038,10 @@ const DLRStandings = (() => {
         // Split into regular rounds and finals
         const regularWeeks = poWeeks.slice(0, -1);
         const finalWeek    = poWeeks[poWeeks.length - 1];
-        const finalMus     = champGames(finalWeek);
+        const finalMus     = allMu[finalWeek] || [];
 
         const cols = regularWeeks.map((w, ri) => {
-          const games = champGames(w).map(m => bracketCard(m)).join("");
+          const games = (allMu[w] || []).map(m => bracketCard(m)).join("");
           return `<div class="bracket-section">
             <div class="bracket-section-label">${roundLabel(ri)}</div>
             <div class="bracket-section-games">${games || '<div class="bracket-tbd">TBD</div>'}</div>
@@ -1525,142 +1506,62 @@ const DLRStandings = (() => {
     const nameMap    = {};
     teams.forEach(t => { nameMap[String(t.id)] = t.name || `Team ${t.id}`; });
 
-    // Build standings lookup for season record
-    const standingsMap = {};
-    (bundle.standings || []).forEach(s => { standingsMap[String(s.teamId)] = s; });
-
     // Determine available weeks
     const availWeeks = Object.keys(allMu).map(Number).filter(w => w > 0).sort((a, b) => a - b);
+    // Fall back to current bundle matchups if allMatchups is empty
     const fallbackMus = bundle.matchups || [];
     if (!availWeeks.length && !fallbackMus.length) {
       el.innerHTML = `<div class="empty-state">No matchup data available.</div>`;
       return;
     }
 
+    // Default to current week or most recent scored week
     const defaultWeek = bundle.currentWeek
       || (availWeeks.length ? availWeeks[availWeeks.length - 1] : (fallbackMus[0]?.week || 1));
     let selectedWeek = _yahooSelectedWeek || defaultWeek;
+    // Clamp to available range
     if (availWeeks.length && !availWeeks.includes(selectedWeek)) {
       selectedWeek = availWeeks[availWeeks.length - 1];
     }
     _yahooSelectedWeek = selectedWeek;
 
     const playoffStart = lm.playoff_start_week || 0;
+    const endWeek      = lm.end_week           || Math.max(...availWeeks, 17);
 
-    // Per-week detail cache: week → { [homeId_awayId]: {home:[],away:[]} }
-    const _detailCache = {};
+    function _renderWeek(week) {
+      _yahooSelectedWeek = week;
+      const weekMus = allMu[week] || (week === fallbackMus[0]?.week ? fallbackMus : []);
 
-    const POS_COLOR = {
-      QB:"var(--color-orange,#f97316)", RB:"var(--color-green)", WR:"var(--color-cyan,#22d3ee)",
-      TE:"var(--color-purple,#a855f7)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)",
-      DL:"var(--color-text-dim)", LB:"var(--color-text-dim)", CB:"var(--color-text-dim)",
-      S:"var(--color-text-dim)", DB:"var(--color-text-dim)",
-    };
-
-    // Canonical slot order for sorting starters
-    const SLOT_ORDER = ["QB","WR","RB","TE","W/R","W/R/T","W/T","Q/W/R/T","FLEX","SF","K","DEF","BN","IR"];
-    const slotRank = s => { const i = SLOT_ORDER.indexOf(s); return i < 0 ? 50 : i; };
-
-    // Build card HTML for a week's matchups, optionally with detail data injected
-    function _buildCards(weekMus, detailByKey) {
-      const fmt = n => (n || 0).toFixed(2);
-
-      return weekMus.map(m => {
-        const hId   = String(m.home?.teamId ?? "");
-        const aId   = String(m.away?.teamId ?? "");
-        const hSc   = m.home?.score ?? 0;
-        const aSc   = m.away?.score ?? 0;
-        const hWin  = m.winnerTeamId ? m.winnerTeamId === hId : hSc > aSc && hSc > 0;
-        const aWin  = m.winnerTeamId ? m.winnerTeamId === aId : aSc > hSc && aSc > 0;
-        const hMe   = myTeamId && hId === String(myTeamId);
-        const aMe   = myTeamId && aId === String(myTeamId);
+      const cards = weekMus.map(m => {
+        const hId  = String(m.home?.teamId ?? "");
+        const aId  = String(m.away?.teamId ?? "");
+        const hSc  = m.home?.score ?? 0;
+        const aSc  = m.away?.score ?? 0;
+        const hWin = m.winnerTeamId ? m.winnerTeamId === hId : hSc > aSc;
+        const aWin = m.winnerTeamId ? m.winnerTeamId === aId : aSc > hSc;
+        const hMe  = myTeamId && hId === String(myTeamId);
+        const aMe  = myTeamId && aId === String(myTeamId);
         const hName = nameMap[hId] || `Team ${hId || "?"}`;
         const aName = nameMap[aId] || `Team ${aId || "?"}`;
-        const inProg = hSc > 0 || aSc > 0 || !!m.winnerTeamId;
+        const fmt   = n => (n || 0).toFixed(2);
+        const status = m.status || "";
+        const inProg = status === "midevent" || status === "postevent" || hSc > 0 || aSc > 0;
 
-        const hSt  = standingsMap[hId] || {};
-        const aSt  = standingsMap[aId] || {};
+        // Look up season record + total points from standings for the expand detail
+        const standingsMap = {};
+        (bundle.standings || []).forEach(s => { standingsMap[String(s.teamId)] = s; });
+        const hSt = standingsMap[hId] || {};
+        const aSt = standingsMap[aId] || {};
         const hRec = `${hSt.wins ?? "?"}–${hSt.losses ?? "?"}`;
         const aRec = `${aSt.wins ?? "?"}–${aSt.losses ?? "?"}`;
-
-        // Detail: player-score side-by-side rows
-        const cacheKey = `${hId}_${aId}`;
-        const detail   = detailByKey?.[cacheKey];
-
-        let detailHTML;
-        if (detail === "loading") {
-          detailHTML = `<div class="mu-detail hidden" style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--color-text-dim);font-size:.8rem">Loading lineup…</div>`;
-        } else if (detail && (detail.home?.length || detail.away?.length)) {
-          // Sort starters by slot, bench at bottom
-          const sortPlayers = ps => {
-            const st = ps.filter(p => p.isStarter).sort((a, b) => slotRank(a.slot) - slotRank(b.slot));
-            const bn = ps.filter(p => !p.isStarter);
-            return { starters: st, bench: bn };
-          };
-          const { starters: stH, bench: bnH } = sortPlayers(detail.home || []);
-          const { starters: stA, bench: bnA } = sortPlayers(detail.away || []);
-          const numRows = Math.max(stH.length, stA.length);
-
-          let rows = "";
-          for (let i = 0; i < numRows; i++) {
-            const ph   = stH[i], pa = stA[i];
-            // Use the slot label from whichever side has it; they should match by index
-            const slot = ph?.slot || pa?.slot || "FLEX";
-            const col  = POS_COLOR[ph?.pos || pa?.pos || ""] || "var(--color-text-dim)";
-            const ptsH = ph?.pts ?? null;
-            const ptsA = pa?.pts ?? null;
-            const hBetter = ptsH != null && ptsA != null && ptsH > ptsA;
-            const aBetter = ptsA != null && ptsH != null && ptsA > ptsH;
-            rows += `<div class="mu-sbs-row">
-              <span class="mu-pts ${hBetter ? "mu-pts--win" : ""}">${ptsH != null ? ptsH.toFixed(2) : "—"}</span>
-              <span class="mu-name mu-name--left">${ph ? _esc(ph.name || ph.pid) : "—"}</span>
-              <span class="mu-slot" style="color:${col}">${_esc(slot)}</span>
-              <span class="mu-name mu-name--right">${pa ? _esc(pa.name || pa.pid) : "—"}</span>
-              <span class="mu-pts mu-pts--right ${aBetter ? "mu-pts--win" : ""}">${ptsA != null ? ptsA.toFixed(2) : "—"}</span>
-            </div>`;
-          }
-
-          if (bnH.length || bnA.length) {
-            rows += `<div class="mu-bench-header">Bench</div>`;
-            const maxBn = Math.max(bnH.length, bnA.length);
-            for (let i = 0; i < maxBn; i++) {
-              const ph = bnH[i], pa = bnA[i];
-              rows += `<div class="mu-sbs-row mu-sbs-row--bench">
-                <span class="mu-pts dim">${ph ? ph.pts.toFixed(2) : ""}</span>
-                <span class="mu-name mu-name--left dim">${ph ? _esc(ph.name || ph.pid) : ""}</span>
-                <span class="mu-slot dim">BN</span>
-                <span class="mu-name mu-name--right dim">${pa ? _esc(pa.name || pa.pid) : ""}</span>
-                <span class="mu-pts mu-pts--right dim">${pa ? pa.pts.toFixed(2) : ""}</span>
-              </div>`;
-            }
-          }
-
-          detailHTML = `<div class="mu-detail hidden">
-            <div class="mu-sbs-header">
-              <span></span>
-              <span class="mu-sbs-team">${_esc(hName)} <span style="font-weight:400;color:var(--color-text-dim);font-size:.72rem">${hRec}</span></span>
-              <span class="mu-sbs-pos">SLOT</span>
-              <span class="mu-sbs-team" style="text-align:right">${_esc(aName)} <span style="font-weight:400;color:var(--color-text-dim);font-size:.72rem">${aRec}</span></span>
-              <span></span>
-            </div>
-            ${rows}
-          </div>`;
-        } else {
-          // No detail yet — show record summary, will upgrade once detail loads
-          detailHTML = `<div class="mu-detail hidden" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-3) var(--space-4)">
-            <div style="display:flex;justify-content:space-between">
-              <span>${_esc(hName)}: ${hRec}</span>
-              <span>${_esc(aName)}: ${aRec}</span>
-            </div>
-          </div>`;
-        }
+        const hPF  = hSt.ptsFor ? hSt.ptsFor.toFixed(1) : "—";
+        const aPF  = aSt.ptsFor ? aSt.ptsFor.toFixed(1) : "—";
 
         return `
-          <div class="mu-card" data-hid="${hId}" data-aid="${aId}"
-               onclick="this.querySelector('.mu-detail').classList.toggle('hidden');DLRStandings._yahooExpandMatchup(this,${selectedWeek})">
+          <div class="mu-card" onclick="this.querySelector('.mu-detail').classList.toggle('hidden')">
             <div class="mu-header">
               <div class="mu-team${hMe ? " mu-team--me" : ""}">
-                <div class="st-av" style="${hMe ? "background:var(--color-gold);color:#000;" : ""}">${(hName[0]||"?").toUpperCase()}</div>
+                <div class="st-av" style="${hMe ? "background:var(--color-gold);color:#000;" : ""}">${hName[0]?.toUpperCase() || "?"}</div>
                 <span class="${hWin ? "fw-700" : ""}">${_esc(hName)}</span>
               </div>
               <div class="mu-scores">
@@ -1670,139 +1571,42 @@ const DLRStandings = (() => {
               </div>
               <div class="mu-team mu-team--right${aMe ? " mu-team--me" : ""}">
                 <span class="${aWin ? "fw-700" : ""}">${_esc(aName)}</span>
-                <div class="st-av" style="${aMe ? "background:var(--color-gold);color:#000;" : ""}">${(aName[0]||"?").toUpperCase()}</div>
+                <div class="st-av" style="${aMe ? "background:var(--color-gold);color:#000;" : ""}">${aName[0]?.toUpperCase() || "?"}</div>
               </div>
             </div>
-            ${detailHTML}
+            <div class="mu-detail hidden" style="font-size:.75rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) var(--space-3)">
+              ${_esc(hName)}: ${hRec}, ${hPF} pts &nbsp;|&nbsp; ${_esc(aName)}: ${aRec}, ${aPF} pts
+            </div>
           </div>`;
       }).join("");
-    }
 
-    async function _fetchDetail(week) {
-      if (_detailCache[week]) return _detailCache[week];
-      _detailCache[week] = {};  // mark as in-flight
+      document.getElementById("yahoo-matchups-cards").innerHTML =
+        weekMus.length ? `<div class="matchups-grid">${cards}</div>`
+          : `<div class="empty-state">No matchups for week ${week}.</div>`;
 
-      try {
-        const token = await YahooAPI._getValidToken();
-        const leagueKey = _leagueKey
-          || bundle.league?.league_key
-          || _leagueData?.leagueKey;
-
-        if (!token || !leagueKey) return {};
-
-        const res = await fetch(`${YahooAPI._workerBase}/yahoo/matchupDetail`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ access_token: token, league_key: leagueKey, week })
-        });
-        if (!res.ok) return {};
-        const data = await res.json();
-
-        const byKey = {};
-        (data.matchups || []).forEach(mu => {
-          byKey[`${mu.homeId}_${mu.awayId}`] = { home: mu.home, away: mu.away };
-        });
-        _detailCache[week] = byKey;
-        return byKey;
-      } catch(e) {
-        console.warn("[Yahoo] matchupDetail fetch failed:", e.message);
-        return {};
-      }
-    }
-
-    async function _renderWeek(week) {
-      _yahooSelectedWeek = week;
-      const weekMus = allMu[week] || (week === fallbackMus[0]?.week ? fallbackMus : []);
-
-      const cardsEl = document.getElementById("yahoo-matchups-cards");
-      if (!cardsEl) return;
-
-      if (!weekMus.length) {
-        cardsEl.innerHTML = `<div class="empty-state">No matchups for week ${week}.</div>`;
-        _updatePills(week);
-        return;
-      }
-
-      // Render immediately with whatever detail we already have cached
-      const cached = _detailCache[week] || null;
-      cardsEl.innerHTML = `<div class="matchups-grid">${_buildCards(weekMus, cached)}</div>`;
-      _updatePills(week);
-
-      // If we don't have detail yet, fetch it and re-render
-      if (!cached) {
-        // Mark each card as loading so expand shows spinner
-        weekMus.forEach(m => {
-          const hId = String(m.home?.teamId ?? "");
-          const aId = String(m.away?.teamId ?? "");
-          _detailCache[week] = _detailCache[week] || {};
-          _detailCache[week][`${hId}_${aId}`] = "loading";
-        });
-
-        const detail = await _fetchDetail(week);
-        // Only re-render if week hasn't changed while we were fetching
-        if (_yahooSelectedWeek === week) {
-          cardsEl.innerHTML = `<div class="matchups-grid">${_buildCards(weekMus, detail)}</div>`;
-        }
-      }
-    }
-
-    function _updatePills(week) {
       document.querySelectorAll(".yahoo-week-pill").forEach(p => {
-        p.classList.toggle("season-pill--current", parseInt(p.dataset.week) === week);
+        p.classList.toggle("matchups-week-pill--active", parseInt(p.dataset.week) === week);
       });
     }
 
-    // Build week pill bar — same season-pill class as Sleeper/MFL
+    // Build week pill bar
     const pills = availWeeks.map(w => {
-      const isActive = w === selectedWeek;
-      const isPO     = playoffStart > 0 && w >= playoffStart;
-      return `<button class="season-pill yahoo-week-pill${isActive ? " season-pill--current" : ""}${isPO ? " season-pill--playoff" : ""}"
+      const isActive  = w === selectedWeek;
+      const isPO      = playoffStart > 0 && w >= playoffStart;
+      return `<button class="matchups-week-pill yahoo-week-pill${isActive ? " matchups-week-pill--active" : ""}${isPO ? " matchups-week-pill--playoff" : ""}"
         data-week="${w}" onclick="DLRStandings._yahooPickWeek(${w})">${isPO ? "🏆" : ""}${w}</button>`;
     }).join("");
 
     el.innerHTML = `
-      <div class="matchups-week-bar">
-        <span class="matchups-week-label">Week:</span>
+      <div class="matchups-week-bar" style="flex-wrap:wrap;gap:var(--space-1)">
+        <span class="matchups-week-label">Week</span>
         <div class="matchups-week-pills">${pills}</div>
       </div>
       <div id="yahoo-matchups-cards"></div>`;
 
     _renderWeek(selectedWeek);
+    // Expose week picker callback on the module's public surface
     DLRStandings._yahooPickWeek = (w) => _renderWeek(w);
-
-    // Expand handler: if detail not yet loaded for this card, re-render detail panel
-    DLRStandings._yahooExpandMatchup = async (cardEl, week) => {
-      const hId      = cardEl.dataset.hid;
-      const aId      = cardEl.dataset.aid;
-      const cacheKey = `${hId}_${aId}`;
-      const detail   = _detailCache[week];
-      if (detail && detail[cacheKey] && detail[cacheKey] !== "loading") return; // already have it
-
-      // Fetch and upgrade just this card's detail panel
-      const fullDetail = await _fetchDetail(week);
-      const cardDetail = fullDetail[cacheKey];
-      if (!cardDetail) return;
-
-      const weekMus = allMu[week] || (week === fallbackMus[0]?.week ? fallbackMus : []);
-      const matchup = weekMus.find(m =>
-        String(m.home?.teamId) === hId && String(m.away?.teamId) === aId
-      );
-      if (!matchup) return;
-
-      // Re-render just this card's detail div
-      const detailEl = cardEl.querySelector(".mu-detail");
-      if (!detailEl) return;
-
-      // Reuse _buildCards to build a single card and extract its detail HTML
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = _buildCards([matchup], { [cacheKey]: cardDetail });
-      const newDetail = tempDiv.querySelector(".mu-detail");
-      if (newDetail) {
-        const wasOpen = !detailEl.classList.contains("hidden");
-        detailEl.replaceWith(newDetail);
-        if (wasOpen) newDetail.classList.remove("hidden");
-      }
-    };
   }
 
   function _renderMFLStandings(el, rawLeague, standings, leagueId, season, leagueInfo, myRosterId, bundle, _unused) {
@@ -2054,8 +1858,7 @@ const DLRStandings = (() => {
     initPlayoffs, _mflLoadWeek, _mflLoadBracket,
     _showAllDivisions, _selectDivision,
     getSelectedDivId: () => _mflSelectedDivId,
-    _yahooPickWeek: (w) => {},          // overwritten by _renderYahooMatchups at runtime
-    _yahooExpandMatchup: () => {},      // overwritten by _renderYahooMatchups at runtime
+    _yahooPickWeek: (w) => {},  // overwritten by _renderYahooMatchups at runtime
   };
 
 })();

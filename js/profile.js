@@ -38,19 +38,6 @@ const Profile = (() => {
       avatar:           result.avatar,
       mostRecentSeason: result.mostRecentSeason
     });
-
-    // Mark past complete seasons as resolved at import time
-    const currentYear = new Date().getFullYear();
-    Object.values(result.leagues).forEach(l => {
-      if (parseInt(l.season || 0) < currentYear
-          && l.playoffFinish != null
-          && l.leagueType && l.leagueType !== "redraft"
-          && l.teamName && l.status === "complete") {
-        l.resolved   = true;
-        l.isChampion = l.playoffFinish === 1;
-      }
-    });
-
     await GMDB.saveLeagues(gmdUsername, result.leagues);
     await GMDB.recomputeStats(gmdUsername);
     return result;
@@ -184,31 +171,10 @@ const Profile = (() => {
         pointsFor:      Number(mySt.pf        || mySt.PF     || 0),
         pointsAgainst:  Number(mySt.pa        || mySt.PA     || 0),
         standing:       Number(mySt.rank)     || null,
-        playoffFinish:  null,   // populated below after bracket fetch
+        playoffFinish:  null,
         isChampion:     false,
         isGuillotine,
       };
-
-      // Detect playoff finish for past seasons (async bracket fetch)
-      try {
-        const finish = await _detectMFLPlayoffFinish(myFranchiseId, bundle, leagueId, season, isGuillotine);
-        if (finish !== null) {
-          leaguesMap[key].playoffFinish = finish;
-          leaguesMap[key].isChampion    = finish === 1;
-        }
-      } catch(e) { /* non-fatal */ }
-
-      // Mark as resolved if all key fields confirmed for a past season.
-      // Eliminator/guillotine leagues are leagueType "redraft" but still have
-      // playoff finishes — use isGuillotine to allow them through.
-      if (parseInt(season) < new Date().getFullYear()
-          && leaguesMap[key].playoffFinish != null
-          && leaguesMap[key].leagueType
-          && (leaguesMap[key].leagueType !== "redraft" || isGuillotine)
-          && leaguesMap[key].teamName) {
-        leaguesMap[key].resolved   = true;
-        leaguesMap[key].isChampion = leaguesMap[key].playoffFinish === 1;
-      }
     }
 
     for (let i = 0; i < leagues.length; i += BUNDLE_BATCH) {
@@ -309,111 +275,10 @@ const Profile = (() => {
   }
 
   function _detectMFLLeagueType(name) {
-    const n = (name || "").toLowerCase();
-    if (n.includes("dynasty"))                                              return "dynasty";
-    if (n.includes("keeper"))                                               return "keeper";
-    if (n.includes("redraft"))                                              return "redraft";
-    if (n.includes("salary") || n.includes("sal cap") || n.includes("auction")) return "salary";
+    const n = name.toLowerCase();
+    if (n.includes("dynasty")) return "dynasty";
+    if (n.includes("keeper"))  return "keeper";
     return "redraft";
-  }
-
-  // ── MFL playoff finish detection ──────────────────────────────────────────
-  // Path 1 (bracket leagues): fetches the championship bracket, walks rounds
-  // from final to first to find placement.
-  // Path 2 (no-bracket/guillotine): falls back to standings rank (≤ 8 only).
-  // Only runs for past seasons (leagueYear < currentYear).
-  async function _detectMFLPlayoffFinish(myRosterId, bundle, leagueId, season, isGuillotine) {
-    if (!myRosterId) return null;
-    const currentYear = new Date().getFullYear();
-    const leagueYear  = parseInt(season) || currentYear;
-    if (leagueYear >= currentYear) return null;
-
-    const myId = String(myRosterId);
-
-    // ── Path 1: Bracket leagues ─────────────────────────────────────────────
-    // Skip entirely for guillotine/eliminator — they use standings rank, not brackets.
-    const brackets = isGuillotine ? [] : MFLAPI.normalizePlayoffBrackets(bundle);
-    if (brackets.length) {
-      const champBracket = brackets.find(b =>
-        (b.name || "").toLowerCase().includes("champ") ||
-        (b.name || "").toLowerCase().includes("winner")
-      ) || brackets[0];
-
-      try {
-        const data   = await MFLAPI.getPlayoffBracket(leagueId, season, champBracket.id);
-        const rounds = MFLAPI.normalizePlayoffBracketResult(data);
-        if (!rounds.length) return null;
-
-        // Helper: determine winner of a game using scores directly (won flag
-        // is false when one score is 0, so we can't rely on it for decided games)
-        function gameWinner(game) {
-          const hSc = game.home?.score ?? 0;
-          const aSc = game.away?.score ?? 0;
-          if (hSc > 0 && aSc > 0) return hSc > aSc ? game.home.id : game.away.id;
-          if (hSc > 0 && aSc === 0) return game.home.id;  // forfeit / bye
-          if (aSc > 0 && hSc === 0) return game.away.id;
-          return null;  // game not yet played
-        }
-
-        const finalRound = rounds[rounds.length - 1];
-
-        // Championship game = first game of final round
-        const champGame = finalRound?.matchups?.[0];
-        if (champGame) {
-          const hId   = String(champGame.home?.id || "");
-          const aId   = String(champGame.away?.id || "");
-          const winId = gameWinner(champGame);
-          if (hId === myId || aId === myId) {
-            if (!winId) return null;  // game not yet played
-            return winId === myId ? 1 : 2;
-          }
-        }
-
-        // Consolation games in final round (3rd place, 5th place, ...)
-        for (let gi = 1; gi < (finalRound?.matchups?.length || 0); gi++) {
-          const game  = finalRound.matchups[gi];
-          const hId   = String(game.home?.id || "");
-          const aId   = String(game.away?.id || "");
-          const winId = gameWinner(game);
-          if (hId === myId || aId === myId) {
-            if (!winId) return null;
-            const place = gi * 2 + 1;   // 3rd, 5th, 7th...
-            return winId === myId ? place : place + 1;
-          }
-        }
-
-        // Not in final round — find earliest round where they appear and lost
-        for (let ri = rounds.length - 2; ri >= 0; ri--) {
-          for (const game of (rounds[ri].matchups || [])) {
-            const hId = String(game.home?.id || "");
-            const aId = String(game.away?.id || "");
-            if (hId === myId || aId === myId) {
-              const roundsFromFinal = rounds.length - 1 - ri;
-              return Math.pow(2, roundsFromFinal) + 1;
-            }
-          }
-        }
-        return null;  // not in any bracket game
-      } catch(e) {
-        // Bracket fetch failed — fall through to standings fallback
-      }
-    }
-
-    // ── Path 2: No-bracket / guillotine leagues ──────────────────────────────
-    // For eliminator/guillotine leagues rank = final standing = playoff finish.
-    // For bracket leagues that had no bracket data, only trust top-8 ranks.
-    const standingsRaw = bundle?.standings?.leagueStandings?.franchise;
-    const standingsArr = standingsRaw
-      ? (Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw])
-      : [];
-    const mySt = standingsArr.find(f => String(f.id) === myId);
-    if (!mySt) return null;
-    const rank    = parseInt(mySt.rank) || null;
-    if (!rank) return null;
-    // Guillotine/eliminator: every rank is meaningful (last surviving = 1st)
-    // Bracket leagues with no bracket: only trust top 8 to avoid noise
-    const maxRank = isGuillotine ? 999 : 8;
-    return rank <= maxRank ? rank : null;
   }
 
   // ── League meta (pins, labels, archive) ───────────────
@@ -495,10 +360,7 @@ const Profile = (() => {
     // myRosterId was set from the authoritative myleagues response on import.
     if (!_currentUsername || !_currentProfile?.platforms?.mfl?.linked) return 0;
 
-    // Skip past-season MFL leagues already fully resolved — historical data never changes
-    const allMFL = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "mfl" && !_isFullyResolved(l)
-    );
+    const allMFL = Object.entries(_allLeagues).filter(([, l]) => l.platform === "mfl");
     if (!allMFL.length) return 0;
 
     let matched = 0;
@@ -528,28 +390,6 @@ const Profile = (() => {
             _allLeagues[leagueKey].ties        = mySt.ties         || _allLeagues[leagueKey].ties    || 0;
             _allLeagues[leagueKey].standing    = mySt.rank         || _allLeagues[leagueKey].standing || null;
             _allLeagues[leagueKey].pointsFor   = mySt.ptsFor       || _allLeagues[leagueKey].pointsFor || 0;
-
-            // Detect playoff finish for past seasons not yet resolved
-            if (_allLeagues[leagueKey].playoffFinish == null) {
-              try {
-                const finish = await _detectMFLPlayoffFinish(myRosterId, bundle, league.leagueId, league.season, league.isGuillotine);
-                if (finish !== null) {
-                  _allLeagues[leagueKey].playoffFinish = finish;
-                  _allLeagues[leagueKey].isChampion    = finish === 1;
-                }
-              } catch(e) { /* non-fatal */ }
-            }
-
-            // Mark past-season leagues as resolved once all key fields are confirmed.
-            // Allow eliminator/guillotine (isGuillotine=true) even if leagueType is "redraft".
-            if (_isPastSeason(_allLeagues[leagueKey])
-                && _allLeagues[leagueKey].playoffFinish != null
-                && _allLeagues[leagueKey].leagueType
-                && (_allLeagues[leagueKey].leagueType !== "redraft" || _allLeagues[leagueKey].isGuillotine)
-                && _allLeagues[leagueKey].teamName) {
-              _markResolved(_allLeagues[leagueKey]);
-            }
-
             GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
             matched++;
           }
@@ -560,81 +400,15 @@ const Profile = (() => {
     return matched;
   }
 
-  // ── Background Sleeper resolver ────────────────────────
-  // Marks completed past-season Sleeper leagues as resolved so they are never
-  // re-fetched. Sleeper already detects playoffFinish at import time (importUserLeagues
-  // calls getPlayoffFinish for every complete season), so this only needs to
-  // set the resolved flag on leagues that were imported before this logic existed.
-  async function _resolveSleeperIdentities(username) {
-    if (!username || !_currentProfile?.platforms?.sleeper?.linked) return;
-
-    const unresolved = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "sleeper" && _isPastSeason(l) && !l.resolved
-      && l.playoffFinish != null && l.leagueType && l.leagueType !== "redraft" && l.teamName
-    );
-
-    if (!unresolved.length) return;
-
-    for (const [leagueKey, league] of unresolved) {
-      _markResolved(_allLeagues[leagueKey]);
-      GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
-    }
-
-    // For Sleeper leagues missing playoffFinish (imported before playoff detection was added),
-    // fetch the bracket now and detect finish.
-    const needsFinish = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "sleeper" && _isPastSeason(l) && !l.resolved
-      && l.playoffFinish == null && l.myRosterId && l.status === "complete"
-    );
-
-    if (!needsFinish.length) return;
-
-    const CONCURRENCY = 3;
-    for (let i = 0; i < needsFinish.length; i += CONCURRENCY) {
-      const batch = needsFinish.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
-        try {
-          const finish = await SleeperAPI.getPlayoffFinish(
-            league.leagueId, league.sleeperUserId || _currentProfile?.platforms?.sleeper?.sleeperUserId
-          );
-          if (_allLeagues[leagueKey]) {
-            _allLeagues[leagueKey].playoffFinish = finish;
-            _allLeagues[leagueKey].isChampion    = finish === 1;
-            _allLeagues[leagueKey].playoffResult = finish === 1 ? "champion"
-              : finish === 2 ? "finalist" : finish === 3 ? "third" : finish != null ? "playoffs" : null;
-            if (finish != null && _allLeagues[leagueKey].leagueType !== "redraft" && _allLeagues[leagueKey].teamName) {
-              _markResolved(_allLeagues[leagueKey]);
-            }
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
-          }
-        } catch(e) { /* skip */ }
-      }));
-    }
-
-    try {
-      const stats = await GMDB.recomputeStats(username);
-      if (_currentProfile) _currentProfile.stats = stats;
-      _renderStatsRow(stats);
-    } catch(e) {}
-
-    _renderLeagues();
-    _renderCareerSummary(_currentProfile || {});
-  }
-
   // ── Background Yahoo identity resolution ───────────────
   // Finds Yahoo leagues missing myRosterId or teamName, fetches their bundle
   // non-blocking in small batches, and persists results to Firebase.
   // Also detects playoff finish (champion, runner-up, etc.) from allMatchups.
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
-    const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
-      if (l.platform !== "yahoo") return false;
-      if (_isFullyResolved(l)) return false;                               // past season fully cached — skip
-      if (!l.myRosterId || !l.teamName || l.teamName === "") return true;  // identity not yet resolved
-      if (l.playoffFinish == null && l.season)                return true;  // needs playoff check
-      if (l.leagueType === "redraft" && l.season)            return true;  // may be mis-classified
-      return true;                                                          // current season always refreshes
-    });
+    const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
+      l.platform === "yahoo" && (!l.myRosterId || !l.teamName || l.teamName === "")
+    );
     if (!allYahoo.length) return;
 
     const CONCURRENCY = 2;
@@ -650,21 +424,14 @@ const Profile = (() => {
           const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
           const lm     = bundle.leagueMeta || {};
 
-          // Detect playoff finish — run whenever playoff_start_week is set.
-          // Never overwrite an already-detected non-null finish with null (stale bundle).
+          // Detect playoff finish from allMatchups when league is finished
           let playoffFinish = league.playoffFinish ?? null;
-          if (lm.playoff_start_week && bundle.allMatchups) {
-            const detected = _detectYahooPlayoffFinish(myId, bundle);
-            if (detected !== null) playoffFinish = detected;
+          if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
+            playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
           }
 
-          // Detect league type — preserve existing non-redraft value to avoid
-          // clobbering a dynasty/keeper league that was already correctly classified.
-          // Also check draft data: keeper picks (is_keeper flag or cost=0 round>1) confirm keeper type.
-          const detectedType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
-          const leagueType   = (league.leagueType && league.leagueType !== "redraft")
-            ? league.leagueType
-            : detectedType;
+          // Detect league type from Yahoo settings
+          const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "");
 
           if (_allLeagues[leagueKey]) {
             Object.assign(_allLeagues[leagueKey], {
@@ -680,11 +447,6 @@ const Profile = (() => {
               isChampion:    playoffFinish === 1,
               leagueType:    leagueType,
             });
-            // Mark past-season leagues as resolved so they are never re-fetched
-            if (_isPastSeason(_allLeagues[leagueKey]) && playoffFinish !== null
-                && leagueType && leagueType !== "redraft") {
-              _markResolved(_allLeagues[leagueKey]);
-            }
             GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         } catch(e) { /* skip failed league silently */ }
@@ -716,113 +478,60 @@ const Profile = (() => {
     const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
     if (!poWeeks.length) return null;
 
-    const myStr       = String(myId);
-    const numPoTeams  = lm.num_playoff_teams || 0;
+    const myStr = String(myId);
 
-    // Build the set of teams that actually made the playoffs using standings seed/rank.
-    // Yahoo allMatchups includes ALL games per week (both championship AND consolation
-    // bracket), so a team that missed the playoffs can appear in consolation games.
-    // We must filter to only the top-N seeds to avoid false positives.
-    let playoffTeamSet = null;
-    if (numPoTeams > 0 && bundle.standings?.length) {
-      // standings are already sorted by rank; take the top N
-      const sorted = [...bundle.standings].sort((a, b) => (a.rank || 99) - (b.rank || 99));
-      playoffTeamSet = new Set(sorted.slice(0, numPoTeams).map(s => String(s.teamId)));
-    }
-
-    // If we can determine playoff teams and this team isn't in the set → missed playoffs
-    if (playoffTeamSet && !playoffTeamSet.has(myStr)) return null;
-
-    // Walk playoff weeks in order
-    let appearedInPlayoffs = false;
-    let eliminated  = false;
-    let elimWeek    = null;
-
+    // Walk playoff weeks to track how far the user advanced
+    let eliminated = false;
+    let elimWeek   = null;
     for (const w of poWeeks) {
       const mus = allMu[w] || [];
-      // Filter to only games between playoff-eligible teams (championship bracket only)
-      const poMus = playoffTeamSet
-        ? mus.filter(m =>
-            playoffTeamSet.has(String(m.home?.teamId ?? "")) &&
-            playoffTeamSet.has(String(m.away?.teamId ?? "")))
-        : mus;
-
-      const myMatchup = poMus.find(m =>
+      const myMatchup = mus.find(m =>
         String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
       );
-      if (!myMatchup) continue;  // bye or not in championship bracket this week
-
+      if (!myMatchup) continue;  // bye or not in this bracket
       const hId  = String(myMatchup.home?.teamId ?? "");
+      const aId  = String(myMatchup.away?.teamId ?? "");
       const hSc  = myMatchup.home?.score ?? 0;
       const aSc  = myMatchup.away?.score ?? 0;
-
-      // Only process decided games
-      const hasWinner = !!myMatchup.winnerTeamId;
-      const hasScores = hSc > 0 || aSc > 0;
-      if (!hasWinner && !hasScores) continue;  // not yet played
-
-      appearedInPlayoffs = true;
-
-      const iWon = hasWinner
+      const iWon = myMatchup.winnerTeamId
         ? myMatchup.winnerTeamId === myStr
         : (hId === myStr ? hSc > aSc : aSc > hSc);
-
       if (!iWon) { eliminated = true; elimWeek = w; break; }
     }
 
-    if (!appearedInPlayoffs) return null;
+    if (!eliminated) {
+      // Survived all playoff weeks — champion
+      return 1;
+    }
 
-    if (!eliminated) return 1;  // won every decided playoff game = champion
-
+    // Determine placement based on which week eliminated
     const finalWeek = poWeeks[poWeeks.length - 1];
-    if (elimWeek === finalWeek)                    return 2;  // lost championship
-    if (elimWeek === poWeeks[poWeeks.length - 2])  return 3;  // lost semifinal
+    const numTeams  = lm.num_playoff_teams || 0;
+    if (elimWeek === finalWeek) return 2;          // lost championship = runner-up
+    if (elimWeek === poWeeks[poWeeks.length - 2]) {
+      // Lost in semifinal — 3rd or 4th depending on consolation result
+      return 3;
+    }
+    // Earlier elimination — rough placement based on round
     const roundIdx = poWeeks.indexOf(elimWeek);
     return (roundIdx + 1) * 2 + 1;  // 5th, 7th, etc.
   }
 
   // Detect Yahoo league type from API settings fields + name heuristics
   // Yahoo settings exposes: uses_roster_import (1=keeper), draft_type ("self"=keeper/salary)
-  function _detectYahooLeagueType(lm, name, hasKeeperPicks) {
+  function _detectYahooLeagueType(lm, name) {
     const n = (name || "").toLowerCase();
     // Name-based detection first (most reliable for self-described leagues)
     if (n.includes("dynasty"))  return "dynasty";
     if (n.includes("keeper"))   return "keeper";
     if (n.includes("redraft"))  return "redraft";
     if (n.includes("salary") || n.includes("sal cap") || n.includes("auction")) return "salary";
-    // Draft data: keeper picks present = keeper league
-    if (hasKeeperPicks) return "keeper";
     // API field detection: uses_roster_import=1 means players carry over = keeper/dynasty
     if (lm.uses_roster_import === 1 || lm.uses_roster_import === "1") {
+      // dynasty leagues also keep players; no reliable way to distinguish from name alone
       return "keeper";
     }
     return "redraft";
-  }
-
-  // ── Resolved flag helpers ────────────────────────────────────────────────
-  // A past-season league is "fully resolved" when all key fields are confirmed.
-  // Once resolved, it is NEVER re-fetched — historical data doesn't change.
-  const _CURRENT_YEAR = new Date().getFullYear();
-
-  function _isPastSeason(league) {
-    return parseInt(league.season || 0) < _CURRENT_YEAR;
-  }
-
-  function _isFullyResolved(league) {
-    if (!_isPastSeason(league)) return false;         // current season always re-checks
-    if (!league.resolved) return false;               // not yet marked resolved
-    return true;
-  }
-
-  // Mark a league as fully resolved — call after confirming all key fields are set.
-  // Also clears any stale isChampion=true that contradicts playoffFinish.
-  function _markResolved(leagueObj) {
-    leagueObj.resolved   = true;
-    // Ensure isChampion is consistent with playoffFinish
-    if (leagueObj.playoffFinish != null) {
-      leagueObj.isChampion = leagueObj.playoffFinish === 1;
-    }
-    return leagueObj;
   }
 
   // ── Main locker render ─────────────────────────────────
@@ -886,19 +595,17 @@ const Profile = (() => {
     _renderLeagues();
     _renderCareerSummary(profile);
 
-    // ── Background identity resolution (all platforms) ────────
-    // Non-blocking: resolves missing fields and marks fully-resolved past-season
-    // leagues so they are never re-fetched on subsequent page loads.
-    if (profile.platforms?.sleeper?.linked) {
-      setTimeout(() => _resolveSleeperIdentities(_currentUsername), 300);
-    }
+    // ── Background Yahoo identity resolution ─────────────────
+    // Non-blocking: resolve myTeamId + teamName/record for any Yahoo league
+    // that doesn't yet have them stored. Same pattern as syncMFLTeams.
+    // Runs after first paint so it doesn't block the initial render.
     if (profile.platforms?.yahoo?.linked) {
-      setTimeout(() => _resolveYahooIdentities(_currentUsername), 500);
+      setTimeout(() => _resolveYahooIdentities(_currentUsername), 200);
+      // Recompute stats non-blocking so header reflects latest Yahoo leagues
+      GMDB.recomputeStats(_currentUsername).then(stats => {
+        if (stats) _renderStatsRow(stats);
+      }).catch(() => {});
     }
-    // Recompute stats so header reflects all platforms
-    GMDB.recomputeStats(_currentUsername).then(stats => {
-      if (stats) _renderStatsRow(stats);
-    }).catch(() => {});
   }
 
   function _renderAvatar(profile) {

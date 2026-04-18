@@ -97,14 +97,6 @@ export default {
         return yahooPlayerStats(access_token, league_key, player_ids);
       }
 
-      if (path === "/yahoo/matchupDetail" && req.method === "POST") {
-        const { access_token, league_key, week } = await req.json();
-        if (!access_token || !league_key || !week) {
-          return new Response(JSON.stringify({ error: "Missing access_token, league_key, or week" }), { status: 400, headers: corsHeaders() });
-        }
-        return yahooMatchupDetail(access_token, league_key, week);
-      }
-
       if (path === "/mfl/userLeagues" && req.method === "POST") {
         const { username, password } = await req.json();
         if (!username || !password) return new Response(JSON.stringify({ error: "Missing credentials" }), { status: 400, headers: corsHeaders() });
@@ -699,26 +691,43 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   //   Shape 3 (nested array): fantasy_content.league[1].draft_results[0].draft_result = array
   //   Shape 4 (nested obj):   fantasy_content.league[1].draft_results[0].draft_result = count-keyed obj
   //   Shape 5 (nested alt):   fantasy_content.league[1].draft_results = count-keyed obj
+  //
+  // _draftDebug is returned in the response so the frontend can log it for diagnosis.
+  // Remove _draftDebug from the return statement once draft parsing is confirmed working.
   let draft = [];
+  let _draftDebug = {
+    shape: null, draftArrLen: 0, error: null,
+    topLevelKeys: null, dLeagueKeys: null, dResultsType: null,
+    dContainerKeys: null, draftRawType: null,
+  };
   try {
+    _draftDebug.topLevelKeys = draftData ? Object.keys(draftData) : null;
+
     let draftArr = [];
 
     // ── Shape 1 / 2: draft_results directly on the response object ──────────
     if (draftData?.draft_results !== undefined) {
       const dr = draftData.draft_results;
       if (Array.isArray(dr)) {
+        // Shape 1 — flat array of picks
         draftArr = dr;
+        _draftDebug.shape = "flat-array";
       } else if (dr && typeof dr === "object") {
+        // Shape 2 — count-keyed object: { count: N, "0": pick, "1": pick, ... }
         const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
         for (let i = 0; i < count; i++) { if (dr[String(i)]) draftArr.push(dr[String(i)]); }
+        _draftDebug.shape = "flat-object";
       }
     }
 
     // ── Shape 3 / 4 / 5: nested under fantasy_content.league ────────────────
     if (!draftArr.length) {
-      const dLeague  = draftData?.fantasy_content?.league;
+      const dLeague = draftData?.fantasy_content?.league;
+      _draftDebug.dLeagueKeys = dLeague ? Object.keys(dLeague) : null;
       const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
       const dResults = dLeague1?.draft_results;
+      _draftDebug.dResultsType = dResults === undefined ? "undefined"
+        : Array.isArray(dResults) ? "array" : typeof dResults;
 
       let dContainer;
       if (Array.isArray(dResults)) {
@@ -726,38 +735,47 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       } else if (dResults && typeof dResults === "object") {
         dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
       }
+      _draftDebug.dContainerKeys = dContainer ? Object.keys(dContainer).slice(0, 10) : null;
 
       const draftRaw = dContainer?.draft_result;
+      _draftDebug.draftRawType = draftRaw === undefined ? "undefined"
+        : Array.isArray(draftRaw) ? "array" : typeof draftRaw;
 
       if (Array.isArray(draftRaw)) {
         draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
+        _draftDebug.shape = "nested-array";
       } else if (draftRaw && typeof draftRaw === "object") {
         const rawKeys = Object.keys(draftRaw);
+        _draftDebug.draftRawKeys = rawKeys.slice(0, 10);
+        _draftDebug.draftRawSample = draftRaw[rawKeys[0]];  // first entry — shows actual pick structure
         const count = parseInt(draftRaw.count) || rawKeys.filter(k => k !== "count").length;
         for (let i = 0; i < count; i++) {
           const entry = draftRaw[String(i)];
           if (!entry) continue;
           draftArr.push(entry.draft_result || entry);
         }
+        _draftDebug.shape = "nested-object";
       }
     }
 
+    _draftDebug.draftArrLen = draftArr.length;
+
     draftArr.forEach((pick, i) => {
       if (!pick) return;
+      // flat shape uses team_key / player_key; nested shape may also use team_id / player_id
       const rawPid = pick.player_key || pick.player_id;
       const rawTid = pick.team_key   || pick.team_id;
       draft.push({
-        pick:      parseInt(pick.pick   || i + 1),
-        round:     parseInt(pick.round  || 1),
-        teamId:    String(rawTid || "").split(".").pop(),
-        playerId:  yahooPlayerId(rawPid),
-        name:      pick.player_name || pick.name || "",
-        position:  pick.position    || "?",
-        cost:      pick.cost != null ? parseInt(pick.cost) : null,
-        is_keeper: pick.is_keeper != null ? parseInt(pick.is_keeper) : null,
+        pick:     parseInt(pick.pick   || i + 1),
+        round:    parseInt(pick.round  || 1),
+        teamId:   String(rawTid || "").split(".").pop(),   // "449.l.123.t.3" → "3"
+        playerId: yahooPlayerId(rawPid),                   // bare numeric
+        name:     pick.player_name || pick.name || "",
+        position: pick.position    || "?",
+        cost:     pick.cost != null ? parseInt(pick.cost) : null,
       });
     });
-  } catch(e) { console.error("[Worker] Draft parse error:", e.message); }
+  } catch(e) { _draftDebug.error = e.message; }
 
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
@@ -767,6 +785,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     teams, standings, rosters, matchups,
     allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
     transactions, draft,
+    _draftDebug,         // temporary diagnostic — remove after draft parsing is confirmed working
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
@@ -845,153 +864,6 @@ async function yahooPlayerStats(accessToken, leagueKey, playerIds) {
   }
 
   return new Response(JSON.stringify(statsMap), { headers: corsHeaders() });
-}
-
-// ── Yahoo per-week matchup player detail ─────────────────────────────────────
-// Fetches player-level scores for every matchup in a given week.
-// Uses: GET /league/{key}/scoreboard;week={w};out=matchup_grade,players,stats
-// Returns:
-//   { matchups: [ { homeId, awayId, home: [{pid, name, pos, slot, pts, isStarter}], away: [...] } ] }
-//
-// Yahoo encodes the starting lineup inside each team's roster entry:
-//   team[1].roster[0].players[i].player[1].selected_position[0].position = "QB" | "BN" etc.
-//   player_points.total = fantasy points for that week
-async function yahooMatchupDetail(accessToken, leagueKey, week) {
-  const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
-  const authHdr = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
-
-  const findVal = (arr, key) => {
-    if (!Array.isArray(arr)) return arr?.[key] ?? null;
-    for (const obj of arr) { if (obj && typeof obj === "object" && key in obj) return obj[key]; }
-    return null;
-  };
-  const yahooPlayerId = k => {
-    if (!k) return "";
-    const s = String(k);
-    return s.includes(".") ? s.split(".").pop() : s;
-  };
-
-  // Step 1: get the week's scoreboard to know which teams are in each matchup
-  let matchupPairs = [];  // [{ homeId, awayId, winnerTeamId }]
-  let teamIds = [];
-  try {
-    const sbRes  = await fetch(`${base}/league/${leagueKey}/scoreboard;week=${week}?format=json`, { headers: authHdr });
-    const sbData = sbRes.ok ? await sbRes.json() : null;
-    const sb     = sbData?.fantasy_content?.league?.[1]?.scoreboard;
-    const muObj  = sb?.["0"]?.matchups || {};
-    const count  = muObj.count || 0;
-    for (let i = 0; i < count; i++) {
-      const mu      = muObj[String(i)]?.matchup;
-      if (!mu) continue;
-      const muTeams = mu["0"]?.teams || {};
-      const t0Info  = Array.isArray(muTeams["0"]?.team?.[0]) ? muTeams["0"].team[0] : [muTeams["0"]?.team?.[0]].filter(Boolean);
-      const t1Info  = Array.isArray(muTeams["1"]?.team?.[0]) ? muTeams["1"].team[0] : [muTeams["1"]?.team?.[0]].filter(Boolean);
-      const id0     = String(findVal(t0Info, "team_id") || "");
-      const id1     = String(findVal(t1Info, "team_id") || "");
-      const winnerKey = mu.winner_team_key || "";
-      if (id0 && id1) {
-        matchupPairs.push({ homeId: id0, awayId: id1, winnerTeamId: winnerKey ? String(winnerKey).split(".").pop() : null });
-        teamIds.push(id0, id1);
-      }
-    }
-  } catch(e) {
-    return new Response(JSON.stringify({ error: "Scoreboard fetch failed: " + e.message }), { status: 200, headers: corsHeaders() });
-  }
-
-  if (!teamIds.length) {
-    return new Response(JSON.stringify({ matchups: [] }), { headers: corsHeaders() });
-  }
-
-  // Step 2: fetch roster+stats for all teams in one batched request
-  // Yahoo allows: /teams;team_keys={k1,k2,...}/roster;out=stats;type=week;week={n}
-  // team_key format: "{game_id}.l.{league_id}.t.{team_id}"
-  const gameId    = leagueKey.split(".")[0];  // e.g. "449" from "449.l.12345"
-  const leagueNum = leagueKey.split(".l.")[1] || leagueKey;
-  const teamKeys  = teamIds.map(tid => `${gameId}.l.${leagueNum}.t.${tid}`).join(",");
-  const rosterUrl = `${base}/teams;team_keys=${teamKeys}/roster;out=stats;type=week;week=${week}?format=json`;
-
-  let rosterData;
-  try {
-    const rRes = await fetch(rosterUrl, { headers: authHdr });
-    if (!rRes.ok) {
-      const txt = await rRes.text().catch(() => "");
-      return new Response(JSON.stringify({ error: `Roster fetch ${rRes.status}`, detail: txt.slice(0, 300) }), { status: 200, headers: corsHeaders() });
-    }
-    rosterData = await rRes.json();
-  } catch(e) {
-    return new Response(JSON.stringify({ error: "Roster fetch failed: " + e.message }), { status: 200, headers: corsHeaders() });
-  }
-
-  // Parse per-team player list: { teamId → [{pid, name, pos, slot, isStarter, pts}] }
-  const playersByTeam = {};
-  try {
-    const teamsObj = rosterData?.fantasy_content?.teams || {};
-    const tCount   = teamsObj.count || 0;
-    for (let ti = 0; ti < tCount; ti++) {
-      const teamEntry = teamsObj[String(ti)]?.team;
-      if (!teamEntry) continue;
-      const tInfo  = Array.isArray(teamEntry[0]) ? teamEntry[0] : [teamEntry[0]].filter(Boolean);
-      const teamId = String(findVal(tInfo, "team_id") || "");
-      if (!teamId) continue;
-
-      // Roster is in teamEntry[1].roster[0].players
-      const rosterContainer = teamEntry[1]?.roster;
-      const playersObj = (Array.isArray(rosterContainer) ? rosterContainer[0] : rosterContainer)?.players || {};
-      const pCount = playersObj.count || 0;
-      const players = [];
-
-      for (let pi = 0; pi < pCount; pi++) {
-        const p = playersObj[String(pi)]?.player;
-        if (!p) continue;
-        const pInfo = Array.isArray(p[0]) ? p[0] : [p[0]].filter(Boolean);
-        const rawId = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
-        const pid   = yahooPlayerId(rawId);
-        if (!pid) continue;
-
-        const nameObj = findVal(pInfo, "name");
-        const name    = (typeof nameObj === "object" ? nameObj?.full : nameObj) || findVal(pInfo, "full_name") || "";
-        const dispPos = findVal(pInfo, "display_position") || findVal(pInfo, "eligible_positions") || "";
-        const pos     = (typeof dispPos === "object" ? (dispPos?.position || "") : dispPos).split(",")[0].trim();
-        const nflTeam = findVal(pInfo, "editorial_team_abbr") || "";
-
-        // selected_position lives in p[1].selected_position
-        const selPosRaw = p[1]?.selected_position;
-        const selPos    = Array.isArray(selPosRaw) ? selPosRaw[0] : selPosRaw;
-        const slot      = String(selPos?.position || "").toUpperCase();
-        const isStarter = slot !== "" && slot !== "BN" && slot !== "IR";
-
-        // player_points lives in one of p[2..n] — search for it
-        let pts = 0;
-        for (let k = 2; k < p.length; k++) {
-          const pp = p[k]?.player_points;
-          if (pp != null) { pts = parseFloat(pp.total ?? 0) || 0; break; }
-          // fallback: player_stats with stat_id "0" = total
-          const ps = p[k]?.player_stats;
-          if (ps) {
-            const statsArr = (Array.isArray(ps) ? ps[0] : ps)?.stats?.stat;
-            if (Array.isArray(statsArr)) {
-              const tot = statsArr.find(s => String(s.stat_id) === "0");
-              if (tot) { pts = parseFloat(tot.value || 0) || 0; break; }
-            }
-          }
-        }
-
-        players.push({ pid, name, pos, nflTeam, slot, isStarter, pts });
-      }
-      playersByTeam[teamId] = players;
-    }
-  } catch(e) {}
-
-  // Assemble result pairing each matchup with its team player arrays
-  const result = matchupPairs.map(pair => ({
-    homeId:       pair.homeId,
-    awayId:       pair.awayId,
-    winnerTeamId: pair.winnerTeamId,
-    home:         playersByTeam[pair.homeId] || [],
-    away:         playersByTeam[pair.awayId] || [],
-  }));
-
-  return new Response(JSON.stringify({ matchups: result }), { headers: corsHeaders() });
 }
 
 function yahooLogin(env) {
