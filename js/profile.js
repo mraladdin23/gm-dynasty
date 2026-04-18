@@ -913,6 +913,13 @@ const Profile = (() => {
     _currentProfile  = profile;
     _allLeagues      = profile.leagues || {};
 
+    // Always close the detail panel on load — prevents stuck panel state
+    // from persisting across sessions (especially on mobile).
+    document.getElementById("league-detail-panel")?.classList.add("hidden");
+    document.getElementById("league-detail-backdrop")?.classList.add("hidden");
+    _detailLeagueKey = null;
+    _detailLeague    = null;
+
     await loadLeagueMeta(profile.username);
 
     // Apply any stored type overrides to in-memory league data
