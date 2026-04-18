@@ -4108,21 +4108,16 @@ select option { background: var(--color-bg-2); }
   .page-btn { font-size: .7rem; padding: 3px 7px; }
   .page-info { font-size: .7rem; }
 
-  /* League detail panel: full screen with sticky header + tab select */
+  /* League detail panel: full screen */
   .league-detail-panel {
     position: fixed !important;
     inset: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
     border-radius: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;            /* panel itself does NOT scroll */
-    padding-top: calc(48px + env(safe-area-inset-top)) !important;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
-  .league-detail-header  { flex-shrink: 0; }
-  .league-detail-tabs    { flex-shrink: 0; }
-  .league-detail-body    { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
   .detail-tab-select { font-size: .8rem; width: 100%; }
   .season-bar-pills { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
   .season-bar-pills::-webkit-scrollbar { display: none; }
