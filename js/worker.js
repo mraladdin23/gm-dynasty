@@ -115,15 +115,14 @@ export default {
         if (!cookieMatch) return new Response(JSON.stringify({ error: "MFL login failed — check username and password", loginResponse: loginXml.slice(0, 300) }), { status: 200, headers: corsHeaders() });
         const cookieValue = cookieMatch[1];
 
-        // ── Fetch all leagues using SINCE= then supplement with year-by-year ──
-        // MFL's SINCE= parameter is unreliable — it sometimes skips entire years
-        // (e.g. returns 2022 and 2024 but omits 2023 and 2025). So we always:
-        // 1. Try SINCE= first as a fast bulk fetch
-        // 2. Check which years between 2005 and currentYear are NOT represented
-        // 3. Fetch any missing years individually to fill the gaps
+        // ── Fetch all leagues in one shot using SINCE= parameter ──────────────
+        // MFL supports TYPE=myleagues&SINCE=YYYY to return leagues across all years
+        // from that year to present — one request instead of 27.
+        // Falls back to year-by-year batching if the single request fails or returns
+        // nothing (some MFL account configurations don't support SINCE=).
         const allLeagues = [];
 
-        // Step 1: SINCE= bulk fetch
+        let usedSince = false;
         try {
           const sinceUrl = `https://api.myfantasyleague.com/${currentYear}/export?TYPE=myleagues&SINCE=1999&JSON=1`;
           const sinceRes = await fetch(sinceUrl, { headers: mflHeaders({ Cookie: `MFL_USER_ID=${cookieValue}` }) });
@@ -134,24 +133,22 @@ export default {
             const list = Array.isArray(sinceData.leagues.league)
               ? sinceData.leagues.league
               : [sinceData.leagues.league];
+            // SINCE= responses include a season field on each league
             list.forEach(l => { if (l.league_id || l.id) allLeagues.push(l); });
+            usedSince = allLeagues.length > 0;
           }
         } catch(e) {}
 
-        // Step 2: Find which years are missing from the SINCE= response
-        const coveredYears = new Set(allLeagues.map(l => String(l.season)).filter(Boolean));
-        const missingYears = [];
-        for (let y = currentYear; y >= 2005; y--) {
-          if (!coveredYears.has(String(y))) missingYears.push(y);
-        }
+        // Fallback: year-by-year batching if SINCE= returned nothing
+        if (!usedSince) {
+          const years = [];
+          for (let y = currentYear; y >= 2005; y--) years.push(y);  // 2005 covers most dynasty leagues
 
-        // Step 3: Fetch missing years individually in batches
-        if (missingYears.length > 0) {
-          const BATCH_SIZE     = 4;
+          const BATCH_SIZE    = 4;
           const BATCH_DELAY_MS = 150;
 
-          for (let i = 0; i < missingYears.length; i += BATCH_SIZE) {
-            const batch = missingYears.slice(i, i + BATCH_SIZE);
+          for (let i = 0; i < years.length; i += BATCH_SIZE) {
+            const batch = years.slice(i, i + BATCH_SIZE);
             const batchResults = await Promise.allSettled(
               batch.map(async y => {
                 const r    = await fetch(`https://api.myfantasyleague.com/${y}/export?TYPE=myleagues&JSON=1`,
@@ -168,7 +165,7 @@ export default {
             );
             batchResults.forEach(r => { if (r.status === "fulfilled") allLeagues.push(...r.value); });
 
-            if (i + BATCH_SIZE < missingYears.length) {
+            if (i + BATCH_SIZE < years.length) {
               await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
             }
           }

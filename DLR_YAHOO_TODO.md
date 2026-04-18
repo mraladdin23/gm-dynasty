@@ -1,279 +1,165 @@
-# DLR Yahoo & MFL — Remaining Issues
-*Updated: April 17, 2026*
-*Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
+# DLR Yahoo Integration — Remaining Work
+*Updated after major Yahoo session (April 16, 2026)*
+*Attach: DLR_PROJECT_SUMMARY.md + the specific files listed per step.*
 
 ---
 
-## How to Use This Doc
-Each issue below is self-contained. For each session: attach this doc + project summary +
-only the files listed under that issue. Fix one issue per session where possible.
+## Context
+All files from previous sessions are in the GitHub repo. The worker is deployed
+by pasting into the Cloudflare dashboard editor (not wrangler — no wrangler.toml).
+CSS lives in `css/locker.css`. Key CSS classes confirmed:
+- Standings: `standings-row--me` (not `--mine`), `standings-win`, `standings-loss`,
+  `standings-num`, `st-av`, `bubble-tag`, `standings-legend`, `standings-table-wrap`
+- Matchups: `mu-card`, `mu-header`, `mu-team`, `mu-team--right`, `mu-scores`,
+  `mu-score`, `mu-score--win`, `mu-score--lose`, `mu-dash`, `mu-no-detail`, `fw-700`
+- Playoffs: `bracket-wrap`, `bracket-section`, `bracket-section-label`,
+  `bracket-section-games`, `bracket-match`, `bracket-slot`, `bracket-slot--win`,
+  `bracket-slot--lose`, `bracket-slot--me`, `bracket-team`, `bracket-score`,
+  `bracket-check`, `bracket-tbd`, `bracket-finals`, `bracket-finals-game`,
+  `bracket-finals-label`, `seed-tag`, `playoffs-pending`
+- Draft list/pagination: `draft-auction-list`, `draft-auction-row`, `draft-pagination`
+- Transaction pagination: `tx-pagination`, `tx-page-btn`
 
 ---
 
-## ✅ Completed (April 17 session)
+## ✅ Completed
 
-- `_draftDebug` removed from `worker.js` and `yahoo.js`
-- `uses_roster_import` added to `normalizeBundle` leagueMeta in `yahoo.js`
-- All `saveLeague` catches now log `[GMDB] saveLeague failed for {key}` to console
-- `viewport-fit=cover` added to `index.html` meta viewport
-- Mobile nav safe area: `env(safe-area-inset-top)` on `.top-nav` height + padding in `locker.css`
-- Mobile browser bar: `100dvh` replacing `100vh` in `locker.css` + `base.css`
-- Mobile league detail panel: header + tab select now sticky; only `.league-detail-body` scrolls; `padding-top: calc(48px + env(safe-area-inset-top))`
-- Yahoo week pills: `season-pill` / `season-pill--current` — now matches MFL/Sleeper exactly
-- Yahoo matchup player scores: new `/yahoo/matchupDetail` worker endpoint (two-step fetch); frontend renders side-by-side player score grid on expand
-- Yahoo token fix: optimistic use when `expiresAt` is 0; empty string refresh token treated as missing
-- MFL `_detectMFLPlayoffFinish`: `isGuillotine` param added; guillotine/eliminator skip bracket path
-- MFL guillotine rank cap: removed ≤ 8 limit for guillotine leagues
-- MFL `resolved` flag: allows eliminator/guillotine leagues even when `leagueType === "redraft"`
-- Yahoo keeper detection: `isKeeper` + `hasKeeperPicks` in draft; `_detectYahooLeagueType` uses it ✅ confirmed working
-- `worker.js`: `is_keeper` on draft picks; `yahooLogin` function declaration fixed
-- Career stats: confirmed working correctly
+### Step 1 — Standings CSS Fix ✅
+`standings.js` — `_renderYahooStandings` matches MFL structure exactly.
 
----
+### Step 2 — Matchup Click-to-Expand ✅
+`standings.js` — cards have onclick toggle, expand shows season W–L + PF.
+Now also shows **roster players** (pos + name) in a two-column grid on expand.
+Week pill bar matches Sleeper/MFL style exactly.
 
-## 🔴 Issue 1 — MFL Championship Reset Script
-**Status:** Needs to be run in browser console once.
+### Step 3 — Standings Sort ✅
+Wins DESC → PF DESC in `_renderYahooStandings`.
 
-Guillotine/eliminator leagues already in Firebase were imported before the `isGuillotine`
-fix. They have `resolved: true` with `playoffFinish: null` so they'll never re-process.
-Also some bracket leagues have wrong or missing `playoffFinish`.
+### Step 4 — Roster Tab: Dynamic Position Groups ✅
+`roster.js` — PREFERRED_ORDER, detailMap bio fallback.
 
-**Run this in the browser console (replace username):**
-```js
-const u = "mraladdin23";
-const ref = firebase.database().ref(`gmd/users/${u}/leagues`);
-const snap = await ref.get();
-const leagues = snap.val() || {};
-const updates = {};
-Object.entries(leagues).forEach(([key, l]) => {
-  if (l.platform === "mfl" && (l.isGuillotine || l.playoffFinish == null)) {
-    updates[`${key}/playoffFinish`] = null;
-    updates[`${key}/isChampion`]    = false;
-    updates[`${key}/resolved`]      = null;
-  }
-});
-console.log("Resetting", Object.keys(updates).length / 3, "MFL leagues");
-await ref.update(updates);
-console.log("Done — click Sync to re-detect");
-```
+### Step 5 — Players Tab: Position Filter + Bio Fallback + Yahoo Stats ✅
+`rules-and-fa.js` — dropdown filter, Yahoo YTD stats, detailMap fallback.
 
-After running: click the **Sync** button on your MFL locker to trigger `syncMFLTeams`,
-which will re-run `_detectMFLPlayoffFinish` with the `isGuillotine` fix in place.
+### Step 6 — Draft Tab ✅
+`draft.js` + `worker.js` — draft parsing fixed (nested-object shape with single-pick
+detection). Grid view + list view + auction toggle. 25-per-page pagination on list view
+(shared across Sleeper, MFL, Yahoo). `_draftDebug` diagnostic still in worker —
+**remove from worker.js and draft.js** once confirmed stable.
 
-**No file changes needed for this issue.**
+### Step 7 — Transactions: Team Name + Player Bios ✅
+`transactions.js` — teamId derived from moves[] when tx.teamId is empty. Player
+enrichment chain: DynastyProcess CSV → Sleeper record → detailMap → tx name/position.
+DEF player names now resolve from `editorial_team_full_name` (worker fix).
+25-per-page pagination added (all platforms). `worker.js` updated to extract
+`display_position` and better name fields for DEF/special team entries.
 
----
+### Step 8 — Analytics: leagueKey wire-up ✅
+`analytics.js` + `profile.js` — `_leagueKey` state var, non-blocking `recomputeStats`.
 
-## 🔴 Issue 2 — Yahoo Mobile Token Not Persisting
-**Symptom:** After reconnecting Yahoo on mobile, tabs still say "No Yahoo access token."
-Reconnecting works on desktop but not mobile browser.
+### Step 9 — Career Stats: Platform Tabs ✅
+`profile.js` + `index.html` — `_renderCSPlatform` and `_renderCSPlatformYear` added.
+`_platformLabel()` updated to include Yahoo. Crash fixed.
 
-**Root cause suspects:**
-1. `localStorage` is blocked or partitioned in mobile Safari private/incognito mode
-2. The OAuth redirect back to `dynastylockerroom.com/#yahoo_token=...` may be losing
-   the hash on some mobile browsers (redirect strips fragment)
-3. `storeTokens` is called in the IIFE at page load, but if YahooAPI hasn't initialized
-   yet the call may silently fail
+### Step 10 — Stats Header Auto-Update ✅
+Non-blocking `recomputeStats` in `renderLocker` for Yahoo-linked users.
 
-**Debug steps before next session:**
-- Open mobile Safari → Settings → check if "Prevent Cross-Site Tracking" is on
-- After reconnecting, open console and run:
-  `console.log(localStorage.getItem('dlr_yahoo_access_token'))`
-  If null, localStorage is being blocked → need sessionStorage-only fallback path
-- Check if `window.location.hash` contains `yahoo_token=` after redirect
+### Step 11 — League Type Detection ✅
+`profile.js` — `_detectYahooLeagueType` uses `uses_roster_import` API field + name
+keywords (dynasty/keeper/redraft/salary/auction). `_detectMFLLeagueType` also updated
+with salary/auction/redraft detection. Existing non-redraft types preserved on
+re-resolution (no overwriting dynasty/keeper leagues).
 
-**Files:** `app.js`, `yahoo.js`
+### Step 12 — Championship / Playoff Finish Detection ✅
 
-**Likely fix:** In `storeTokens`, if `localStorage.setItem` throws (blocked), fall back
-to sessionStorage only and set a flag. In `_getValidToken`, try localStorage first,
-sessionStorage second, and if both are empty but `dlr_yahoo_pending` was just set,
-wait briefly and retry.
+**Yahoo (`_detectYahooPlayoffFinish`):**
+- Builds `playoffTeamSet` from standings top-N seeds (`num_playoff_teams`) to filter
+  out consolation games. Teams not in the set immediately return null (missed playoffs).
+- Only counts decided games (has scores or winnerTeamId).
+- `appearedInPlayoffs` flag prevents false champions.
+- Filter now runs on `playoff_start_week` (not just `is_finished`).
 
----
+**MFL (`_detectMFLPlayoffFinish`):**
+- Path 1 (bracket leagues): fetches championship bracket via `MFLAPI.getPlayoffBracket`,
+  uses score comparison (not `won` flag which is unreliable when one score is 0).
+  Handles championship game, consolation games (3rd/5th/7th), and earlier-round exits.
+- Path 2 (no-bracket / guillotine): falls back to standings rank ≤ 8.
+- Only runs for past seasons (leagueYear < currentYear).
+- Wired into both `fetchBundle` (initial import) and `syncMFLTeams` (background sync).
 
-## 🔴 Issue 3 — Yahoo Matchup Player Scores Not Showing
-**Symptom:** Clicking a matchup shows "Loading lineup…" but never populates player scores.
+**Playoffs bracket rendering (`standings.js`):**
+- `playoffTeamSet` filter applied to bracket — consolation games excluded.
+- `champGames(week)` helper used throughout.
 
-**Root cause:** The `/yahoo/matchupDetail` worker endpoint was rewritten to use the
-correct two-step approach (scoreboard → teams roster+stats) but has not been confirmed
-working against live Yahoo data. The `player_points` location in the response may need
-adjustment.
+### Step 13 — `resolved` Flag / Historical League Caching ✅
+`profile.js` — past-season leagues marked `resolved: true` once fully hydrated.
+Resolved leagues are never re-fetched (no API calls, no overwriting).
 
-**Files:** `worker.js`, `standings.js`
+**Helpers added:**
+- `_isPastSeason(l)` — true if `l.season < currentYear`
+- `_isFullyResolved(l)` — true if past season AND `l.resolved === true`
+- `_markResolved(l)` — sets `resolved: true`, corrects `isChampion` consistency
 
-**Debug approach:** In the worker, add temporary logging to the `yahooMatchupDetail`
-function to log what the roster+stats response actually looks like:
-```js
-console.log("[matchupDetail] rosterData sample:", JSON.stringify(rosterData)?.slice(0, 500));
-```
-Check Cloudflare Worker logs after triggering a matchup expand on mobile data.
-
-**Most likely fixes needed in `worker.js`:**
-- The `player_points` field may be at `p[k]?.player_points?.total` or just `p[k]?.player_points`
-- The roster container path `teamEntry[1]?.roster` vs `teamEntry[2]?.roster` varies by response shape
-- `selected_position` may be nested differently than expected
-
-**Known working pattern** (from `yahooLeagueBundle` roster parsing in worker):
-```js
-// player[0] = info array, player[1] = selected_position, player[2+] = stats
-const selPos = p[1]?.selected_position;
-```
+**Per platform:**
+- **Sleeper:** `linkSleeper` marks complete past leagues resolved at import.
+  `_resolveSleeperIdentities()` runs non-blocking from `renderLocker` — stamps
+  `resolved` on already-hydrated leagues instantly, backfills `playoffFinish` via
+  `SleeperAPI.getPlayoffFinish()` for leagues imported before playoff detection existed.
+- **MFL:** `fetchBundle` (import) and `syncMFLTeams` (sync) both mark resolved.
+  `syncMFLTeams` filter skips resolved leagues.
+- **Yahoo:** `_resolveYahooIdentities` filter skips resolved leagues. After successful
+  hydration of a past-season league, marks resolved.
 
 ---
 
-## 🔴 Issue 4 — Yahoo Playoff Finish Bug (Runner-up shown as 3rd)
-**Symptom:** Some leagues where the user finished 2nd (runner-up) are showing `playoffFinish: 3`.
-The Overview tab shows the correct result, suggesting the stored value is wrong but
-display logic may be compensating in some places.
+## ⚠️ Outstanding Issues
 
-**Root cause:** In `_detectYahooPlayoffFinish` (`profile.js` ~line 777):
-```js
-const finalWeek = poWeeks[poWeeks.length - 1];
-if (elimWeek === finalWeek)                    return 2;  // lost championship
-if (elimWeek === poWeeks[poWeeks.length - 2])  return 3;  // lost semifinal
-```
-The problem is that `allMatchups` may include a "3rd place game" in the same final week
-as the championship game. The `playoffTeamSet` filter is supposed to exclude consolation
-teams, but if the consolation game teams are ALSO in the playoff set (e.g. in a 4-team
-playoff, all 4 teams are in `playoffTeamSet`), the filter doesn't remove it.
-
-Result: the user loses the semifinal, gets placed into the 3rd place game, wins or
-loses it — the code finds them "eliminated" in the final week and returns 2 or 3
-incorrectly.
-
-**Fix needed in `_detectYahooPlayoffFinish` (`profile.js`):**
-Track which teams played in the championship game. Only that game counts as "final week."
-Any other game in the final week is a consolation game — elimination there means 3rd or 4th,
-not 2nd. Logic should be:
-
-1. Find the championship game (the one game in the last playoff week that only involves
-   teams who won their semifinal)
-2. If user is in the championship game: win = 1st, lose = 2nd
-3. If user is NOT in the championship game but plays in the final week: win = 3rd, lose = 4th
-4. If eliminated in semifinal week: 3rd/4th (already lost before final)
-
-**Files:** `profile.js`
-
----
-
-## 🟡 Issue 5 — Yahoo Firebase Persistence (saveLeague Failures)
-**Symptom:** Yahoo leagues sometimes don't save correctly after resolution. Console now
-shows `[GMDB] saveLeague failed for yahoo_XXX` when this happens.
-
-**Root cause suspects:**
-1. Race condition: multiple `saveLeague` calls firing simultaneously in `_resolveYahooIdentities`
-   (currently `CONCURRENCY = 2`)
-2. Firebase REST API timeout (8-second AbortController) triggered during slow Yahoo bundle fetch
-3. The `resolved` flag being set on a stale copy of the league object
-
+### Issue A — Yahoo Data Not Always Saving to Firebase
+**Symptom:** After resolution runs, some Yahoo leagues don't persist correctly.
+**Likely cause:** Race condition between resolution batches and `saveLeague` calls,
+or network timeout during the Yahoo bundle fetch causing silent failure.
 **Files:** `profile.js`, `firebase-db.js`
+**Debug steps:**
+1. Open console, filter for `[GMDB]` or network errors during page load
+2. Check if `_resolveYahooIdentities` is hitting the concurrency limit (currently 2)
+   — try reducing to 1 to eliminate races
+3. Verify `GMDB.saveLeague` isn't silently failing (add `.catch(e => console.error(e))`)
 
-**Fix approach:**
-- Reduce `CONCURRENCY` from 2 to 1 in `_resolveYahooIdentities` to eliminate races
-- Confirm `_markResolved` is called before `saveLeague` (already fixed in April 17 session
-  but worth verifying the save order is correct in all paths)
-- Add retry logic to `saveLeague` — if it fails once, wait 1 second and retry once
-
----
-
-## 🟡 Issue 6 — Yahoo Analytics Tab
-**Symptom:** Analytics tab for Yahoo leagues not fully tested. `leagueKey` is wired
-into `analytics.js` but end-to-end behavior is unknown.
-
-**Files:** `analytics.js`, `standings.js`
-
-**Approach:** Open a Yahoo league → Analytics tab. Check console for errors.
-The Yahoo bundle is already cached in `_yahooBundle` — analytics just needs to read
-from it the same way standings/matchups do.
-
----
-
-## 🟡 Issue 7 — Yahoo Completed Redraft Leagues Not Getting `resolved`
-**Symptom:** Past-season Yahoo redraft leagues re-fetch their bundle every page load
-even though the season is over and data won't change.
-
-**Current logic** in `_resolveYahooIdentities`:
-```js
-if (_isPastSeason(l) && playoffFinish !== null && leagueType && leagueType !== "redraft") {
-  _markResolved(l);
-}
-```
-Redraft leagues are explicitly excluded, but a completed redraft season is also
-historical and safe to cache.
-
-**Fix:** Also mark resolved if `lm.is_finished === 1` regardless of `leagueType`:
-```js
-if (_isPastSeason(l) && playoffFinish !== null
-    && (leagueType !== "redraft" || lm.is_finished === 1)) {
-  _markResolved(l);
-}
-```
-
+### Issue B — Yahoo `resolved` Flag Not Persisting
+**Symptom:** Leagues show as resolved in memory but re-fetch on next page load.
+**Likely cause:** The `resolved` field may not be getting written to Firebase because
+`_markResolved` is called AFTER `saveLeague` in some paths, or `saveLeague` is called
+on a stale copy of the object.
+**Fix:** Ensure `_markResolved` is called BEFORE `GMDB.saveLeague`.
 **Files:** `profile.js`
 
----
+### Issue C — `_draftDebug` Cleanup Needed
+**Symptom:** `_draftDebug` diagnostic still in `worker.js` return payload and
+`draft.js` console logs — dead weight in production.
+**Fix:** Remove `_draftDebug` from both files once confirmed stable.
+**Files:** `worker.js`, `draft.js`
 
-## 🟡 Issue 8 — Bottom Safe Area on Mobile
-**Symptom:** On iPhones with home indicator, content at the bottom of scrollable
-areas can be clipped behind the home bar.
+### Issue D — `uses_roster_import` Not in `normalizeBundle`
+**Symptom:** `_detectYahooLeagueType` API field detection (`uses_roster_import`) may
+not work because `yahoo.js` `normalizeBundle` doesn't pass it through.
+**Status:** `yahoo.js` leagueMeta section doesn't include `uses_roster_import`.
+**Fix:** Add to `normalizeBundle` leagueMeta block in `yahoo.js`.
+**Files:** `yahoo.js`
 
-**Fix:** Add `padding-bottom: env(safe-area-inset-bottom)` to:
-- `.league-detail-body` (already scrollable)
-- `.app-view.active` (main content area)
-- Any other `overflow-y: auto` containers at full viewport height
+### Issue E — Cloudflare Worker Custom Domain
+**Symptom:** Email warning that `api.dynastylockerroom.com` custom domain on the
+Cloudflare Worker will be deleted because DNS moved from Cloudflare to GoDaddy.
+**See "Cloudflare Infrastructure" section below.**
 
-**Files:** `locker.css`
-
----
-
-## 🟢 Issue 9 — MFL Bracket Early-Round Exit Placement
-**Symptom:** For non-standard bracket sizes (6-team, 10-team), the placement formula
-`Math.pow(2, roundsFromFinal) + 1` may give wrong results.
-
-Example: In a 6-team playoff where there's a bye round, losing in round 1 (quarterfinal
-equivalent) would give `2^2 + 1 = 5` but the actual placement might be 5th or 6th
-depending on bracket structure.
-
-**Files:** `profile.js`
-
-**Low priority** — only affects non-standard bracket sizes and the error is minor.
+### Issue F — Analytics Tab (Yahoo) Not Connected
+`analytics.js` Yahoo path exists but not fully tested/wired. Lower priority.
 
 ---
 
-## 🟢 Issue 10 — Cloudflare Custom Domain
-**Symptom:** Email warning that `api.dynastylockerroom.com` will be deleted.
+## Console Reset Script
+If Yahoo playoffs show wrong values, run this in the browser console to clear
+stale data and force re-resolution:
 
-**Status:** Safe to ignore. Worker itself (`mfl-proxy.mraladdin23.workers.dev`) is
-unaffected. All code uses the `workers.dev` URL directly.
-
-**Action if desired:** Log into Cloudflare → Workers & Pages → confirm `mfl-proxy`
-is still deployed. Custom domain can be restored by adding a GoDaddy CNAME:
-`api` → `mfl-proxy.mraladdin23.workers.dev` (but not required).
-
----
-
-## Console Reset Scripts
-
-### Reset MFL guillotine/eliminator championships
-```js
-const u = "mraladdin23";
-const ref = firebase.database().ref(`gmd/users/${u}/leagues`);
-const snap = await ref.get();
-const leagues = snap.val() || {};
-const updates = {};
-Object.entries(leagues).forEach(([key, l]) => {
-  if (l.platform === "mfl" && (l.isGuillotine || l.playoffFinish == null)) {
-    updates[`${key}/playoffFinish`] = null;
-    updates[`${key}/isChampion`]    = false;
-    updates[`${key}/resolved`]      = null;
-  }
-});
-console.log("Resetting", Object.keys(updates).length / 3, "MFL leagues");
-await ref.update(updates);
-console.log("Done — click Sync to re-detect");
-```
-
-### Reset Yahoo playoff/resolved data
 ```js
 const u = "mraladdin23";
 const ref = firebase.database().ref(`gmd/users/${u}/leagues`);
@@ -283,8 +169,8 @@ const updates = {};
 Object.entries(leagues).forEach(([key, l]) => {
   if (l.platform === "yahoo") {
     updates[`${key}/playoffFinish`] = null;
-    updates[`${key}/isChampion`]    = false;
-    updates[`${key}/resolved`]      = null;
+    updates[`${key}/isChampion`] = false;
+    updates[`${key}/resolved`] = null;
   }
 });
 console.log("Resetting", Object.keys(updates).length / 3, "Yahoo leagues");
@@ -294,25 +180,63 @@ console.log("Done — reload the page");
 
 ---
 
-## Files Modified (This Session — April 17)
-| File | Key Changes |
-|------|-------------|
-| `worker.js` | `_draftDebug` removed; `is_keeper` on draft picks; `yahooMatchupDetail` endpoint added (two-step roster+stats fetch); `yahooLogin` declaration bug fixed |
-| `yahoo.js` | `uses_roster_import` in leagueMeta; `isKeeper`/`hasKeeperPicks` in draft; `_draftDebug` passthrough removed; token expiry logic fixed (optimistic use when expiresAt=0) |
-| `profile.js` | `_detectMFLPlayoffFinish` accepts `isGuillotine`; guillotine skip bracket; rank cap removed; `resolved` allows guillotine redraft; `saveLeague` errors now logged; `hasKeeperPicks` wired into `_detectYahooLeagueType` |
-| `standings.js` | Yahoo week pills use `season-pill`/`season-pill--current`; `_yahooExpandMatchup` handler; side-by-side player score grid in matchup expand |
-| `index.html` | `viewport-fit=cover` added to meta viewport |
-| `locker.css` | `100dvh` for app-view; `env(safe-area-inset-top)` on nav + detail panel; detail panel header/tabs sticky, body-only scroll |
-| `base.css` | `min-height: 100dvh` with `100vh` fallback |
+## Cloudflare Infrastructure
+
+### The Problem
+Moving DNS from Cloudflare to GoDaddy means `api.dynastylockerroom.com` (the custom
+domain on the `mfl-proxy` Worker) no longer works via Cloudflare's proxy. The Worker
+itself (`mfl-proxy.mraladdin23.workers.dev`) is unaffected — it's on Cloudflare's
+infrastructure regardless of DNS.
+
+### What You Actually Need to Keep
+1. **The Worker itself** — `mfl-proxy.mraladdin23.workers.dev` — this NEVER gets
+   deleted as long as you have a Cloudflare account. Workers are tied to your account,
+   not to your domain's DNS.
+2. **The Worker code** — always backed up in your GitHub repo (`worker.js`).
+
+### What You Can Safely Ignore
+The "your site will be deleted" email likely refers to Cloudflare Pages (if you ever
+had a Pages project for dynastylockerroom.com) or the custom domain binding. Your
+actual site is on **GitHub Pages**, not Cloudflare Pages — Cloudflare can't delete it.
+
+### The Custom Domain (`api.dynastylockerroom.com`)
+This was optional. Your code in `yahoo.js` uses `BASE = "https://mfl-proxy.mraladdin23.workers.dev"`
+directly — **not** `api.dynastylockerroom.com`. So losing the custom domain doesn't
+break anything in production.
+
+### Action Items
+1. **Verify your Worker still works** — visit `https://mfl-proxy.mraladdin23.workers.dev/`
+   in a browser. Should return `"Worker running"`.
+2. **Log into Cloudflare dashboard** → Workers & Pages → `mfl-proxy` → confirm it's
+   still deployed and the code is there.
+3. **Ignore the email** if it refers to a Cloudflare Pages project for your domain —
+   your site runs on GitHub Pages, not Cloudflare Pages.
+4. **If you want `api.dynastylockerroom.com` back:** You'd need to either move DNS
+   back to Cloudflare OR add a GoDaddy CNAME pointing `api` to
+   `mfl-proxy.mraladdin23.workers.dev` — but the `workers.dev` URL works fine and
+   is already what your code uses.
 
 ---
 
-## Suggested Session Order
-1. **Issue 1** — Run MFL reset script (no code changes, 5 minutes)
-2. **Issue 4** — Yahoo playoff finish bug (`profile.js` only, surgical fix)
-3. **Issue 3** — Yahoo matchup scores (`worker.js` + debug first, then `standings.js` if needed)
-4. **Issue 2** — Yahoo mobile token (`app.js` + `yahoo.js`)
-5. **Issue 5** — Yahoo Firebase persistence (`profile.js`)
-6. **Issue 7** — Yahoo redraft resolved flag (`profile.js`, one-liner)
-7. **Issue 8** — Bottom safe area (`locker.css`, small)
-8. **Issue 6** — Yahoo Analytics (`analytics.js`)
+## Files Modified (Across All Yahoo Sessions)
+| File | Key Changes |
+|------|-------------|
+| `worker.js` | Yahoo bundle, draft parsing (all shapes), `/yahoo/playerStats` endpoint, transaction DEF player names, `_draftDebug` (to remove) |
+| `yahoo.js` | `normalizeBundle`, token management, `_getValidToken` + `_workerBase` exposed |
+| `profile.js` | `_detectYahooLeagueType`, `_detectMFLPlayoffFinish`, `_detectYahooPlayoffFinish`, `_resolveYahooIdentities`, `_resolveSleeperIdentities`, `_isFullyResolved`, `_markResolved`, career stats platform tabs, MFL league type |
+| `standings.js` | `_renderYahooStandings`, `_renderYahooMatchups` (roster detail, week pills), Yahoo playoffs bracket (playoff team set filter) |
+| `roster.js` | PREFERRED_ORDER position grouping, detailMap bio fallback |
+| `rules-and-fa.js` | Position dropdown, compact toolbar, Yahoo stats, detailMap fallback |
+| `transactions.js` | Yahoo team name resolution, player enrichment, 25/page pagination |
+| `draft.js` | Yahoo draft grid+list+auction, 25/page pagination (all platforms), `_renderYahooDraftBoard` |
+| `analytics.js` | `_leagueKey` wire-up, poStart guard |
+| `index.html` | Career stats platform tabs (cs-platform, cs-platform-year) |
+
+---
+
+## Notes for Next Session
+- Worker is deployed by **pasting into Cloudflare dashboard editor** — no wrangler
+- After pasting worker, verify at `https://mfl-proxy.mraladdin23.workers.dev/`
+- Test on **mobile data** — home router blocks workers.dev
+- `standings-row--me` is correct (NOT `standings-row--mine`)
+- Yahoo game key format: `"{game_id}.l.{league_id}"` — always use stored `league.leagueKey`

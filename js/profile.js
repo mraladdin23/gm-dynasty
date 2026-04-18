@@ -6,8 +6,7 @@
 
 const Profile = (() => {
 
-  const CURRENT_SEASON  = new Date().getFullYear().toString();
-  const _CURRENT_YEAR   = new Date().getFullYear();   // numeric, used by bundle cache + isPastSeason
+  const CURRENT_SEASON = new Date().getFullYear().toString();
   // 10 per page on desktop (2 cols × 5), 5 on mobile (1 col × 5)
   function _getPageSize() {
     return window.innerWidth <= 640 ? 5 : 10;
@@ -57,7 +56,6 @@ const Profile = (() => {
     return result;
   }
 
-
   async function linkMFL(gmdUsername, email, password, onProgress) {
     if (!email?.trim())    throw new Error("Enter your MFL email address.");
     if (!password?.trim()) throw new Error("Enter your MFL password.");
@@ -78,19 +76,14 @@ const Profile = (() => {
       throw new Error("No MFL leagues found. Check your email and password.");
     }
 
-    // ───────── STEP 1b: LOGIN ONCE — one cookie works for all seasons ──────────
-    // MFL only needs a single login against the current year. That cookie is
-    // valid for fetching bundle data from any historical year's API endpoint.
+    // ───────── STEP 1b: LOGIN ONCE — reuse cookie for all bundle fetches ─────
     let mflCookie = null;
     try {
       const currentYear = new Date().getFullYear().toString();
       mflCookie = await MFLAPI.login(mflUsername, password, currentYear);
-      console.log("[MFL] Session cookie obtained:", mflCookie ? "OK" : "FAILED");
     } catch(err) {
       console.warn("[MFL] Could not pre-obtain session cookie, will fall back to per-bundle login:", err.message);
     }
-    // cookieByYear not needed — one cookie works across all seasons
-    const cookieByYear = {};
 
     // ───────── STEP 2: FETCH BUNDLE PER LEAGUE AND BUILD MAP ─────────
     const BUNDLE_BATCH   = 3;
@@ -108,15 +101,12 @@ const Profile = (() => {
       const myFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
       if (!leagueId) return;
 
-      // Use the year-specific cookie — MFL cookies are scoped to the season
-      // they were obtained from, so a 2026 cookie won't auth 2022 API calls.
-      const seasonCookie = cookieByYear[season] || mflCookie || null;
       const opts = {
         leagueId,
         year:     season,
-        cookie:   seasonCookie || undefined,
-        username: seasonCookie ? undefined : mflUsername,
-        password: seasonCookie ? undefined : password,
+        cookie:   mflCookie   || undefined,
+        username: mflCookie   ? undefined : mflUsername,
+        password: mflCookie   ? undefined : password,
       };
 
       let bundle, leagueInfo;
@@ -124,17 +114,17 @@ const Profile = (() => {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           if (attempt === 2) {
+            // Before retrying, pause briefly to let MFL recover
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
             console.log(`[MFL] Retrying league ${leagueId} (${season})…`);
           }
-          console.log(`[MFL] Fetching bundle: league=${leagueId} season=${season} cookie=${opts.cookie ? 'YES' : 'NO'} attempt=${attempt}`);
           bundle     = await MFLAPI.getLeagueBundle(opts);
           leagueInfo = bundle?.league?.league || {};
-          console.log(`[MFL] Bundle result: league=${leagueId} name=${leagueInfo?.name || 'MISSING'} keys=${Object.keys(bundle||{}).join(',')}`);
+          // If we got a valid league name, bundle is good — break out
           if (leagueInfo?.name) break;
         } catch(err) {
-          console.warn(`[MFL] Bundle fetch error: league=${leagueId} season=${season} attempt=${attempt}:`, err.message);
           if (attempt === 2) {
+            console.warn(`[MFL] Skipped league ${leagueId} (${season}) after retry:`, err.message);
             skipped.push({ leagueId, season, name: l.name || leagueId, reason: err.message });
             return;
           }
@@ -219,7 +209,6 @@ const Profile = (() => {
         leaguesMap[key].resolved   = true;
         leaguesMap[key].isChampion = leaguesMap[key].playoffFinish === 1;
       }
-
     }
 
     for (let i = 0; i < leagues.length; i += BUNDLE_BATCH) {
@@ -813,7 +802,7 @@ const Profile = (() => {
   // ── Resolved flag helpers ────────────────────────────────────────────────
   // A past-season league is "fully resolved" when all key fields are confirmed.
   // Once resolved, it is NEVER re-fetched — historical data doesn't change.
-  // _CURRENT_YEAR is declared at top of IIFE.
+  const _CURRENT_YEAR = new Date().getFullYear();
 
   function _isPastSeason(league) {
     return parseInt(league.season || 0) < _CURRENT_YEAR;
@@ -2648,4 +2637,3 @@ const Profile = (() => {
   };
 
 })();
-
