@@ -216,14 +216,20 @@ const YahooAPI = (() => {
 
     // Draft
     const draft = _arr(raw.draft).map(p => ({
-      pick:     _int(p.pick),
-      round:    _int(p.round),
-      teamId:   _str(p.teamId   ?? p.team_id),
-      playerId: _str(p.playerId ?? p.player_id),
-      name:     p.name          || "",
-      position: p.position      || "?",
-      cost:     p.cost != null  ? _int(p.cost) : null,
+      pick:       _int(p.pick),
+      round:      _int(p.round),
+      teamId:     _str(p.teamId   ?? p.team_id),
+      playerId:   _str(p.playerId ?? p.player_id),
+      name:       p.name          || "",
+      position:   p.position      || "?",
+      cost:       p.cost != null  ? _int(p.cost) : null,
+      isKeeper:   !!(p.isKeeper   ?? p.is_keeper),
     }));
+
+    // Detect keeper league from draft data: if any pick is flagged as a keeper,
+    // or if multiple picks share round+cost=0 pattern (pre-assigned keeper rounds).
+    const hasKeeperPicks = draft.some(p => p.isKeeper)
+      || draft.filter(p => p.cost === 0 && p.round > 1).length >= 2;
 
     // Transactions — preserve moves array for DynastyProcess resolution
     const transactions = _arr(raw.transactions).map(tx => ({
@@ -258,10 +264,10 @@ const YahooAPI = (() => {
     };
 
     return {
-      league:       raw.league       || null,
+      league:          raw.league       || null,
       leagueMeta,
-      myTeamId:     raw.myTeamId     ? _str(raw.myTeamId) : null,
-      currentWeek:  _int(raw.currentWeek || lm.current_week),
+      myTeamId:        raw.myTeamId     ? _str(raw.myTeamId) : null,
+      currentWeek:     _int(raw.currentWeek || lm.current_week),
       teams,
       standings,
       rosters,
@@ -269,10 +275,11 @@ const YahooAPI = (() => {
       allMatchups,
       draft,
       transactions,
-      players:      _arr(raw.players),
-      futurePicks:  _arr(raw.futurePicks),
-      auctions:     _arr(raw.auctions),
-      rules:        raw.rules        || {},
+      players:         _arr(raw.players),
+      futurePicks:     _arr(raw.futurePicks),
+      auctions:        _arr(raw.auctions),
+      rules:           raw.rules        || {},
+      hasKeeperPicks,
     };
   }
 

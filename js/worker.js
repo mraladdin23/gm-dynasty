@@ -747,13 +747,14 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       const rawPid = pick.player_key || pick.player_id;
       const rawTid = pick.team_key   || pick.team_id;
       draft.push({
-        pick:     parseInt(pick.pick   || i + 1),
-        round:    parseInt(pick.round  || 1),
-        teamId:   String(rawTid || "").split(".").pop(),
-        playerId: yahooPlayerId(rawPid),
-        name:     pick.player_name || pick.name || "",
-        position: pick.position    || "?",
-        cost:     pick.cost != null ? parseInt(pick.cost) : null,
+        pick:      parseInt(pick.pick   || i + 1),
+        round:     parseInt(pick.round  || 1),
+        teamId:    String(rawTid || "").split(".").pop(),
+        playerId:  yahooPlayerId(rawPid),
+        name:      pick.player_name || pick.name || "",
+        position:  pick.position    || "?",
+        cost:      pick.cost != null ? parseInt(pick.cost) : null,
+        is_keeper: pick.is_keeper != null ? parseInt(pick.is_keeper) : null,
       });
     });
   } catch(e) { console.error("[Worker] Draft parse error:", e.message); }
@@ -859,21 +860,6 @@ async function yahooMatchupDetail(accessToken, leagueKey, week) {
   const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
   const authHdr = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
 
-  // Fetch scoreboard with players+stats out for the specified week
-  // This is the most efficient single call — returns scores + rosters in one shot
-  const url = `${base}/league/${leagueKey}/scoreboard;week=${week};out=players,stats?format=json`;
-  let data;
-  try {
-    const res = await fetch(url, { headers: authHdr });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      return new Response(JSON.stringify({ error: `Yahoo API ${res.status}`, detail: txt.slice(0, 200) }), { status: 200, headers: corsHeaders() });
-    }
-    data = await res.json();
-  } catch(e) {
-    return new Response(JSON.stringify({ error: e.message }), { status: 200, headers: corsHeaders() });
-  }
-
   const findVal = (arr, key) => {
     if (!Array.isArray(arr)) return arr?.[key] ?? null;
     for (const obj of arr) { if (obj && typeof obj === "object" && key in obj) return obj[key]; }
@@ -885,84 +871,125 @@ async function yahooMatchupDetail(accessToken, leagueKey, week) {
     return s.includes(".") ? s.split(".").pop() : s;
   };
 
-  const sb = data?.fantasy_content?.league?.[1]?.scoreboard;
-  if (!sb) return new Response(JSON.stringify({ matchups: [] }), { headers: corsHeaders() });
+  // Step 1: get the week's scoreboard to know which teams are in each matchup
+  let matchupPairs = [];  // [{ homeId, awayId, winnerTeamId }]
+  let teamIds = [];
+  try {
+    const sbRes  = await fetch(`${base}/league/${leagueKey}/scoreboard;week=${week}?format=json`, { headers: authHdr });
+    const sbData = sbRes.ok ? await sbRes.json() : null;
+    const sb     = sbData?.fantasy_content?.league?.[1]?.scoreboard;
+    const muObj  = sb?.["0"]?.matchups || {};
+    const count  = muObj.count || 0;
+    for (let i = 0; i < count; i++) {
+      const mu      = muObj[String(i)]?.matchup;
+      if (!mu) continue;
+      const muTeams = mu["0"]?.teams || {};
+      const t0Info  = Array.isArray(muTeams["0"]?.team?.[0]) ? muTeams["0"].team[0] : [muTeams["0"]?.team?.[0]].filter(Boolean);
+      const t1Info  = Array.isArray(muTeams["1"]?.team?.[0]) ? muTeams["1"].team[0] : [muTeams["1"]?.team?.[0]].filter(Boolean);
+      const id0     = String(findVal(t0Info, "team_id") || "");
+      const id1     = String(findVal(t1Info, "team_id") || "");
+      const winnerKey = mu.winner_team_key || "";
+      if (id0 && id1) {
+        matchupPairs.push({ homeId: id0, awayId: id1, winnerTeamId: winnerKey ? String(winnerKey).split(".").pop() : null });
+        teamIds.push(id0, id1);
+      }
+    }
+  } catch(e) {
+    return new Response(JSON.stringify({ error: "Scoreboard fetch failed: " + e.message }), { status: 200, headers: corsHeaders() });
+  }
 
-  const muObj  = sb?.["0"]?.matchups || {};
-  const count  = muObj.count || 0;
-  const result = [];
+  if (!teamIds.length) {
+    return new Response(JSON.stringify({ matchups: [] }), { headers: corsHeaders() });
+  }
 
-  for (let i = 0; i < count; i++) {
-    const mu = muObj[String(i)]?.matchup;
-    if (!mu) continue;
-    const muTeams = mu["0"]?.teams || {};
+  // Step 2: fetch roster+stats for all teams in one batched request
+  // Yahoo allows: /teams;team_keys={k1,k2,...}/roster;out=stats;type=week;week={n}
+  // team_key format: "{game_id}.l.{league_id}.t.{team_id}"
+  const gameId    = leagueKey.split(".")[0];  // e.g. "449" from "449.l.12345"
+  const leagueNum = leagueKey.split(".l.")[1] || leagueKey;
+  const teamKeys  = teamIds.map(tid => `${gameId}.l.${leagueNum}.t.${tid}`).join(",");
+  const rosterUrl = `${base}/teams;team_keys=${teamKeys}/roster;out=stats;type=week;week=${week}?format=json`;
 
-    const parseSide = (teamSlot) => {
-      const t      = muTeams[String(teamSlot)]?.team;
-      if (!t) return { teamId: "", players: [] };
-      const tInfo  = Array.isArray(t[0]) ? t[0] : [t[0]].filter(Boolean);
+  let rosterData;
+  try {
+    const rRes = await fetch(rosterUrl, { headers: authHdr });
+    if (!rRes.ok) {
+      const txt = await rRes.text().catch(() => "");
+      return new Response(JSON.stringify({ error: `Roster fetch ${rRes.status}`, detail: txt.slice(0, 300) }), { status: 200, headers: corsHeaders() });
+    }
+    rosterData = await rRes.json();
+  } catch(e) {
+    return new Response(JSON.stringify({ error: "Roster fetch failed: " + e.message }), { status: 200, headers: corsHeaders() });
+  }
+
+  // Parse per-team player list: { teamId → [{pid, name, pos, slot, isStarter, pts}] }
+  const playersByTeam = {};
+  try {
+    const teamsObj = rosterData?.fantasy_content?.teams || {};
+    const tCount   = teamsObj.count || 0;
+    for (let ti = 0; ti < tCount; ti++) {
+      const teamEntry = teamsObj[String(ti)]?.team;
+      if (!teamEntry) continue;
+      const tInfo  = Array.isArray(teamEntry[0]) ? teamEntry[0] : [teamEntry[0]].filter(Boolean);
       const teamId = String(findVal(tInfo, "team_id") || "");
+      if (!teamId) continue;
 
-      // t[1] may hold roster directly or be team_points; roster is in t[1].roster or t[2].roster
-      const rosterContainer = t[1]?.roster || t[2]?.roster;
-      const playersObj = rosterContainer?.[0]?.players || {};
+      // Roster is in teamEntry[1].roster[0].players
+      const rosterContainer = teamEntry[1]?.roster;
+      const playersObj = (Array.isArray(rosterContainer) ? rosterContainer[0] : rosterContainer)?.players || {};
       const pCount = playersObj.count || 0;
       const players = [];
 
-      for (let j = 0; j < pCount; j++) {
-        const p = playersObj[String(j)]?.player;
+      for (let pi = 0; pi < pCount; pi++) {
+        const p = playersObj[String(pi)]?.player;
         if (!p) continue;
         const pInfo = Array.isArray(p[0]) ? p[0] : [p[0]].filter(Boolean);
         const rawId = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
         const pid   = yahooPlayerId(rawId);
         if (!pid) continue;
 
-        const nameObj  = findVal(pInfo, "name");
-        const name     = (typeof nameObj === "object" ? nameObj?.full : nameObj) || findVal(pInfo, "full_name") || "";
-        const dispPos  = findVal(pInfo, "display_position") || findVal(pInfo, "eligible_positions") || "";
-        const pos      = (typeof dispPos === "object" ? (dispPos?.position || "") : dispPos).split(",")[0].trim();
-        const nflTeam  = findVal(pInfo, "editorial_team_abbr") || "";
+        const nameObj = findVal(pInfo, "name");
+        const name    = (typeof nameObj === "object" ? nameObj?.full : nameObj) || findVal(pInfo, "full_name") || "";
+        const dispPos = findVal(pInfo, "display_position") || findVal(pInfo, "eligible_positions") || "";
+        const pos     = (typeof dispPos === "object" ? (dispPos?.position || "") : dispPos).split(",")[0].trim();
+        const nflTeam = findVal(pInfo, "editorial_team_abbr") || "";
 
-        // selected_position is in p[1].selected_position[0].position
-        const selPos = p[1]?.selected_position;
-        const slotRaw = (Array.isArray(selPos) ? selPos[0] : selPos)?.position || "";
-        const slot    = String(slotRaw).toUpperCase();
-        const isStarter = slot !== "BN" && slot !== "IR" && slot !== "";
+        // selected_position lives in p[1].selected_position
+        const selPosRaw = p[1]?.selected_position;
+        const selPos    = Array.isArray(selPosRaw) ? selPosRaw[0] : selPosRaw;
+        const slot      = String(selPos?.position || "").toUpperCase();
+        const isStarter = slot !== "" && slot !== "BN" && slot !== "IR";
 
-        // player_points: in p[2] or p[3] — search for player_points key
+        // player_points lives in one of p[2..n] — search for it
         let pts = 0;
-        for (let k = 1; k < p.length; k++) {
+        for (let k = 2; k < p.length; k++) {
           const pp = p[k]?.player_points;
-          if (pp != null) { pts = parseFloat(pp.total ?? pp ?? 0) || 0; break; }
-          // also check player_stats total
+          if (pp != null) { pts = parseFloat(pp.total ?? 0) || 0; break; }
+          // fallback: player_stats with stat_id "0" = total
           const ps = p[k]?.player_stats;
           if (ps) {
-            const statsArr = ps?.[0]?.stats?.stat || ps?.stats?.stat;
+            const statsArr = (Array.isArray(ps) ? ps[0] : ps)?.stats?.stat;
             if (Array.isArray(statsArr)) {
-              const totStat = statsArr.find(s => String(s.stat_id) === "0");
-              if (totStat) { pts = parseFloat(totStat.value || 0) || 0; break; }
+              const tot = statsArr.find(s => String(s.stat_id) === "0");
+              if (tot) { pts = parseFloat(tot.value || 0) || 0; break; }
             }
           }
         }
 
         players.push({ pid, name, pos, nflTeam, slot, isStarter, pts });
       }
+      playersByTeam[teamId] = players;
+    }
+  } catch(e) {}
 
-      return { teamId, players };
-    };
-
-    const homeTeam  = parseSide(0);
-    const awayTeam  = parseSide(1);
-    const winnerKey = mu.winner_team_key || "";
-
-    result.push({
-      homeId: homeTeam.teamId,
-      awayId: awayTeam.teamId,
-      winnerTeamId: winnerKey ? String(winnerKey).split(".").pop() : null,
-      home: homeTeam.players,
-      away: awayTeam.players,
-    });
-  }
+  // Assemble result pairing each matchup with its team player arrays
+  const result = matchupPairs.map(pair => ({
+    homeId:       pair.homeId,
+    awayId:       pair.awayId,
+    winnerTeamId: pair.winnerTeamId,
+    home:         playersByTeam[pair.homeId] || [],
+    away:         playersByTeam[pair.awayId] || [],
+  }));
 
   return new Response(JSON.stringify({ matchups: result }), { headers: corsHeaders() });
 }
