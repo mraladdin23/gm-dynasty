@@ -76,22 +76,19 @@ const Profile = (() => {
       throw new Error("No MFL leagues found. Check your email and password.");
     }
 
-    // ───────── STEP 1b: LOGIN PER YEAR — MFL cookies are year-scoped ─────────
-    // A cookie obtained from the 2026 login endpoint does NOT authenticate
-    // requests to the 2022/2023/etc. endpoints. We need one cookie per season.
+    // ───────── STEP 1b: LOGIN ONCE — one cookie works for all seasons ──────────
+    // MFL only needs a single login against the current year. That cookie is
+    // valid for fetching bundle data from any historical year's API endpoint.
+    let mflCookie = null;
+    try {
+      const currentYear = new Date().getFullYear().toString();
+      mflCookie = await MFLAPI.login(mflUsername, password, currentYear);
+      console.log("[MFL] Session cookie obtained:", mflCookie ? "OK" : "FAILED");
+    } catch(err) {
+      console.warn("[MFL] Could not pre-obtain session cookie, will fall back to per-bundle login:", err.message);
+    }
+    // cookieByYear not needed — one cookie works across all seasons
     const cookieByYear = {};
-    const uniqueSeasons = [...new Set(leagues.map(l => String(l.season || new Date().getFullYear())))];
-    await Promise.allSettled(uniqueSeasons.map(async season => {
-      try {
-        const cookie = await MFLAPI.login(mflUsername, password, season);
-        if (cookie) cookieByYear[season] = cookie;
-      } catch(err) {
-        console.warn(`[MFL] Could not obtain cookie for season ${season}:`, err.message);
-      }
-    }));
-    console.log(`[MFL] Got cookies for seasons: ${Object.keys(cookieByYear).join(', ')}`);
-    // mflCookie kept as fallback (current year cookie)
-    const mflCookie = cookieByYear[new Date().getFullYear().toString()] || null;
 
     // ───────── STEP 2: FETCH BUNDLE PER LEAGUE AND BUILD MAP ─────────
     const BUNDLE_BATCH   = 3;
@@ -125,17 +122,17 @@ const Profile = (() => {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           if (attempt === 2) {
-            // Before retrying, pause briefly to let MFL recover
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
             console.log(`[MFL] Retrying league ${leagueId} (${season})…`);
           }
+          console.log(`[MFL] Fetching bundle: league=${leagueId} season=${season} cookie=${opts.cookie ? 'YES' : 'NO'} attempt=${attempt}`);
           bundle     = await MFLAPI.getLeagueBundle(opts);
           leagueInfo = bundle?.league?.league || {};
-          // If we got a valid league name, bundle is good — break out
+          console.log(`[MFL] Bundle result: league=${leagueId} name=${leagueInfo?.name || 'MISSING'} keys=${Object.keys(bundle||{}).join(',')}`);
           if (leagueInfo?.name) break;
         } catch(err) {
+          console.warn(`[MFL] Bundle fetch error: league=${leagueId} season=${season} attempt=${attempt}:`, err.message);
           if (attempt === 2) {
-            console.warn(`[MFL] Skipped league ${leagueId} (${season}) after retry:`, err.message);
             skipped.push({ leagueId, season, name: l.name || leagueId, reason: err.message });
             return;
           }
