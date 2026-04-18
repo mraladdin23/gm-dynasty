@@ -76,14 +76,22 @@ const Profile = (() => {
       throw new Error("No MFL leagues found. Check your email and password.");
     }
 
-    // ───────── STEP 1b: LOGIN ONCE — reuse cookie for all bundle fetches ─────
-    let mflCookie = null;
-    try {
-      const currentYear = new Date().getFullYear().toString();
-      mflCookie = await MFLAPI.login(mflUsername, password, currentYear);
-    } catch(err) {
-      console.warn("[MFL] Could not pre-obtain session cookie, will fall back to per-bundle login:", err.message);
-    }
+    // ───────── STEP 1b: LOGIN PER YEAR — MFL cookies are year-scoped ─────────
+    // A cookie obtained from the 2026 login endpoint does NOT authenticate
+    // requests to the 2022/2023/etc. endpoints. We need one cookie per season.
+    const cookieByYear = {};
+    const uniqueSeasons = [...new Set(leagues.map(l => String(l.season || new Date().getFullYear())))];
+    await Promise.allSettled(uniqueSeasons.map(async season => {
+      try {
+        const cookie = await MFLAPI.login(mflUsername, password, season);
+        if (cookie) cookieByYear[season] = cookie;
+      } catch(err) {
+        console.warn(`[MFL] Could not obtain cookie for season ${season}:`, err.message);
+      }
+    }));
+    console.log(`[MFL] Got cookies for seasons: ${Object.keys(cookieByYear).join(', ')}`);
+    // mflCookie kept as fallback (current year cookie)
+    const mflCookie = cookieByYear[new Date().getFullYear().toString()] || null;
 
     // ───────── STEP 2: FETCH BUNDLE PER LEAGUE AND BUILD MAP ─────────
     const BUNDLE_BATCH   = 3;
@@ -101,12 +109,15 @@ const Profile = (() => {
       const myFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
       if (!leagueId) return;
 
+      // Use the year-specific cookie — MFL cookies are scoped to the season
+      // they were obtained from, so a 2026 cookie won't auth 2022 API calls.
+      const seasonCookie = cookieByYear[season] || mflCookie || null;
       const opts = {
         leagueId,
         year:     season,
-        cookie:   mflCookie   || undefined,
-        username: mflCookie   ? undefined : mflUsername,
-        password: mflCookie   ? undefined : password,
+        cookie:   seasonCookie || undefined,
+        username: seasonCookie ? undefined : mflUsername,
+        password: seasonCookie ? undefined : password,
       };
 
       let bundle, leagueInfo;
