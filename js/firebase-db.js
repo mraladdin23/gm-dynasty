@@ -358,6 +358,40 @@ const GMDB = (() => {
     await GMD.child(`salaryCap/${leagueKey}/rosters`).set(rosters);
   }
 
+  // ── Bundle Cache ──────────────────────────────────────
+  // Stores full MFL/Yahoo league bundles for past seasons so tabs never
+  // need to re-fetch from the Worker. Current season always bypasses cache.
+  // Path: gmd/users/{username}/bundles/{leagueKey}
+
+  async function getBundleCache(username, leagueKey) {
+    try {
+      const data = await _restGet(`gmd/users/${username.toLowerCase()}/bundles/${leagueKey}`);
+      return data || null;
+    } catch(e) {
+      console.warn(`[GMDB] getBundleCache failed for ${leagueKey}:`, e.message);
+      return null;
+    }
+  }
+
+  async function saveBundleCache(username, leagueKey, bundle) {
+    try {
+      await _restPut(`gmd/users/${username.toLowerCase()}/bundles/${leagueKey}`, bundle);
+      return true;
+    } catch(e) {
+      console.warn(`[GMDB] saveBundleCache failed for ${leagueKey}:`, e.message);
+      return false;
+    }
+  }
+
+  // Mark a league as having its bundle cached in Firebase
+  async function markBundleCached(username, leagueKey) {
+    try {
+      await GMD.child(`users/${username.toLowerCase()}/leagues/${leagueKey}/bundleCached`).set(true);
+    } catch(e) {
+      console.warn(`[GMDB] markBundleCached failed for ${leagueKey}:`, e.message);
+    }
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
@@ -388,6 +422,9 @@ const GMDB = (() => {
     saveSalarySettings,
     getSalaryRosters,
     saveSalaryRosters,
+    getBundleCache,
+    saveBundleCache,
+    markBundleCached,
     _restGet,
     _restPut
   };

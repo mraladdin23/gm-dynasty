@@ -56,6 +56,69 @@ const Profile = (() => {
     return result;
   }
 
+  // ── Bundle cache helper ───────────────────────────────────────────────────
+  // For past seasons: check Firebase bundle cache first, fall back to Worker.
+  // On first successful Worker fetch, save to Firebase and mark bundleCached.
+  // For current season: always fetch live from Worker (data changes weekly).
+  const _CURRENT_YEAR = new Date().getFullYear();
+
+  async function _getMFLBundleWithCache(leagueKey, leagueId, season, username) {
+    const isPast = parseInt(season) < _CURRENT_YEAR;
+
+    // Past season with cache flag — read from Firebase, never hit Worker
+    if (isPast && _allLeagues[leagueKey]?.bundleCached) {
+      const cached = await GMDB.getBundleCache(username, leagueKey);
+      if (cached) {
+        console.log(`[BundleCache] HIT ${leagueKey}`);
+        return cached;
+      }
+      // Cache flag set but data missing — fall through to re-fetch
+      console.warn(`[BundleCache] MISS (flag set but no data) ${leagueKey}`);
+    }
+
+    // Fetch live from Worker
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
+
+    // Save to Firebase for past seasons
+    if (isPast && bundle && username) {
+      console.log(`[BundleCache] SAVING ${leagueKey}`);
+      const saved = await GMDB.saveBundleCache(username, leagueKey, bundle);
+      if (saved) {
+        await GMDB.markBundleCached(username, leagueKey);
+        if (_allLeagues[leagueKey]) _allLeagues[leagueKey].bundleCached = true;
+      }
+    }
+
+    return bundle;
+  }
+
+  async function _getYahooBundleWithCache(leagueKey, yahooKey, season, username) {
+    const isPast = parseInt(season) < _CURRENT_YEAR;
+
+    if (isPast && _allLeagues[leagueKey]?.bundleCached) {
+      const cached = await GMDB.getBundleCache(username, leagueKey);
+      if (cached) {
+        console.log(`[BundleCache] HIT ${leagueKey}`);
+        return cached;
+      }
+      console.warn(`[BundleCache] MISS (flag set but no data) ${leagueKey}`);
+    }
+
+    const bundle = await YahooAPI.getLeagueBundle(yahooKey);
+
+    if (isPast && bundle && username) {
+      console.log(`[BundleCache] SAVING ${leagueKey}`);
+      const saved = await GMDB.saveBundleCache(username, leagueKey, bundle);
+      if (saved) {
+        await GMDB.markBundleCached(username, leagueKey);
+        if (_allLeagues[leagueKey]) _allLeagues[leagueKey].bundleCached = true;
+      }
+    }
+
+    return bundle;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   async function linkMFL(gmdUsername, email, password, onProgress) {
     if (!email?.trim())    throw new Error("Enter your MFL email address.");
     if (!password?.trim()) throw new Error("Enter your MFL password.");
@@ -216,6 +279,14 @@ const Profile = (() => {
           && leaguesMap[key].teamName) {
         leaguesMap[key].resolved   = true;
         leaguesMap[key].isChampion = leaguesMap[key].playoffFinish === 1;
+      }
+
+      // Cache the full bundle for past seasons immediately at import time.
+      // This means tabs will never need to hit the Worker for historical leagues.
+      if (parseInt(season) < new Date().getFullYear() && bundle) {
+        GMDB.saveBundleCache(gmdUsername, key, bundle)
+          .then(saved => { if (saved) leaguesMap[key].bundleCached = true; })
+          .catch(() => {});
       }
     }
 
@@ -518,7 +589,7 @@ const Profile = (() => {
         if (!myRosterId) return;   // can't resolve without a stored roster id
 
         try {
-          const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+          const bundle       = await _getMFLBundleWithCache(leagueKey, league.leagueId, league.season, username);
           const leagueInfo   = bundle?.league?.league || {};
           const franchisesRaw = leagueInfo?.franchises?.franchise;
           const franchisesArr = franchisesRaw
@@ -651,7 +722,7 @@ const Profile = (() => {
       await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
         try {
           const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
-          const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+          const bundle   = await _getYahooBundleWithCache(leagueKey, yahooKey, league.season, username);
           const myId     = bundle.myTeamId || null;
           if (!myId) return;
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
@@ -2367,7 +2438,7 @@ const Profile = (() => {
     if (needsLiveFetch) {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
-        const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+        const bundle       = await _getMFLBundleWithCache(leagueKey, league.leagueId, league.season, _currentUsername);
         const standingsMap = MFLAPI.getStandingsMap(bundle);
 
         // Use stored myRosterId (franchise_id) — set authoritatively on import.
@@ -2424,7 +2495,7 @@ const Profile = (() => {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
         const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
-        const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+        const bundle   = await _getYahooBundleWithCache(leagueKey, yahooKey, league.season, _currentUsername);
         const myId     = bundle.myTeamId || null;
         if (myId) {
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
@@ -2644,4 +2715,106 @@ const Profile = (() => {
     syncMFLTeams
   };
 
+})();
+
+// ── Global bundle cache interface for tab modules ─────────────────────────
+// Tab modules call these instead of MFLAPI.getLeagueBundle / YahooAPI.getLeagueBundle
+// directly. For past seasons the bundle is read from Firebase (no Worker call).
+// For current season it always fetches live.
+//
+// Usage in tab modules:
+//   const bundle = await DLRBundleCache.getMFL(leagueId, season);
+//   const bundle = await DLRBundleCache.getYahoo(yahooLeagueKey, season, fbLeagueKey);
+window.DLRBundleCache = (() => {
+  const CURRENT_YEAR = new Date().getFullYear();
+
+  function _fbKey(platform, season, leagueId) {
+    return `${platform}_${season}_${leagueId}`;
+  }
+
+  async function _getUsername() {
+    // Read current username from the GMD profile module's cached state
+    // by checking Firebase auth — same user who loaded the app
+    const user = firebase.auth().currentUser;
+    if (!user) return null;
+    const snap = await firebase.database().ref(`gmd/uid_map/${user.uid}`).once("value");
+    return snap.val() || null;
+  }
+
+  // Cache username to avoid repeated Firebase reads
+  let _cachedUsername = null;
+  async function _username() {
+    if (!_cachedUsername) _cachedUsername = await _getUsername();
+    return _cachedUsername;
+  }
+
+  async function getMFL(leagueId, season) {
+    const isPast = parseInt(season) < CURRENT_YEAR;
+    if (!isPast) {
+      return MFLAPI.getLeagueBundle(leagueId, season);
+    }
+
+    const fbKey = _fbKey("mfl", season, leagueId);
+    const username = await _username();
+
+    if (username) {
+      // Check bundleCached flag via in-memory league data first (fast path)
+      const leagueSnap = await firebase.database()
+        .ref(`gmd/users/${username}/leagues/${fbKey}/bundleCached`).once("value");
+
+      if (leagueSnap.val() === true) {
+        const cached = await GMDB.getBundleCache(username, fbKey);
+        if (cached) {
+          console.log(`[BundleCache] HIT ${fbKey}`);
+          return cached;
+        }
+      }
+    }
+
+    // Cache miss — fetch from Worker
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
+
+    // Save to cache for next time
+    if (bundle && username) {
+      console.log(`[BundleCache] SAVING ${fbKey}`);
+      const saved = await GMDB.saveBundleCache(username, fbKey, bundle);
+      if (saved) await GMDB.markBundleCached(username, fbKey);
+    }
+
+    return bundle;
+  }
+
+  async function getYahoo(yahooLeagueKey, season, fbLeagueKey) {
+    const isPast = parseInt(season) < CURRENT_YEAR;
+    if (!isPast) {
+      return YahooAPI.getLeagueBundle(yahooLeagueKey);
+    }
+
+    const username = await _username();
+
+    if (username && fbLeagueKey) {
+      const leagueSnap = await firebase.database()
+        .ref(`gmd/users/${username}/leagues/${fbLeagueKey}/bundleCached`).once("value");
+
+      if (leagueSnap.val() === true) {
+        const cached = await GMDB.getBundleCache(username, fbLeagueKey);
+        if (cached) {
+          console.log(`[BundleCache] HIT ${fbLeagueKey}`);
+          return cached;
+        }
+      }
+    }
+
+    const bundle = await YahooAPI.getLeagueBundle(yahooLeagueKey);
+
+    if (bundle && username && fbLeagueKey) {
+      console.log(`[BundleCache] SAVING ${fbLeagueKey}`);
+      const saved = await GMDB.saveBundleCache(username, fbLeagueKey, bundle);
+      if (saved) await GMDB.markBundleCached(username, fbLeagueKey);
+    }
+
+    return bundle;
+  }
+
+  return { getMFL, getYahoo };
 })();
