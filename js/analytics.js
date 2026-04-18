@@ -741,7 +741,7 @@ const DLRAnalytics = (() => {
 
   async function _renderYahooAnalytics(el, leagueId, token) {
     const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
-    _yahooBundle    = await DLRBundleCache.getYahoo(leagueKey, _season, `yahoo_${_season}_${_leagueId}`);
+    _yahooBundle    = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
 
     _yahooTeamMap   = {};
@@ -1135,7 +1135,7 @@ const DLRAnalytics = (() => {
 
   async function _renderMFLAnalytics(el, leagueId, token) {
     const season = _season || new Date().getFullYear().toString();
-    _mflBundle    = await DLRBundleCache.getMFL(leagueId, season);
+    _mflBundle    = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
     const teams = MFLAPI.getTeams(_mflBundle);

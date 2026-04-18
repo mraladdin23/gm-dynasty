@@ -370,7 +370,7 @@ const DLRFreeAgents = (() => {
     await DLRPlayers.load();
     if (token !== _initToken) return;
 
-    const bundle = await DLRBundleCache.getMFL(leagueId, _season);
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, _season);
     if (token !== _initToken) return;
 
     const teams        = MFLAPI.getTeams(bundle);
@@ -491,7 +491,7 @@ const DLRFreeAgents = (() => {
     if (token !== _initToken) return;
 
     const leagueKey = _platformLeagueKey || `nfl.l.${leagueId}`;
-    const bundle    = await DLRBundleCache.getYahoo(leagueKey, _season, `yahoo_${_season}_${_leagueId}`);
+    const bundle    = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
 
     const teams   = bundle.teams   || [];

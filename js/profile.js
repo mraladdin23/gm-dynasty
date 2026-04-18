@@ -57,68 +57,6 @@ const Profile = (() => {
     return result;
   }
 
-  // ── Bundle cache helper ───────────────────────────────────────────────────
-  // For past seasons: check Firebase bundle cache first, fall back to Worker.
-  // On first successful Worker fetch, save to Firebase and mark bundleCached.
-  // For current season: always fetch live from Worker (data changes weekly).
-  // Uses _CURRENT_YEAR declared below at IIFE scope.
-
-  async function _getMFLBundleWithCache(leagueKey, leagueId, season, username) {
-    const isPast = parseInt(season) < _CURRENT_YEAR;
-
-    // Past season with cache flag — read from Firebase, never hit Worker
-    if (isPast && _allLeagues[leagueKey]?.bundleCached) {
-      const cached = await GMDB.getBundleCache(username, leagueKey);
-      if (cached) {
-        console.log(`[BundleCache] HIT ${leagueKey}`);
-        return cached;
-      }
-      // Cache flag set but data missing — fall through to re-fetch
-      console.warn(`[BundleCache] MISS (flag set but no data) ${leagueKey}`);
-    }
-
-    // Fetch live from Worker
-    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
-
-    // Save to Firebase for past seasons
-    if (isPast && bundle && username) {
-      console.log(`[BundleCache] SAVING ${leagueKey}`);
-      const saved = await GMDB.saveBundleCache(username, leagueKey, bundle);
-      if (saved) {
-        await GMDB.markBundleCached(username, leagueKey);
-        if (_allLeagues[leagueKey]) _allLeagues[leagueKey].bundleCached = true;
-      }
-    }
-
-    return bundle;
-  }
-
-  async function _getYahooBundleWithCache(leagueKey, yahooKey, season, username) {
-    const isPast = parseInt(season) < _CURRENT_YEAR;
-
-    if (isPast && _allLeagues[leagueKey]?.bundleCached) {
-      const cached = await GMDB.getBundleCache(username, leagueKey);
-      if (cached) {
-        console.log(`[BundleCache] HIT ${leagueKey}`);
-        return cached;
-      }
-      console.warn(`[BundleCache] MISS (flag set but no data) ${leagueKey}`);
-    }
-
-    const bundle = await YahooAPI.getLeagueBundle(yahooKey);
-
-    if (isPast && bundle && username) {
-      console.log(`[BundleCache] SAVING ${leagueKey}`);
-      const saved = await GMDB.saveBundleCache(username, leagueKey, bundle);
-      if (saved) {
-        await GMDB.markBundleCached(username, leagueKey);
-        if (_allLeagues[leagueKey]) _allLeagues[leagueKey].bundleCached = true;
-      }
-    }
-
-    return bundle;
-  }
-  // ─────────────────────────────────────────────────────────────────────────
 
   async function linkMFL(gmdUsername, email, password, onProgress) {
     if (!email?.trim())    throw new Error("Enter your MFL email address.");
@@ -282,13 +220,6 @@ const Profile = (() => {
         leaguesMap[key].isChampion = leaguesMap[key].playoffFinish === 1;
       }
 
-      // Cache the full bundle for past seasons immediately at import time.
-      // This means tabs will never need to hit the Worker for historical leagues.
-      if (parseInt(season) < new Date().getFullYear() && bundle) {
-        GMDB.saveBundleCache(gmdUsername, key, bundle)
-          .then(saved => { if (saved) leaguesMap[key].bundleCached = true; })
-          .catch(() => {});
-      }
     }
 
     for (let i = 0; i < leagues.length; i += BUNDLE_BATCH) {
@@ -590,7 +521,7 @@ const Profile = (() => {
         if (!myRosterId) return;   // can't resolve without a stored roster id
 
         try {
-          const bundle       = await _getMFLBundleWithCache(leagueKey, league.leagueId, league.season, username);
+          const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
           const leagueInfo   = bundle?.league?.league || {};
           const franchisesRaw = leagueInfo?.franchises?.franchise;
           const franchisesArr = franchisesRaw
@@ -723,7 +654,7 @@ const Profile = (() => {
       await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
         try {
           const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
-          const bundle   = await _getYahooBundleWithCache(leagueKey, yahooKey, league.season, username);
+          const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
           const myId     = bundle.myTeamId || null;
           if (!myId) return;
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
@@ -912,13 +843,6 @@ const Profile = (() => {
     _currentUsername = profile.username;
     _currentProfile  = profile;
     _allLeagues      = profile.leagues || {};
-
-    // Always close the detail panel on load — prevents stuck panel state
-    // from persisting across sessions (especially on mobile).
-    document.getElementById("league-detail-panel")?.classList.add("hidden");
-    document.getElementById("league-detail-backdrop")?.classList.add("hidden");
-    _detailLeagueKey = null;
-    _detailLeague    = null;
 
     await loadLeagueMeta(profile.username);
 
@@ -2446,7 +2370,7 @@ const Profile = (() => {
     if (needsLiveFetch) {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
-        const bundle       = await _getMFLBundleWithCache(leagueKey, league.leagueId, league.season, _currentUsername);
+        const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
         const standingsMap = MFLAPI.getStandingsMap(bundle);
 
         // Use stored myRosterId (franchise_id) — set authoritatively on import.
@@ -2503,7 +2427,7 @@ const Profile = (() => {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
         const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
-        const bundle   = await _getYahooBundleWithCache(leagueKey, yahooKey, league.season, _currentUsername);
+        const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
         const myId     = bundle.myTeamId || null;
         if (myId) {
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
@@ -2724,3 +2648,4 @@ const Profile = (() => {
   };
 
 })();
+
