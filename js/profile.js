@@ -140,18 +140,22 @@ const Profile = (() => {
       throw new Error("No MFL leagues found. Check your email and password.");
     }
 
-// ── NEW: Load existing leagues so we can respect bundleCached flags ──
-const existingLeagues = await GMDB.getLeagues(gmdUsername);
-const cachedPastKeys = new Set();
-
-Object.entries(existingLeagues || {}).forEach(([key, l]) => {
-  const seasonNum = parseInt(l.season || 0);
-  if (seasonNum < _CURRENT_YEAR && l.bundleCached === true) {
-    cachedPastKeys.add(key);
+// ───────── NEW: Load existing leagues to respect bundleCached flags ─────────
+  let existingLeagues = {};
+  try {
+    existingLeagues = await GMDB.getLeagues(gmdUsername);
+  } catch (e) {
+    console.warn("[MFL Import] Could not load existing leagues:", e.message);
   }
-});
 
-console.log(`[MFL Import] Found ${cachedPastKeys.size} past-season leagues already cached`);
+  const cachedPastKeys = new Set();
+  Object.entries(existingLeagues).forEach(([key, l]) => {
+    const seasonNum = parseInt(l.season || 0);
+    if (seasonNum < _CURRENT_YEAR && l.bundleCached === true) {
+      cachedPastKeys.add(key);
+    }
+  });
+  console.log(`[MFL Import] Found ${cachedPastKeys.size} past-season leagues already cached`);
 
     // ───────── STEP 1b: LOGIN ONCE — one cookie works for all seasons ──────────
     // MFL only needs a single login against the current year. That cookie is
@@ -386,6 +390,7 @@ Object.entries(existing || {}).forEach(([key, l]) => {
     cachedPastKeys.add(key);
   }
 });
+console.log(`[Yahoo Import] Found ${cachedPastKeys.size} past-season leagues already cached`);
 
     const leaguesMap = {};
     for (const l of yahooLeagues) {
