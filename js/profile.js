@@ -140,6 +140,19 @@ const Profile = (() => {
       throw new Error("No MFL leagues found. Check your email and password.");
     }
 
+// ── NEW: Load existing leagues so we can respect bundleCached flags ──
+const existingLeagues = await GMDB.getLeagues(gmdUsername);
+const cachedPastKeys = new Set();
+
+Object.entries(existingLeagues || {}).forEach(([key, l]) => {
+  const seasonNum = parseInt(l.season || 0);
+  if (seasonNum < _CURRENT_YEAR && l.bundleCached === true) {
+    cachedPastKeys.add(key);
+  }
+});
+
+console.log(`[MFL Import] Found ${cachedPastKeys.size} past-season leagues already cached`);
+
     // ───────── STEP 1b: LOGIN ONCE — one cookie works for all seasons ──────────
     // MFL only needs a single login against the current year. That cookie is
     // valid for fetching bundle data from any historical year's API endpoint.
@@ -169,6 +182,20 @@ const Profile = (() => {
       const season        = String(l.season || new Date().getFullYear());
       const myFranchiseId = l.franchise_id ? String(l.franchise_id) : null;
       if (!leagueId) return;
+
+const key = `mfl_${season}_${leagueId}`;
+
+  // ── NEW: Skip Worker entirely for past seasons that are already cached ──
+  const isPast = parseInt(season) < _CURRENT_YEAR;
+  if (isPast && cachedPastKeys.has(key)) {
+    console.log(`[MFL Import] CACHE HIT — skipping Worker for ${key}`);
+    
+    // Reuse the existing cached metadata (team name, record, etc.)
+    if (existingLeagues[key]) {
+      leaguesMap[key] = { ...existingLeagues[key] };
+    }
+    return;   // ←←← EARLY RETURN — no Worker call
+  }
 
       // Use the year-specific cookie — MFL cookies are scoped to the season
       // they were obtained from, so a 2026 cookie won't auth 2022 API calls.
@@ -351,9 +378,23 @@ const Profile = (() => {
       throw new Error("No Yahoo leagues found. Make sure you completed the Yahoo authorization.");
     }
 
+const existing = await GMDB.getLeagues(gmdUsername);
+const cachedPastKeys = new Set();
+
+Object.entries(existing || {}).forEach(([key, l]) => {
+  if (parseInt(l.season || 0) < _CURRENT_YEAR && l.bundleCached) {
+    cachedPastKeys.add(key);
+  }
+});
+
     const leaguesMap = {};
     for (const l of yahooLeagues) {
       const key        = `yahoo_${l.season}_${l.leagueId}`;
+if (parseInt(l.season || 0) < _CURRENT_YEAR && cachedPastKeys.has(key)) {
+    console.log(`[Yahoo Import] CACHE HIT — skipping bundle fetch for ${key}`);
+    leaguesMap[key] = existing[key];
+    continue;
+  }
       const leagueName = l.leagueName || `League ${l.leagueId}`;
       // Chain by normalized league name so same dynasty across seasons links together
       const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
