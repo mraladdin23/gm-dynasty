@@ -1,138 +1,53 @@
-# DLR Yahoo Integration — Remaining Work
-*Updated after session completing Steps 1–5, 8, and partial 6.*
-*Attach: DLR_PROJECT_SUMMARY.md + the specific files listed per step.*
+# DLR Yahoo & MFL — Remaining Issues
+*Updated: April 18, 2026*
+*Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
 
-## Context
-All files from previous sessions are in the GitHub repo. The worker is deployed
-via `wrangler deploy`. CSS lives in `css/locker.css`. Key CSS classes confirmed:
-- Standings: `standings-row--me` (not `--mine`), `standings-win`, `standings-loss`,
-  `standings-num`, `st-av`, `bubble-tag`, `standings-legend`, `standings-table-wrap`
-- Matchups: `mu-card`, `mu-header`, `mu-team`, `mu-team--right`, `mu-scores`,
-  `mu-score`, `mu-score--win`, `mu-score--lose`, `mu-dash`, `mu-no-detail`, `fw-700`
-- Playoffs: `bracket-wrap`, `bracket-section`, `bracket-section-label`,
-  `bracket-section-games`, `bracket-match`, `bracket-slot`, `bracket-slot--win`,
-  `bracket-slot--lose`, `bracket-slot--me`, `bracket-team`, `bracket-score`,
-  `bracket-check`, `bracket-tbd`, `bracket-finals`, `bracket-finals-game`,
-  `bracket-finals-label`, `seed-tag`, `playoffs-pending`
+## How to Use This Doc
+Each issue below is self-contained. For each session: attach this doc + project summary +
+only the files listed under that issue. Fix one issue per session where possible.
 
 ---
 
-## ✅ Completed This Session
+## ✅ Completed
 
-### Step 8 — Analytics: leagueKey wire-up ✅
-`analytics.js` + `profile.js` — `_leagueKey` state var added, passed as 6th arg
-from `profile.js`, used in `_renderYahooAnalytics` instead of hardcoded `nfl.l.` prefix.
-`poStart` guard fixed (`> 0 ? ... : 999`). Non-blocking `recomputeStats` added at
-end of `renderLocker` for Yahoo-linked users (also covers Step 10).
-
-### Step 1 — Standings CSS Fix ✅
-`standings.js` — `_renderYahooStandings` rebuilt to match MFL structure exactly:
-`standings-row--me` (was `--mine`), `★` star, `standings-win`/`standings-loss`/
-`standings-num` classes, `standings-legend` at bottom, bubble tag.
-
-### Step 2 — Matchup Click-to-Expand ✅
-`standings.js` — `_renderYahooMatchups` cards now have `onclick` toggle on `.mu-detail`.
-Expand section shows season W–L + total PF for both teams (looked up from `bundle.standings`).
-
-### Step 3 — Standings Sort ✅
-Already confirmed in place: wins DESC → PF DESC in `_renderYahooStandings`.
-
-### Step 4 — Roster Tab: Dynamic Position Groups ✅
-`roster.js` — `_teamCardHTML` uses `PREFERRED_ORDER = ["QB","RB","WR","TE","K","DEF","PN","Coach"]`
-first, then remaining positions (DL, LB, CB, S, etc.) alphabetically. Sleeper keeps
-hardcoded `POS_ORDER`. Also added `detailMap` from `bundle.rosters[].playerDetails`
-as bio fallback for players missing from DynastyProcess CSV.
-
-### Step 5 — Players Tab: Position Filter + Bio Fallback + Yahoo Stats ✅
-`rules-and-fa.js` — Position filter replaced with `<select>` dropdown using same
-`PREFERRED_ORDER` prefix + alphabetical extras. Toolbar collapsed to two rows (search
-+ single flex-wrap control row). `detailMap` fallback for unmatched players.
-
-**Yahoo season stats added (new worker endpoint):**
-- `worker.js` — new `/yahoo/playerStats` POST endpoint: batches player IDs into
-  groups of 25, fetches `league/{key}/players;player_keys={...};out=stats`, returns
-  `{ [playerId]: totalPts }`. Parses `player_points.total` first, falls back to
-  summing `stat_id=0` from stats array.
-- `yahoo.js` — exposed `_getValidToken` and `_workerBase` on public surface.
-- `rules-and-fa.js` — `_loadYahooRosterData` now fetches Yahoo YTD stats + Sleeper
-  historical stats (2018+). Points resolved as: `sleeperPts ?? yahooPts`. Pts sort
-  and year selector now shown for Yahoo (was previously hidden).
+- Yahoo OAuth flow
+- Yahoo Standings (CSS matches MFL/Sleeper, sort confirmed)
+- Yahoo Matchups (season-pill week bar, click-to-expand with team stats)
+- Yahoo Roster tab (PREFERRED_ORDER position grouping, detailMap fallback)
+- Yahoo Players tab (YTD stats via `/yahoo/playerStats`, position dropdown)
+- Yahoo Analytics (leagueKey wired)
+- Yahoo keeper detection (`hasKeeperPicks` from draft data + `uses_roster_import`)
+- Yahoo token fix: optimistic use when `expiresAt` is 0
+- MFL `_detectMFLPlayoffFinish`: `isGuillotine` param, skips bracket for guillotine
+- MFL guillotine standings rank cap removed
+- MFL `resolved` flag: allows guillotine redraft leagues through
+- Worker `userLeagues` SINCE= gap-fill: year-by-year supplement for missing years
+- Mobile stuck panel fix: `renderLocker` closes detail panel on every load
+- Mobile safe area: `viewport-fit=cover`, `env(safe-area-inset-top)`, `100dvh`
 
 ---
 
-## Step 6 — Draft Tab: Fix Empty Results ⚠️ NEEDS DEPLOY + DEBUG
-**Files:** `worker.js`, `draft.js`
+## 🔴 Issue 1 — Career Stats Modal Crash
+**Status:** Broken — throws error every time career modal is opened.
 
-**Status:** Debug instrumentation added but not yet deployed/tested. Both files
-are in the repo with the following changes:
+**Error:** `Uncaught ReferenceError: _renderCSPlatform is not defined`
 
-**`worker.js`** — draft parsing block rewritten with:
-- `_draftDebug` object capturing `dResultsType`, `dContainerKeys`, `draftRawType`,
-  `draftArrLen`, `error` at each parse step
-- Handles additional response shapes (Shape C/D where `draft_results` is an object,
-  not an array)
-- `_draftDebug` returned in the response payload for client-side inspection
+`_openCareerSummaryModal` in `profile.js` calls `_renderCSPlatform()` and
+`_renderCSPlatformYear()` but these functions were never implemented.
 
-**`draft.js`** — after `getLeagueBundle()`, logs:
-```js
-console.log("[Yahoo draft] debug:", bundle._draftDebug);
-console.log("[Yahoo draft] picks parsed:", (bundle.draft || []).length);
-```
+**Fix needed in `profile.js`:**
+Add two render functions after `_renderCSMatrix`:
 
-**Action needed:**
-1. `wrangler deploy` the worker, push `draft.js`
-2. Open a Yahoo league → Draft tab → DevTools Console
-3. Paste the `[Yahoo draft] debug:` output here
-4. Key fields: `dResultsType`, `dContainerKeys`, `draftRawType`, `draftArrLen`
+`_renderCSPlatform(leagues)`: table grouped by `l.platform` ("sleeper", "mfl", "yahoo").
+Use `_platformLabel()` for display names. Same structure as `_renderCSType`.
 
-Once the shape is known, fix the parser and **remove `_draftDebug`** from the
-worker response and `draft.js` console log.
+`_renderCSPlatformYear(leagues)`: matrix with rows=seasons, columns=platforms.
+Same structure as `_renderCSMatrix`.
 
----
-
-## Step 7 — Transactions: Show Team Name
-**Files:** `transactions.js`, `worker.js`
-
-**Issue 10:** Team name blank on Yahoo transactions. Root cause: `roster_ids[0]` is
-set from `tx.teamId` which may be null when the worker can't find any team key.
-
-**Fix in worker** — for add transactions, the team is `destination_team_key` at the
-**transaction level** (not player level). For drops, it's `source_team_key`. The
-current code already does this. Check the actual Yahoo response in devtools:
-
-Add temporary logging to worker:
-```js
-// After meta parsing in transaction loop:
-console.log("[Yahoo tx]", txType, "trader:", traderKey, "dest:", destKey, "src:", srcKey);
-```
-
-**Fix in transactions.js** — ensure `_rosters` is populated before `_loadYahooData`
-tries to look up names. The `_rosters` array is built from `bundle.teams` with
-`roster_id: t.id`. Verify `t.id` matches the `teamId` strings on transactions —
-both should be bare numeric strings like `"3"`.
-
-If still blank, add a fallback: when `_teamName()` returns `Team ${id}`, at least
-that shows something. Check if the issue is that `initiator` check at:
-```js
-const initiator = type !== "trade" && tx.roster_ids?.[0]
-  ? _teamName(tx.roster_ids[0]) : "";
-```
-Yahoo adds/drops have `type = "free_agent"` (not "trade"), so `initiator` should
-fire. Log `tx.roster_ids[0]` and compare against `_rosters[i].roster_id`.
-
----
-
-## Step 9 — Career Stats: Platform Tabs ⚠️ BROKEN — FIX FIRST IN NEW SESSION
-**Files:** `profile.js`, `index.html`
-
-**Error:** `Uncaught ReferenceError: _renderCSPlatform is not defined` fires every
-time the career summary modal is opened. `_openCareerSummaryModal` calls
-`_renderCSPlatform()` and `_renderCSPlatformYear()` but these functions were never
-implemented.
-
-**In `index.html`** — add after the matrix tab button and panel:
+**Fix needed in `index.html`:**
+Add after existing cs-tab buttons and panels:
 ```html
 <button class="cs-tab" data-cstab="platform">By Platform</button>
 <button class="cs-tab" data-cstab="platform-year">Platform × Year</button>
@@ -141,101 +56,194 @@ implemented.
 <div id="cs-platform-year" class="cs-panel"></div>
 ```
 
-**In `profile.js`** — add two render functions after `_renderCSMatrix`:
-
-`_renderCSPlatform(leagues)`: same table structure as `_renderCSType` but grouped by
-`l.platform` ("sleeper", "mfl", "yahoo"). Use `_platformLabel()` for display names.
-
-`_renderCSPlatformYear(leagues)`: same matrix structure as `_renderCSMatrix` but
-columns are platforms instead of types, rows are seasons.
-
-Call both from `_openCareerSummaryModal` alongside the existing four calls.
+**Files:** `profile.js`, `index.html`
 
 ---
 
-## Step 10 — Stats Header Auto-Update ✅ (done as part of Step 8)
-Non-blocking `recomputeStats` added at end of `renderLocker` for Yahoo-linked users.
-Confirm `_resolveYahooIdentities` also calls `recomputeStats` at the end — should
-already be in place from a prior session.
+## 🔴 Issue 2 — Yahoo Draft Tab Empty
+**Status:** Debug instrumentation in place, needs deploy + console output to fix parser.
+
+**Current state:** `worker.js` has `_draftDebug` object capturing parse shape info.
+`draft.js` logs `bundle._draftDebug` to console after bundle fetch.
+
+**Action needed:**
+1. Deploy current `worker.js` to Cloudflare (paste into dashboard)
+2. Open a Yahoo league → Draft tab → DevTools Console
+3. Paste the `[Yahoo draft] debug:` output — key fields: `dResultsType`, `dContainerKeys`, `draftRawType`, `draftArrLen`
+4. Fix the parser based on actual response shape
+5. Remove `_draftDebug` from worker response and `draft.js` console log
+
+**Files:** `worker.js`, `draft.js`
 
 ---
 
-## Step 11 — League Type Detection (Keeper/Dynasty)
-**Files:** `worker.js`, `profile.js`
+## 🔴 Issue 3 — Yahoo Transactions Team Name Blank
+**Status:** Team name blank on most Yahoo transactions.
 
-**Issue 3:** Already partially fixed — `uses_roster_import` added to `leagueMeta`
-in `worker.js`, and `_detectYahooLeagueType` updated in `profile.js`.
+**Root cause:** `roster_ids[0]` comes from `tx.teamId` which may be null when worker
+can't find the team key. For add transactions, team is `destination_team_key` at the
+transaction level (not player level). For drops, it's `source_team_key`.
 
-**Confirm** worker returns `uses_roster_import` in `leagueMeta`. Then confirm
-`_resolveYahooIdentities` calls `_detectYahooLeagueType(bundle.leagueMeta, ...)` and
-writes `leagueType` to Firebase.
+**Fix approach:**
+- Verify `t.id` in `bundle.teams` matches `teamId` strings on transactions (both
+  should be bare numeric strings like `"3"`)
+- If `_teamName()` returns `Team ${id}`, at least that shows something — check if
+  the `initiator` logic fires correctly for Yahoo free agent moves:
+  ```js
+  const initiator = type !== "trade" && tx.roster_ids?.[0]
+    ? _teamName(tx.roster_ids[0]) : "";
+  ```
 
-**Gap:** Leagues already imported before this fix won't get updated. Add
-`leagueType` to the fields that trigger re-resolution by changing the filter in
-`_resolveYahooIdentities`:
+**Files:** `transactions.js`, `worker.js`
+
+---
+
+## 🔴 Issue 4 — Yahoo Playoff Finish Bug (Runner-up shown as 3rd)
+**Status:** Some leagues where user finished 2nd show `playoffFinish: 3`.
+
+**Root cause:** In `_detectYahooPlayoffFinish` (`profile.js`):
+The problem is that `allMatchups` may include a "3rd place game" in the same final
+week as the championship. All 4 playoff teams are in `playoffTeamSet` so the
+consolation game teams aren't excluded.
+
+**Fix needed in `profile.js`:**
+1. Find the championship game (only game in last playoff week involving teams who
+   won their semifinal)
+2. If user is in championship game: win = 1st, lose = 2nd
+3. If user plays in final week but NOT in championship game: win = 3rd, lose = 4th
+4. If eliminated in semifinal week: 3rd/4th
+
+**Files:** `profile.js`
+
+---
+
+## 🟡 Issue 5 — Yahoo Matchup Player Scores
+**Status:** `/yahoo/matchupDetail` endpoint not yet in deployed worker.
+
+The two-step fetch (scoreboard → roster+stats) was built in a previous session but
+the worker with that endpoint has not been deployed. Need to:
+1. Confirm `/yahoo/matchupDetail` endpoint exists in `worker.js`
+2. Deploy worker
+3. Test by clicking a matchup expand on a Yahoo league
+
+**Files:** `worker.js`, `standings.js`
+
+---
+
+## 🟡 Issue 6 — Yahoo Firebase Persistence (saveLeague Failures)
+**Status:** Yahoo leagues sometimes don't save correctly after resolution.
+
+**Root cause suspects:**
+1. Race condition in `_resolveYahooIdentities` (CONCURRENCY = 2)
+2. Firebase REST API timeout during slow Yahoo bundle fetch
+3. `resolved` flag set on stale copy
+
+**Fix approach:**
+- Reduce CONCURRENCY from 2 to 1 in `_resolveYahooIdentities`
+- Add retry logic to `saveLeague` — if fails once, wait 1 second and retry
+
+**Files:** `profile.js`, `firebase-db.js`
+
+---
+
+## 🟡 Issue 7 — Yahoo Completed Redraft Leagues Not Getting `resolved`
+**Status:** Past-season Yahoo redraft leagues re-fetch on every page load.
+
+**Fix:** Also mark resolved if `lm.is_finished === 1` regardless of `leagueType`:
 ```js
-const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
-  l.platform === "yahoo" && (
-    !l.myRosterId || !l.teamName || l.teamName === "" ||
-    l.leagueType === "redraft"   // re-check leagues still marked as redraft
-  )
-);
+if (_isPastSeason(l) && playoffFinish !== null
+    && (leagueType !== "redraft" || lm.is_finished === 1)) {
+  _markResolved(l);
+}
+```
+
+**Files:** `profile.js`
+
+---
+
+## 🟡 Issue 8 — MFL Guillotine Championship Detection
+**Status:** Existing guillotine/eliminator leagues in Firebase may have wrong
+`playoffFinish` values from before the `isGuillotine` fix.
+
+**⚠️ WARNING:** Do NOT run bulk reset scripts on Firebase league data.
+This has caused repeated data corruption. Instead, fix surgically:
+
+For any specific league showing wrong championship:
+```js
+// Fix ONE league at a time — replace KEY with the specific mfl_YYYY_XXXXX key
+const key = "mfl_2024_XXXXX";
+await firebase.database().ref(`gmd/users/mraladdin23/leagues/${key}`).update({
+  playoffFinish: null,
+  isChampion: false,
+  resolved: null
+});
+console.log("Reset", key, "— click Sync to re-detect");
+```
+Then click **Sync** to re-run detection.
+
+For guillotine leagues, `playoffFinish` = standings rank (last surviving = 1st,
+last eliminated = 2nd, etc.). The code is correct — the issue is stale Firebase data.
+
+---
+
+## 🟢 Issue 9 — Bottom Safe Area on Mobile
+**Status:** Content at bottom of scrollable areas clipped behind home indicator.
+
+**Fix:** Add `padding-bottom: env(safe-area-inset-bottom)` to:
+- `.league-detail-body`
+- `.app-view.active`
+
+**Files:** `locker.css`
+
+---
+
+## Console Scripts (Safe to Run)
+
+### Check MFL league data health
+```js
+const snap = await firebase.database().ref('gmd/users/mraladdin23/leagues').get();
+const leagues = snap.val() || {};
+const mfl = Object.entries(leagues).filter(([k,v]) => v.platform === 'mfl');
+console.log('MFL total:', mfl.length);
+console.log('With leagueName:', mfl.filter(([k,v]) => v.leagueName).length);
+console.log('With myRosterId:', mfl.filter(([k,v]) => v.myRosterId).length);
+console.log('Resolved:', mfl.filter(([k,v]) => v.resolved).length);
+```
+
+### Reset a SINGLE MFL league (surgical — safe)
+```js
+// Only use this for one specific league, not bulk
+const key = "mfl_2024_XXXXX"; // replace with actual key
+await firebase.database().ref(`gmd/users/mraladdin23/leagues/${key}`).update({
+  playoffFinish: null, isChampion: false, resolved: null
+});
+console.log("Reset", key, "— click Sync to re-detect");
+```
+
+### Clear bundles node (safe — only clears cached bundles, not league data)
+```js
+await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
+console.log("Bundles cleared");
 ```
 
 ---
 
-## Step 12 — Overview: Championship Detection
-**Files:** `profile.js`
-
-**Issue 6:** `playoffFinish` is never set for past Yahoo leagues so no 🏆 champion
-badge shows on the overview tab.
-
-`_detectYahooPlayoffFinish` was added in a prior session inside `_resolveYahooIdentities`.
-**Confirm** it's writing `playoffFinish` and `isChampion` to Firebase.
-
-For current in-season leagues where `is_finished = 0`, the function returns null
-(correct). For completed leagues it should return 1 for champion.
-
-**Test:** After deploying, open a finished Yahoo league overview. If still blank,
-add a console log in `_detectYahooPlayoffFinish` to see what `allMatchups` and
-`poWeeks` contain.
+## Suggested Session Order
+1. **Issue 1** — Career stats crash (`profile.js` + `index.html`, fix first — it's a hard error)
+2. **Issue 2** — Yahoo draft (deploy worker, read console output, fix parser)
+3. **Issue 3** — Yahoo transactions team name
+4. **Issue 4** — Yahoo playoff finish bug
+5. **Issue 5** — Yahoo matchup player scores (worker deploy)
+6. **Issue 7** — Yahoo redraft resolved flag (one-liner)
+7. **Issue 9** — Bottom safe area (CSS only)
 
 ---
 
-## Deployment Checklist
-After each step, commit and push to trigger GitHub Pages. Worker changes need
-`wrangler deploy` separately.
-
-**Order of priority for next session:**
-1. Step 9 (Career stats `_renderCSPlatform` — currently throwing a console error)
-2. Step 6 (Draft — deploy debug build, read console output, fix parser)
-3. Step 7 (Transactions team name)
-4. Steps 11–12 (League type, championships — data layer)
-
----
-
-## Files Modified This Session (all should be in repo)
-| File | Last Changed |
+## Files Modified (April 18 Session)
+| File | Key Changes |
 |------|-------------|
-| `worker.js` | `/yahoo/playerStats` endpoint, draft debug instrumentation + shape handling |
-| `yahoo.js` | `playerDetails` passed through `normalizeBundle` rosters, `_getValidToken` + `_workerBase` exposed |
-| `analytics.js` | `_leagueKey` state var, `init()` 6th arg, `_renderYahooAnalytics` key fix, `poStart` guard |
-| `profile.js` | `DLRAnalytics.init()` passes `league.leagueKey`, non-blocking `recomputeStats` in `renderLocker` |
-| `standings.js` | `_renderYahooStandings` CSS/structure rebuilt, `_renderYahooMatchups` click-to-expand |
-| `roster.js` | `PREFERRED_ORDER` position grouping, `detailMap` bio fallback for unmatched players |
-| `rules-and-fa.js` | Position dropdown with `PREFERRED_ORDER`, compact toolbar, Yahoo stats fetch, `detailMap` bio fallback |
-| `draft.js` | Debug log after `getLeagueBundle()` |
-
----
-
-## Notes for Next Session
-- Attach `DLR_PROJECT_SUMMARY.md` + the specific JS file(s) for the step
-- The CSS classes are confirmed from `locker.css` — use them exactly as listed above
-- `standings-row--me` is the correct class (NOT `standings-row--mine`)
-- Yahoo game key format: `"{game_id}.l.{league_id}"` e.g. `"449.l.123456"` for NFL 2024
-  The game_id changes yearly — always use the stored `league.leagueKey` not a hardcoded prefix
-- Worker changes require `wrangler deploy` in addition to git push
-- Test on mobile data (home router blocks workers.dev)
-- `/yahoo/playerStats` worker endpoint is new — needs `wrangler deploy` before Yahoo
-  Players tab will show points data
-- `_renderCSPlatform` error is a hard crash on career modal open — fix this first
+| `worker.js` | `userLeagues`: SINCE= gap-fill — fetches missing years year-by-year after SINCE= response |
+| `profile.js` | `renderLocker`: closes detail panel + clears `_detailLeagueKey` on every load (stuck panel fix) |
+| `yahoo.js` | Token fix restored: `!expiresAt` optimistic condition; `_draftDebug` removed; `isKeeper`/`hasKeeperPicks` restored; `uses_roster_import` in leagueMeta |
+| `base.css` | `min-height: 100dvh` restored on `.screen` |
+| `index.html` | `viewport-fit=cover` restored in viewport meta |
