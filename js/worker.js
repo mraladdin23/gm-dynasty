@@ -97,6 +97,14 @@ export default {
         return yahooPlayerStats(access_token, league_key, player_ids);
       }
 
+      if (path === "/yahoo/matchupDetail" && req.method === "POST") {
+        const { access_token, league_key, week } = await req.json();
+        if (!access_token || !league_key || !week) {
+          return new Response(JSON.stringify({ error: "Missing access_token, league_key, or week" }), { status: 400, headers: corsHeaders() });
+        }
+        return yahooMatchupDetail(access_token, league_key, week);
+      }
+
       if (path === "/mfl/userLeagues" && req.method === "POST") {
         const { username, password } = await req.json();
         if (!username || !password) return new Response(JSON.stringify({ error: "Missing credentials" }), { status: 400, headers: corsHeaders() });
@@ -836,6 +844,127 @@ async function yahooPlayerStats(accessToken, leagueKey, playerIds) {
   }
 
   return new Response(JSON.stringify(statsMap), { headers: corsHeaders() });
+}
+
+// ── Yahoo per-week matchup player detail ─────────────────────────────────────
+// Fetches player-level scores for every matchup in a given week.
+// Uses: GET /league/{key}/scoreboard;week={w};out=matchup_grade,players,stats
+// Returns:
+//   { matchups: [ { homeId, awayId, home: [{pid, name, pos, slot, pts, isStarter}], away: [...] } ] }
+//
+// Yahoo encodes the starting lineup inside each team's roster entry:
+//   team[1].roster[0].players[i].player[1].selected_position[0].position = "QB" | "BN" etc.
+//   player_points.total = fantasy points for that week
+async function yahooMatchupDetail(accessToken, leagueKey, week) {
+  const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
+  const authHdr = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+
+  // Fetch scoreboard with players+stats out for the specified week
+  // This is the most efficient single call — returns scores + rosters in one shot
+  const url = `${base}/league/${leagueKey}/scoreboard;week=${week};out=players,stats?format=json`;
+  let data;
+  try {
+    const res = await fetch(url, { headers: authHdr });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      return new Response(JSON.stringify({ error: `Yahoo API ${res.status}`, detail: txt.slice(0, 200) }), { status: 200, headers: corsHeaders() });
+    }
+    data = await res.json();
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 200, headers: corsHeaders() });
+  }
+
+  const findVal = (arr, key) => {
+    if (!Array.isArray(arr)) return arr?.[key] ?? null;
+    for (const obj of arr) { if (obj && typeof obj === "object" && key in obj) return obj[key]; }
+    return null;
+  };
+  const yahooPlayerId = k => {
+    if (!k) return "";
+    const s = String(k);
+    return s.includes(".") ? s.split(".").pop() : s;
+  };
+
+  const sb = data?.fantasy_content?.league?.[1]?.scoreboard;
+  if (!sb) return new Response(JSON.stringify({ matchups: [] }), { headers: corsHeaders() });
+
+  const muObj  = sb?.["0"]?.matchups || {};
+  const count  = muObj.count || 0;
+  const result = [];
+
+  for (let i = 0; i < count; i++) {
+    const mu = muObj[String(i)]?.matchup;
+    if (!mu) continue;
+    const muTeams = mu["0"]?.teams || {};
+
+    const parseSide = (teamSlot) => {
+      const t      = muTeams[String(teamSlot)]?.team;
+      if (!t) return { teamId: "", players: [] };
+      const tInfo  = Array.isArray(t[0]) ? t[0] : [t[0]].filter(Boolean);
+      const teamId = String(findVal(tInfo, "team_id") || "");
+
+      // t[1] may hold roster directly or be team_points; roster is in t[1].roster or t[2].roster
+      const rosterContainer = t[1]?.roster || t[2]?.roster;
+      const playersObj = rosterContainer?.[0]?.players || {};
+      const pCount = playersObj.count || 0;
+      const players = [];
+
+      for (let j = 0; j < pCount; j++) {
+        const p = playersObj[String(j)]?.player;
+        if (!p) continue;
+        const pInfo = Array.isArray(p[0]) ? p[0] : [p[0]].filter(Boolean);
+        const rawId = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
+        const pid   = yahooPlayerId(rawId);
+        if (!pid) continue;
+
+        const nameObj  = findVal(pInfo, "name");
+        const name     = (typeof nameObj === "object" ? nameObj?.full : nameObj) || findVal(pInfo, "full_name") || "";
+        const dispPos  = findVal(pInfo, "display_position") || findVal(pInfo, "eligible_positions") || "";
+        const pos      = (typeof dispPos === "object" ? (dispPos?.position || "") : dispPos).split(",")[0].trim();
+        const nflTeam  = findVal(pInfo, "editorial_team_abbr") || "";
+
+        // selected_position is in p[1].selected_position[0].position
+        const selPos = p[1]?.selected_position;
+        const slotRaw = (Array.isArray(selPos) ? selPos[0] : selPos)?.position || "";
+        const slot    = String(slotRaw).toUpperCase();
+        const isStarter = slot !== "BN" && slot !== "IR" && slot !== "";
+
+        // player_points: in p[2] or p[3] — search for player_points key
+        let pts = 0;
+        for (let k = 1; k < p.length; k++) {
+          const pp = p[k]?.player_points;
+          if (pp != null) { pts = parseFloat(pp.total ?? pp ?? 0) || 0; break; }
+          // also check player_stats total
+          const ps = p[k]?.player_stats;
+          if (ps) {
+            const statsArr = ps?.[0]?.stats?.stat || ps?.stats?.stat;
+            if (Array.isArray(statsArr)) {
+              const totStat = statsArr.find(s => String(s.stat_id) === "0");
+              if (totStat) { pts = parseFloat(totStat.value || 0) || 0; break; }
+            }
+          }
+        }
+
+        players.push({ pid, name, pos, nflTeam, slot, isStarter, pts });
+      }
+
+      return { teamId, players };
+    };
+
+    const homeTeam  = parseSide(0);
+    const awayTeam  = parseSide(1);
+    const winnerKey = mu.winner_team_key || "";
+
+    result.push({
+      homeId: homeTeam.teamId,
+      awayId: awayTeam.teamId,
+      winnerTeamId: winnerKey ? String(winnerKey).split(".").pop() : null,
+      home: homeTeam.players,
+      away: awayTeam.players,
+    });
+  }
+
+  return new Response(JSON.stringify({ matchups: result }), { headers: corsHeaders() });
 }
 
 function yahooLogin(env) {
