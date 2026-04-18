@@ -105,7 +105,7 @@ eliminator, and guillotine leagues.
 - Playoffs ⚠️ (bracket filtered to championship teams, runner-up sometimes shown as 3rd)
 - Roster ✅ (PREFERRED_ORDER position grouping, detailMap fallback)
 - Players tab ✅ (YTD stats via `/yahoo/playerStats`, position dropdown)
-- Draft ⚠️ (debug instrumentation added but parser not yet confirmed working)
+- Draft ⚠️ (parser not yet confirmed working)
 - Transactions ⚠️ (team name blank on some transactions)
 - Analytics ✅ (leagueKey wired)
 - Career stats ⚠️ (`_renderCSPlatform` not implemented — throws error on modal open)
@@ -228,27 +228,6 @@ POST /auth/yahoo/refresh   — token refresh
 
 ---
 
-## Roadmap — Open Issues (see DLR_YAHOO_TODO.md for detail)
-
-### 🔴 High Priority
-1. **Career stats crash** — `_renderCSPlatform` not implemented, throws error every time career modal opens
-2. **Yahoo draft tab** — parser debug instrumentation in place, needs deploy + console output to fix
-3. **Yahoo transactions team name** — blank on most transactions
-4. **Yahoo playoff finish bug** — runner-up sometimes detected as 3rd place
-
-### 🟡 Medium Priority
-5. **Yahoo redraft resolved flag** — completed redraft leagues should be marked resolved
-6. **Yahoo matchup player scores** — `/yahoo/matchupDetail` endpoint not yet in worker
-7. **MFL guillotine championship detection** — standings rank used but existing data may be stale
-
-### 🟢 Low Priority / Future
-8. **Bottom safe area** — `env(safe-area-inset-bottom)` not yet applied
-9. **Sticky notes in Hallway UI**
-10. **Commissioner trophy builder**
-11. **Tournament bracket feature**
-
----
-
 ## Completed Sessions Log
 
 **April 10:** Mobile auth fixes, MFL player matching, transactions, overview, draft, auction, salary cap, players tab, DNS rollback.
@@ -291,12 +270,13 @@ POST /auth/yahoo/refresh   — token refresh
 - `yahoo.js` token fix restored after revert: optimistic `!expiresAt` condition re-applied (fixes Yahoo OAuth 400 errors)
 - `base.css` `100dvh` and `index.html` `viewport-fit=cover` restored after revert
 - Multiple stability incidents this session due to Firebase data corruption from bulk reset scripts and bundle caching experiments — see IMPORTANT note in Historical League Caching section above
+- Roadmap moved to `DLR_TODO_LIST.md` (replaces `DLR_YAHOO_TODO.md`)
 
 ---
 
 ## Tips for Starting a New Claude Chat
 
-1. **Attach this document** + `DLR_YAHOO_TODO.md` + **the specific file(s)** for the task
+1. **Attach this document** + `DLR_TODO_LIST.md` + **the specific file(s)** for the task
 2. **One task per session** — attach only the 1–3 files needed for that task
 3. **Commit to git** after each fix before starting a new session
 4. **Never run bulk Firebase reset scripts** — they corrupt league data. Fix things surgically.
@@ -308,7 +288,7 @@ Repo: mraladdin23/gm-dynasty (GitHub Pages).
 Stack: Vanilla JS, Firebase Realtime DB, Cloudflare Worker (mfl-proxy.mraladdin23.workers.dev).
 Worker deployed by pasting into Cloudflare dashboard editor (no wrangler.toml).
 Platforms: Sleeper ✅, MFL ✅, Yahoo ⚠️.
-[Attach DLR_PROJECT_SUMMARY.md + DLR_YAHOO_TODO.md]
+[Attach DLR_PROJECT_SUMMARY.md + DLR_TODO_LIST.md]
 Today I want to work on: [specific task]
 Here are the relevant files: [attach files]
 ```
@@ -323,4 +303,4 @@ Here are the relevant files: [attach files]
 ---
 
 *Document updated: April 18, 2026*
-*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — see DLR_YAHOO_TODO.md.*
+*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — see DLR_TODO_LIST.md.*
