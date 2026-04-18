@@ -539,7 +539,7 @@ const Profile = (() => {
               _markResolved(_allLeagues[leagueKey]);
             }
 
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
             matched++;
           }
         } catch(e) { /* skip failed league */ }
@@ -566,7 +566,7 @@ const Profile = (() => {
 
     for (const [leagueKey, league] of unresolved) {
       _markResolved(_allLeagues[leagueKey]);
-      GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+      GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
     }
 
     // For Sleeper leagues missing playoffFinish (imported before playoff detection was added),
@@ -594,7 +594,7 @@ const Profile = (() => {
             if (finish != null && _allLeagues[leagueKey].leagueType !== "redraft" && _allLeagues[leagueKey].teamName) {
               _markResolved(_allLeagues[leagueKey]);
             }
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
           }
         } catch(e) { /* skip */ }
       }));
@@ -673,7 +673,7 @@ const Profile = (() => {
                 && leagueType && leagueType !== "redraft") {
               _markResolved(_allLeagues[leagueKey]);
             }
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
           }
         } catch(e) { /* skip failed league silently */ }
       }));
@@ -2387,13 +2387,11 @@ const Profile = (() => {
           }
           if (_currentUsername) {
             _renderLeagues();
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
           }
         }
       } catch(e) { /* render with what we have */ }
-    }
-
-    // ── Yahoo: live-fetch to resolve myTeamId (team_id from is_owned_by_current_login)
+    }    // ── Yahoo: live-fetch to resolve myTeamId (team_id from is_owned_by_current_login)
     // and update teamName/record if not yet stored. Runs once per league load when
     // myRosterId is null (newly imported leagues) or teamName is blank.
     const needsYahooFetch = league.platform === "yahoo" && (
@@ -2423,7 +2421,7 @@ const Profile = (() => {
           if (_detailLeagueKey === leagueKey) _detailLeague = { ..._detailLeague, ...league };
           if (_currentUsername) {
             _renderLeagues();
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
           }
         }
       } catch(e) { /* render with what we have */ }

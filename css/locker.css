@@ -4897,15 +4897,16 @@ select option { background: var(--color-bg-2); }
   body { overscroll-behavior: none; touch-action: pan-y; }
   html { overscroll-behavior: none; }
 
-  /* Nav stays pinned at top */
+  /* Nav stays pinned at top — account for notch/status bar in PWA standalone mode */
   .top-nav {
     position: fixed !important;
     top: 0; left: 0; right: 0;
     z-index: 200;
-    height: 48px;
+    height: calc(48px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
   }
-  /* Push content below fixed nav */
-  #app-screen { padding-top: 48px; }
+  /* Push content below fixed nav + safe area */
+  #app-screen { padding-top: calc(48px + env(safe-area-inset-top)); }
 
   /* App view padding */
   .app-view { padding: var(--space-3) var(--space-3) var(--space-6) !important; }

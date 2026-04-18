@@ -244,16 +244,17 @@ const YahooAPI = (() => {
     // leagueMeta — structured league settings from worker
     const lm = raw.leagueMeta || {};
     const leagueMeta = {
-      current_week:       _int(lm.current_week),
-      start_week:         _int(lm.start_week)         || 1,
-      end_week:           _int(lm.end_week)            || 17,
-      is_finished:        _int(lm.is_finished),
-      playoff_start_week: _int(lm.playoff_start_week),
-      num_playoff_teams:  _int(lm.num_playoff_teams),
-      uses_playoff:       _int(lm.uses_playoff),
-      scoring_type:       lm.scoring_type || "head",
-      season:             lm.season       || "",
-      name:               lm.name         || "",
+      current_week:        _int(lm.current_week),
+      start_week:          _int(lm.start_week)         || 1,
+      end_week:            _int(lm.end_week)            || 17,
+      is_finished:         _int(lm.is_finished),
+      playoff_start_week:  _int(lm.playoff_start_week),
+      num_playoff_teams:   _int(lm.num_playoff_teams),
+      uses_playoff:        _int(lm.uses_playoff),
+      uses_roster_import:  lm.uses_roster_import != null ? _int(lm.uses_roster_import) : null,
+      scoring_type:        lm.scoring_type || "head",
+      season:              lm.season       || "",
+      name:                lm.name         || "",
     };
 
     return {
@@ -272,7 +273,6 @@ const YahooAPI = (() => {
       futurePicks:  _arr(raw.futurePicks),
       auctions:     _arr(raw.auctions),
       rules:        raw.rules        || {},
-      _draftDebug:  raw._draftDebug  || null, 
     };
   }
 
