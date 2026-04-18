@@ -36,10 +36,13 @@ const YahooAPI = (() => {
     if (!access) throw new Error("No Yahoo access token — please reconnect Yahoo.");
 
     // If token is still valid (with 2-minute buffer), use it
-    if (expiresAt && Date.now() < expiresAt - 120_000) return access;
+    // If expiry is unknown (0), use token optimistically — it might still be valid.
+    // Only attempt refresh if we know for certain the token has expired.
+    if (!expiresAt || Date.now() < expiresAt - 120_000) return access;
 
-    // Token expired or expiry unknown — try to refresh
-    if (!refresh) {
+    // Token is definitively expired — try to refresh
+    const hasRefresh = refresh && refresh.length > 0;
+    if (!hasRefresh) {
       throw new Error("Yahoo token expired — please reconnect Yahoo.");
     }
 
@@ -216,14 +219,20 @@ const YahooAPI = (() => {
 
     // Draft
     const draft = _arr(raw.draft).map(p => ({
-      pick:     _int(p.pick),
-      round:    _int(p.round),
-      teamId:   _str(p.teamId   ?? p.team_id),
-      playerId: _str(p.playerId ?? p.player_id),
-      name:     p.name          || "",
-      position: p.position      || "?",
-      cost:     p.cost != null  ? _int(p.cost) : null,
+      pick:       _int(p.pick),
+      round:      _int(p.round),
+      teamId:     _str(p.teamId   ?? p.team_id),
+      playerId:   _str(p.playerId ?? p.player_id),
+      name:       p.name          || "",
+      position:   p.position      || "?",
+      cost:       p.cost != null  ? _int(p.cost) : null,
+      isKeeper:   !!(p.isKeeper   ?? p.is_keeper),
     }));
+
+    // Detect keeper league from draft data: if any pick is flagged as a keeper,
+    // or if multiple picks share round+cost=0 pattern (pre-assigned keeper rounds).
+    const hasKeeperPicks = draft.some(p => p.isKeeper)
+      || draft.filter(p => p.cost === 0 && p.round > 1).length >= 2;
 
     // Transactions — preserve moves array for DynastyProcess resolution
     const transactions = _arr(raw.transactions).map(tx => ({
@@ -251,9 +260,10 @@ const YahooAPI = (() => {
       playoff_start_week: _int(lm.playoff_start_week),
       num_playoff_teams:  _int(lm.num_playoff_teams),
       uses_playoff:       _int(lm.uses_playoff),
-      scoring_type:       lm.scoring_type || "head",
-      season:             lm.season       || "",
-      name:               lm.name         || "",
+      uses_roster_import:  lm.uses_roster_import != null ? _int(lm.uses_roster_import) : null,
+      scoring_type:        lm.scoring_type || "head",
+      season:              lm.season       || "",
+      name:                lm.name         || "",
     };
 
     return {
@@ -271,8 +281,8 @@ const YahooAPI = (() => {
       players:      _arr(raw.players),
       futurePicks:  _arr(raw.futurePicks),
       auctions:     _arr(raw.auctions),
-      rules:        raw.rules        || {},
-      _draftDebug:  raw._draftDebug  || null, 
+      rules:           raw.rules        || {},
+      hasKeeperPicks,
     };
   }
 
