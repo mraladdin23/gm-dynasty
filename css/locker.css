@@ -4033,7 +4033,7 @@ select option { background: var(--color-bg-2); }
   .screen.active     { height: 100%; overflow: hidden; width: 100vw; max-width: 100vw; }
   #onboarding-screen.active { overflow-y: auto; overflow-x: hidden; } /* must scroll to see all platforms */
   .app-view          { padding: var(--space-2) !important; overflow-x: hidden; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
-  .app-view.active   { overflow-y: auto; overflow-x: hidden; height: calc(100vh - 48px); height: calc(100dvh - 48px); box-sizing: border-box; width: 100% !important; }
+  .app-view.active   { overflow-y: auto; overflow-x: hidden; height: calc(100vh - 48px); box-sizing: border-box; width: 100% !important; }
 
   /* Nav */
   .top-nav   { height: 48px; min-height: 48px; padding: 0 var(--space-2); }
@@ -4108,16 +4108,21 @@ select option { background: var(--color-bg-2); }
   .page-btn { font-size: .7rem; padding: 3px 7px; }
   .page-info { font-size: .7rem; }
 
-  /* League detail panel: full screen */
+  /* League detail panel: full screen with sticky header + tab select */
   .league-detail-panel {
     position: fixed !important;
     inset: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
     border-radius: 0 !important;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;            /* panel itself does NOT scroll */
+    padding-top: calc(48px + env(safe-area-inset-top)) !important;
   }
+  .league-detail-header  { flex-shrink: 0; }
+  .league-detail-tabs    { flex-shrink: 0; }
+  .league-detail-body    { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
   .detail-tab-select { font-size: .8rem; width: 100%; }
   .season-bar-pills { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
   .season-bar-pills::-webkit-scrollbar { display: none; }
@@ -4897,16 +4902,15 @@ select option { background: var(--color-bg-2); }
   body { overscroll-behavior: none; touch-action: pan-y; }
   html { overscroll-behavior: none; }
 
-  /* Nav stays pinned at top — account for notch/status bar in PWA standalone mode */
+  /* Nav stays pinned at top */
   .top-nav {
     position: fixed !important;
     top: 0; left: 0; right: 0;
     z-index: 200;
-    height: calc(48px + env(safe-area-inset-top));
-    padding-top: env(safe-area-inset-top);
+    height: 48px;
   }
-  /* Push content below fixed nav + safe area */
-  #app-screen { padding-top: calc(48px + env(safe-area-inset-top)); }
+  /* Push content below fixed nav */
+  #app-screen { padding-top: 48px; }
 
   /* App view padding */
   .app-view { padding: var(--space-3) var(--space-3) var(--space-6) !important; }

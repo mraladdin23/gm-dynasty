@@ -35,11 +35,13 @@ const YahooAPI = (() => {
 
     if (!access) throw new Error("No Yahoo access token — please reconnect Yahoo.");
 
-    // If token is still valid (with 2-minute buffer), use it
-    if (expiresAt && Date.now() < expiresAt - 120_000) return access;
+    // If expiry is unknown (0), optimistically use the token — it might still be valid.
+    // Only attempt refresh if we know for certain the token has expired.
+    if (!expiresAt || Date.now() < expiresAt - 120_000) return access;
 
-    // Token expired or expiry unknown — try to refresh
-    if (!refresh) {
+    // Token is definitively expired — try to refresh
+    const hasRefresh = refresh && refresh.length > 0;
+    if (!hasRefresh) {
       throw new Error("Yahoo token expired — please reconnect Yahoo.");
     }
 
