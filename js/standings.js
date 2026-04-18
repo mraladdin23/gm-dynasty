@@ -63,7 +63,7 @@ const DLRStandings = (() => {
     if (_platform === "mfl") {
       try {
         const season = _season || new Date().getFullYear().toString();
-        const bundle = await DLRBundleCache.getMFL(leagueId, season);
+        const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
         if (token !== _initToken) return;
 
         // Cache bundle so matchups/playoffs can reuse it without a second fetch
@@ -92,7 +92,7 @@ const DLRStandings = (() => {
     if (_platform === "yahoo") {
       try {
         const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
-        if (!_yahooBundle) _yahooBundle = await DLRBundleCache.getYahoo(leagueKey, _season, `yahoo_${_season}_${_leagueId}`);
+        if (!_yahooBundle) _yahooBundle = await YahooAPI.getLeagueBundle(leagueKey);
         if (token !== _initToken) return;
         _renderYahooStandings(el, _yahooBundle, leagueId);
       } catch(e) {
@@ -260,7 +260,7 @@ const DLRStandings = (() => {
       el.innerHTML = _loadingHTML("Loading Yahoo matchups…");
       try {
         const leagueKey = _leagueKey || `nfl.l.${_leagueId}`;
-        if (!_yahooBundle) _yahooBundle = await DLRBundleCache.getYahoo(leagueKey, _season, `yahoo_${_season}_${_leagueId}`);
+        if (!_yahooBundle) _yahooBundle = await YahooAPI.getLeagueBundle(leagueKey);
         _renderYahooMatchups(el, _yahooBundle);
       } catch(e) {
         el.innerHTML = `<div class="empty-state" style="padding:var(--space-6);text-align:center;">
@@ -278,7 +278,7 @@ const DLRStandings = (() => {
         // If standings tab was never opened, we fetch the bundle now and cache it.
         let bundleState = _mflBundle;
         if (!bundleState) {
-          const bundle = await DLRBundleCache.getMFL(_leagueId, season);
+          const bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
           bundleState = _mflBuildBundleState(bundle, season);
           _mflBundle  = bundleState;
           _mflNameMap = bundleState.nameMap;
@@ -957,7 +957,7 @@ const DLRStandings = (() => {
       el.innerHTML = _loadingHTML("Loading Yahoo playoffs…");
       try {
         const leagueKey = _leagueKey || `nfl.l.${_leagueId}`;
-        if (!_yahooBundle) _yahooBundle = await DLRBundleCache.getYahoo(leagueKey, _season, `yahoo_${_season}_${_leagueId}`);
+        if (!_yahooBundle) _yahooBundle = await YahooAPI.getLeagueBundle(leagueKey);
         if (token !== _initToken) return;
 
         const lm      = _yahooBundle.leagueMeta || {};
@@ -1098,7 +1098,7 @@ const DLRStandings = (() => {
         if (_mflBundle?.bundle) {
           bundle = _mflBundle.bundle;
         } else {
-          bundle = await DLRBundleCache.getMFL(_leagueId, season);
+          bundle = await MFLAPI.getLeagueBundle(_leagueId, season);
           if (token !== _initToken) return;
           _mflBundle  = _mflBuildBundleState(bundle, season);
           _mflNameMap = _mflBundle.nameMap;

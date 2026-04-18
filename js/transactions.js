@@ -281,7 +281,7 @@ const DLRTransactions = (() => {
   // ── MFL transactions ──────────────────────────────────────
   async function _loadMFLData(tok) {
     const el = document.getElementById("dtab-transactions");
-    const bundle = await DLRBundleCache.getMFL(_leagueId, _season);
+    const bundle = await MFLAPI.getLeagueBundle(_leagueId, _season);
     if (tok !== _token) return;
 
     const teams = MFLAPI.getTeams(bundle);
@@ -548,7 +548,7 @@ const DLRTransactions = (() => {
     await DLRPlayers.load();
     if (tok !== _token) return;
 
-    const bundle = await DLRBundleCache.getYahoo(key, _season, `yahoo_${_season}_${_leagueId}`);
+    const bundle = await YahooAPI.getLeagueBundle(key);
     if (tok !== _token) return;
 
     const teams = bundle.teams || [];

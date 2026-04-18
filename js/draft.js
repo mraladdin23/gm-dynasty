@@ -504,7 +504,7 @@ const DLRDraft = (() => {
   // ── MFL draft + auction history ───────────────────────────
   async function _loadMFLDraft(leagueId, season, token) {
     const el = document.getElementById("dtab-draft");
-    const bundle = await DLRBundleCache.getMFL(leagueId, season);
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
     const teams = MFLAPI.getTeams(bundle);
@@ -892,7 +892,7 @@ const DLRDraft = (() => {
     await DLRPlayers.load();
     if (token !== _initToken) return;
 
-    const bundle = await DLRBundleCache.getYahoo(key, _season, `yahoo_${_season}_${_leagueId}`);
+    const bundle = await YahooAPI.getLeagueBundle(key);
     if (token !== _initToken) return;
 
     const teams    = bundle.teams    || [];

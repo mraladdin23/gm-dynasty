@@ -356,7 +356,7 @@ const DLRRoster = (() => {
     if (token !== _initToken) return;
 
     const leagueKey = _leagueKey || `nfl.l.${leagueId}`;
-    const bundle = await DLRBundleCache.getYahoo(leagueKey, _season, `yahoo_${_season}_${_leagueId}`);
+    const bundle = await YahooAPI.getLeagueBundle(leagueKey);
     if (token !== _initToken) return;
 
     const teams     = bundle.teams     || [];
@@ -462,7 +462,7 @@ const DLRRoster = (() => {
     if (token !== _initToken) return;
 
     // Single bundle fetch — contains everything
-    const bundle = await DLRBundleCache.getMFL(leagueId, season);
+    const bundle = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
     // Use MFLAPI helpers to normalize the raw worker response
