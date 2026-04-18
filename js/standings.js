@@ -1748,21 +1748,21 @@ const DLRStandings = (() => {
 
     function _updatePills(week) {
       document.querySelectorAll(".yahoo-week-pill").forEach(p => {
-        p.classList.toggle("matchups-week-pill--active", parseInt(p.dataset.week) === week);
+        p.classList.toggle("season-pill--current", parseInt(p.dataset.week) === week);
       });
     }
 
-    // Build week pill bar
+    // Build week pill bar — same season-pill class as Sleeper/MFL
     const pills = availWeeks.map(w => {
       const isActive = w === selectedWeek;
       const isPO     = playoffStart > 0 && w >= playoffStart;
-      return `<button class="matchups-week-pill yahoo-week-pill${isActive ? " matchups-week-pill--active" : ""}${isPO ? " matchups-week-pill--playoff" : ""}"
+      return `<button class="season-pill yahoo-week-pill${isActive ? " season-pill--current" : ""}${isPO ? " season-pill--playoff" : ""}"
         data-week="${w}" onclick="DLRStandings._yahooPickWeek(${w})">${isPO ? "🏆" : ""}${w}</button>`;
     }).join("");
 
     el.innerHTML = `
       <div class="matchups-week-bar">
-        <span class="matchups-week-label">Week</span>
+        <span class="matchups-week-label">Week:</span>
         <div class="matchups-week-pills">${pills}</div>
       </div>
       <div id="yahoo-matchups-cards"></div>`;

@@ -191,17 +191,20 @@ const Profile = (() => {
 
       // Detect playoff finish for past seasons (async bracket fetch)
       try {
-        const finish = await _detectMFLPlayoffFinish(myFranchiseId, bundle, leagueId, season);
+        const finish = await _detectMFLPlayoffFinish(myFranchiseId, bundle, leagueId, season, isGuillotine);
         if (finish !== null) {
           leaguesMap[key].playoffFinish = finish;
           leaguesMap[key].isChampion    = finish === 1;
         }
       } catch(e) { /* non-fatal */ }
 
-      // Mark as resolved if all key fields confirmed for a past season
+      // Mark as resolved if all key fields confirmed for a past season.
+      // Eliminator/guillotine leagues are leagueType "redraft" but still have
+      // playoff finishes — use isGuillotine to allow them through.
       if (parseInt(season) < new Date().getFullYear()
           && leaguesMap[key].playoffFinish != null
-          && leaguesMap[key].leagueType && leaguesMap[key].leagueType !== "redraft"
+          && leaguesMap[key].leagueType
+          && (leaguesMap[key].leagueType !== "redraft" || isGuillotine)
           && leaguesMap[key].teamName) {
         leaguesMap[key].resolved   = true;
         leaguesMap[key].isChampion = leaguesMap[key].playoffFinish === 1;
@@ -319,7 +322,7 @@ const Profile = (() => {
   // from final to first to find placement.
   // Path 2 (no-bracket/guillotine): falls back to standings rank (≤ 8 only).
   // Only runs for past seasons (leagueYear < currentYear).
-  async function _detectMFLPlayoffFinish(myRosterId, bundle, leagueId, season) {
+  async function _detectMFLPlayoffFinish(myRosterId, bundle, leagueId, season, isGuillotine) {
     if (!myRosterId) return null;
     const currentYear = new Date().getFullYear();
     const leagueYear  = parseInt(season) || currentYear;
@@ -328,7 +331,8 @@ const Profile = (() => {
     const myId = String(myRosterId);
 
     // ── Path 1: Bracket leagues ─────────────────────────────────────────────
-    const brackets = MFLAPI.normalizePlayoffBrackets(bundle);
+    // Skip entirely for guillotine/eliminator — they use standings rank, not brackets.
+    const brackets = isGuillotine ? [] : MFLAPI.normalizePlayoffBrackets(bundle);
     if (brackets.length) {
       const champBracket = brackets.find(b =>
         (b.name || "").toLowerCase().includes("champ") ||
@@ -396,14 +400,20 @@ const Profile = (() => {
     }
 
     // ── Path 2: No-bracket / guillotine leagues ──────────────────────────────
+    // For eliminator/guillotine leagues rank = final standing = playoff finish.
+    // For bracket leagues that had no bracket data, only trust top-8 ranks.
     const standingsRaw = bundle?.standings?.leagueStandings?.franchise;
     const standingsArr = standingsRaw
       ? (Array.isArray(standingsRaw) ? standingsRaw : [standingsRaw])
       : [];
     const mySt = standingsArr.find(f => String(f.id) === myId);
     if (!mySt) return null;
-    const rank = parseInt(mySt.rank) || null;
-    return (rank && rank <= 8) ? rank : null;
+    const rank    = parseInt(mySt.rank) || null;
+    if (!rank) return null;
+    // Guillotine/eliminator: every rank is meaningful (last surviving = 1st)
+    // Bracket leagues with no bracket: only trust top 8 to avoid noise
+    const maxRank = isGuillotine ? 999 : 8;
+    return rank <= maxRank ? rank : null;
   }
 
   // ── League meta (pins, labels, archive) ───────────────
@@ -522,7 +532,7 @@ const Profile = (() => {
             // Detect playoff finish for past seasons not yet resolved
             if (_allLeagues[leagueKey].playoffFinish == null) {
               try {
-                const finish = await _detectMFLPlayoffFinish(myRosterId, bundle, league.leagueId, league.season);
+                const finish = await _detectMFLPlayoffFinish(myRosterId, bundle, league.leagueId, league.season, league.isGuillotine);
                 if (finish !== null) {
                   _allLeagues[leagueKey].playoffFinish = finish;
                   _allLeagues[leagueKey].isChampion    = finish === 1;
@@ -530,16 +540,17 @@ const Profile = (() => {
               } catch(e) { /* non-fatal */ }
             }
 
-            // Mark past-season leagues as resolved once all key fields are confirmed
+            // Mark past-season leagues as resolved once all key fields are confirmed.
+            // Allow eliminator/guillotine (isGuillotine=true) even if leagueType is "redraft".
             if (_isPastSeason(_allLeagues[leagueKey])
                 && _allLeagues[leagueKey].playoffFinish != null
                 && _allLeagues[leagueKey].leagueType
-                && _allLeagues[leagueKey].leagueType !== "redraft"
+                && (_allLeagues[leagueKey].leagueType !== "redraft" || _allLeagues[leagueKey].isGuillotine)
                 && _allLeagues[leagueKey].teamName) {
               _markResolved(_allLeagues[leagueKey]);
             }
 
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
             matched++;
           }
         } catch(e) { /* skip failed league */ }
@@ -566,7 +577,7 @@ const Profile = (() => {
 
     for (const [leagueKey, league] of unresolved) {
       _markResolved(_allLeagues[leagueKey]);
-      GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
+      GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
     }
 
     // For Sleeper leagues missing playoffFinish (imported before playoff detection was added),
@@ -594,7 +605,7 @@ const Profile = (() => {
             if (finish != null && _allLeagues[leagueKey].leagueType !== "redraft" && _allLeagues[leagueKey].teamName) {
               _markResolved(_allLeagues[leagueKey]);
             }
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         } catch(e) { /* skip */ }
       }));
@@ -649,7 +660,8 @@ const Profile = (() => {
 
           // Detect league type — preserve existing non-redraft value to avoid
           // clobbering a dynasty/keeper league that was already correctly classified.
-          const detectedType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "");
+          // Also check draft data: keeper picks (is_keeper flag or cost=0 round>1) confirm keeper type.
+          const detectedType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
           const leagueType   = (league.leagueType && league.leagueType !== "redraft")
             ? league.leagueType
             : detectedType;
@@ -673,7 +685,7 @@ const Profile = (() => {
                 && leagueType && leagueType !== "redraft") {
               _markResolved(_allLeagues[leagueKey]);
             }
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
+            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         } catch(e) { /* skip failed league silently */ }
       }));
@@ -771,16 +783,17 @@ const Profile = (() => {
 
   // Detect Yahoo league type from API settings fields + name heuristics
   // Yahoo settings exposes: uses_roster_import (1=keeper), draft_type ("self"=keeper/salary)
-  function _detectYahooLeagueType(lm, name) {
+  function _detectYahooLeagueType(lm, name, hasKeeperPicks) {
     const n = (name || "").toLowerCase();
     // Name-based detection first (most reliable for self-described leagues)
     if (n.includes("dynasty"))  return "dynasty";
     if (n.includes("keeper"))   return "keeper";
     if (n.includes("redraft"))  return "redraft";
     if (n.includes("salary") || n.includes("sal cap") || n.includes("auction")) return "salary";
+    // Draft data: keeper picks present = keeper league
+    if (hasKeeperPicks) return "keeper";
     // API field detection: uses_roster_import=1 means players carry over = keeper/dynasty
     if (lm.uses_roster_import === 1 || lm.uses_roster_import === "1") {
-      // dynasty leagues also keep players; no reliable way to distinguish from name alone
       return "keeper";
     }
     return "redraft";
@@ -2387,11 +2400,13 @@ const Profile = (() => {
           }
           if (_currentUsername) {
             _renderLeagues();
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         }
       } catch(e) { /* render with what we have */ }
-    }    // ── Yahoo: live-fetch to resolve myTeamId (team_id from is_owned_by_current_login)
+    }
+
+    // ── Yahoo: live-fetch to resolve myTeamId (team_id from is_owned_by_current_login)
     // and update teamName/record if not yet stored. Runs once per league load when
     // myRosterId is null (newly imported leagues) or teamName is blank.
     const needsYahooFetch = league.platform === "yahoo" && (
@@ -2421,7 +2436,7 @@ const Profile = (() => {
           if (_detailLeagueKey === leagueKey) _detailLeague = { ..._detailLeague, ...league };
           if (_currentUsername) {
             _renderLeagues();
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(e => console.error('[GMDB] saveLeague failed for', leagueKey, e));
+            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         }
       } catch(e) { /* render with what we have */ }
