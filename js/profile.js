@@ -6,7 +6,8 @@
 
 const Profile = (() => {
 
-  const CURRENT_SEASON = new Date().getFullYear().toString();
+  const CURRENT_SEASON  = new Date().getFullYear().toString();
+  const _CURRENT_YEAR   = new Date().getFullYear();   // numeric, used by bundle cache + isPastSeason
   // 10 per page on desktop (2 cols × 5), 5 on mobile (1 col × 5)
   function _getPageSize() {
     return window.innerWidth <= 640 ? 5 : 10;
@@ -60,7 +61,7 @@ const Profile = (() => {
   // For past seasons: check Firebase bundle cache first, fall back to Worker.
   // On first successful Worker fetch, save to Firebase and mark bundleCached.
   // For current season: always fetch live from Worker (data changes weekly).
-  const _CURRENT_YEAR = new Date().getFullYear();
+  // Uses _CURRENT_YEAR declared below at IIFE scope.
 
   async function _getMFLBundleWithCache(leagueKey, leagueId, season, username) {
     const isPast = parseInt(season) < _CURRENT_YEAR;
@@ -881,7 +882,7 @@ const Profile = (() => {
   // ── Resolved flag helpers ────────────────────────────────────────────────
   // A past-season league is "fully resolved" when all key fields are confirmed.
   // Once resolved, it is NEVER re-fetched — historical data doesn't change.
-  const _CURRENT_YEAR = new Date().getFullYear();
+  // _CURRENT_YEAR is declared at top of IIFE.
 
   function _isPastSeason(league) {
     return parseInt(league.season || 0) < _CURRENT_YEAR;
