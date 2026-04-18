@@ -358,7 +358,6 @@ const GMDB = (() => {
     await GMD.child(`salaryCap/${leagueKey}/rosters`).set(rosters);
   }
 
-
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
