@@ -913,14 +913,22 @@ const DLRDraft = (() => {
     // ── Enrich picks with DynastyProcess player data ─────────────────────────
     // Worker returns name="" and position="?" for most leagues since draftresults
     // doesn't include player details. Resolve via yahoo_id → Sleeper record → CSV fallback.
+    // DEF/team defenses: Yahoo uses team abbrev as player_id (e.g. "KC", "DAL").
+    //   These won't match DynastyProcess but rosterDetails has their name — use that.
+    //   Fall back to "Team Defense" label so grid cells aren't blank.
     const playerMap = {};  // pid → { name, pos, sleeperPid, nflTeam }
+    // Build a quick lookup from rosterDetails for DEF/kicker fallbacks
+    const detailById = {};
+    (bundle.rosters || []).flatMap(r => r.playerDetails || []).forEach(d => {
+      if (d.id) detailById[String(d.id)] = d;
+    });
     draft.forEach(p => {
       const pid = String(p.playerId || "");
       if (!pid || playerMap[pid]) return;
       const map      = DLRPlayers.getByYahooId(pid);
       const sleeperP = map?.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
-      let name = p.name || "";
-      let pos  = (p.position || "?").toUpperCase();
+      let name    = p.name || "";
+      let pos     = (p.position || "?").toUpperCase();
       let nflTeam = "";
       if (sleeperP && Object.keys(sleeperP).length > 5) {
         name    = `${sleeperP.first_name || ""} ${sleeperP.last_name || ""}`.trim() || name;
@@ -931,24 +939,34 @@ const DLRDraft = (() => {
         pos     = (map.position || pos).toUpperCase();
         nflTeam = map.team || "";
       }
-      // Final fallback: bundle rosters playerDetails
-      if (!name) {
-        const detail = (bundle.rosters || []).flatMap(r => r.playerDetails || []).find(d => String(d.id) === pid);
-        if (detail?.name) { name = detail.name; pos = (detail.position || pos).toUpperCase(); nflTeam = detail.nflTeam || ""; }
+      // Fallback: Yahoo-native bio from worker rosterDetails (covers DEF, K, and unmatched players)
+      if (!name || pos === "?" || pos === "DEF") {
+        const detail = detailById[pid];
+        if (detail?.name) {
+          name    = name || detail.name;
+          pos     = pos !== "?" && pos !== "DEF" ? pos : (detail.position || pos).toUpperCase();
+          nflTeam = nflTeam || detail.nflTeam || "";
+        }
       }
+      // DEF final fallback: pid is often the team abbrev (e.g. "KC") — use as display name
+      if (!name && pos === "DEF") name = `${pid} Defense`;
+      else if (!name) name = `Player ${pid}`;
       const sleeperPid = map?.sleeper_id || null;
-      playerMap[pid] = { name: name || `Player ${pid}`, pos, nflTeam, sleeperPid };
+      playerMap[pid] = { name, pos, nflTeam, sleeperPid };
     });
 
+    // Detect keeper league: any pick flagged isKeeper, OR bundle hasKeeperPicks signal
+    const hasKeeperPicks = draft.some(p => p.isKeeper) || !!(bundle.hasKeeperPicks);
+
     // Cache for re-renders (view/layout/page switches)
-    _yahooCache = { draft, teams, myTeamId, teamMap, playerMap };
+    _yahooCache = { draft, teams, myTeamId, teamMap, playerMap, hasKeeperPicks };
     _listPage   = 0;
     _renderYahooDraftBoard(el);
   }
 
   function _renderYahooDraftBoard(el) {
     if (!_yahooCache) return;
-    const { draft, myTeamId, teamMap, playerMap } = _yahooCache;
+    const { draft, myTeamId, teamMap, playerMap, hasKeeperPicks } = _yahooCache;
     el = el || document.getElementById("dtab-draft");
     if (!el) return;
 
@@ -968,7 +986,10 @@ const DLRDraft = (() => {
             : `<button class="draft-toggle-btn" onclick="DLRDraft.setViewMode('auction')">🏷 Auction</button>`)
         : "",
     ].filter(Boolean).join("");
-    const toggleBar = `<div class="draft-toggle-bar">${viewBtns}</div>`;
+    const keeperBadge = hasKeeperPicks
+      ? `<span style="margin-left:auto;font-size:.7rem;color:var(--color-accent);font-weight:700;letter-spacing:.05em;padding:2px 6px;border:1px solid var(--color-accent);border-radius:4px">KEEPER</span>`
+      : "";
+    const toggleBar = `<div class="draft-toggle-bar" style="align-items:center">${viewBtns}${keeperBadge}</div>`;
 
     // ── Auction list view ─────────────────────────────────────────────────────
     if (showAuction) {
@@ -1027,7 +1048,7 @@ const DLRDraft = (() => {
               ${info.nflTeam ? `<div class="dim" style="font-size:.7rem">${_esc(info.nflTeam)}</div>` : ""}
             </div>
             <span class="draft-auction-team dim">${_esc(fantTeam)}${isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">▶</span>' : ""}</span>
-            ${p.isKeeper ? `<span style="font-size:.65rem;color:var(--color-accent);font-weight:700;letter-spacing:.03em">K</span>` : ""}
+            ${p.isKeeper ? `<span style="font-size:.65rem;color:var(--color-accent);font-weight:700">K</span>` : ""}
           </div>`;
       });
       const header = `<div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
@@ -1067,7 +1088,7 @@ const DLRDraft = (() => {
                 title="${_esc(info.name)} · ${info.pos}">
                 <div class="draft-pick-num">${pickLabel}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(info.name)}${p.isKeeper ? ' <span style="font-size:.6rem;color:var(--color-accent);font-weight:700">K</span>' : ""}</div>
+                  <div class="draft-pick-name">${_esc(info.name)}${p.isKeeper ? '<span style="font-size:.6rem;color:var(--color-accent);font-weight:700;margin-left:3px">K</span>' : ""}</div>
                   <div class="draft-pick-meta">
                     <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${info.pos}</span>
                     ${info.nflTeam ? `<span class="draft-pick-nfl">${_esc(info.nflTeam)}</span>` : ""}

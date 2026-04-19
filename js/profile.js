@@ -431,7 +431,7 @@ const Profile = (() => {
           }
 
           // Detect league type from Yahoo settings
-          const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "");
+          const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
 
           if (_allLeagues[leagueKey]) {
             Object.assign(_allLeagues[leagueKey], {
@@ -519,7 +519,7 @@ const Profile = (() => {
 
   // Detect Yahoo league type from API settings fields + name heuristics
   // Yahoo settings exposes: uses_roster_import (1=keeper), draft_type ("self"=keeper/salary)
-  function _detectYahooLeagueType(lm, name) {
+  function _detectYahooLeagueType(lm, name, hasKeeperPicks) {
     const n = (name || "").toLowerCase();
     // Name-based detection first (most reliable for self-described leagues)
     if (n.includes("dynasty"))  return "dynasty";
@@ -527,7 +527,7 @@ const Profile = (() => {
     if (n.includes("redraft"))  return "redraft";
     if (n.includes("salary") || n.includes("sal cap") || n.includes("auction")) return "salary";
     // API field detection: uses_roster_import=1 means players carry over = keeper/dynasty
-    if (lm.uses_roster_import === 1 || lm.uses_roster_import === "1") {
+    if (lm.uses_roster_import === 1 || lm.uses_roster_import === "1" || hasKeeperPicks) {
       // dynasty leagues also keep players; no reliable way to distinguish from name alone
       return "keeper";
     }
