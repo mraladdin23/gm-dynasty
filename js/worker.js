@@ -393,7 +393,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       fetch(`${base}/league/${leagueKey}/teams;out=roster?format=json`,                  { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/scoreboard?format=json`,                        { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/transactions;types=add,drop,trade?format=json`, { headers: authHdr }),
-      fetch(`${base}/league/${leagueKey}/draftresults;out=draft_results?format=json`,     { headers: authHdr }),
+      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,                        { headers: authHdr }),
     ]);
 
   async function toJson(s) {
@@ -702,10 +702,8 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     if (draftData?.draft_results !== undefined) {
       const dr = draftData.draft_results;
       if (Array.isArray(dr)) {
-        // Shape 1 — flat array of picks
         draftArr = dr;
       } else if (dr && typeof dr === "object") {
-        // Shape 2 — count-keyed object: { count: N, "0": pick, "1": pick, ... }
         const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
         for (let i = 0; i < count; i++) { if (dr[String(i)]) draftArr.push(dr[String(i)]); }
       }
@@ -719,22 +717,16 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
 
       let dContainer;
       if (Array.isArray(dResults)) {
-        // Shape 3/4: draft_results is an array — first element is the container
         dContainer = dResults[0];
       } else if (dResults && typeof dResults === "object") {
-        // Shape 5: draft_results is an object — may be count-keyed directly
-        // or may have a nested draft_result key
         dContainer = dResults;
       }
 
       if (dContainer) {
-        // Try draft_result sub-key first (Shapes 3/4)
         const draftRaw = dContainer.draft_result;
         if (Array.isArray(draftRaw)) {
-          // Shape 3: draft_result is a flat array
           draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
         } else if (draftRaw && typeof draftRaw === "object") {
-          // Shape 4: draft_result is count-keyed
           const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
           for (let i = 0; i < count; i++) {
             const entry = draftRaw[String(i)];
@@ -753,20 +745,29 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       }
     }
 
+    // Temporary: log draft shape to Worker console for diagnosis
+    console.log("[Yahoo draft] topLevelKeys:", draftData ? Object.keys(draftData) : null);
+    console.log("[Yahoo draft] picks parsed:", draftArr.length);
+    if (!draftArr.length && draftData) {
+      const fc  = draftData?.fantasy_content?.league;
+      const fc1 = Array.isArray(fc) ? fc[1] : fc?.[1];
+      console.log("[Yahoo draft] fc.league[1] keys:", fc1 ? Object.keys(fc1) : "none");
+      console.log("[Yahoo draft] draft_results sample:", JSON.stringify(fc1?.draft_results)?.slice(0, 400));
+    }
+
     draftArr.forEach((pick, i) => {
       if (!pick) return;
-      // flat shape uses team_key / player_key; nested shape may also use team_id / player_id
       const rawPid = pick.player_key || pick.player_id;
       const rawTid = pick.team_key   || pick.team_id;
       draft.push({
         pick:     parseInt(pick.pick   || i + 1),
         round:    parseInt(pick.round  || 1),
-        teamId:   String(rawTid || "").split(".").pop(),   // "449.l.123.t.3" → "3"
-        playerId: yahooPlayerId(rawPid),                   // bare numeric
+        teamId:   String(rawTid || "").split(".").pop(),
+        playerId: yahooPlayerId(rawPid),
         name:     pick.player_name || pick.name || "",
         position: pick.position    || "?",
         cost:     pick.cost != null ? parseInt(pick.cost) : null,
-        isKeeper: parseInt(pick.is_keeper || 0) === 1,    // Yahoo sets is_keeper=1 on keeper picks
+        isKeeper: parseInt(pick.is_keeper || 0) === 1,
       });
     });
   } catch(e) { console.error("[Yahoo draft parse]", e.message); }
