@@ -406,14 +406,15 @@ const Profile = (() => {
   // Also detects playoff finish (champion, runner-up, etc.) from allMatchups.
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
-    const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "yahoo" && (
-        !l.myRosterId || !l.teamName || l.teamName === "" ||
-        // Re-detect leagueType for leagues that may have been tagged as redraft before
-        // keeper detection was implemented, or where leagueType is not yet set
-        !l.leagueType || l.leagueType === "redraft"
-      )
-    );
+    const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
+      if (l.platform !== "yahoo") return false;
+      // Always fetch if missing core identity
+      if (!l.myRosterId || !l.teamName || l.teamName === "") return true;
+      // Re-fetch if leagueType has never been confirmed by API detection
+      // (leagueTypeConfirmed is set to true after a successful bundle-based detection)
+      if (!l.leagueTypeConfirmed) return true;
+      return false;
+    });
     if (!allYahoo.length) return;
 
     const CONCURRENCY = 2;
@@ -440,17 +441,18 @@ const Profile = (() => {
 
           if (_allLeagues[leagueKey]) {
             Object.assign(_allLeagues[leagueKey], {
-              myRosterId:    String(myId),
-              teamName:      myTeam.name       || _allLeagues[leagueKey].teamName || "",
-              wins:          mySt.wins         ?? _allLeagues[leagueKey].wins    ?? 0,
-              losses:        mySt.losses       ?? _allLeagues[leagueKey].losses  ?? 0,
-              ties:          mySt.ties         ?? _allLeagues[leagueKey].ties    ?? 0,
-              standing:      mySt.rank         || _allLeagues[leagueKey].standing || null,
-              pointsFor:     mySt.ptsFor       || _allLeagues[leagueKey].pointsFor  || 0,
-              pointsAgainst: mySt.ptsAgainst   || _allLeagues[leagueKey].pointsAgainst || 0,
-              playoffFinish: playoffFinish,
-              isChampion:    playoffFinish === 1,
-              leagueType:    leagueType,
+              myRosterId:          String(myId),
+              teamName:            myTeam.name       || _allLeagues[leagueKey].teamName || "",
+              wins:                mySt.wins         ?? _allLeagues[leagueKey].wins    ?? 0,
+              losses:              mySt.losses       ?? _allLeagues[leagueKey].losses  ?? 0,
+              ties:                mySt.ties         ?? _allLeagues[leagueKey].ties    ?? 0,
+              standing:            mySt.rank         || _allLeagues[leagueKey].standing || null,
+              pointsFor:           mySt.ptsFor       || _allLeagues[leagueKey].pointsFor  || 0,
+              pointsAgainst:       mySt.ptsAgainst   || _allLeagues[leagueKey].pointsAgainst || 0,
+              playoffFinish:       playoffFinish,
+              isChampion:          playoffFinish === 1,
+              leagueType:          leagueType,
+              leagueTypeConfirmed: true,   // marks that leagueType was set by API detection
             });
             GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
