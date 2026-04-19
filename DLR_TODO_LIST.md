@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 18, 2026*
+*Updated: April 18, 2026 (session 2)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -13,112 +13,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Critical — Crashes or Broken Core Features
 
-### C1 — Career Stats Modal Crash
-**Error:** `Uncaught ReferenceError: _renderCSPlatform is not defined`
-`_openCareerSummaryModal` in `profile.js` calls `_renderCSPlatform()` and
-`_renderCSPlatformYear()` but these functions were never implemented.
 
-**Fix needed in `profile.js`:**
-Add two render functions after `_renderCSMatrix`:
-- `_renderCSPlatform(leagues)`: table grouped by `l.platform` ("sleeper", "mfl", "yahoo"). Use `_platformLabel()` for display names. Same structure as `_renderCSType`.
-- `_renderCSPlatformYear(leagues)`: matrix with rows=seasons, columns=platforms. Same structure as `_renderCSMatrix`.
-
-**Fix needed in `index.html`:**
-Add after existing cs-tab buttons and panels:
-```html
-<button class="cs-tab" data-cstab="platform">By Platform</button>
-<button class="cs-tab" data-cstab="platform-year">Platform × Year</button>
-...
-<div id="cs-platform"      class="cs-panel"></div>
-<div id="cs-platform-year" class="cs-panel"></div>
-```
-**Files:** `profile.js`, `index.html`
-
----
-
-### C2 — Yahoo Draft Tab Empty
-**Problem:** Draft results not rendering for Yahoo leagues.
-
-**Fix:** The parser below handles all known Yahoo response shapes and should go into
-`worker.js` where the draft array is built in the bundle builder:
-
-```js
-// ── Draft results ─────────────────────────────────────────────────────────
-let draft = [];
-try {
-  let draftArr = [];
-  // Shape 1 / 2: direct draft_results
-  if (draftData?.draft_results !== undefined) {
-    const dr = draftData.draft_results;
-    if (Array.isArray(dr)) {
-      draftArr = dr;
-    } else if (dr && typeof dr === "object") {
-      const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
-      for (let i = 0; i < count; i++) {
-        if (dr[String(i)]) draftArr.push(dr[String(i)]);
-      }
-    }
-  }
-  // Shape 3+: nested under fantasy_content.league
-  if (!draftArr.length) {
-    const dLeague = draftData?.fantasy_content?.league;
-    const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
-    const dResults = dLeague1?.draft_results;
-    let dContainer;
-    if (Array.isArray(dResults)) {
-      dContainer = dResults[0];
-    } else if (dResults && typeof dResults === "object") {
-      dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
-    }
-    let draftRaw;
-    if (dResults && typeof dResults === "object" && dResults.count) {
-      draftRaw = dResults;
-    } else if (dContainer?.draft_result) {
-      draftRaw = dContainer.draft_result;
-    } else {
-      draftRaw = dContainer;
-    }
-    if (Array.isArray(draftRaw)) {
-      draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
-    } else if (draftRaw && typeof draftRaw === "object") {
-      const numericKeys = Object.keys(draftRaw).filter(k => !isNaN(k));
-      if (numericKeys.length > 0) {
-        numericKeys.forEach(k => {
-          const entry = draftRaw[k];
-          if (entry) draftArr.push(entry.draft_result || entry);
-        });
-      } else {
-        draftArr = [draftRaw];
-      }
-    }
-  }
-  draftArr.forEach((pick, i) => {
-    if (!pick) return;
-    const rawPid = pick.player_key || pick.player_id;
-    const rawTid = pick.team_key || pick.team_id;
-    draft.push({
-      pick: parseInt(pick.pick || i + 1),
-      round: parseInt(pick.round || 1),
-      teamId: String(rawTid || "").split(".").pop(),
-      playerId: yahooPlayerId(rawPid),
-      name: pick.player_name || pick.name || "",
-      position: pick.position || "?",
-      cost: pick.cost != null ? parseInt(pick.cost) : null,
-    });
-  });
-} catch (e) {}
-```
-**Files:** `worker.js`, `draft.js`
-
----
-
-### C3 — Yahoo Keeper Detection via Draft Cost
-**Problem:** Keeper identification should use the `cost` field in draft results —
-keepers have a cost value set in Yahoo auction/keeper drafts.
-**Note:** Do in same session as C2 since it depends on the cost field being parsed.
-**Files:** `yahoo.js`, `worker.js`
-
----
 
 ## 🔴 Yahoo Platform Bugs
 
@@ -292,33 +187,37 @@ auto-detected platform trophies.
 
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
-| 1 | C2 | Yahoo Draft Parsing | Medium | `worker.js`, `draft.js` |
-| 2 | C3 | Yahoo Keeper via Cost | Low (with C2) | `yahoo.js`, `worker.js` |
-| 3 | C1 | Career Stats Crash | Medium | `profile.js`, `index.html` |
-| 4 | Y1 | Yahoo Playoff/Championship | Medium | `profile.js`, `standings.js` |
-| 5 | Y2 | Yahoo Matchup Pills + Scores | Medium | `standings.js`, `worker.js` |
-| 6 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
-| 7 | M1 | MFL Championship Detection | Medium | `profile.js`, `mfl.js` |
-| 8 | M2 | MFL Analytics Tab | Medium | `analytics.js`, `mfl.js` |
-| 9 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
-| 10 | U1 | Hallway Grid + Scroll | Low | `hallway.js`, `locker.css` |
-| 11 | U2 | Bottom Safe Area | Trivial | `locker.css` |
-| 12 | U3 | Groups League Order | Low | `leaguegroups.js` |
-| 13 | U4 | Broadcast Message | Low | `leaguegroups.js` |
-| 14 | X1 | Season in Progress Badge | Low | `profile.js`, `standings.js` |
-| 15 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 16 | Y6 | Yahoo Redraft Resolved Flag | Trivial | `profile.js` |
-| 17 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 18 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 19 | F2 | Custom Playoff Tracker | Very High | New module + several files |
-| 20 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 21 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 22 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
-| 23 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
+| 1 | Y1 | Yahoo Playoff/Championship | Medium | `profile.js`, `standings.js` |
+| 2 | Y2 | Yahoo Matchup Pills + Scores | Medium | `standings.js`, `worker.js` |
+| 3 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
+| 4 | M1 | MFL Championship Detection | Medium | `profile.js`, `mfl.js` |
+| 5 | M2 | MFL Analytics Tab | Medium | `analytics.js`, `mfl.js` |
+| 6 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
+| 7 | U1 | Hallway Grid + Scroll | Low | `hallway.js`, `locker.css` |
+| 8 | U2 | Bottom Safe Area | Trivial | `locker.css` |
+| 9 | U3 | Groups League Order | Low | `leaguegroups.js` |
+| 10 | U4 | Broadcast Message | Low | `leaguegroups.js` |
+| 11 | X1 | Season in Progress Badge | Low | `profile.js`, `standings.js` |
+| 12 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
+| 13 | Y6 | Yahoo Redraft Resolved Flag | Trivial | `profile.js` |
+| 14 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
+| 15 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 16 | F2 | Custom Playoff Tracker | Very High | New module + several files |
+| 17 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 18 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 19 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 20 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
 
 ---
 
 ## ✅ Completed
+
+- Yahoo Draft tab: endpoint fixed (`draftresults` not `draftresults;out=draft_results`), multi-shape parser (Shapes 1–5), grid/list/auction views, 25/page pagination, DEF fallback (`worker.js`, `draft.js`)
+- Yahoo Keeper detection: `players;status=K` cross-reference, `isKeeper` on picks, K badge in list+grid, KEEPER badge in toggle bar (`worker.js`, `yahoo.js`, `draft.js`)
+- Yahoo League type detection: `leagueTypeConfirmed` flag prevents re-fetch spam; only re-detects current-season leagues; past seasons locked in Firebase (`profile.js`)
+- `allMatchups` fetch capped to `current_week` — prevents 17 parallel Yahoo requests mid-season (`worker.js`)
+- Career Stats modal: `_renderCSPlatform` + `_renderCSPlatformYear` were already implemented — C1 was stale (`profile.js`, `index.html`)
+- `leagueTypeConfirmed: true` bulk-set in Firebase for all past Yahoo seasons via console script
 
 - Yahoo OAuth flow
 - Yahoo Standings (CSS matches MFL/Sleeper, sort confirmed)

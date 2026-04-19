@@ -1048,10 +1048,40 @@ const DLRStandings = (() => {
           </div>`;
         }).join("");
 
+        // Determine semi winners so we can correctly label final-week games
+        const semiWinnerSet = new Set();
+        if (poWeeks.length >= 2) {
+          const sw = poWeeks[poWeeks.length - 2];
+          for (const m of (allMu[sw] || [])) {
+            const hId = String(m.home?.teamId ?? "");
+            const aId = String(m.away?.teamId ?? "");
+            const hSc = m.home?.score ?? 0;
+            const aSc = m.away?.score ?? 0;
+            if (m.winnerTeamId) semiWinnerSet.add(String(m.winnerTeamId));
+            else if (hSc > 0 || aSc > 0) {
+              if (hSc > aSc && hId) semiWinnerSet.add(hId);
+              else if (aSc > hSc && aId) semiWinnerSet.add(aId);
+            }
+          }
+        }
+
+        // Sort final-week games: championship first, then consolation in order
+        const champGame = finalMus.find(m => {
+          const hId = String(m.home?.teamId ?? "");
+          const aId = String(m.away?.teamId ?? "");
+          return semiWinnerSet.size >= 2
+            ? (semiWinnerSet.has(hId) && semiWinnerSet.has(aId))
+            : false;
+        });
+        // Build ordered finals array: championship first, then remaining games
+        const orderedFinals = champGame
+          ? [champGame, ...finalMus.filter(m => m !== champGame)]
+          : finalMus;
+
         const placeLabels = [`🏆 Championship`, `🥉 3rd Place`, `5th Place`, `7th Place`];
-        const finalsHTML = finalMus.length
+        const finalsHTML = orderedFinals.length
           ? `<div class="bracket-finals">
-              ${finalMus.map((m, i) => `
+              ${orderedFinals.map((m, i) => `
                 <div class="bracket-finals-game">
                   <div class="bracket-finals-label${i > 0 ? " place-" + (2*i+1) : ""}">${(placeLabels[i] || `Place ${2*i+1}`)} · Wk ${finalWeek}</div>
                   ${bracketCard(m)}

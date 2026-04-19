@@ -409,6 +409,8 @@ const Profile = (() => {
     const currentYear = String(new Date().getFullYear());
     const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
       if (l.platform !== "yahoo") return false;
+      // Skip fully resolved past seasons — they're cached and don't need re-fetching
+      if (l.resolved) return false;
       // Always fetch if missing core identity
       if (!l.myRosterId || !l.teamName || l.teamName === "") return true;
       // Only re-detect leagueType for current-season leagues that haven't been confirmed yet.
@@ -441,7 +443,8 @@ const Profile = (() => {
           const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
 
           if (_allLeagues[leagueKey]) {
-            Object.assign(_allLeagues[leagueKey], {
+            const updatedLeague = {
+              ..._allLeagues[leagueKey],
               myRosterId:          String(myId),
               teamName:            myTeam.name       || _allLeagues[leagueKey].teamName || "",
               wins:                mySt.wins         ?? _allLeagues[leagueKey].wins    ?? 0,
@@ -454,7 +457,21 @@ const Profile = (() => {
               isChampion:          playoffFinish === 1,
               leagueType:          leagueType,
               leagueTypeConfirmed: true,   // marks that leagueType was set by API detection
-            });
+            };
+
+            // Mark past finished leagues as resolved so they stop re-fetching.
+            // Condition mirrors the global resolved logic but also allows redraft
+            // leagues through when Yahoo confirms is_finished=1 (Y6 fix).
+            const isPastSeason  = Number(updatedLeague.season) < Number(currentYear);
+            const hasFinish     = updatedLeague.playoffFinish != null;
+            const hasTeamName   = !!(updatedLeague.teamName);
+            const isFinished    = lm.is_finished === 1 || lm.is_finished === "1";
+            const notRedraft    = updatedLeague.leagueType !== "redraft";
+            if (isPastSeason && hasFinish && hasTeamName && (notRedraft || isFinished)) {
+              updatedLeague.resolved = true;
+            }
+
+            Object.assign(_allLeagues[leagueKey], updatedLeague);
             GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
           }
         } catch(e) { /* skip failed league silently */ }
@@ -475,8 +492,15 @@ const Profile = (() => {
     _renderCareerSummary(_currentProfile || {});
   }
 
-  // Detect playoff finish rank from allMatchups
-  // Championship game is the final playoff week with 1 game; runner-up lost that game.
+  // Detect playoff finish rank from allMatchups.
+  //
+  // Strategy:
+  //   1. Identify which teams won the semifinal — they play in the championship game.
+  //   2. Check if the user is in ANY final-week game:
+  //        - Championship game (both teams are semi winners): win=1st, lose=2nd.
+  //        - Consolation game (not the championship): win=3rd, lose=4th.
+  //   3. If user didn't play in the final week, find when they were eliminated
+  //      and estimate placement from round index (5th, 7th, etc.).
   function _detectYahooPlayoffFinish(myId, bundle) {
     const lm      = bundle.leagueMeta || {};
     const poStart = lm.playoff_start_week || 0;
@@ -486,41 +510,73 @@ const Profile = (() => {
     const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
     if (!poWeeks.length) return null;
 
-    const myStr = String(myId);
+    const myStr     = String(myId);
+    const finalWeek = poWeeks[poWeeks.length - 1];
+    const semiWeek  = poWeeks.length >= 2 ? poWeeks[poWeeks.length - 2] : null;
 
-    // Walk playoff weeks to track how far the user advanced
-    let eliminated = false;
-    let elimWeek   = null;
-    for (const w of poWeeks) {
-      const mus = allMu[w] || [];
-      const myMatchup = mus.find(m =>
+    // Determine which teams WON the semifinal — they play the championship.
+    const semiWinners = new Set();
+    if (semiWeek != null) {
+      for (const m of (allMu[semiWeek] || [])) {
+        const hId = String(m.home?.teamId ?? "");
+        const aId = String(m.away?.teamId ?? "");
+        const hSc = m.home?.score ?? 0;
+        const aSc = m.away?.score ?? 0;
+        if (m.winnerTeamId) {
+          semiWinners.add(String(m.winnerTeamId));
+        } else if (hSc > 0 || aSc > 0) {
+          if (hSc > aSc && hId) semiWinners.add(hId);
+          else if (aSc > hSc && aId) semiWinners.add(aId);
+        }
+      }
+    }
+
+    // Check if user played in the final week
+    const finalMus    = allMu[finalWeek] || [];
+    const myFinalGame = finalMus.find(m =>
+      String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
+    );
+
+    if (myFinalGame) {
+      const hId  = String(myFinalGame.home?.teamId ?? "");
+      const aId  = String(myFinalGame.away?.teamId ?? "");
+      const hSc  = myFinalGame.home?.score ?? 0;
+      const aSc  = myFinalGame.away?.score ?? 0;
+      const iWon = myFinalGame.winnerTeamId
+        ? myFinalGame.winnerTeamId === myStr
+        : (hId === myStr ? hSc > aSc : aSc > hSc);
+
+      // Is this the championship game?
+      // If we resolved semi winners, check that both teams in this game are semi winners.
+      // Fallback: if no semi winner data, treat the first final-week game as championship.
+      const isChampGame = semiWinners.size >= 2
+        ? (semiWinners.has(hId) && semiWinners.has(aId))
+        : finalMus.indexOf(myFinalGame) === 0;
+
+      if (isChampGame) return iWon ? 1 : 2;
+      // Consolation game (3rd/4th place)
+      return iWon ? 3 : 4;
+    }
+
+    // User not in final week — find when they were eliminated in earlier rounds
+    let elimWeek = null;
+    for (const w of poWeeks.slice(0, -1)) {  // skip final week — handled above
+      const myMatchup = (allMu[w] || []).find(m =>
         String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
       );
-      if (!myMatchup) continue;  // bye or not in this bracket
+      if (!myMatchup) continue;
       const hId  = String(myMatchup.home?.teamId ?? "");
-      const aId  = String(myMatchup.away?.teamId ?? "");
       const hSc  = myMatchup.home?.score ?? 0;
       const aSc  = myMatchup.away?.score ?? 0;
       const iWon = myMatchup.winnerTeamId
         ? myMatchup.winnerTeamId === myStr
         : (hId === myStr ? hSc > aSc : aSc > hSc);
-      if (!iWon) { eliminated = true; elimWeek = w; break; }
+      if (!iWon) { elimWeek = w; break; }
     }
 
-    if (!eliminated) {
-      // Survived all playoff weeks — champion
-      return 1;
-    }
+    if (elimWeek == null) return null;
 
-    // Determine placement based on which week eliminated
-    const finalWeek = poWeeks[poWeeks.length - 1];
-    const numTeams  = lm.num_playoff_teams || 0;
-    if (elimWeek === finalWeek) return 2;          // lost championship = runner-up
-    if (elimWeek === poWeeks[poWeeks.length - 2]) {
-      // Lost in semifinal — 3rd or 4th depending on consolation result
-      return 3;
-    }
-    // Earlier elimination — rough placement based on round
+    // Rough placement: earlier elimination = worse finish
     const roundIdx = poWeeks.indexOf(elimWeek);
     return (roundIdx + 1) * 2 + 1;  // 5th, 7th, etc.
   }
