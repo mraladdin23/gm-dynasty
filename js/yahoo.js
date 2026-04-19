@@ -229,9 +229,11 @@ const YahooAPI = (() => {
       isKeeper:   !!(p.isKeeper   ?? p.is_keeper),
     }));
 
-    // Detect keeper league from draft data: if any pick is flagged as a keeper,
-    // or if multiple picks share round+cost=0 pattern (pre-assigned keeper rounds).
+    // Detect keeper league: worker cross-references draft picks against players;status=K.
+    // keeperCount > 0 means Yahoo confirmed keepers exist for this league.
+    // Fallback: cost=0 pattern for auction keeper leagues.
     const hasKeeperPicks = draft.some(p => p.isKeeper)
+      || _int(raw.keeperCount) > 0
       || draft.filter(p => p.cost === 0 && p.round > 1).length >= 2;
 
     // Transactions — preserve moves array for DynastyProcess resolution

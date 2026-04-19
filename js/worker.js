@@ -386,14 +386,15 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   // ── Fetch all bundle endpoints in parallel ────────────────────────────────
   // scoreboard with no week param returns the current/most-recent week.
   // We also fetch settings so we can get playoff_start_week, current_week, end_week.
-  const [settingsRes, standingsRes, rostersRes, matchupsRes, transactionsRes, draftRes] =
+  const [settingsRes, standingsRes, rostersRes, matchupsRes, transactionsRes, draftRes, keepersRes] =
     await Promise.allSettled([
       fetch(`${base}/league/${leagueKey}/settings?format=json`,                          { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/standings?format=json`,                         { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/teams;out=roster?format=json`,                  { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/scoreboard?format=json`,                        { headers: authHdr }),
       fetch(`${base}/league/${leagueKey}/transactions;types=add,drop,trade?format=json`, { headers: authHdr }),
-      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,                        { headers: authHdr }),
+      fetch(`${base}/league/${leagueKey}/draftresults?format=json`,                      { headers: authHdr }),
+      fetch(`${base}/league/${leagueKey}/players;status=K?format=json`,                  { headers: authHdr }),
     ]);
 
   async function toJson(s) {
@@ -403,8 +404,8 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     try { return await r.json(); } catch { return null; }
   }
 
-  const [settingsData, standingsData, rostersData, matchupsData, transactionsData, draftData] =
-    await Promise.all([toJson(settingsRes), toJson(standingsRes), toJson(rostersRes), toJson(matchupsRes), toJson(transactionsRes), toJson(draftRes)]);
+  const [settingsData, standingsData, rostersData, matchupsData, transactionsData, draftData, keepersData] =
+    await Promise.all([toJson(settingsRes), toJson(standingsRes), toJson(rostersRes), toJson(matchupsRes), toJson(transactionsRes), toJson(draftRes), toJson(keepersRes)]);
 
   // Use standings response for league meta; fall back to settings
   const leagueRaw = standingsData?.fantasy_content?.league || settingsData?.fantasy_content?.league || null;
@@ -682,6 +683,26 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     }
   } catch(e) {}
 
+  // ── Keeper player IDs ────────────────────────────────────────────────────
+  // Fetch players;status=K to get the set of keeper-designated player IDs.
+  // Yahoo doesn't flag keeper picks directly on draft result objects in snake drafts,
+  // so we cross-reference draft picks against this set.
+  const keeperPlayerIds = new Set();
+  try {
+    const kLeague  = keepersData?.fantasy_content?.league;
+    const kLeague1 = Array.isArray(kLeague) ? kLeague[1] : kLeague?.[1];
+    const kPlayers = kLeague1?.players || {};
+    const kCount   = parseInt(kPlayers.count) || 0;
+    for (let i = 0; i < kCount; i++) {
+      const entry = kPlayers[String(i)]?.player;
+      if (!entry) continue;
+      const pInfo = Array.isArray(entry[0]) ? entry[0] : [entry[0]];
+      const rawId = pInfo.find(o => o?.player_id != null)?.player_id
+                 || pInfo.find(o => o?.player_key != null)?.player_key;
+      if (rawId) keeperPlayerIds.add(yahooPlayerId(String(rawId)));
+    }
+  } catch(e) {}
+
   // ── Draft results ─────────────────────────────────────────────────────────
   // Yahoo draftresults endpoint returns picks in one of several shapes depending
   // on league age and type. We try the most common shapes in order:
@@ -695,8 +716,8 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   // Keeper detection: Yahoo sets is_keeper=1 on keeper picks in keeper/salary leagues.
   // Falls back to cost-based heuristic on the frontend (yahoo.js normalizeBundle).
   let draft = [];
+  let draftArr = [];
   try {
-    let draftArr = [];
 
     // ── Shape 1 / 2: draft_results directly on the response object ──────────
     if (draftData?.draft_results !== undefined) {
@@ -767,10 +788,12 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
         name:     pick.player_name || pick.name || "",
         position: pick.position    || "?",
         cost:     pick.cost != null ? parseInt(pick.cost) : null,
-        isKeeper: parseInt(pick.is_keeper || 0) === 1,
+        isKeeper: parseInt(pick.is_keeper || 0) === 1 || keeperPlayerIds.has(yahooPlayerId(pick.player_key || pick.player_id)),
       });
     });
-  } catch(e) { console.error("[Yahoo draft parse]", e.message); }
+  } catch(e) { /* draft parse error */ }
+
+
 
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
@@ -780,6 +803,7 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     teams, standings, rosters, matchups,
     allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
     transactions, draft,
+    keeperCount: keeperPlayerIds.size,
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
