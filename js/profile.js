@@ -407,81 +407,119 @@ const Profile = (() => {
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
     const currentYear = String(new Date().getFullYear());
-    const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
+
+    // ── Pass 1: Identity resolution ──────────────────────────────────────────
+    // Only fetch leagues missing myRosterId or teamName. This is the fast pass —
+    // it runs at page load and doesn't need matchup data, so the bundle is lighter.
+    // Concurrency: 1 at a time with 1.5s delay to avoid Yahoo rate limiting.
+    const needsIdentity = Object.entries(_allLeagues).filter(([, l]) => {
       if (l.platform !== "yahoo") return false;
-      // Skip fully resolved past seasons — they're cached and don't need re-fetching
-      if (l.resolved) return false;
-      // Always fetch if missing core identity
       if (!l.myRosterId || !l.teamName || l.teamName === "") return true;
-      // Only re-detect leagueType for current-season leagues that haven't been confirmed yet.
-      // Past seasons keep whatever type they have — no need to re-fetch.
       if (!l.leagueTypeConfirmed && l.season === currentYear) return true;
       return false;
     });
-    if (!allYahoo.length) return;
 
-    const CONCURRENCY = 2;
-    for (let i = 0; i < allYahoo.length; i += CONCURRENCY) {
-      const batch = allYahoo.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(batch.map(async ([leagueKey, league]) => {
-        try {
-          const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
-          const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
-          const myId     = bundle.myTeamId || null;
-          if (!myId) return;
-          const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
-          const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
-          const lm     = bundle.leagueMeta || {};
+    for (const [leagueKey, league] of needsIdentity) {
+      try {
+        const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
+        const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+        const myId     = bundle.myTeamId || null;
+        if (!myId) continue;
+        const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
+        const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
+        const lm     = bundle.leagueMeta || {};
 
-          // Detect playoff finish from allMatchups when league is finished
-          let playoffFinish = league.playoffFinish ?? null;
-          if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
-            playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
+        let playoffFinish = league.playoffFinish ?? null;
+        if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
+          playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
+        }
+
+        const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
+
+        if (_allLeagues[leagueKey]) {
+          const updatedLeague = {
+            ..._allLeagues[leagueKey],
+            myRosterId:          String(myId),
+            teamName:            myTeam.name       || _allLeagues[leagueKey].teamName || "",
+            wins:                mySt.wins         ?? _allLeagues[leagueKey].wins    ?? 0,
+            losses:              mySt.losses       ?? _allLeagues[leagueKey].losses  ?? 0,
+            ties:                mySt.ties         ?? _allLeagues[leagueKey].ties    ?? 0,
+            standing:            mySt.rank         || _allLeagues[leagueKey].standing || null,
+            pointsFor:           mySt.ptsFor       || _allLeagues[leagueKey].pointsFor  || 0,
+            pointsAgainst:       mySt.ptsAgainst   || _allLeagues[leagueKey].pointsAgainst || 0,
+            playoffFinish,
+            isChampion:          playoffFinish === 1,
+            leagueType,
+            leagueTypeConfirmed: true,
+          };
+
+          const isPastSeason = Number(updatedLeague.season) < Number(currentYear);
+          const hasFinish    = updatedLeague.playoffFinish != null;
+          const hasTeamName  = !!(updatedLeague.teamName);
+          const isFinished   = lm.is_finished === 1 || lm.is_finished === "1";
+          const notRedraft   = updatedLeague.leagueType !== "redraft";
+          if (isPastSeason && hasFinish && hasTeamName && (notRedraft || isFinished)) {
+            updatedLeague.resolved = true;
           }
 
-          // Detect league type from Yahoo settings
-          const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
+          Object.assign(_allLeagues[leagueKey], updatedLeague);
+          GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+        }
+      } catch(e) { /* skip failed league silently */ }
 
-          if (_allLeagues[leagueKey]) {
-            const updatedLeague = {
-              ..._allLeagues[leagueKey],
-              myRosterId:          String(myId),
-              teamName:            myTeam.name       || _allLeagues[leagueKey].teamName || "",
-              wins:                mySt.wins         ?? _allLeagues[leagueKey].wins    ?? 0,
-              losses:              mySt.losses       ?? _allLeagues[leagueKey].losses  ?? 0,
-              ties:                mySt.ties         ?? _allLeagues[leagueKey].ties    ?? 0,
-              standing:            mySt.rank         || _allLeagues[leagueKey].standing || null,
-              pointsFor:           mySt.ptsFor       || _allLeagues[leagueKey].pointsFor  || 0,
-              pointsAgainst:       mySt.ptsAgainst   || _allLeagues[leagueKey].pointsAgainst || 0,
-              playoffFinish:       playoffFinish,
-              isChampion:          playoffFinish === 1,
-              leagueType:          leagueType,
-              leagueTypeConfirmed: true,   // marks that leagueType was set by API detection
-            };
-
-            // Mark past finished leagues as resolved so they stop re-fetching.
-            // Condition mirrors the global resolved logic but also allows redraft
-            // leagues through when Yahoo confirms is_finished=1 (Y6 fix).
-            const isPastSeason  = Number(updatedLeague.season) < Number(currentYear);
-            const hasFinish     = updatedLeague.playoffFinish != null;
-            const hasTeamName   = !!(updatedLeague.teamName);
-            const isFinished    = lm.is_finished === 1 || lm.is_finished === "1";
-            const notRedraft    = updatedLeague.leagueType !== "redraft";
-            if (isPastSeason && hasFinish && hasTeamName && (notRedraft || isFinished)) {
-              updatedLeague.resolved = true;
-            }
-
-            Object.assign(_allLeagues[leagueKey], updatedLeague);
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
-          }
-        } catch(e) { /* skip failed league silently */ }
-      }));
-      if (i + CONCURRENCY < allYahoo.length) {
-        await new Promise(r => setTimeout(r, 500));
-      }
+      // 1.5s between each league to stay well under Yahoo's rate limit
+      await new Promise(r => setTimeout(r, 1500));
     }
 
-    // Recompute career stats + refresh header so stats row shows updated numbers
+    // ── Pass 2: Playoff finish re-detection ──────────────────────────────────
+    // Runs after Pass 1. Only re-detects leagues that are past seasons, have an
+    // identity, but are missing playoffFinish (resolved: null was cleared by the
+    // surgical console fix, or newly imported leagues that got no matchup data).
+    // Runs with a longer delay since each bundle call fetches all week scoreboards.
+    const needsPlayoff = Object.entries(_allLeagues).filter(([, l]) => {
+      if (l.platform !== "yahoo") return false;
+      if (l.resolved) return false;
+      if (!l.myRosterId) return false;
+      const isPast = Number(l.season) < Number(currentYear);
+      return isPast && l.playoffFinish == null;
+    });
+
+    for (const [leagueKey, league] of needsPlayoff) {
+      try {
+        const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
+        const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+        const lm       = bundle.leagueMeta || {};
+        const myId     = bundle.myTeamId || league.myRosterId;
+        if (!myId) continue;
+
+        let playoffFinish = null;
+        if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
+          playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
+        }
+
+        if (_allLeagues[leagueKey]) {
+          const updatedLeague = {
+            ..._allLeagues[leagueKey],
+            playoffFinish,
+            isChampion: playoffFinish === 1,
+          };
+
+          const isFinished = lm.is_finished === 1 || lm.is_finished === "1";
+          const notRedraft = updatedLeague.leagueType !== "redraft";
+          if (playoffFinish != null && updatedLeague.teamName && (notRedraft || isFinished)) {
+            updatedLeague.resolved = true;
+          }
+
+          Object.assign(_allLeagues[leagueKey], updatedLeague);
+          GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+        }
+      } catch(e) { /* skip */ }
+
+      // 2s between each playoff re-detection — these trigger full week fetches in the worker
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Recompute career stats + refresh header
     try {
       const stats = await GMDB.recomputeStats(username);
       if (_currentProfile) _currentProfile.stats = stats;
