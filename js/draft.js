@@ -888,15 +888,19 @@ const DLRDraft = (() => {
   async function _loadYahooDraft(leagueId, leagueKey, token) {
     const el  = document.getElementById("dtab-draft");
     const key = leagueKey || `nfl.l.${leagueId}`;
+    console.log("[Yahoo draft] _loadYahooDraft entered, key:", key);
 
     await DLRPlayers.load();
+    console.log("[Yahoo draft] DLRPlayers loaded");
     if (token !== _initToken) return;
 
     const bundle = await YahooAPI.getLeagueBundle(key);
     if (token !== _initToken) return;
 
     // Temporary: log keeper debug info from worker
-    if (bundle._draftKeepDebug) console.log("[Yahoo keeper debug]", bundle._draftKeepDebug);
+    console.log("[Yahoo keeper debug]", bundle._draftKeepDebug);
+    console.log("[Yahoo draft] bundle.draft length:", (bundle.draft||[]).length);
+    console.log("[Yahoo draft] bundle.hasKeeperPicks:", bundle.hasKeeperPicks);
 
     const teams    = bundle.teams    || [];
     const draft    = bundle.draft    || [];
