@@ -407,7 +407,12 @@ const Profile = (() => {
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
     const allYahoo = Object.entries(_allLeagues).filter(([, l]) =>
-      l.platform === "yahoo" && (!l.myRosterId || !l.teamName || l.teamName === "")
+      l.platform === "yahoo" && (
+        !l.myRosterId || !l.teamName || l.teamName === "" ||
+        // Re-detect leagueType for leagues that may have been tagged as redraft before
+        // keeper detection was implemented, or where leagueType is not yet set
+        !l.leagueType || l.leagueType === "redraft"
+      )
     );
     if (!allYahoo.length) return;
 
