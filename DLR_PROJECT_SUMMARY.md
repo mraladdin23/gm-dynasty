@@ -105,11 +105,12 @@ eliminator, and guillotine leagues.
 - Playoffs ⚠️ (bracket filtered to championship teams, runner-up sometimes shown as 3rd)
 - Roster ✅ (PREFERRED_ORDER position grouping, detailMap fallback)
 - Players tab ✅ (YTD stats via `/yahoo/playerStats`, position dropdown)
-- Draft ⚠️ (parser not yet confirmed working)
+- Draft ✅ (parser working, grid/list/auction views, 25/page pagination)
 - Transactions ⚠️ (team name blank on some transactions)
 - Analytics ✅ (leagueKey wired)
-- Career stats ⚠️ (`_renderCSPlatform` not implemented — throws error on modal open)
-- Keeper detection ✅ (`hasKeeperPicks` from draft data + `uses_roster_import`)
+- Career stats ✅ (`_renderCSPlatform` and `_renderCSPlatformYear` implemented)
+- Keeper detection ✅ (cross-referenced via `players;status=K` endpoint + `isKeeper` flag + cost heuristic)
+- League type detection ✅ (`leagueTypeConfirmed` flag prevents re-fetch spam; past seasons locked in Firebase)
 - Championship detection ⚠️ (playoff finish logic has runner-up/3rd-place bug)
 - Token persistence ⚠️ (optimistic use when expiresAt=0 fixed; mobile localStorage may still be unreliable)
 
@@ -196,7 +197,7 @@ POST /mfl/auctionResults — auction results on-demand
 
 ### Yahoo worker endpoints
 ```
-POST /yahoo/leagueBundle   — full normalized bundle
+POST /yahoo/leagueBundle   — full normalized bundle (allMatchups capped to current_week to avoid rate-limiting)
 POST /yahoo/playerStats    — YTD fantasy points by player ID (batched, 25/req)
 GET  /auth/yahoo/login     — OAuth redirect
 GET  /auth/yahoo/callback  — OAuth callback
@@ -264,6 +265,25 @@ POST /auth/yahoo/refresh   — token refresh
 - MFL guillotine rank cap removed
 - Yahoo keeper detection: `isKeeper` + `hasKeeperPicks`
 
+**April 18 (Yahoo draft + keeper session):**
+- Yahoo draft tab fixed: endpoint changed from `draftresults;out=draft_results` → `draftresults`, parser rewritten for all 5 Yahoo response shapes
+- Yahoo keeper detection: worker fetches `players;status=K` in parallel, cross-references against draft picks for `isKeeper` flag
+- `hasKeeperPicks` in `normalizeBundle` now uses `keeperCount` from worker (most reliable signal)
+- `leagueTypeConfirmed` flag added to Firebase — prevents `_resolveYahooIdentities` from re-fetching all Yahoo leagues on every page load
+- `_resolveYahooIdentities` filter tightened: only re-detects type for current-season leagues missing confirmation
+- `allMatchups` fetch capped to `current_week` (was always fetching up to `end_week` = 17 requests even mid-season)
+- DEF/team defense fallback in `draft.js` playerMap: uses Yahoo-native rosterDetails bio for unmatched players
+- Keeper badge (K) shown on individual picks in list + grid view; KEEPER badge in toggle bar
+- `draft.js` `_renderYahooDraftBoard` fully in place with grid/list/auction views + 25/page pagination
+
+**April 18 (Yahoo draft + keeper session):**
+- Yahoo draft tab: endpoint fixed, multi-shape parser (Shapes 1–5), `isKeeper` via `players;status=K` cross-reference
+- Keeper badges (K) on picks in list+grid; KEEPER badge in toggle bar; `hasKeeperPicks` from `keeperCount`
+- `leagueTypeConfirmed` flag in Firebase prevents `_resolveYahooIdentities` from re-fetching all 59 Yahoo leagues on every load
+- `_resolveYahooIdentities` filter: only re-detects type for current-season leagues missing confirmation
+- `allMatchups` capped to `current_week` (was fetching up to 17 parallel requests even mid-season)
+- DEF/team defense fallback in draft `playerMap` uses Yahoo-native rosterDetails bio
+
 **April 18 (stability session):**
 - Worker `userLeagues`: SINCE= gap-fill added — now supplements with year-by-year for any years missing from SINCE= response (fixes MFL returning only 2022+2024 but skipping 2023+2025)
 - `profile.js` stuck panel fix: `renderLocker` now closes detail panel + clears state on every load (fixes mobile frozen screen affecting all users)
@@ -304,3 +324,5 @@ Here are the relevant files: [attach files]
 
 *Document updated: April 18, 2026*
 *MFL: fully working. Sleeper: fully working. Yahoo: mostly working — see DLR_TODO_LIST.md.*
+*Yahoo draft ✅, keeper detection ✅. Next: Y1 Yahoo Playoff/Championship Detection.*
+*Yahoo draft ✅, keeper detection ✅, leagueType detection ✅. Next: Y1 playoff/championship detection.*
