@@ -895,6 +895,9 @@ const DLRDraft = (() => {
     const bundle = await YahooAPI.getLeagueBundle(key);
     if (token !== _initToken) return;
 
+    // Temporary: log keeper debug info from worker
+    if (bundle._draftKeepDebug) console.log("[Yahoo keeper debug]", bundle._draftKeepDebug);
+
     const teams    = bundle.teams    || [];
     const draft    = bundle.draft    || [];
     const myTeamId = bundle.myTeamId || _myRosterId || null;
