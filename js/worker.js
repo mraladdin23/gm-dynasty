@@ -690,19 +690,12 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   //   Shape 2 (flat object):  { draft_results: { count:N, "0":{...}, "1":{...}, ... } }
   //   Shape 3 (nested array): fantasy_content.league[1].draft_results[0].draft_result = array
   //   Shape 4 (nested obj):   fantasy_content.league[1].draft_results[0].draft_result = count-keyed obj
-  //   Shape 5 (nested alt):   fantasy_content.league[1].draft_results = count-keyed obj
+  //   Shape 5 (nested alt):   fantasy_content.league[1].draft_results = count-keyed obj (no draft_result wrapper)
   //
-  // _draftDebug is returned in the response so the frontend can log it for diagnosis.
-  // Remove _draftDebug from the return statement once draft parsing is confirmed working.
+  // Keeper detection: Yahoo sets is_keeper=1 on keeper picks in keeper/salary leagues.
+  // Falls back to cost-based heuristic on the frontend (yahoo.js normalizeBundle).
   let draft = [];
-  let _draftDebug = {
-    shape: null, draftArrLen: 0, error: null,
-    topLevelKeys: null, dLeagueKeys: null, dResultsType: null,
-    dContainerKeys: null, draftRawType: null,
-  };
   try {
-    _draftDebug.topLevelKeys = draftData ? Object.keys(draftData) : null;
-
     let draftArr = [];
 
     // ── Shape 1 / 2: draft_results directly on the response object ──────────
@@ -711,54 +704,54 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       if (Array.isArray(dr)) {
         // Shape 1 — flat array of picks
         draftArr = dr;
-        _draftDebug.shape = "flat-array";
       } else if (dr && typeof dr === "object") {
         // Shape 2 — count-keyed object: { count: N, "0": pick, "1": pick, ... }
         const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
         for (let i = 0; i < count; i++) { if (dr[String(i)]) draftArr.push(dr[String(i)]); }
-        _draftDebug.shape = "flat-object";
       }
     }
 
     // ── Shape 3 / 4 / 5: nested under fantasy_content.league ────────────────
     if (!draftArr.length) {
-      const dLeague = draftData?.fantasy_content?.league;
-      _draftDebug.dLeagueKeys = dLeague ? Object.keys(dLeague) : null;
+      const dLeague  = draftData?.fantasy_content?.league;
       const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
       const dResults = dLeague1?.draft_results;
-      _draftDebug.dResultsType = dResults === undefined ? "undefined"
-        : Array.isArray(dResults) ? "array" : typeof dResults;
 
       let dContainer;
       if (Array.isArray(dResults)) {
+        // Shape 3/4: draft_results is an array — first element is the container
         dContainer = dResults[0];
       } else if (dResults && typeof dResults === "object") {
-        dContainer = dResults.draft_result !== undefined ? dResults : (dResults["0"] || dResults);
+        // Shape 5: draft_results is an object — may be count-keyed directly
+        // or may have a nested draft_result key
+        dContainer = dResults;
       }
-      _draftDebug.dContainerKeys = dContainer ? Object.keys(dContainer).slice(0, 10) : null;
 
-      const draftRaw = dContainer?.draft_result;
-      _draftDebug.draftRawType = draftRaw === undefined ? "undefined"
-        : Array.isArray(draftRaw) ? "array" : typeof draftRaw;
-
-      if (Array.isArray(draftRaw)) {
-        draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
-        _draftDebug.shape = "nested-array";
-      } else if (draftRaw && typeof draftRaw === "object") {
-        const rawKeys = Object.keys(draftRaw);
-        _draftDebug.draftRawKeys = rawKeys.slice(0, 10);
-        _draftDebug.draftRawSample = draftRaw[rawKeys[0]];  // first entry — shows actual pick structure
-        const count = parseInt(draftRaw.count) || rawKeys.filter(k => k !== "count").length;
-        for (let i = 0; i < count; i++) {
-          const entry = draftRaw[String(i)];
-          if (!entry) continue;
-          draftArr.push(entry.draft_result || entry);
+      if (dContainer) {
+        // Try draft_result sub-key first (Shapes 3/4)
+        const draftRaw = dContainer.draft_result;
+        if (Array.isArray(draftRaw)) {
+          // Shape 3: draft_result is a flat array
+          draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
+        } else if (draftRaw && typeof draftRaw === "object") {
+          // Shape 4: draft_result is count-keyed
+          const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
+          for (let i = 0; i < count; i++) {
+            const entry = draftRaw[String(i)];
+            if (entry) draftArr.push(entry.draft_result || entry);
+          }
+        } else {
+          // Shape 5: dContainer itself is count-keyed (no draft_result wrapper)
+          const numericKeys = Object.keys(dContainer).filter(k => !isNaN(k));
+          if (numericKeys.length > 0) {
+            numericKeys.forEach(k => {
+              const entry = dContainer[k];
+              if (entry) draftArr.push(entry.draft_result || entry);
+            });
+          }
         }
-        _draftDebug.shape = "nested-object";
       }
     }
-
-    _draftDebug.draftArrLen = draftArr.length;
 
     draftArr.forEach((pick, i) => {
       if (!pick) return;
@@ -773,9 +766,10 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
         name:     pick.player_name || pick.name || "",
         position: pick.position    || "?",
         cost:     pick.cost != null ? parseInt(pick.cost) : null,
+        isKeeper: parseInt(pick.is_keeper || 0) === 1,    // Yahoo sets is_keeper=1 on keeper picks
       });
     });
-  } catch(e) { _draftDebug.error = e.message; }
+  } catch(e) { console.error("[Yahoo draft parse]", e.message); }
 
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
@@ -785,7 +779,6 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     teams, standings, rosters, matchups,
     allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
     transactions, draft,
-    _draftDebug,         // temporary diagnostic — remove after draft parsing is confirmed working
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }

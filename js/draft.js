@@ -1027,6 +1027,7 @@ const DLRDraft = (() => {
               ${info.nflTeam ? `<div class="dim" style="font-size:.7rem">${_esc(info.nflTeam)}</div>` : ""}
             </div>
             <span class="draft-auction-team dim">${_esc(fantTeam)}${isMe ? ' <span style="color:var(--color-gold);font-size:.7rem">▶</span>' : ""}</span>
+            ${p.isKeeper ? `<span style="font-size:.65rem;color:var(--color-accent);font-weight:700;letter-spacing:.03em">K</span>` : ""}
           </div>`;
       });
       const header = `<div class="draft-auction-header" style="grid-template-columns:60px 44px 1fr 1fr">
@@ -1066,7 +1067,7 @@ const DLRDraft = (() => {
                 title="${_esc(info.name)} · ${info.pos}">
                 <div class="draft-pick-num">${pickLabel}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(info.name)}</div>
+                  <div class="draft-pick-name">${_esc(info.name)}${p.isKeeper ? ' <span style="font-size:.6rem;color:var(--color-accent);font-weight:700">K</span>' : ""}</div>
                   <div class="draft-pick-meta">
                     <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${info.pos}</span>
                     ${info.nflTeam ? `<span class="draft-pick-nfl">${_esc(info.nflTeam)}</span>` : ""}
