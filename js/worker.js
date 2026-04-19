@@ -567,57 +567,73 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
     }
   } catch(e) {}
 
-  // ── All-weeks scoreboard (fetch weeks 1 → end_week in parallel) ───────────
-  // This powers the week picker and playoffs view. Capped at 17 regular weeks
-  // plus up to 4 playoff weeks. Each per-week fetch is the same scoreboard
-  // endpoint with ;week={n}. We only fetch if we know the week range.
+  // ── All-weeks scoreboard (batched sequential fetching) ──────────────────────
+  // Fetches weeks in small batches with delays between batches to avoid Yahoo
+  // rate limiting. Firing all weeks in parallel (17 requests at once) reliably
+  // triggers Yahoo's undocumented rate limiter (HTTP 999 / silent failures).
+  // Strategy: 3 weeks at a time, 300ms between batches, 1 retry per failed week.
   let allMatchups = {};  // { [week]: matchups[] }
   try {
-    // Cap to current_week so we don't fire 17 requests for in-progress seasons.
-    // For finished leagues, current_week === end_week so we get the full season.
     const fetchThrough = Math.min(
       leagueMeta.current_week || 1,
       leagueMeta.end_week     || 17
     );
     const weeks = Array.from({ length: fetchThrough }, (_, i) => i + 1);
-    const weekResults = await Promise.allSettled(
-      weeks.map(w =>
-        fetch(`${base}/league/${leagueKey}/scoreboard;week=${w}?format=json`, { headers: authHdr })
-          .then(r => r.ok ? r.json() : null).catch(() => null)
-      )
-    );
-    weeks.forEach((w, idx) => {
-      const data = weekResults[idx]?.status === "fulfilled" ? weekResults[idx].value : null;
+
+    const WEEK_BATCH  = 3;    // parallel requests per batch
+    const WEEK_DELAY  = 300;  // ms between batches
+    const RETRY_DELAY = 800;  // ms before retrying a failed week
+
+    async function fetchWeek(w) {
+      const url = `${base}/league/${leagueKey}/scoreboard;week=${w}?format=json`;
+      try {
+        const r = await fetch(url, { headers: authHdr });
+        if (r.ok) return await r.json();
+        await new Promise(res => setTimeout(res, RETRY_DELAY));
+        const r2 = await fetch(url, { headers: authHdr });
+        return r2.ok ? await r2.json() : null;
+      } catch { return null; }
+    }
+
+    function parseWeekData(data, w) {
       if (!data) return;
-      const sb = data?.fantasy_content?.league?.[1]?.scoreboard;
-      if (!sb) return;
+      const sb    = data?.fantasy_content?.league?.[1]?.scoreboard;
       const muObj = sb?.["0"]?.matchups || {};
-      const wMatchups = [];
       const count = muObj.count || 0;
+      const wMatchups = [];
       for (let i = 0; i < count; i++) {
         const mu = muObj[String(i)]?.matchup;
         if (!mu) continue;
-        const muTeams   = mu["0"]?.teams || {};
-        const t0        = muTeams["0"]?.team;
-        const t1        = muTeams["1"]?.team;
-        const t0Info    = Array.isArray(t0?.[0]) ? t0[0] : [t0?.[0]].filter(Boolean);
-        const t1Info    = Array.isArray(t1?.[0]) ? t1[0] : [t1?.[0]].filter(Boolean);
-        const id0       = String(findVal(t0Info, "team_id") || "");
-        const id1       = String(findVal(t1Info, "team_id") || "");
-        const sc0       = parseFloat(t0?.[1]?.team_points?.total || 0);
-        const sc1       = parseFloat(t1?.[1]?.team_points?.total || 0);
+        const muTeams = mu["0"]?.teams || {};
+        const t0      = muTeams["0"]?.team;
+        const t1      = muTeams["1"]?.team;
+        const t0Info  = Array.isArray(t0?.[0]) ? t0[0] : [t0?.[0]].filter(Boolean);
+        const t1Info  = Array.isArray(t1?.[0]) ? t1[0] : [t1?.[0]].filter(Boolean);
+        const id0     = String(findVal(t0Info, "team_id") || "");
+        const id1     = String(findVal(t1Info, "team_id") || "");
+        const sc0     = parseFloat(t0?.[1]?.team_points?.total || 0);
+        const sc1     = parseFloat(t1?.[1]?.team_points?.total || 0);
         const winnerKey = mu.winner_team_key || "";
         wMatchups.push({
-          week:        w,
-          home:        { teamId: id0, score: sc0 },
-          away:        { teamId: id1, score: sc1 },
+          week:         w,
+          home:         { teamId: id0, score: sc0 },
+          away:         { teamId: id1, score: sc1 },
           winnerTeamId: winnerKey ? String(winnerKey).split(".").pop() : null,
-          status:      mu.status || "",
-          isTied:      !!(mu.is_tied),
+          status:       mu.status || "",
+          isTied:       !!(mu.is_tied),
         });
       }
       if (wMatchups.length) allMatchups[w] = wMatchups;
-    });
+    }
+
+    for (let i = 0; i < weeks.length; i += WEEK_BATCH) {
+      const batch   = weeks.slice(i, i + WEEK_BATCH);
+      const results = await Promise.all(batch.map(w => fetchWeek(w)));
+      batch.forEach((w, idx) => parseWeekData(results[idx], w));
+      if (i + WEEK_BATCH < weeks.length) {
+        await new Promise(res => setTimeout(res, WEEK_DELAY));
+      }
+    }
   } catch(e) {}
 
   // ── Transactions ──────────────────────────────────────────────────────────
