@@ -1512,7 +1512,7 @@ const Profile = (() => {
       const league = _allLeagues[f.latestKey];
       if (league) all.push({ key: f.latestKey, name: league.leagueName, season: league.season });
     });
-    all.sort((a, b) => a.name.localeCompare(b.name));
+    all.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
     sel.innerHTML = `<option value="">Jump to league…</option>` +
       all.map(l => `<option value="${l.key}">${_escHtml(l.name)} (${l.season})</option>`).join("");
