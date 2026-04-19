@@ -127,7 +127,10 @@ const YahooAPI = (() => {
         throw new Error(err.error || `Yahoo worker error ${res.status}`);
       }
       const raw = await res.json();
-      return normalizeBundle(raw);
+      const normalized = normalizeBundle(raw);
+      console.log("[Yahoo bundle debug] raw._debug:", raw._debug);
+      console.log("[Yahoo bundle debug] normalized teams:", normalized.teams?.length, "standings:", normalized.standings?.length, "draft:", normalized.draft?.length);
+      return normalized;
     } catch (err) {
       console.error("YahooAPI getLeagueBundle error:", err.message);
       throw err;  // re-throw so callers can show error UI

@@ -573,8 +573,13 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   // endpoint with ;week={n}. We only fetch if we know the week range.
   let allMatchups = {};  // { [week]: matchups[] }
   try {
-    const endWeek = leagueMeta.end_week || leagueMeta.current_week || 17;
-    const weeks   = Array.from({ length: endWeek }, (_, i) => i + 1);
+    // Cap to current_week so we don't fire 17 requests for in-progress seasons.
+    // For finished leagues, current_week === end_week so we get the full season.
+    const fetchThrough = Math.min(
+      leagueMeta.current_week || 1,
+      leagueMeta.end_week     || 17
+    );
+    const weeks = Array.from({ length: fetchThrough }, (_, i) => i + 1);
     const weekResults = await Promise.allSettled(
       weeks.map(w =>
         fetch(`${base}/league/${leagueKey}/scoreboard;week=${w}?format=json`, { headers: authHdr })
@@ -684,9 +689,8 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
   } catch(e) {}
 
   // ── Keeper player IDs ────────────────────────────────────────────────────
-  // Fetch players;status=K to get the set of keeper-designated player IDs.
-  // Yahoo doesn't flag keeper picks directly on draft result objects in snake drafts,
-  // so we cross-reference draft picks against this set.
+  // players;status=K returns keeper-designated players. Non-keeper leagues
+  // return empty or 4xx — keepersData will be null and keeperPlayerIds stays empty.
   const keeperPlayerIds = new Set();
   try {
     const kLeague  = keepersData?.fantasy_content?.league;
@@ -795,15 +799,35 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
 
 
 
+  const _debug = {
+    settingsOk:     !!settingsData,
+    standingsOk:    !!standingsData,
+    rostersOk:      !!rostersData,
+    matchupsOk:     !!matchupsData,
+    transactionsOk: !!transactionsData,
+    draftOk:        !!draftData,
+    keepersOk:      !!keepersData,
+    teamsCount:     teams.length,
+    standingsCount: standings.length,
+    rostersCount:   rosters.length,
+    matchupsCount:  matchups.length,
+    allMatchupsWeeks: Object.keys(allMatchups).length,
+    draftCount:     draft.length,
+    keeperCount:    keeperPlayerIds.size,
+    currentWeek,
+    leagueMetaSnap: { current_week: leagueMeta.current_week, end_week: leagueMeta.end_week, is_finished: leagueMeta.is_finished },
+  };
+
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
-    leagueMeta,          // structured league settings (current_week, playoff_start_week, etc.)
-    myTeamId,            // team_id of the logged-in user's team (null if not found)
-    currentWeek,         // most-recently-scored week
+    leagueMeta,
+    myTeamId,
+    currentWeek,
     teams, standings, rosters, matchups,
-    allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
+    allMatchups,
     transactions, draft,
     keeperCount: keeperPlayerIds.size,
+    _debug,
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
