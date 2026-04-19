@@ -424,6 +424,7 @@ const Profile = (() => {
         try {
           const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
           const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
+          console.log("[Yahoo bundle debug]", yahooKey, bundle._debug);
           const myId     = bundle.myTeamId || null;
           if (!myId) return;
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
