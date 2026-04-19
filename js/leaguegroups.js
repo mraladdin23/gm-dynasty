@@ -358,6 +358,24 @@ async function deleteGroupAndRefresh(groupId) {
 // ── League selector dialog ─────────────────────────────────
 
 function openLeagueSelector(title, color, existingKeys, leagueEntries, callback) {
+  // Sort: year descending, then league name alphabetically within same year
+  // For dynasty/keeper chains, only show the most recent year of each chain
+  const seenDynasty = {};
+  const sorted = [...leagueEntries]
+    .sort((a, b) => {
+      const sDiff = (b.league.season || '').localeCompare(a.league.season || '');
+      if (sDiff !== 0) return sDiff;
+      return (a.league.leagueName || '').localeCompare(b.league.leagueName || '');
+    })
+    .filter(({key, league}) => {
+      // Collapse dynasty/keeper: group by leagueName, keep only first (most recent) seen
+      const isDynasty = league.leagueType === 'dynasty' || league.leagueType === 'keeper';
+      if (!isDynasty) return true;
+      const nameKey = (league.leagueName || '').toLowerCase().trim();
+      if (seenDynasty[nameKey]) return false;
+      seenDynasty[nameKey] = true;
+      return true;
+    });
   const div = document.createElement('div');
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;';
   div.innerHTML = `
@@ -365,7 +383,7 @@ function openLeagueSelector(title, color, existingKeys, leagueEntries, callback)
       <div style="font-size:14px;font-weight:700;margin-bottom:4px;color:${color};">📋 ${_esc(title)}</div>
       <div style="font-size:12px;color:var(--color-text-dim);margin-bottom:12px;">Select leagues to include:</div>
       <div style="max-height:260px;overflow-y:auto;margin-bottom:16px;">
-        ${leagueEntries.map(({key, league}) => `
+        ${sorted.map(({key, league}) => `
           <label style="display:flex;align-items:center;gap:10px;padding:7px 4px;cursor:pointer;border-bottom:1px solid var(--color-border);">
             <input type="checkbox" value="${key}" ${(existingKeys||[]).includes(key)?'checked':''} style="cursor:pointer;flex-shrink:0;accent-color:var(--color-gold);" />
             <span style="font-size:13px;color:var(--color-text);">${_esc(league.leagueName)}</span>
@@ -396,7 +414,7 @@ async function showGroupBroadcast(groupId, groupName, leagueKeys) {
   let sent = 0;
   await Promise.all(leagueKeys.map(async key => {
     try {
-      await db.ref(`gmd/leagueChats/${key}`).push({
+      await firebase.database().ref(`gmd/leagueChats/${key}`).push({
         user: username,
         text: msg.trim(),
         ts:   Date.now(),
