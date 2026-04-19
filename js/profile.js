@@ -2222,9 +2222,20 @@ const Profile = (() => {
     _renderOverviewHTML(el, leagueKey, league);
   }
 
+  // Returns true when a season is definitively over, regardless of platform.
+  // Sleeper sets status="complete". Yahoo/MFL use resolved=true or season < currentYear.
+  function _isSeasonComplete(l) {
+    if (!l) return false;
+    if (l.status === "complete") return true;
+    if (l.resolved) return true;
+    const year = Number(l.season || 0);
+    return year > 0 && year < Number(CURRENT_SEASON);
+  }
+
   function _renderOverviewHTML(el, leagueKey, league) {
     const finish      = league.playoffFinish;
-    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 5:"5th Place", 6:"6th Place", 7:"Made Playoffs" }[finish] || (league.status === "complete" ? "Missed Playoffs" : "Season in Progress");
+    const isComplete  = _isSeasonComplete(league);
+    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 5:"5th Place", 6:"6th Place", 7:"Made Playoffs" }[finish] || (isComplete ? "Missed Playoffs" : "Season in Progress");
     const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";
 
     // Franchise all-time stats
@@ -2295,7 +2306,7 @@ const Profile = (() => {
               <span class="detail-history-season">${s.season}</span>
               <span class="detail-history-team">${_escHtml(s.teamName && s.teamName !== "My Team" ? s.teamName : (s.leagueName || ""))}</span>
               <span class="detail-history-record">${s.wins}–${s.losses}</span>
-              <span class="detail-history-finish">${icon} ${s.playoffResult || (s.status === "complete" ? "—" : "active")}</span>
+              <span class="detail-history-finish">${icon} ${s.playoffResult || (_isSeasonComplete(s) ? "—" : "active")}</span>
             </div>`;
         }).join("")}
       </div>` : ""}
