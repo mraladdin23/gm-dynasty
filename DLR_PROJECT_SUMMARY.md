@@ -37,13 +37,13 @@ GitHub Pages (dynastylockerroom.com)
 ## File Map — Every File and Its Purpose
 
 ### Root
-- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted at v=19. Viewport meta includes `viewport-fit=cover` for PWA safe area support.
+- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted at v=20. Viewport meta includes `viewport-fit=cover` for PWA safe area support.
 - `worker.js` — Cloudflare Worker. MFL bundle fetches, Yahoo OAuth flow + bundle + playerStats. Deploy by pasting into Cloudflare dashboard.
 
 ### `css/`
 - `base.css` — Global variables, reset, typography. `.screen` uses `min-height: 100dvh` (with `100vh` fallback).
 - `auth.css` — Login/register screen styles
-- `locker.css` — All app UI styles. v=19. Mobile: `100dvh` for app-view height, `env(safe-area-inset-top)` for nav + detail panel.
+- `locker.css` — All app UI styles. v=20. Mobile: `100dvh` for app-view height, `env(safe-area-inset-top)` for nav + detail panel.
 
 ### `js/` — Core modules (all vanilla JS IIFEs)
 
@@ -52,11 +52,11 @@ GitHub Pages (dynastylockerroom.com)
 | `app.js` | Orchestrates screens, auth state, global monitors, button handlers. Yahoo OAuth callback handled via `#yahoo_token=` hash. |
 | `auth.js` | Firebase Auth wrapper. 8-second timeout on auth state to prevent mobile hang. |
 | `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. `saveLeagues` uses `.update()` (merge). |
-| `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo/Sleeper import. Background identity resolution for all platforms. `resolved` flag system for historical league caching. `renderLocker` always closes the detail panel on load (prevents stuck panel on mobile). |
+| `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo/Sleeper import. Background identity resolution for all platforms. `resolved` flag system for historical league caching. `renderLocker` always closes the detail panel on load (prevents stuck panel on mobile). `_isSeasonComplete(l)` helper used for cross-platform finish label detection. |
 | `mfl.js` | MFL API helpers. Full set of normalizers for standings, matchups, brackets, drafts. |
 | `yahoo.js` | Yahoo OAuth token management, `getLeagueBundle`, `normalizeBundle`. Token logic: if `expiresAt` is unknown (0), use token optimistically. `hasKeeperPicks` detection from draft data. `uses_roster_import` in leagueMeta. `_getValidToken` and `_workerBase` exposed on public surface. |
 | `sleeper.js` | Sleeper API wrappers. `importUserLeagues` handles full import with playoff detection. |
-| `standings.js` | Standings, Matchups, Playoffs tabs — cross-platform. Yahoo: `season-pill` week pills (matching MFL/Sleeper), matchup expand with team stats. |
+| `standings.js` | Standings, Matchups, Playoffs tabs — cross-platform. Yahoo: `season-pill` week pills (matching MFL/Sleeper), matchup expand with team stats. Yahoo bracket identifies championship game via semi-winner detection. |
 | `roster.js` | Roster tab — cross-platform. PREFERRED_ORDER position grouping. `detailMap` bio fallback for unmatched players. |
 | `draft.js` | Draft board — multi-draft selector, grid/list/auction toggle, 25/page pagination (all platforms). |
 | `transactions.js` | Transactions tab — all platforms. 25/page pagination. |
@@ -102,17 +102,18 @@ eliminator, and guillotine leagues.
 - OAuth flow ✅
 - Standings ✅ (CSS matches MFL/Sleeper, sort confirmed)
 - Matchups ✅ (season-pill week bar, click-to-expand with team stats)
-- Playoffs ⚠️ (bracket filtered to championship teams, runner-up sometimes shown as 3rd)
+- Playoffs ⚠️ (bracket + finish detection code fixed but needs full verification)
 - Roster ✅ (PREFERRED_ORDER position grouping, detailMap fallback)
 - Players tab ✅ (YTD stats via `/yahoo/playerStats`, position dropdown)
 - Draft ✅ (parser working, grid/list/auction views, 25/page pagination)
 - Transactions ⚠️ (team name blank on some transactions)
 - Analytics ✅ (leagueKey wired)
 - Career stats ✅ (`_renderCSPlatform` and `_renderCSPlatformYear` implemented)
-- Keeper detection ✅ (cross-referenced via `players;status=K` endpoint + `isKeeper` flag + cost heuristic)
-- League type detection ✅ (`leagueTypeConfirmed` flag prevents re-fetch spam; past seasons locked in Firebase)
-- Championship detection ⚠️ (playoff finish logic has runner-up/3rd-place bug)
-- Token persistence ⚠️ (optimistic use when expiresAt=0 fixed; mobile localStorage may still be unreliable)
+- Keeper detection ✅
+- League type detection ✅ (`leagueTypeConfirmed` flag)
+- Championship/playoff finish detection ⚠️ (code fixed April 18; needs verification once Yahoo API stabilizes — old leagues 2002–2011 may have no matchup data)
+- Token persistence ⚠️ (optimistic use when expiresAt=0 fixed; mobile still unreliable — Y4 open)
+- Bundle stability ⚠️ (worker now batches week fetches 3 at a time with 300ms delay + retry; Yahoo still rate-limits under heavy load — Y5 open)
 
 ---
 
@@ -124,21 +125,20 @@ A resolved league is NEVER re-fetched from any platform API.
 **A league is marked resolved when:**
 - `season < currentYear` (past season)
 - `playoffFinish != null`
-- `leagueType` is set and not `"redraft"` — OR `isGuillotine === true`
+- `leagueType` is set and not `"redraft"` — OR `lm.is_finished === 1` (covers finished redraft leagues — Y6 fix)
 - `teamName` is set
 
-**⚠️ IMPORTANT — Do NOT run reset scripts on Firebase league data.**
-Running bulk reset scripts (setting `resolved: null`, `playoffFinish: null` on many
-leagues at once) has caused repeated data corruption issues. If playoff detection
-needs to be re-run for specific leagues, do it surgically one league at a time or
-via the Sync button, not via bulk console scripts.
+**`_isSeasonComplete(l)` helper (profile.js):**
+Returns true when a season is definitively over, regardless of platform:
+- Sleeper: `l.status === "complete"`
+- Yahoo/MFL resolved: `l.resolved === true`
+- Any past year: `l.season < CURRENT_SEASON`
+Used for "Missed Playoffs" vs "Season in Progress" display label.
 
-**Helpers in `profile.js`:**
-```js
-_isPastSeason(l)    // true if l.season < currentYear
-_isFullyResolved(l) // true if past AND l.resolved === true
-_markResolved(l)    // sets resolved=true, corrects isChampion
-```
+**⚠️ IMPORTANT — Do NOT run bulk Firebase reset scripts.**
+Running bulk reset scripts (setting `resolved: null`, `playoffFinish: null` on many
+leagues at once) has caused repeated data corruption issues. Fix stale data surgically,
+one league at a time. Use the console scripts in DLR_TODO_LIST.md.
 
 ---
 
@@ -161,8 +161,9 @@ gmd/
 ```
 Sleeper:  sleeper_{leagueId}           e.g. "sleeper_987654321"
 MFL:      mfl_{season}_{leagueId}      e.g. "mfl_2024_22796"
-Yahoo:    yahoo_{leagueKey}            e.g. "yahoo_449.l.123456"
+Yahoo:    yahoo_{season}_{leagueId}    e.g. "yahoo_2024_123456"
 MFL dynasty chain key: mfl__{leagueId}
+Yahoo franchise chain key: yahoo__{normalized_league_name}
 ```
 
 ### Yahoo bundle (from `YahooAPI.getLeagueBundle` → `normalizeBundle`)
@@ -177,6 +178,7 @@ MFL dynasty chain key: mfl__{leagueId}
   rosters[],       // { teamId, players[], playerDetails[] }
   matchups[],      // current week
   allMatchups,     // { [week]: matchups[] } — all weeks including playoffs
+                   // fetched in batches of 3 with 300ms delay + 1 retry (worker)
   draft[],         // { pick, round, teamId, playerId, name, position, cost, isKeeper }
   transactions[],
   hasKeeperPicks,  // true if draft data contains keeper picks
@@ -197,7 +199,7 @@ POST /mfl/auctionResults — auction results on-demand
 
 ### Yahoo worker endpoints
 ```
-POST /yahoo/leagueBundle   — full normalized bundle (allMatchups capped to current_week to avoid rate-limiting)
+POST /yahoo/leagueBundle   — full normalized bundle (weeks fetched in batches of 3, 300ms delay)
 POST /yahoo/playerStats    — YTD fantasy points by player ID (batched, 25/req)
 GET  /auth/yahoo/login     — OAuth redirect
 GET  /auth/yahoo/callback  — OAuth callback
@@ -216,6 +218,7 @@ POST /auth/yahoo/refresh   — token refresh
 - **Mobile viewport height:** `100dvh` used throughout (with `100vh` fallback).
 - **Yahoo token storage:** `localStorage` primary, `sessionStorage` fallback. If `expiresAt` is 0 (unknown), token is used optimistically rather than triggering a refresh.
 - **Stuck panel fix:** `renderLocker` explicitly closes the detail panel and clears `_detailLeagueKey` on every load — prevents mobile frozen screen state.
+- **Yahoo rate limiting:** Yahoo's API has undocumented rate limits. Firing many parallel requests triggers HTTP 999 or silent failures. Worker batches week fetches (3/batch, 300ms delay). `_resolveYahooIdentities` runs 2 concurrent bundles with 500ms between batches.
 
 ---
 
@@ -266,31 +269,29 @@ POST /auth/yahoo/refresh   — token refresh
 - Yahoo keeper detection: `isKeeper` + `hasKeeperPicks`
 
 **April 18 (Yahoo draft + keeper session):**
-- Yahoo draft tab fixed: endpoint changed from `draftresults;out=draft_results` → `draftresults`, parser rewritten for all 5 Yahoo response shapes
-- Yahoo keeper detection: worker fetches `players;status=K` in parallel, cross-references against draft picks for `isKeeper` flag
-- `hasKeeperPicks` in `normalizeBundle` now uses `keeperCount` from worker (most reliable signal)
-- `leagueTypeConfirmed` flag added to Firebase — prevents `_resolveYahooIdentities` from re-fetching all Yahoo leagues on every page load
-- `_resolveYahooIdentities` filter tightened: only re-detects type for current-season leagues missing confirmation
-- `allMatchups` fetch capped to `current_week` (was always fetching up to `end_week` = 17 requests even mid-season)
-- DEF/team defense fallback in `draft.js` playerMap: uses Yahoo-native rosterDetails bio for unmatched players
-- Keeper badge (K) shown on individual picks in list + grid view; KEEPER badge in toggle bar
-- `draft.js` `_renderYahooDraftBoard` fully in place with grid/list/auction views + 25/page pagination
-
-**April 18 (Yahoo draft + keeper session):**
-- Yahoo draft tab: endpoint fixed, multi-shape parser (Shapes 1–5), `isKeeper` via `players;status=K` cross-reference
-- Keeper badges (K) on picks in list+grid; KEEPER badge in toggle bar; `hasKeeperPicks` from `keeperCount`
-- `leagueTypeConfirmed` flag in Firebase prevents `_resolveYahooIdentities` from re-fetching all 59 Yahoo leagues on every load
-- `_resolveYahooIdentities` filter: only re-detects type for current-season leagues missing confirmation
-- `allMatchups` capped to `current_week` (was fetching up to 17 parallel requests even mid-season)
-- DEF/team defense fallback in draft `playerMap` uses Yahoo-native rosterDetails bio
+- Yahoo draft tab fixed: endpoint + multi-shape parser (Shapes 1–5)
+- Yahoo keeper detection: worker fetches `players;status=K`, cross-references draft picks
+- `hasKeeperPicks` from `keeperCount`; `leagueTypeConfirmed` flag added
+- `_resolveYahooIdentities` filter tightened: skips resolved + current-season-only re-detect
+- `allMatchups` capped to `current_week`
+- DEF/team defense fallback in draft `playerMap`
 
 **April 18 (stability session):**
-- Worker `userLeagues`: SINCE= gap-fill added — now supplements with year-by-year for any years missing from SINCE= response (fixes MFL returning only 2022+2024 but skipping 2023+2025)
-- `profile.js` stuck panel fix: `renderLocker` now closes detail panel + clears state on every load (fixes mobile frozen screen affecting all users)
-- `yahoo.js` token fix restored after revert: optimistic `!expiresAt` condition re-applied (fixes Yahoo OAuth 400 errors)
-- `base.css` `100dvh` and `index.html` `viewport-fit=cover` restored after revert
-- Multiple stability incidents this session due to Firebase data corruption from bulk reset scripts and bundle caching experiments — see IMPORTANT note in Historical League Caching section above
-- Roadmap moved to `DLR_TODO_LIST.md` (replaces `DLR_YAHOO_TODO.md`)
+- Worker `userLeagues` SINCE= gap-fill
+- `profile.js` stuck panel fix
+- `yahoo.js` token fix restored
+- `base.css` + `index.html` mobile fixes restored
+
+**April 18 (Yahoo playoff + stability session):**
+- `_detectYahooPlayoffFinish` rewritten: identifies championship game via semi-winner detection; correctly assigns 1st/2nd/3rd/4th place; no longer confuses consolation game loser with runner-up
+- Yahoo bracket (`standings.js`): championship game identified by semi-winner set, sorted first in finals display
+- Y6: `_resolveYahooIdentities` now sets `resolved: true` for finished redraft leagues (`lm.is_finished === 1`)
+- Y6: resolved leagues skipped in `_resolveYahooIdentities` filter
+- `_isSeasonComplete(l)` helper added — cross-platform "season is over" check used for "Missed Playoffs" vs "Season in Progress" display label
+- `_updateJumpDropdown` crash fixed (undefined `leagueName` in sort)
+- Worker: Yahoo week fetches now batched (3/batch, 300ms delay, 1 retry) instead of all-parallel — reduces Yahoo rate limit hits
+- All Yahoo leagues deleted and reimported fresh; placeholder Firebase keys from bad console script cleaned up
+- Note: Yahoo API still rate-limits under heavy load; old leagues (2002–2011) may have no matchup data and will show "Missed Playoffs" by default
 
 ---
 
@@ -300,6 +301,7 @@ POST /auth/yahoo/refresh   — token refresh
 2. **One task per session** — attach only the 1–3 files needed for that task
 3. **Commit to git** after each fix before starting a new session
 4. **Never run bulk Firebase reset scripts** — they corrupt league data. Fix things surgically.
+5. **Worker changes require a separate paste into Cloudflare dashboard** — git push alone is not enough
 
 ### Standard context block:
 ```
@@ -319,10 +321,10 @@ Here are the relevant files: [attach files]
 - Yahoo week pills use `season-pill` / `season-pill--current` (same as MFL/Sleeper)
 - Yahoo game key format: `"{game_id}.l.{league_id}"` — always use stored `league.leagueKey`
 - Worker changes require a **separate paste into Cloudflare dashboard** — git push alone is not enough
+- Yahoo rate limiting: don't run multiple tabs or hammer the import button repeatedly
 
 ---
 
 *Document updated: April 18, 2026*
 *MFL: fully working. Sleeper: fully working. Yahoo: mostly working — see DLR_TODO_LIST.md.*
-*Yahoo draft ✅, keeper detection ✅. Next: Y1 Yahoo Playoff/Championship Detection.*
-*Yahoo draft ✅, keeper detection ✅, leagueType detection ✅. Next: Y1 playoff/championship detection.*
+*Yahoo playoff detection code fixed. Bundle stability improved. Y4/Y5 still open.*
