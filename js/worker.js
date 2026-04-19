@@ -799,35 +799,15 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
 
 
 
-  const _debug = {
-    settingsOk:     !!settingsData,
-    standingsOk:    !!standingsData,
-    rostersOk:      !!rostersData,
-    matchupsOk:     !!matchupsData,
-    transactionsOk: !!transactionsData,
-    draftOk:        !!draftData,
-    keepersOk:      !!keepersData,
-    teamsCount:     teams.length,
-    standingsCount: standings.length,
-    rostersCount:   rosters.length,
-    matchupsCount:  matchups.length,
-    allMatchupsWeeks: Object.keys(allMatchups).length,
-    draftCount:     draft.length,
-    keeperCount:    keeperPlayerIds.size,
-    currentWeek,
-    leagueMetaSnap: { current_week: leagueMeta.current_week, end_week: leagueMeta.end_week, is_finished: leagueMeta.is_finished },
-  };
-
   return new Response(JSON.stringify({
     league:      leagueRaw?.[0] || {},
-    leagueMeta,
-    myTeamId,
-    currentWeek,
+    leagueMeta,          // structured league settings (current_week, playoff_start_week, etc.)
+    myTeamId,            // team_id of the logged-in user's team (null if not found)
+    currentWeek,         // most-recently-scored week
     teams, standings, rosters, matchups,
-    allMatchups,
+    allMatchups,         // { [week]: matchups[] } — all weeks including playoffs
     transactions, draft,
     keeperCount: keeperPlayerIds.size,
-    _debug,
     players: [], futurePicks: [],
   }), { headers: corsHeaders() });
 }
