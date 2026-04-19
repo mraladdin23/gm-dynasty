@@ -406,13 +406,14 @@ const Profile = (() => {
   // Also detects playoff finish (champion, runner-up, etc.) from allMatchups.
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
+    const currentYear = String(new Date().getFullYear());
     const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
       if (l.platform !== "yahoo") return false;
       // Always fetch if missing core identity
       if (!l.myRosterId || !l.teamName || l.teamName === "") return true;
-      // Re-fetch if leagueType has never been confirmed by API detection
-      // (leagueTypeConfirmed is set to true after a successful bundle-based detection)
-      if (!l.leagueTypeConfirmed) return true;
+      // Only re-detect leagueType for current-season leagues that haven't been confirmed yet.
+      // Past seasons keep whatever type they have — no need to re-fetch.
+      if (!l.leagueTypeConfirmed && l.season === currentYear) return true;
       return false;
     });
     if (!allYahoo.length) return;
@@ -424,7 +425,6 @@ const Profile = (() => {
         try {
           const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
           const bundle   = await YahooAPI.getLeagueBundle(yahooKey);
-          console.log("[Yahoo bundle debug]", yahooKey, bundle._debug);
           const myId     = bundle.myTeamId || null;
           if (!myId) return;
           const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
