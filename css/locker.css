@@ -1682,6 +1682,11 @@ select option { background: var(--color-bg-2); }
   font-size: .78rem;
 }
 .mu-sbs-row--bench { opacity: .6; }
+/* Yahoo roster expand — no score columns, 3-column layout: name | slot | name */
+.mu-sbs-row--no-pts,
+.mu-sbs-header--no-pts {
+  grid-template-columns: 1fr 42px 1fr;
+}
 .mu-pts { font-family: var(--font-mono); font-size: .75rem; text-align: right; }
 .mu-pts--right { text-align: left; }
 .mu-pts--win { color: var(--color-green); font-weight: 700; }

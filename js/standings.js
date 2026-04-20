@@ -1783,10 +1783,10 @@ const DLRStandings = (() => {
         const pa    = stA[i] || null;
         const label = _yahooSlotLabel(ph?.slot || pa?.slot || "FLEX");
         const col   = _YAHOO_POS_COLOR[label] || "var(--color-text-dim)";
-        rows += `<div class="mu-sbs-row">
-          <span class="mu-name mu-name--left" style="flex:1">${ph ? _esc(ph.name || ph.pid) : "—"}</span>
-          <span class="mu-slot" style="color:${col};min-width:3rem;text-align:center">${label}</span>
-          <span class="mu-name mu-name--right" style="flex:1">${pa ? _esc(pa.name || pa.pid) : "—"}</span>
+        rows += `<div class="mu-sbs-row mu-sbs-row--no-pts">
+          <span class="mu-name mu-name--left">${ph ? _esc(ph.name || ph.pid) : "—"}</span>
+          <span class="mu-slot" style="color:${col}">${label}</span>
+          <span class="mu-name mu-name--right">${pa ? _esc(pa.name || pa.pid) : "—"}</span>
         </div>`;
       }
 
@@ -1795,19 +1795,19 @@ const DLRStandings = (() => {
         const maxBn = Math.max(bnH.length, bnA.length);
         for (let i = 0; i < maxBn; i++) {
           const ph = bnH[i], pa = bnA[i];
-          rows += `<div class="mu-sbs-row mu-sbs-row--bench">
-            <span class="mu-name mu-name--left dim" style="flex:1">${ph ? _esc(ph.name || ph.pid) : ""}</span>
-            <span class="mu-slot dim" style="min-width:3rem;text-align:center">BN</span>
-            <span class="mu-name mu-name--right dim" style="flex:1">${pa ? _esc(pa.name || pa.pid) : ""}</span>
+          rows += `<div class="mu-sbs-row mu-sbs-row--bench mu-sbs-row--no-pts">
+            <span class="mu-name mu-name--left dim">${ph ? _esc(ph.name || ph.pid) : ""}</span>
+            <span class="mu-slot dim">BN</span>
+            <span class="mu-name mu-name--right dim">${pa ? _esc(pa.name || pa.pid) : ""}</span>
           </div>`;
         }
       }
 
       detail.innerHTML = `
-        <div class="mu-sbs-header">
-          <span class="mu-sbs-team" style="flex:1">${_esc(hName)}</span>
-          <span class="mu-sbs-pos" style="min-width:3rem;text-align:center">SLOT</span>
-          <span class="mu-sbs-team" style="flex:1;text-align:right">${_esc(aName)}</span>
+        <div class="mu-sbs-header mu-sbs-header--no-pts">
+          <span class="mu-sbs-team">${_esc(hName)}</span>
+          <span class="mu-sbs-pos">SLOT</span>
+          <span class="mu-sbs-team" style="text-align:right">${_esc(aName)}</span>
         </div>
         ${rows || '<div class="mu-no-detail">No lineup data available.</div>'}
         <div style="font-size:.7rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) 0 0">
