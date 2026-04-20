@@ -608,6 +608,106 @@ const Profile = (() => {
     _renderCareerSummary(_currentProfile || {});
   }
 
+  // ── Per-league Yahoo sync (🔄 Sync League button in detail panel) ────────────
+  // Clears resolved/playoffFinish flags, re-fetches bundle, re-runs detection, saves.
+  async function syncYahooLeague(leagueKey) {
+    const league = _allLeagues[leagueKey];
+    if (!league || league.platform !== "yahoo") return;
+
+    const currentYear = String(new Date().getFullYear());
+
+    // Clear stale flags so detection runs fresh
+    Object.assign(_allLeagues[leagueKey], {
+      resolved:      null,
+      playoffFinish: null,
+      isChampion:    false,
+      myRosterId:    null,
+      teamName:      "",
+    });
+
+    const yahooKey = league.leagueKey || `nfl.l.${league.leagueId}`;
+    let bundle;
+    try {
+      bundle = await YahooAPI.getLeagueBundle(yahooKey);
+    } catch(e) {
+      throw new Error("Could not fetch Yahoo bundle — check your connection and try again.");
+    }
+
+    const myId = bundle.myTeamId || null;
+    if (!myId) throw new Error("Yahoo did not return your team ID — try reconnecting Yahoo.");
+
+    const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
+    const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
+    const lm     = bundle.leagueMeta || {};
+
+    let playoffFinish = null;
+    if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
+      playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
+    }
+
+    const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
+
+    const updated = {
+      ..._allLeagues[leagueKey],
+      myRosterId:          String(myId),
+      teamName:            myTeam.name       || "",
+      wins:                mySt.wins         ?? 0,
+      losses:              mySt.losses       ?? 0,
+      ties:                mySt.ties         ?? 0,
+      standing:            mySt.rank         || null,
+      pointsFor:           mySt.ptsFor       || 0,
+      pointsAgainst:       mySt.ptsAgainst   || 0,
+      playoffFinish,
+      isChampion:          playoffFinish === 1,
+      leagueType,
+      leagueTypeConfirmed: true,
+    };
+
+    const isPastSeason = Number(updated.season) < Number(currentYear);
+    const isFinished   = lm.is_finished === 1 || lm.is_finished === "1";
+    const notRedraft   = updated.leagueType !== "redraft";
+    if (isPastSeason && updated.playoffFinish != null && updated.teamName && (notRedraft || isFinished)) {
+      updated.resolved = true;
+    }
+
+    Object.assign(_allLeagues[leagueKey], updated);
+    await GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] });
+
+    try {
+      const stats = await GMDB.recomputeStats(_currentUsername);
+      if (_currentProfile && stats) _currentProfile.stats = stats;
+      _renderStatsRow(stats || {});
+    } catch(e) {}
+
+    _renderLeagues();
+    _renderCareerSummary(_currentProfile || {});
+
+    // Re-render the overview tab immediately
+    if (_detailLeagueKey === leagueKey) {
+      _detailLeague = { ..._allLeagues[leagueKey] };
+      const overviewEl = document.getElementById("dtab-overview");
+      if (overviewEl) await _renderOverview(overviewEl, leagueKey, _detailLeague);
+    }
+  }
+
+  // Handles sync button click — shows loading state, calls sync, restores button
+  async function _triggerYahooSync(leagueKey) {
+    const btn = document.getElementById("detail-yahoo-sync-btn");
+    if (!btn) return;
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Syncing…";
+    try {
+      await syncYahooLeague(leagueKey);
+      btn.textContent = "✓ Synced";
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+    } catch(e) {
+      btn.textContent = "Failed";
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2500);
+      showToast(e.message || "Sync failed", "error");
+    }
+  }
+
   // Detect playoff finish rank from allMatchups.
   //
   // Strategy:
@@ -618,19 +718,10 @@ const Profile = (() => {
   //   3. If user didn't play in the final week, find when they were eliminated
   //      and estimate placement from round index (5th, 7th, etc.).
   // Detect playoff finish rank from allMatchups.
-  //
-  // Strategy:
-  //   1. Confirm user appears in at least one playoff-week matchup — if not, return null
-  //      (missed playoffs entirely — don't incorrectly assign a finish).
-  //   2. Identify which teams won the semifinal round (second-to-last playoff week).
-  //      These two teams play the championship; the two losers play for 3rd place.
-  //   3. Check if user played in the final week:
-  //        - Championship game (both teams are semi-winners): win=1st, lose=2nd.
-  //        - Consolation game (semi-losers): win=3rd, lose=4th.
-  //        - If semiWinners data is unavailable (e.g. only 2 playoff weeks total and
-  //          first week had no scores): fall back to game index 0 = championship ONLY
-  //          if the user actually appears in a playoff matchup.
-  //   4. If user was eliminated in an earlier round, estimate placement from round.
+  // Gate: user must appear in at least one playoff-week matchup.
+  // If not → return null (missed playoffs entirely).
+  // Championship identification: both teams are semi-winners, OR only 1 final game.
+  // Safe fallback: multiple final games + no semi data → 3rd/4th rather than false champion.
   function _detectYahooPlayoffFinish(myId, bundle) {
     const lm      = bundle.leagueMeta || {};
     const poStart = lm.playoff_start_week || 0;
@@ -642,9 +733,7 @@ const Profile = (() => {
 
     const myStr = String(myId);
 
-    // ── Gate: user must appear in at least one playoff matchup ─────────────
-    // This prevents assigning a finish to someone who missed the playoffs entirely,
-    // even if their bundle contains playoff-week data (they were just absent).
+    // ── Gate: user must appear in at least one playoff matchup ─────────────────
     const appearsInPlayoffs = poWeeks.some(w =>
       (allMu[w] || []).some(m =>
         String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
@@ -655,7 +744,7 @@ const Profile = (() => {
     const finalWeek = poWeeks[poWeeks.length - 1];
     const semiWeek  = poWeeks.length >= 2 ? poWeeks[poWeeks.length - 2] : null;
 
-    // ── Determine semi-winners (teams in the championship game) ────────────
+    // ── Determine semi-winners ─────────────────────────────────────────────────
     const semiWinners = new Set();
     if (semiWeek != null) {
       for (const m of (allMu[semiWeek] || [])) {
@@ -672,7 +761,7 @@ const Profile = (() => {
       }
     }
 
-    // ── Check if user played in the final week ─────────────────────────────
+    // ── Check if user played in the final week ─────────────────────────────────
     const finalMus    = allMu[finalWeek] || [];
     const myFinalGame = finalMus.find(m =>
       String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
@@ -687,31 +776,21 @@ const Profile = (() => {
         ? String(myFinalGame.winnerTeamId) === myStr
         : (hId === myStr ? hSc > aSc : aSc > hSc);
 
-      // Determine if this is the championship game:
-      //   - If we have semi-winner data: championship = both teams are semi-winners.
-      //   - If no semi-winner data (2-team playoff, or semis unscored): check whether
-      //     it's the only game in the final week, which means it must be the championship.
-      //     Do NOT fall back to game index 0 if there are multiple games — that risks
-      //     misidentifying a consolation game as the championship.
+      // Championship = both teams are semi-winners, OR only one game this week
       let isChampGame = false;
       if (semiWinners.size >= 2) {
         isChampGame = semiWinners.has(hId) && semiWinners.has(aId);
       } else if (finalMus.length === 1) {
-        // Only one game this week — must be the championship
         isChampGame = true;
       }
-      // If semiWinners.size < 2 AND multiple final games: we can't safely identify
-      // the championship, so we leave isChampGame = false and fall through to
-      // the semi-loser path which at least gives 3rd/4th rather than a wrong 1st/2nd.
 
       if (isChampGame) return iWon ? 1 : 2;
-      // Consolation game (3rd/4th place) — the two semi-losers
-      return iWon ? 3 : 4;
+      return iWon ? 3 : 4;  // consolation / 3rd place game
     }
 
-    // ── User not in final week — find when they were eliminated ────────────
+    // ── User eliminated in an earlier round ───────────────────────────────────
     let elimWeek = null;
-    for (const w of poWeeks.slice(0, -1)) {  // skip final week — handled above
+    for (const w of poWeeks.slice(0, -1)) {
       const myMatchup = (allMu[w] || []).find(m =>
         String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
       );
@@ -726,8 +805,6 @@ const Profile = (() => {
     }
 
     if (elimWeek == null) return null;
-
-    // Rough placement: earlier elimination = worse finish
     const roundIdx = poWeeks.indexOf(elimWeek);
     return (roundIdx + 1) * 2 + 1;  // 5th, 7th, etc.
   }
@@ -2053,6 +2130,19 @@ const Profile = (() => {
       ${league.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
 
+    // Yahoo sync button — show only for Yahoo leagues
+    const syncBtn = document.getElementById("detail-yahoo-sync-btn");
+    if (syncBtn) {
+      if (league.platform === "yahoo") {
+        syncBtn.style.display = "";
+        syncBtn.textContent = "🔄 Sync League";
+        syncBtn.disabled = false;
+        syncBtn.onclick = () => _triggerYahooSync(leagueKey);
+      } else {
+        syncBtn.style.display = "none";
+      }
+    }
+
     // Season pills
     const seasonSel = document.getElementById("detail-season-selector");
     if (seasonSel) {
@@ -2181,6 +2271,19 @@ const Profile = (() => {
       <span style="color:var(--color-text-dim);font-size:.82rem;">${newLeague.leagueType} · ${newLeague.totalTeams} teams</span>
       ${newLeague.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
+
+    // Update sync button for newly-selected season
+    const syncBtnSw = document.getElementById("detail-yahoo-sync-btn");
+    if (syncBtnSw) {
+      if (newLeague.platform === "yahoo") {
+        syncBtnSw.style.display = "";
+        syncBtnSw.textContent = "🔄 Sync League";
+        syncBtnSw.disabled = false;
+        syncBtnSw.onclick = () => _triggerYahooSync(newKey);
+      } else {
+        syncBtnSw.style.display = "none";
+      }
+    }
 
     DLRStandings.reset();
 
@@ -2572,7 +2675,8 @@ const Profile = (() => {
     toggleFilterPanel,
     toggleFilter,
     clearFilters,
-    syncMFLTeams
+    syncMFLTeams,
+    syncYahooLeague
   };
 
 })();

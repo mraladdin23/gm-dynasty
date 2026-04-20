@@ -912,24 +912,19 @@ async function yahooPlayerStats(accessToken, leagueKey, playerIds) {
   return new Response(JSON.stringify(statsMap), { headers: corsHeaders() });
 }
 
-// ── Yahoo matchup roster + weekly points ─────────────────────────────────────
-// Fetches starters/bench with selected_position for both teams in a given week,
-// plus per-player fantasy points for that week. Called lazily on matchup expand.
-//
-// Returns:
-//   { home: [{pid, name, pos, slot, score, isStarter}], away: [...] }
-//   where slot = selected_position (QB/RB/WR/TE/K/DEF/BN/IR etc.)
-//         pos  = eligible display_position (player's actual position)
+// ── Yahoo matchup roster ─────────────────────────────────────────────────────
+// Fetches the weekly roster for both teams showing who started vs sat.
+// Individual fantasy points are NOT fetched — Yahoo requires applying per-league
+// scoring rules to raw stat categories, which varies by league configuration.
+// Returns starters and bench with player name, position, and slot only.
 async function yahooMatchupRoster(accessToken, leagueKey, week, homeTeamKey, awayTeamKey) {
   const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
   const authHdr = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
-  const gameId  = leagueKey.split(".")[0];
 
   function yahooPlayerId(playerKey) {
     if (!playerKey) return null;
-    const s = String(playerKey);
-    const parts = s.split(".");
-    return parts[parts.length - 1] || s;
+    const parts = String(playerKey).split(".");
+    return parts[parts.length - 1] || String(playerKey);
   }
 
   const findVal = (arr, key) => {
@@ -938,106 +933,44 @@ async function yahooMatchupRoster(accessToken, leagueKey, week, homeTeamKey, awa
     return null;
   };
 
-  // ── Step 1: Fetch rosters for both teams for the given week ─────────────────
-  // /team/{team_key}/roster;week={N} returns each player's selected_position for
-  // that specific week, which tells us starter vs bench.
   async function fetchRoster(teamKey) {
     const url = `${base}/team/${teamKey}/roster;week=${week}?format=json`;
     try {
       const r = await fetch(url, { headers: authHdr });
       if (!r.ok) return [];
-      const data = await r.json();
-      const roster = data?.fantasy_content?.team?.[1]?.roster;
+      const data    = await r.json();
+      const roster  = data?.fantasy_content?.team?.[1]?.roster;
       const players = roster?.[0]?.players || {};
       const count   = players.count || 0;
       const result  = [];
       for (let i = 0; i < count; i++) {
         const p = players[String(i)]?.player;
         if (!p) continue;
-        const pInfo  = Array.isArray(p[0]) ? p[0] : [p[0]];
-        const rawId  = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
-        const pid    = yahooPlayerId(rawId);
+        const pInfo    = Array.isArray(p[0]) ? p[0] : [p[0]];
+        const rawId    = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
+        const pid      = yahooPlayerId(rawId);
         if (!pid) continue;
-        const nameObj   = findVal(pInfo, "name");
-        const fullName  = (typeof nameObj === "object" ? nameObj?.full : nameObj) || "";
-        const dispPos   = findVal(pInfo, "display_position") || "";
-        const pos       = typeof dispPos === "object" ? (dispPos?.position || "") : dispPos;
-        // selected_position is in p[1].selected_position[0].position
-        const selPosRaw = p[1]?.selected_position;
-        const selPosArr = Array.isArray(selPosRaw) ? selPosRaw : (selPosRaw ? [selPosRaw] : []);
-        const slot      = selPosArr[0]?.position || selPosArr.find?.(x => x?.position)?.position || "BN";
-        result.push({ pid, name: fullName, pos, slot, playerKey: `${gameId}.p.${pid}` });
+        const nameObj  = findVal(pInfo, "name");
+        const fullName = (typeof nameObj === "object" ? nameObj?.full : nameObj) || "";
+        const dispPos  = findVal(pInfo, "display_position") || "";
+        const pos      = typeof dispPos === "object" ? (dispPos?.position || "") : dispPos;
+        // selected_position lives at p[1].selected_position[0].position
+        const selRaw   = p[1]?.selected_position;
+        const selArr   = Array.isArray(selRaw) ? selRaw : (selRaw ? [selRaw] : []);
+        const slot     = selArr[0]?.position || selArr.find?.(x => x?.position)?.position || "BN";
+        result.push({ pid, name: fullName, pos, slot,
+          isStarter: slot !== "BN" && slot !== "IR" && slot !== "TAXI" });
       }
       return result;
     } catch { return []; }
   }
 
-  const [homePlayers, awayPlayers] = await Promise.all([
+  const [home, away] = await Promise.all([
     fetchRoster(homeTeamKey),
     fetchRoster(awayTeamKey),
   ]);
 
-  // ── Step 2: Batch-fetch weekly points for all players ──────────────────────
-  // /league/{key}/players;player_keys=...;out=stats;type=week;week={N}
-  // Returns per-player fantasy points scored that week (live or final).
-  const allPids     = [...new Set([...homePlayers, ...awayPlayers].map(p => p.pid))];
-  const allKeys     = allPids.map(id => `${gameId}.p.${id}`);
-  const BATCH       = 25;
-  const pointsMap   = {};  // pid → weekly points
-
-  const statBatches = [];
-  for (let i = 0; i < allKeys.length; i += BATCH) {
-    statBatches.push(allKeys.slice(i, i + BATCH));
-  }
-
-  await Promise.allSettled(statBatches.map(async batch => {
-    const keysParam = batch.join(",");
-    const url = `${base}/league/${leagueKey}/players;player_keys=${keysParam};out=stats;type=week;week=${week}?format=json`;
-    try {
-      const r = await fetch(url, { headers: authHdr });
-      if (!r.ok) return;
-      const data = await r.json();
-      const playersObj = data?.fantasy_content?.league?.[1]?.players;
-      if (!playersObj) return;
-      const count = playersObj.count || 0;
-      for (let i = 0; i < count; i++) {
-        const entry = playersObj[String(i)]?.player;
-        if (!entry) continue;
-        const pInfo  = Array.isArray(entry[0]) ? entry[0] : [entry[0]];
-        const rawId  = pInfo.find(o => o?.player_id != null)?.player_id
-                    || pInfo.find(o => o?.player_key != null)?.player_key;
-        if (!rawId) continue;
-        const pid    = String(rawId).includes(".") ? String(rawId).split(".").pop() : String(rawId);
-        const sc     = entry[1];
-        let total    = parseFloat(sc?.player_points?.total ?? NaN);
-        if (isNaN(total)) {
-          const statsArr = sc?.player_stats?.[0]?.stats?.stat;
-          if (Array.isArray(statsArr)) {
-            const totStat = statsArr.find(s => String(s.stat_id) === "0");
-            total = totStat ? parseFloat(totStat.value || 0) : 0;
-          } else { total = 0; }
-        }
-        if (pid) pointsMap[pid] = total;
-      }
-    } catch { /* ignore batch failures */ }
-  }));
-
-  // ── Step 3: Attach points and annotate starter/bench ─────────────────────
-  function annotate(players) {
-    return players.map(p => ({
-      pid:       p.pid,
-      name:      p.name,
-      pos:       p.pos,
-      slot:      p.slot,
-      score:     pointsMap[p.pid] ?? 0,
-      isStarter: p.slot !== "BN" && p.slot !== "IR" && p.slot !== "TAXI",
-    }));
-  }
-
-  return new Response(JSON.stringify({
-    home: annotate(homePlayers),
-    away: annotate(awayPlayers),
-  }), { headers: corsHeaders() });
+  return new Response(JSON.stringify({ home, away }), { headers: corsHeaders() });
 }
 
 function yahooLogin(env) {
