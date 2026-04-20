@@ -397,7 +397,7 @@ const Profile = (() => {
               await _detectAndSetMFLPlayoffFinish(leagueKey, league, bundle, myRosterId);
             }
 
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } }).catch(() => {});
             matched++;
           }
         } catch(e) { /* skip failed league */ }
@@ -593,7 +593,7 @@ const Profile = (() => {
             }
 
             Object.assign(_allLeagues[leagueKey], updatedLeague);
-            GMDB.saveLeague(username, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeagues(username, { [leagueKey]: { ..._allLeagues[leagueKey] } }).catch(() => {});
           }
         } catch(e) { /* skip failed league silently */ }
       }));
@@ -649,7 +649,7 @@ const Profile = (() => {
         isChampion:    false,
         resolved:      isPastSeason ? true : null,
       });
-      await GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] });
+      await GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } });
       _renderLeagues();
       _renderCareerSummary(_currentProfile || {});
       showToast(`⚠️ Yahoo returned no team data for ${league.leagueName} — playoff finish cleared.`, "warn");
@@ -697,7 +697,7 @@ const Profile = (() => {
     }
 
     Object.assign(_allLeagues[leagueKey], updated);
-    await GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] });
+    await GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } });
 
     try {
       const stats = await GMDB.recomputeStats(_currentUsername);
@@ -2457,7 +2457,7 @@ const Profile = (() => {
           }
           if (_currentUsername) {
             _renderLeagues();
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } }).catch(() => {});
           }
         }
       } catch(e) { /* render with what we have */ }
@@ -2493,7 +2493,7 @@ const Profile = (() => {
           if (_detailLeagueKey === leagueKey) _detailLeague = { ..._detailLeague, ...league };
           if (_currentUsername) {
             _renderLeagues();
-            GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
+            GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } }).catch(() => {});
           }
         }
       } catch(e) { /* render with what we have */ }
