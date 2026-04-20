@@ -16,7 +16,7 @@ const DLRHallway = (() => {
   const PAGE_SIZE = 12;  // 4 cols × 3 rows desktop; overridden to 5 on mobile via _getPageSize()
 
   function _getPageSize() {
-    return window.innerWidth <= 640 ? 5 : 12;
+    return window.innerWidth <= 768 ? 5 : 12;
   }
 
   // ── Init (called when hallway view becomes active) ────────
@@ -164,20 +164,9 @@ const DLRHallway = (() => {
     const teamLogo   = u.favoriteNflTeam
       ? `https://a.espncdn.com/i/teamlogos/nfl/500/${u.favoriteNflTeam.toLowerCase()}.png` : "";
 
-    // Recent leagues for locker room "card" look
-    const currentYear = new Date().getFullYear().toString();
-    const prevYear    = (new Date().getFullYear() - 1).toString();
-    const recentLeagues = Object.values(u.leagues)
-      .filter(l => l.season === currentYear || l.season === prevYear)
-      .sort((a, b) => (b.season||"").localeCompare(a.season||""))
-      .slice(0, 3);
-
     return `
       <div class="hallway-locker" onclick="DLRHallway.openLocker('${_esc(u.username)}')">
-        <!-- Team logo watermark -->
         ${teamLogo ? `<img class="hl-team-logo" src="${teamLogo}" onerror="this.style.display='none'" loading="lazy"/>` : ""}
-
-        <!-- Nameplate -->
         <div class="hl-nameplate">
           <div class="hl-avatar" style="${avatarUrl ? `background-image:url(${avatarUrl});background-size:cover;background-position:center` : ""}">
             ${avatarUrl ? "" : `<span>${initials}</span>`}
@@ -192,24 +181,11 @@ const DLRHallway = (() => {
             ${isPinned ? "📌" : "📍"}
           </button>
         </div>
-
-        <!-- Stats shelf -->
         <div class="hl-stats">
           ${u.championships > 0 ? `<span class="hl-stat"><span class="hl-stat-val">🏆 ${u.championships}</span><span class="hl-stat-lbl">Titles</span></span>` : ""}
           ${u.winPct !== null ? `<span class="hl-stat"><span class="hl-stat-val">${u.winPct}%</span><span class="hl-stat-lbl">Win%</span></span>` : ""}
           ${u.seasonsPlayed > 0 ? `<span class="hl-stat"><span class="hl-stat-val">${u.seasonsPlayed}</span><span class="hl-stat-lbl">Seasons</span></span>` : ""}
         </div>
-
-        <!-- Recent leagues clipboard -->
-        ${recentLeagues.length ? `
-        <div class="hl-leagues">
-          ${recentLeagues.map(l => `
-            <div class="hl-league-row">
-              <span class="hl-league-name">${_esc(l.leagueName || "—")}</span>
-              <span class="hl-league-rec">${l.wins||0}–${l.losses||0}</span>
-              ${l.isChampion ? `<span style="color:var(--color-gold);font-size:.7rem">🏆</span>` : ""}
-            </div>`).join("")}
-        </div>` : ""}
       </div>`;
   }
 
@@ -228,9 +204,11 @@ const DLRHallway = (() => {
     const initials  = (username || "?")[0].toUpperCase();
     const isPinned  = _pinned.includes(username);
 
-    const recentLeagues = Object.values(data.leagues)
-      .sort((a, b) => (b.season||"").localeCompare(a.season||""))
-      .slice(0, 10);
+    const myLeagueKeys  = new Set(Object.keys(Auth.getCurrentProfile()?.leagues || {}));
+    const commonLeagues = Object.entries(data.leagues)
+      .filter(([key]) => myLeagueKeys.has(key))
+      .map(([, l]) => l)
+      .sort((a, b) => (b.season||"").localeCompare(a.season||""));
 
     modal.innerHTML = `
       <div class="modal-box modal-box--wide">
@@ -260,9 +238,9 @@ const DLRHallway = (() => {
             <div class="ms-stat-card"><div class="ms-stat-val">${data.championships||0}</div><div class="ms-stat-lbl">🏆 Titles</div></div>
             <div class="ms-stat-card"><div class="ms-stat-val">${data.leagueCount}</div><div class="ms-stat-lbl">Total Seasons</div></div>
           </div>
-          ${recentLeagues.length ? `
-          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);margin-bottom:var(--space-3)">League History</div>
-          ${recentLeagues.map(l => `
+          ${commonLeagues.length ? `
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);margin-bottom:var(--space-3)">Common Leagues</div>
+          ${commonLeagues.map(l => `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
               <div>
                 <div style="font-weight:600">${_esc(l.leagueName||"—")}</div>
@@ -272,7 +250,8 @@ const DLRHallway = (() => {
                 <div style="font-family:var(--font-display);font-weight:700">${l.wins||0}–${l.losses||0}</div>
                 ${l.isChampion ? `<div style="color:var(--color-gold);font-size:.7rem">🏆 Champion</div>` : ""}
               </div>
-            </div>`).join("")}` : ""}
+            </div>`).join("")}` : `
+          <div style="font-size:.83rem;color:var(--color-text-dim);padding:var(--space-4) 0;">No leagues in common.</div>`}
         </div>
       </div>`;
 
