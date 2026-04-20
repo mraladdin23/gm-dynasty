@@ -4348,7 +4348,7 @@ select option { background: var(--color-bg-2); }
 .hallway-search-input { width:100%; background:var(--color-bg-2); border:1px solid var(--color-border); border-radius:var(--radius); color:var(--color-text); font-size:.95rem; padding:var(--space-3) var(--space-4); outline:none; transition:border-color var(--transition); }
 .hallway-search-input:focus { border-color:var(--color-gold); }
 .hallway-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-4); }
-.hl-leagues { display: none; }
+.hl-leagues { display: none; border-top:1px solid var(--color-border); padding-top:var(--space-3); flex-direction:column; gap:3px; }
 .hallway-pagination { display:flex; align-items:center; justify-content:center; gap:var(--space-4); padding:var(--space-5) 0 var(--space-2); grid-column: 1 / -1; }
 .hallway-page-btn { background:var(--color-bg-2); border:1px solid var(--color-border); border-radius:var(--radius-sm); color:var(--color-text); font-family:var(--font-body); font-size:.82rem; padding:5px 14px; cursor:pointer; transition:border-color var(--transition); }
 .hallway-page-btn:hover:not(:disabled) { border-color:var(--color-gold); color:var(--color-gold); }
@@ -4370,7 +4370,6 @@ select option { background: var(--color-bg-2); }
 .hl-stat { display:flex; flex-direction:column; }
 .hl-stat-val { font-family:var(--font-display); font-weight:700; font-size:.88rem; }
 .hl-stat-lbl { font-size:.6rem; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-dim); }
-.hl-leagues { border-top:1px solid var(--color-border); padding-top:var(--space-3); display:flex; flex-direction:column; gap:3px; }
 .hl-league-row { display:flex; align-items:center; gap:var(--space-2); font-size:.75rem; }
 .hl-league-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-text-muted); }
 .hl-league-rec { font-family:var(--font-display); font-weight:700; font-size:.78rem; flex-shrink:0; }
