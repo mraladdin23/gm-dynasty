@@ -12,6 +12,7 @@ const DLRHallway = (() => {
   let _allUsers  = [];   // full result set for pagination
   let _page      = 0;
 
+  const PIN_KEY  = "dlr_hallway_pins";
   const PAGE_SIZE = 12;  // 4 cols × 3 rows desktop; overridden to 5 on mobile via _getPageSize()
 
   function _getPageSize() {
