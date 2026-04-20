@@ -1138,29 +1138,6 @@ const DLRAnalytics = (() => {
     _mflBundle    = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
-    // ── Ensure transactions are in the bundle ──────────────────────────────
-    // The worker's /mfl/bundle endpoint includes transactions, but some leagues
-    // (especially older seasons) may return an empty transactions node.
-    // If missing, fetch transactions directly so Trade Map and Waivers work.
-    if (!_mflBundle?.transactions?.transactions?.transaction) {
-      try {
-        const txData = await MFLAPI.getLeagueBundle({ leagueId, year: season, types: "transactions" });
-        if (txData?.transactions?.transactions?.transaction) {
-          _mflBundle = { ..._mflBundle, transactions: txData.transactions };
-        }
-      } catch(e) { /* transactions unavailable for this league/season */ }
-    }
-
-    // ── Ensure draft results are in the bundle ─────────────────────────────
-    if (!_mflBundle?.draft?.draftResults && !_mflBundle?.auctionResults?.auctionResults) {
-      try {
-        const draftData = await MFLAPI.getLeagueBundle({ leagueId, year: season, types: "draftResults" });
-        if (draftData?.draft?.draftResults) {
-          _mflBundle = { ..._mflBundle, draft: draftData.draft };
-        }
-      } catch(e) { /* draft unavailable for this league/season */ }
-    }
-
     const teams = MFLAPI.getTeams(_mflBundle);
     _mflTeamMap = {};
     teams.forEach(t => { _mflTeamMap[String(t.id)] = t.name || `Team ${t.id}`; });
@@ -1367,25 +1344,21 @@ const DLRAnalytics = (() => {
       const rawTx  = _mflBundle?.transactions?.transactions?.transaction;
       if (!rawTx) { el.innerHTML = _noData("No transaction data available."); return; }
       const txArr  = Array.isArray(rawTx) ? rawTx : [rawTx];
-      const trades = txArr.filter(t => {
-        const type = (t.type || t.transaction_type || "").toLowerCase();
-        return type === "trade";
-      });
+      const trades = txArr.filter(t => (t.type || "").toUpperCase() === "TRADE");
 
       if (!trades.length) { el.innerHTML = _noData("No trades found this season."); return; }
 
-      // MFL trade shape: { franchise: [{id}], transaction_type:"TRADE", ... }
+      // Raw MFL trade shape: { franchise: "0035", franchise2: "0007", ... }
+      // Both franchise fields are plain strings (bare franchise IDs), not objects.
       const pairs = {}, counts = {};
       trades.forEach(t => {
-        const fArr = t.franchise
-          ? (Array.isArray(t.franchise) ? t.franchise : [t.franchise])
-          : [];
-        const ids = fArr.map(f => String(f.id || f)).filter(Boolean).sort();
-        if (ids.length >= 2) {
-          const key = ids.join("-");
-          pairs[key] = (pairs[key] || 0) + 1;
-          ids.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
-        }
+        const fran1 = (t.franchise  || "").trim();
+        const fran2 = (t.franchise2 || "").trim();
+        if (!fran1 || !fran2) return;
+        const ids = [fran1, fran2].sort();
+        const key = ids.join("-");
+        pairs[key] = (pairs[key] || 0) + 1;
+        ids.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
       });
 
       const sorted   = Object.entries(counts).sort((a, b) => b[1] - a[1]);
@@ -1425,40 +1398,61 @@ const DLRAnalytics = (() => {
       const leagueInfo = MFLAPI.getLeagueInfo(_mflBundle);
       const season     = _season || new Date().getFullYear().toString();
 
-      // Detect auction vs snake — check auctionResults first
-      const auctionRaw   = _mflBundle?.auctionResults?.auctionResults;
-      const draftRaw     = _mflBundle?.draft?.draftResults;
-
-      // Multiple draft units (startup + rookie) — handle toggle
+      // ── Draft units (snake/linear) ─────────────────────────────────────────
+      // Bundle shape: bundle.draft.draftResults.draftUnit (array or single object)
+      const draftRaw   = _mflBundle?.draft?.draftResults;
       const draftUnits = draftRaw?.draftUnit
         ? (Array.isArray(draftRaw.draftUnit) ? draftRaw.draftUnit : [draftRaw.draftUnit])
         : [];
 
-      // Multiple auction result sets
-      const auctionSets = auctionRaw?.auction
-        ? (Array.isArray(auctionRaw.auction) && auctionRaw.auction[0]?.franchise
-            ? [auctionRaw]                          // single set
-            : (Array.isArray(auctionRaw) ? auctionRaw : [auctionRaw]))
+      // ── Auction results — mirror draft.js fallback logic ──────────────────
+      // Bundle shape: bundle.auctionResults.auctionResults.auctionUnit
+      // Fallback: MFLAPI.getAuctionResultsDirect() if missing from bundle.
+      let auctionResultsRoot = _mflBundle?.auctionResults?.auctionResults?.auctionUnit
+                            || _mflBundle?.auctionResults?.auctionUnit;
+
+      if (!auctionResultsRoot) {
+        try {
+          const auctionData = await MFLAPI.getAuctionResultsDirect(_leagueId, season);
+          // Standalone response shape: { auctionResults: { auctionUnit: {...} } }
+          auctionResultsRoot = auctionData?.auctionResults?.auctionUnit;
+        } catch(e) { /* auction results not available for this league */ }
+      }
+
+      // Normalise auctionUnit (single object or array) into auctionSets
+      const auctionSetsRaw = auctionResultsRoot
+        ? (Array.isArray(auctionResultsRoot) ? auctionResultsRoot : [auctionResultsRoot])
         : [];
 
-      const hasAuction = auctionSets.length > 0 && MFLAPI.getAuctionResults(_mflBundle).length > 0;
-      const hasDraft   = draftUnits.length > 0;
+      // Each unit has an `.auction` array of { player, franchise, amount } objects
+      const auctionSets = auctionSetsRaw.filter(unit => {
+        const raw = unit.auction ? (Array.isArray(unit.auction) ? unit.auction : [unit.auction]) : [];
+        return raw.length > 0;
+      });
+
+      const hasAuction = auctionSets.length > 0;
+      const hasDraft   = draftUnits.filter(u => {
+        const picks = u.draftPick ? (Array.isArray(u.draftPick) ? u.draftPick : [u.draftPick]) : [];
+        return picks.length > 0;
+      }).length > 0;
 
       if (!hasAuction && !hasDraft) {
         el.innerHTML = _noData("No draft or auction results found.");
         return;
       }
 
-      // Build pill selector if multiple sets
+      // Build combined set list for pill selector
       const allSets = [];
       draftUnits.forEach((unit, i) => {
+        const picks = unit.draftPick ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]) : [];
+        if (!picks.length) return;
         allSets.push({ type: "draft", label: unit.name || (i === 0 ? "Startup Draft" : `Draft ${i + 1}`), data: unit });
       });
-      if (hasAuction) {
-        auctionSets.forEach((set, i) => {
-          allSets.push({ type: "auction", label: i === 0 ? "Auction" : `Auction ${i + 1}`, data: set });
-        });
-      }
+      auctionSets.forEach((unit, i) => {
+        const rawLabel = unit.name || "";
+        const label = (rawLabel && rawLabel !== "LEAGUE") ? rawLabel : (i === 0 ? "Auction" : `Auction ${i + 1}`);
+        allSets.push({ type: "auction", label, data: unit });
+      });
 
       // Render with selector
       const pillBar = allSets.length > 1
@@ -1491,8 +1485,9 @@ const DLRAnalytics = (() => {
     });
 
     if (setObj.type === "auction") {
-      // Auction list — sorted by price desc, list-only
-      const raw   = setObj.data?.auctionResults?.auction || setObj.data?.auction;
+      // auctionUnit shape: { auction: [...], unit: "LEAGUE" }
+      // Each auction item: { player: "12345", franchise: "0035", amount: "42" }
+      const raw   = setObj.data?.auction;
       const picks = Array.isArray(raw) ? raw : (raw ? [raw] : []);
       if (!picks.length) { body.innerHTML = _noData("No auction results found."); return; }
 
@@ -1601,36 +1596,47 @@ const DLRAnalytics = (() => {
       const rawTx = _mflBundle?.transactions?.transactions?.transaction;
       if (!rawTx) { el.innerHTML = _noData("No transaction data available."); return; }
       const txArr   = Array.isArray(rawTx) ? rawTx : [rawTx];
-      const waivers = txArr.filter(t => {
-        const type = (t.type || t.transaction_type || "").toLowerCase();
-        return type === "waiver" || type === "free_agent" || type === "fa" ||
-               type === "bbid_waiver" || type === "bbid";
-      });
+      // WAIVER, BBID_WAIVER, and FREE_AGENT are all waiver/FA pickups in MFL
+      const WAIVER_TYPES = new Set(["WAIVER", "BBID_WAIVER", "FREE_AGENT"]);
+      const waivers = txArr.filter(t => WAIVER_TYPES.has((t.type || "").toUpperCase()));
 
       if (!waivers.length) { el.innerHTML = _noData("No waiver activity found this season."); return; }
 
       const teamPickups = {}, playerClaims = {};
       waivers.forEach(t => {
-        // MFL waiver shape: { franchise: {id}, transaction:[{type:"added"|"dropped", player}] }
-        const fArr = t.franchise
-          ? (Array.isArray(t.franchise) ? t.franchise : [t.franchise])
-          : [];
-        const fid = String(fArr[0]?.id || fArr[0] || "");
+        // Raw MFL shape: { franchise: "0035", transaction: "16333,|0.00|14799," }
+        // franchise is a plain string ID; transaction is a pipe-delimited string.
+        const fid = (t.franchise || "").trim();
         if (!fid) return;
         if (!teamPickups[fid]) teamPickups[fid] = { adds: 0, drops: 0 };
 
-        const txDetails = t.transaction
-          ? (Array.isArray(t.transaction) ? t.transaction : [t.transaction])
-          : [];
-        txDetails.forEach(tx => {
-          const ttype = (tx.type || "").toLowerCase();
-          if (ttype === "added"   || ttype === "add")  {
+        // Parse the transaction string: "addedPids,|faab|droppedPid,"
+        // Everything before the first ",|" is added players.
+        // After ",|": first pipe-segment is FAAB, second is dropped player.
+        const txStr = t.transaction || "";
+        const dropBlockIdx = txStr.indexOf(",|");
+        const addStr = dropBlockIdx >= 0 ? txStr.slice(0, dropBlockIdx) : txStr;
+        const dropStr = dropBlockIdx >= 0 ? txStr.slice(dropBlockIdx + 1) : "";
+
+        const addedPids = addStr.replace(/^\|/, "").split(",").map(s => s.trim()).filter(Boolean);
+        addedPids.forEach(pid => {
+          if (!pid.startsWith("BB_")) {   // skip FAAB transfer tokens
             teamPickups[fid].adds++;
-            const pid = String(tx.player || "");
-            if (pid) playerClaims[pid] = (playerClaims[pid] || 0) + 1;
+            playerClaims[pid] = (playerClaims[pid] || 0) + 1;
           }
-          if (ttype === "dropped" || ttype === "drop") teamPickups[fid].drops++;
         });
+
+        if (dropStr) {
+          const parts = dropStr.split("|").map(s => s.replace(/,$/, "").trim()).filter(Boolean);
+          // parts[0] = faab amount (numeric string), parts[1] = dropped player id
+          const droppedPid = parts.length >= 2 ? parts[1] : null;
+          if (droppedPid && !/^\d+(\.\d+)?$/.test(droppedPid)) {
+            teamPickups[fid].drops++;  // only count if it looks like a player id not a number
+          } else if (parts.length === 1 && parts[0] && !/^\d+(\.\d+)?$/.test(parts[0])) {
+            // No FAAB segment — the only part is a dropped player id
+            teamPickups[fid].drops++;
+          }
+        }
       });
 
       // Resolve player names from bundle.players if available, else show id
