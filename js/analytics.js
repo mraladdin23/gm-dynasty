@@ -983,6 +983,24 @@ const DLRAnalytics = (() => {
       const draft = _yahooBundle?.draft || [];
       if (!draft.length) { el.innerHTML = _noData("No draft data available."); return; }
 
+      // Build player name/position lookup using DynastyProcess CSV (Yahoo player IDs)
+      // This is the primary name source — the worker's inline name field is often empty
+      // for older leagues where Yahoo's draftresults endpoint omits player names.
+      function _draftPlayerName(p) {
+        if (p.playerId) {
+          const dp = DLRPlayers.getByYahooId(String(p.playerId));
+          if (dp?.name) return dp.name;
+        }
+        return p.name || (p.playerId ? `Player ${p.playerId}` : "Unknown");
+      }
+      function _draftPlayerPos(p) {
+        if (p.playerId) {
+          const dp = DLRPlayers.getByYahooId(String(p.playerId));
+          if (dp?.position) return dp.position.toUpperCase();
+        }
+        return (p.position || "?").toUpperCase();
+      }
+
       const hasAuction = draft.some(p => p.cost != null && Number(p.cost) > 0);
 
       if (hasAuction) {
@@ -995,7 +1013,8 @@ const DLRAnalytics = (() => {
             ${sorted.map((p, i) => {
               const tid  = String(p.teamId || "");
               const cost = Number(p.cost || 0);
-              const pos  = (p.position || "?").toUpperCase();
+              const name = _draftPlayerName(p);
+              const pos  = _draftPlayerPos(p);
               const col  = POS_COLOR[pos] || "#9ca3af";
               const isMe = _myRosterId && tid === String(_myRosterId);
               const pct  = (cost / maxCost * 100).toFixed(1);
@@ -1003,7 +1022,7 @@ const DLRAnalytics = (() => {
                 <div class="az-list-row ${isMe ? "az-list-row--me" : ""}">
                   <div class="az-rank dim">${i+1}</div>
                   <div style="flex:1;min-width:0">
-                    <div style="font-weight:600;font-size:.85rem">${_esc(p.name || `Player ${p.playerId}`)}</div>
+                    <div style="font-weight:600;font-size:.85rem">${_esc(name)}</div>
                     <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:2px">
                       <span class="az-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
                       <span style="font-size:.75rem;color:var(--color-text-dim)">${_esc(_yahooTeamMap[tid] || `Team ${tid}`)}</span>
@@ -1017,13 +1036,13 @@ const DLRAnalytics = (() => {
             }).join("")}
           </div>`;
       } else {
-        // Snake draft — group by team
+        // Snake draft — group by team, resolve player names from DynastyProcess
         const byTeam = {};
         draft.forEach(p => {
-          const tid = String(p.teamId || "");
+          const tid  = String(p.teamId || "");
+          const pos  = _draftPlayerPos(p);
           if (!byTeam[tid]) byTeam[tid] = { name: _yahooTeamMap[tid] || `Team ${tid}`, picks: [], posMap: {} };
-          byTeam[tid].picks.push(p);
-          const pos = (p.position || "?").toUpperCase();
+          byTeam[tid].picks.push({ ...p, _name: _draftPlayerName(p), _pos: pos });
           byTeam[tid].posMap[pos] = (byTeam[tid].posMap[pos] || 0) + 1;
         });
         const sorted = Object.values(byTeam).sort((a,b) => a.name.localeCompare(b.name));
@@ -1033,20 +1052,27 @@ const DLRAnalytics = (() => {
           <div class="az-desc">${draft.length} picks · ${sorted.length} teams</div>
           <div class="az-list">
             ${sorted.map(s => {
-              const earlyPick = s.picks.sort((a,b) => a.pick - b.pick)[0];
+              const sortedPicks = [...s.picks].sort((a,b) => (a.pick||0) - (b.pick||0));
+              const earlyPick   = sortedPicks[0];
               const tid = Object.keys(byTeam).find(k => byTeam[k] === s) || "";
+              // Show first 3 picks as preview
+              const pickPreview = sortedPicks.slice(0, 3).map(p =>
+                `<span class="az-stat-sm" style="font-size:.7rem">#${p.pick||"?"} ${_esc(p._name)}</span>`
+              ).join(" · ");
               return `
-                <div class="az-list-row ${isMe(tid) ? "az-list-row--me" : ""}">
-                  <div class="az-rank" style="color:var(--color-text-dim);min-width:2.5rem">#${earlyPick?.pick||"?"}</div>
-                  <div style="flex:1">
-                    <span class="az-team-name">${_esc(s.name)}${isMe(tid) ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</span>
-                    <span class="az-stat-sm">${s.picks.length} picks</span>
-                  </div>
-                  <div class="az-pos-badges">
-                    ${Object.entries(s.posMap).map(([pos, n]) => {
-                      const col = POS_COLOR[pos] || "#9ca3af";
-                      return `<span class="az-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}×${n}</span>`;
-                    }).join("")}
+                <div class="az-draft-row ${isMe(tid) ? "az-list-row--me" : ""}">
+                  <div class="az-draft-body">
+                    <div class="az-draft-header">
+                      <span class="az-team-name">${_esc(s.name)}${isMe(tid) ? ' <span style="color:var(--color-gold);font-size:.7rem">★</span>' : ""}</span>
+                      <span class="az-stat-sm">${s.picks.length} picks</span>
+                    </div>
+                    <div class="az-pos-badges" style="margin-top:2px">
+                      ${Object.entries(s.posMap).map(([pos, n]) => {
+                        const col = POS_COLOR[pos] || "#9ca3af";
+                        return `<span class="az-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}×${n}</span>`;
+                      }).join("")}
+                    </div>
+                    ${pickPreview ? `<div style="margin-top:4px;color:var(--color-text-dim);font-size:.72rem">${pickPreview}</div>` : ""}
                   </div>
                 </div>`;
             }).join("")}

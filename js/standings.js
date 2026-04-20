@@ -1712,10 +1712,12 @@ const DLRStandings = (() => {
   };
 
   function _yahooSlotLabel(slot) {
-    const s = (slot || "").toUpperCase().replace(/[-\/]/g, "");
-    if (s === "WRT" || s === "RBWRTE" || s === "WR")  return "FLEX";
-    if (s === "SUPERFLEX") return "SF";
-    return slot.toUpperCase() || "FLEX";
+    const s = (slot || "").toUpperCase();
+    // Multi-position flex slots — these contain slashes or are compound names
+    if (s === "W/R/T" || s === "W-R-T" || s === "RB/WR/TE" || s === "W/R") return "FLEX";
+    if (s === "SUPER_FLEX" || s === "SUPERFLEX") return "SF";
+    // Pass through real position slots (QB, RB, WR, TE, K, DEF, etc.) unchanged
+    return s || "FLEX";
   }
 
   async function _yahooExpandMatchup(card, leagueKey, week, homeTeamKey, awayTeamKey, hName, aName) {
@@ -1741,11 +1743,14 @@ const DLRStandings = (() => {
       const bnH = homePlayers.filter(p => !p.isStarter);
       const bnA = awayPlayers.filter(p => !p.isStarter);
 
-      // Sort starters by slot order (QB first, bench positions last)
+      // Sort starters by canonical slot order
       const slotRank = s => { const i = _YAHOO_SLOT_ORDER.indexOf(s); return i < 0 ? 50 : i; };
       stH.sort((a, b) => slotRank(a.slot) - slotRank(b.slot));
       stA.sort((a, b) => slotRank(a.slot) - slotRank(b.slot));
 
+      // Roster-only layout — no score columns (Yahoo requires per-league scoring rules
+      // to compute individual fantasy points from raw stats; not available here).
+      // Layout: [home player name] [SLOT] [away player name]
       const numRows = Math.max(stH.length, stA.length);
       let rows = "";
       for (let i = 0; i < numRows; i++) {
@@ -1753,16 +1758,10 @@ const DLRStandings = (() => {
         const pa    = stA[i] || null;
         const label = _yahooSlotLabel(ph?.slot || pa?.slot || "FLEX");
         const col   = _YAHOO_POS_COLOR[label] || "var(--color-text-dim)";
-        const ptsH  = ph?.score ?? null;
-        const ptsA  = pa?.score ?? null;
-        const hWins = ptsH != null && ptsA != null && ptsH > ptsA;
-        const aWins = ptsA != null && ptsH != null && ptsA > ptsH;
         rows += `<div class="mu-sbs-row">
-          <span class="mu-pts ${hWins ? "mu-pts--win" : ""}">${ptsH != null ? ptsH.toFixed(2) : "—"}</span>
-          <span class="mu-name mu-name--left">${ph ? _esc(ph.name || ph.pid) : "—"}</span>
-          <span class="mu-slot" style="color:${col}">${label}</span>
-          <span class="mu-name mu-name--right">${pa ? _esc(pa.name || pa.pid) : "—"}</span>
-          <span class="mu-pts mu-pts--right ${aWins ? "mu-pts--win" : ""}">${ptsA != null ? ptsA.toFixed(2) : "—"}</span>
+          <span class="mu-name mu-name--left" style="flex:1">${ph ? _esc(ph.name || ph.pid) : "—"}</span>
+          <span class="mu-slot" style="color:${col};min-width:3rem;text-align:center">${label}</span>
+          <span class="mu-name mu-name--right" style="flex:1">${pa ? _esc(pa.name || pa.pid) : "—"}</span>
         </div>`;
       }
 
@@ -1772,24 +1771,23 @@ const DLRStandings = (() => {
         for (let i = 0; i < maxBn; i++) {
           const ph = bnH[i], pa = bnA[i];
           rows += `<div class="mu-sbs-row mu-sbs-row--bench">
-            <span class="mu-pts dim">${ph?.score != null ? ph.score.toFixed(2) : ""}</span>
-            <span class="mu-name mu-name--left dim">${ph ? _esc(ph.name || ph.pid) : ""}</span>
-            <span class="mu-slot dim">BN</span>
-            <span class="mu-name mu-name--right dim">${pa ? _esc(pa.name || pa.pid) : ""}</span>
-            <span class="mu-pts mu-pts--right dim">${pa?.score != null ? pa.score.toFixed(2) : ""}</span>
+            <span class="mu-name mu-name--left dim" style="flex:1">${ph ? _esc(ph.name || ph.pid) : ""}</span>
+            <span class="mu-slot dim" style="min-width:3rem;text-align:center">BN</span>
+            <span class="mu-name mu-name--right dim" style="flex:1">${pa ? _esc(pa.name || pa.pid) : ""}</span>
           </div>`;
         }
       }
 
       detail.innerHTML = `
         <div class="mu-sbs-header">
-          <span></span>
-          <span class="mu-sbs-team">${_esc(hName)}</span>
-          <span class="mu-sbs-pos">SLOT</span>
-          <span class="mu-sbs-team" style="text-align:right">${_esc(aName)}</span>
-          <span></span>
+          <span class="mu-sbs-team" style="flex:1">${_esc(hName)}</span>
+          <span class="mu-sbs-pos" style="min-width:3rem;text-align:center">SLOT</span>
+          <span class="mu-sbs-team" style="flex:1;text-align:right">${_esc(aName)}</span>
         </div>
-        ${rows || '<div class="mu-no-detail">No lineup data available.</div>'}`;
+        ${rows || '<div class="mu-no-detail">No lineup data available.</div>'}
+        <div style="font-size:.7rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) 0 0">
+          Individual scores not available for Yahoo
+        </div>`;
       detail.dataset.loaded = "1";
 
     } catch(e) {
