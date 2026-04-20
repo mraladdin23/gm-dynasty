@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 18, 2026 (session 3)*
+*Updated: April 20, 2026 (session 4)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -80,14 +80,7 @@ skipped in the filter to prevent re-fetching.
 
 ## 🔴 MFL Platform Bugs
 
-### M1 — MFL Championship Detection (All League Types)
-**Problem:** Eliminator/guillotine leagues not capturing 1st/2nd/3rd finish correctly.
-Regular bracket leagues also not capturing championships from playoff bracket results.
-**Files:** `profile.js`, `mfl.js`
-
-### M2 — MFL Analytics Tab Empty (Trade Map, Draft Recap, Waivers)
-**Problem:** All three analytics sections show nothing for MFL leagues.
-**Files:** `analytics.js`, `mfl.js`
+*(none currently)*
 
 ---
 
@@ -171,22 +164,20 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
 | 1 | Y1 | Yahoo Playoff/Championship (verify) | Low | `profile.js`, `standings.js` |
-| 2 | M1 | MFL Championship Detection | Medium | `profile.js`, `mfl.js` |
-| 3 | M2 | MFL Analytics Tab | Medium | `analytics.js`, `mfl.js` |
-| 4 | Y2 | Yahoo Matchup Pills + Scores | Medium | `standings.js`, `worker.js` |
-| 5 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
-| 6 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
-| 7 | U4 | Broadcast Message | Low | `leaguegroups.js` |
-| 8 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
-| 9 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 10 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
-| 11 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 12 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 13 | F2 | Custom Playoff Tracker | Very High | New module + several files |
-| 14 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 15 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 16 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
-| 17 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
+| 2 | Y2 | Yahoo Matchup Pills + Scores | Medium | `standings.js`, `worker.js` |
+| 3 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
+| 4 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
+| 5 | U4 | Broadcast Message | Low | `leaguegroups.js` |
+| 6 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
+| 7 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
+| 8 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
+| 9 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
+| 10 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 11 | F2 | Custom Playoff Tracker | Very High | New module + several files |
+| 12 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 13 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 14 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 15 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
 
 ---
 
@@ -230,6 +221,8 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **X1 (partial):** `_isSeasonComplete(l)` helper — "Missed Playoffs" vs "Season in Progress" cross-platform
 - **Bug:** `_updateJumpDropdown` crash on undefined `leagueName` fixed
 - **Worker:** Yahoo week fetches batched (3/batch, 300ms delay, 1 retry)
+- **M1:** MFL championship detection — `_detectAndSetMFLPlayoffFinish()` added to `profile.js`; handles bracket, eliminator, and guillotine leagues; wired into `syncMFLTeams()`
+- **M2:** MFL Analytics Trade Map, Draft Recap, Waivers — fixed raw MFL transaction/draft shapes (franchise strings, pipe-delimited transaction field, auctionUnit path); added `MFLAPI.getPlayers()` for player name lookup
 - Hallway Scroll + Card Grid
 - Bottom Safe Area Clipping
 - Groups: League Order + Dynasty Collapse
