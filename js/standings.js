@@ -980,14 +980,12 @@ const DLRStandings = (() => {
           el.innerHTML = `<div class="playoffs-pending">
             <div class="playoffs-icon">🏆</div>
             <div class="playoffs-title">Playoffs haven't started yet</div>
-            <div class="playoffs-sub">Playoffs begin week ${poStart}. Regular season ends week ${poStart - 1}.</div>
+            <div class="playoffs-sub">Playoffs begin week ${poStart}.</div>
           </div>`;
           return;
         }
 
-        // ── Determine playoff field from standings ─────────────────────────
-        // num_playoff_teams from league settings tells us exactly who made it.
-        // Sort standings W desc → PF desc to get seeding order.
+        // ── Playoff field: top N teams by standing ──────────────────────────
         const numPoTeams = lm.num_playoff_teams || Math.ceil(teams.length / 2);
         const sortedStandings = [...stndgs].sort((a, b) =>
           (b.wins ?? 0) - (a.wins ?? 0) || (b.ptsFor ?? 0) - (a.ptsFor ?? 0)
@@ -998,12 +996,7 @@ const DLRStandings = (() => {
         const seedMap = {};
         sortedStandings.forEach((s, i) => { seedMap[String(s.teamId)] = i + 1; });
 
-        // ── Build rounds by tracking winners forward ───────────────────────
-        // Round 1: all matchups in week poWeeks[0] where BOTH teams are playoff teams.
-        // Teams that are in the playoff field but don't appear in round 1 had a BYE.
-        // Each subsequent round: only matchups involving winners from the prior round.
-        // Final week: split into Championship (2 semi-winners) and 3rd Place only.
-
+        // ── Helper: determine winner of a matchup ───────────────────────────
         function getWinner(m) {
           const hId = String(m.home?.teamId ?? "");
           const aId = String(m.away?.teamId ?? "");
@@ -1011,9 +1004,10 @@ const DLRStandings = (() => {
           const aSc = m.away?.score ?? 0;
           if (m.winnerTeamId) return String(m.winnerTeamId);
           if (hSc > 0 || aSc > 0) return hSc >= aSc ? hId : aId;
-          return null;  // not yet played
+          return null;
         }
 
+        // ── teamLabel helper ────────────────────────────────────────────────
         function teamLabel(id) {
           if (!id) return "TBD";
           const name = nameMap[id] || `Team ${id}`;
@@ -1025,7 +1019,8 @@ const DLRStandings = (() => {
           return lbl;
         }
 
-        function bracketCard(m, overrideLabel) {
+        // ── bracketCard helper ───────────────────────────────────────────────
+        function bracketCard(m) {
           const hId     = String(m.home?.teamId ?? "");
           const aId     = String(m.away?.teamId ?? "");
           const hSc     = m.home?.score ?? 0;
@@ -1036,12 +1031,12 @@ const DLRStandings = (() => {
           const hMe     = myTeamId && hId === String(myTeamId);
           const aMe     = myTeamId && aId === String(myTeamId);
           return `<div class="bracket-match">
-            <div class="bracket-slot ${hWin ? "bracket-slot--win" : (aWin ? "bracket-slot--lose" : "")}${hMe ? " bracket-slot--me" : ""}">
+            <div class="bracket-slot ${hWin ? "bracket-slot--win" : (aWin ? "bracket-slot--lose" : "")}${hMe ? " bracket-slot--me" : ''}">
               <span class="bracket-team">${teamLabel(hId)}</span>
               ${hSc > 0 ? `<span class="bracket-score">${hSc.toFixed(1)}</span>` : ""}
               ${hWin ? '<span class="bracket-check">✓</span>' : ""}
             </div>
-            <div class="bracket-slot ${aWin ? "bracket-slot--win" : (hWin ? "bracket-slot--lose" : "")}${aMe ? " bracket-slot--me" : ""}">
+            <div class="bracket-slot ${aWin ? "bracket-slot--win" : (hWin ? "bracket-slot--lose" : "")}${aMe ? " bracket-slot--me" : ''}">
               <span class="bracket-team">${teamLabel(aId)}</span>
               ${aSc > 0 ? `<span class="bracket-score">${aSc.toFixed(1)}</span>` : ""}
               ${aWin ? '<span class="bracket-check">✓</span>' : ""}
@@ -1050,39 +1045,53 @@ const DLRStandings = (() => {
           </div>`;
         }
 
-        // Build rounds array — each entry is { week, matchups[] }
-        // We track which teams are "active" (in contention) round by round.
-        // Starts with playoffTeamIds; each round we keep only winners.
+        // ── Build rounds by tracking only winners forward ───────────────────
+        // Round 1: playoff matchups in week poWeeks[0].
+        // Subsequent rounds: only matchups where both teams won the previous round.
+        // EXCEPTION: the final week always includes ALL remaining playoff matchups
+        //   (championship + 3rd place) — we don't filter by activeTeams in the last week.
         const rounds = [];
         let activeTeams = new Set(playoffTeamIds);
 
-        for (const week of poWeeks) {
+        for (let wi = 0; wi < poWeeks.length; wi++) {
+          const week    = poWeeks[wi];
           const weekMus = allMu[week] || [];
-          // Only include matchups where at least one active team is playing
-          // (filters out any non-playoff / consolation games in earlier weeks)
-          const roundMus = weekMus.filter(m => {
-            const hId = String(m.home?.teamId ?? "");
-            const aId = String(m.away?.teamId ?? "");
-            return activeTeams.has(hId) || activeTeams.has(aId);
-          });
+          const isFinalWeek = wi === poWeeks.length - 1;
+
+          // In the final week include all playoff-field matchups (winners bracket + 3rd place).
+          // In earlier weeks, only include matchups where an active (not yet eliminated) team plays.
+          const roundMus = isFinalWeek
+            ? weekMus.filter(m => {
+                const hId = String(m.home?.teamId ?? "");
+                const aId = String(m.away?.teamId ?? "");
+                return playoffTeamIds.has(hId) || playoffTeamIds.has(aId);
+              })
+            : weekMus.filter(m => {
+                const hId = String(m.home?.teamId ?? "");
+                const aId = String(m.away?.teamId ?? "");
+                return activeTeams.has(hId) || activeTeams.has(aId);
+              });
+
           if (!roundMus.length) continue;
           rounds.push({ week, matchups: roundMus });
 
-          // Advance: winners move to next round. For unplayed games, assume both teams advance.
-          const nextActive = new Set();
-          for (const m of roundMus) {
-            const winner = getWinner(m);
-            if (winner) {
-              nextActive.add(winner);
-            } else {
-              // Game not played yet — keep both teams active
-              const hId = String(m.home?.teamId ?? "");
-              const aId = String(m.away?.teamId ?? "");
-              if (hId) nextActive.add(hId);
-              if (aId) nextActive.add(aId);
+          // Only advance winners for non-final rounds
+          if (!isFinalWeek) {
+            const nextActive = new Set();
+            for (const m of roundMus) {
+              const winner = getWinner(m);
+              if (winner) {
+                nextActive.add(winner);
+              } else {
+                // Unplayed — keep both teams active
+                const hId = String(m.home?.teamId ?? "");
+                const aId = String(m.away?.teamId ?? "");
+                if (hId) nextActive.add(hId);
+                if (aId) nextActive.add(aId);
+              }
             }
+            activeTeams = nextActive;
           }
-          activeTeams = nextActive;
         }
 
         if (!rounds.length) {
@@ -1090,8 +1099,7 @@ const DLRStandings = (() => {
           return;
         }
 
-        // ── Identify bye teams ──────────────────────────────────────────────
-        // Teams in playoff field but not in round 1 had a bye
+        // ── Identify bye teams (in playoff field but absent from round 1) ───
         const round1Teams = new Set();
         if (rounds.length > 0) {
           rounds[0].matchups.forEach(m => {
@@ -1103,10 +1111,11 @@ const DLRStandings = (() => {
         }
         const byeTeams = [...playoffTeamIds].filter(id => !round1Teams.has(id));
 
-        // ── Determine semi-winners for final round labeling ─────────────────
-        const finalWeekIdx = rounds.length - 1;
-        const semiRound    = rounds.length >= 2 ? rounds[finalWeekIdx - 1] : null;
-        const semiWinners  = new Set();
+        // ── Identify semi-winners to label the championship game ────────────
+        // Semi-winners played in the second-to-last round and won.
+        const finalRound = rounds[rounds.length - 1];
+        const semiRound  = rounds.length >= 2 ? rounds[rounds.length - 2] : null;
+        const semiWinners = new Set();
         if (semiRound) {
           semiRound.matchups.forEach(m => {
             const w = getWinner(m);
@@ -1114,9 +1123,8 @@ const DLRStandings = (() => {
           });
         }
 
-        // ── Render early rounds ─────────────────────────────────────────────
+        // ── Early rounds ────────────────────────────────────────────────────
         const earlyRounds = rounds.slice(0, -1);
-        const finalRound  = rounds[finalWeekIdx];
 
         function roundLabel(idx) {
           const remaining = rounds.length - 1 - idx;
@@ -1126,24 +1134,21 @@ const DLRStandings = (() => {
           return `Round ${idx + 1} · ${wk}`;
         }
 
-        // Bye banner for round 1 (if any)
-        const byeBanner = byeTeams.length
-          ? `<div class="bracket-section">
+        const byeBanner = byeTeams.length ? `<div class="bracket-section">
                <div class="bracket-section-label">First Round Byes</div>
                <div class="bracket-section-games">
                  ${byeTeams.map(id => `
                    <div class="bracket-match">
-                     <div class="bracket-slot bracket-slot--win${myTeamId && id === String(myTeamId) ? " bracket-slot--me" : ""}">
+                     <div class="bracket-slot bracket-slot--win${myTeamId && id === String(myTeamId) ? " bracket-slot--me" : ''}">
                        <span class="bracket-team">${teamLabel(id)}</span>
                        <span style="font-size:.7rem;color:var(--color-text-dim);margin-left:4px">BYE</span>
                      </div>
                    </div>`).join("")}
                </div>
-             </div>`
-          : "";
+             </div>` : "";
 
         const cols = [
-          ...(byeTeams.length ? [byeBanner] : []),
+          byeBanner,
           ...earlyRounds.map((r, ri) => {
             const games = r.matchups.map(m => bracketCard(m)).join("");
             return `<div class="bracket-section">
@@ -1154,29 +1159,25 @@ const DLRStandings = (() => {
         ].join("");
 
         // ── Final round: Championship + 3rd Place only ──────────────────────
-        // Championship = game where both teams are semi-winners (or first game if no semi data)
-        // 3rd Place = game between the two semi-losers
+        // Championship = matchup where both teams are semi-winners.
+        // 3rd Place = matchup where neither or only one team is a semi-winner
+        //   (i.e. the two semi-losers facing each other).
+        // If no semi data (2-team playoff), first game = championship.
         const finalMus = finalRound?.matchups || [];
         const wkLabel  = finalRound ? ` · Wk ${finalRound.week}` : "";
 
-        let champGame  = null;
-        let thirdGame  = null;
+        let champGame = null;
+        let thirdGame = null;
 
         if (semiWinners.size >= 2) {
-          champGame = finalMus.find(m => {
+          for (const m of finalMus) {
             const hId = String(m.home?.teamId ?? "");
             const aId = String(m.away?.teamId ?? "");
-            return semiWinners.has(hId) && semiWinners.has(aId);
-          });
-          thirdGame = finalMus.find(m => {
-            const hId = String(m.home?.teamId ?? "");
-            const aId = String(m.away?.teamId ?? "");
-            return !semiWinners.has(hId) || !semiWinners.has(aId);
-          }) || null;
-          // If both games found, exclude non-playoff teams from thirdGame
-          if (!thirdGame) thirdGame = finalMus.find(m => m !== champGame) || null;
+            const bothWinners = semiWinners.has(hId) && semiWinners.has(aId);
+            if (bothWinners && !champGame)   champGame = m;
+            else if (!bothWinners && !thirdGame) thirdGame = m;
+          }
         } else {
-          // No semi data (e.g. 4-team playoff starting at finals) — treat first as champ
           champGame = finalMus[0] || null;
           thirdGame = finalMus[1] || null;
         }
@@ -1630,15 +1631,13 @@ const DLRStandings = (() => {
         const hPF  = hSt.ptsFor ? hSt.ptsFor.toFixed(1) : "—";
         const aPF  = aSt.ptsFor ? aSt.ptsFor.toFixed(1) : "—";
 
-        // Derive team keys for roster fetch: Yahoo team key = leagueKey with team id
-        // e.g. league "423.l.12345", team "3" → "423.l.12345.t.3"
+        // Team keys for roster fetch: leagueKey prefix + ".t." + teamId
         const gameLeaguePrefix = leagueKey.replace(/\.t\.\d+$/, "");
         const hTeamKey = `${gameLeaguePrefix}.t.${hId}`;
         const aTeamKey = `${gameLeaguePrefix}.t.${aId}`;
-        const muCardId = `yahoo-mu-${week}-${hId}-${aId}`;
 
         return `
-          <div class="mu-card" id="${muCardId}" onclick="DLRStandings._yahooExpandMatchup(this,'${_esc(leagueKey)}',${week},'${_esc(hTeamKey)}','${_esc(aTeamKey)}','${_esc(hName)}','${_esc(aName)}')">
+          <div class="mu-card" onclick="DLRStandings._yahooExpandMatchup(this,'${_esc(leagueKey)}',${week},'${_esc(hTeamKey)}','${_esc(aTeamKey)}','${_esc(hName)}','${_esc(aName)}')">
             <div class="mu-header">
               <div class="mu-team${hMe ? " mu-team--me" : ""}">
                 <div class="st-av" style="${hMe ? "background:var(--color-gold);color:#000;" : ""}">${hName[0]?.toUpperCase() || "?"}</div>
@@ -1657,7 +1656,7 @@ const DLRStandings = (() => {
             <div class="mu-detail hidden">
               <div class="mu-no-detail" style="font-size:.75rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) var(--space-3)">
                 ${_esc(hName)}: ${hRec}, ${hPF} pts &nbsp;|&nbsp; ${_esc(aName)}: ${aRec}, ${aPF} pts
-                <br><span style="font-size:.7rem;opacity:.6">Tap to load lineups</span>
+                <br><span style="font-size:.7rem;opacity:.6">Tap again to load lineups</span>
               </div>
             </div>
           </div>`;
@@ -1672,7 +1671,10 @@ const DLRStandings = (() => {
       });
     }
 
-    // Build week pill bar — using season-pill / season-pill--current to match MFL/Sleeper style
+    // Capture leagueKey in _renderYahooMatchups scope so _renderWeek cards can reference it
+    const leagueKey = _leagueKey || `nfl.l.${_leagueId}`;
+
+    // Build week pill bar using season-pill / season-pill--current to match MFL/Sleeper
     const pills = availWeeks.map(w => {
       const isActive = w === selectedWeek;
       const isPO     = playoffStart > 0 && w >= playoffStart;
@@ -1691,7 +1693,6 @@ const DLRStandings = (() => {
     // Expose week picker callback on the module's public surface
     DLRStandings._yahooPickWeek = (w) => {
       _yahooSelectedWeek = w;
-      // Update pill highlight
       document.querySelectorAll(".matchups-week-pills .season-pill").forEach(b => {
         b.classList.toggle("season-pill--current", parseInt(b.dataset.week) === w);
       });
@@ -1699,40 +1700,34 @@ const DLRStandings = (() => {
     };
   }
 
-  // ── Yahoo matchup expand — lazy roster + weekly points fetch ─────────────────
-  // Called on first tap of a matchup card. Fetches starters/bench with per-player
-  // weekly points from the worker, then renders a slot-ordered side-by-side breakdown
-  // identical in structure to MFL/Sleeper. Subsequent taps just toggle the panel.
-  //
-  // Position slot order: QB → RB → WR → TE → FLEX/W-R-T → SF/SUPER_FLEX → K → DEF → IDPs → BN
-  const _YAHOO_POS_ORDER = ["QB","RB","WR","TE","W/R/T","W-R-T","FLEX","W/R","RB/WR/TE","SF","SUPER_FLEX","K","DEF","DL","LB","DB","S","CB","BN","IR","TAXI"];
-  const _YAHOO_POS_COLOR = {
+  // ── Yahoo matchup expand — lazy roster + weekly points ──────────────────────
+  // First tap: fetches starters/bench with per-player weekly points from the worker.
+  // Subsequent taps: just toggle the panel (dataset.loaded = "1" guards re-fetch).
+  const _YAHOO_SLOT_ORDER = ["QB","RB","WR","TE","W/R/T","W-R-T","RB/WR/TE","FLEX","W/R","SF","SUPER_FLEX","K","DEF","DL","LB","DB","S","CB","BN","IR","TAXI"];
+  const _YAHOO_POS_COLOR  = {
     QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)",
     TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)",
-    SF:"var(--color-orange)", "SUPER_FLEX":"var(--color-orange)",
-    FLEX:"var(--color-text-dim)", "W/R/T":"var(--color-text-dim)", "W-R-T":"var(--color-text-dim)",
-    DL:"#e2a03f", LB:"#e2a03f", DB:"#60a5fa", S:"#60a5fa", CB:"#60a5fa",
+    SF:"var(--color-orange)", SUPERFLEX:"var(--color-orange)",
+    FLEX:"var(--color-text-dim)", DL:"#e2a03f", LB:"#e2a03f", DB:"#60a5fa",
   };
 
   function _yahooSlotLabel(slot) {
-    // Normalize verbose Yahoo slot names to display labels matching Sleeper/MFL
-    const s = (slot || "").toUpperCase();
-    if (s === "W/R/T" || s === "W-R-T" || s === "RB/WR/TE") return "FLEX";
-    if (s === "SUPER_FLEX") return "SF";
-    return s || "FLEX";
+    const s = (slot || "").toUpperCase().replace(/[-\/]/g, "");
+    if (s === "WRT" || s === "RBWRTE" || s === "WR")  return "FLEX";
+    if (s === "SUPERFLEX") return "SF";
+    return slot.toUpperCase() || "FLEX";
   }
 
   async function _yahooExpandMatchup(card, leagueKey, week, homeTeamKey, awayTeamKey, hName, aName) {
     const detail = card.querySelector(".mu-detail");
     if (!detail) return;
 
-    // If already loaded (has sbs rows), just toggle visibility
+    // Toggle if already loaded
     if (detail.dataset.loaded === "1") {
       detail.classList.toggle("hidden");
       return;
     }
 
-    // Show loading state and fetch
     detail.classList.remove("hidden");
     detail.innerHTML = `<div class="detail-loading" style="padding:var(--space-3)"><div class="spinner"></div><span>Loading lineups…</span></div>`;
 
@@ -1746,26 +1741,22 @@ const DLRStandings = (() => {
       const bnH = homePlayers.filter(p => !p.isStarter);
       const bnA = awayPlayers.filter(p => !p.isStarter);
 
-      // Sort starters by slot order
-      const slotRank = s => { const i = _YAHOO_POS_ORDER.indexOf(s); return i < 0 ? 50 : i; };
+      // Sort starters by slot order (QB first, bench positions last)
+      const slotRank = s => { const i = _YAHOO_SLOT_ORDER.indexOf(s); return i < 0 ? 50 : i; };
       stH.sort((a, b) => slotRank(a.slot) - slotRank(b.slot));
       stA.sort((a, b) => slotRank(a.slot) - slotRank(b.slot));
 
-      // Build a map of slot → [home player, away player] paired by position
-      // Strategy: pair by index within the sorted starter array (same order both sides)
       const numRows = Math.max(stH.length, stA.length);
       let rows = "";
       for (let i = 0; i < numRows; i++) {
         const ph    = stH[i] || null;
         const pa    = stA[i] || null;
-        // Use home slot label as the center column label; fall back to away
-        const rawSlot = ph?.slot || pa?.slot || "FLEX";
-        const label   = _yahooSlotLabel(rawSlot);
-        const col     = _YAHOO_POS_COLOR[label] || _YAHOO_POS_COLOR[rawSlot] || "var(--color-text-dim)";
-        const ptsH    = ph?.score ?? null;
-        const ptsA    = pa?.score ?? null;
-        const hWins   = ptsH != null && ptsA != null && ptsH > ptsA;
-        const aWins   = ptsH != null && ptsA != null && ptsA > ptsH;
+        const label = _yahooSlotLabel(ph?.slot || pa?.slot || "FLEX");
+        const col   = _YAHOO_POS_COLOR[label] || "var(--color-text-dim)";
+        const ptsH  = ph?.score ?? null;
+        const ptsA  = pa?.score ?? null;
+        const hWins = ptsH != null && ptsA != null && ptsH > ptsA;
+        const aWins = ptsA != null && ptsH != null && ptsA > ptsH;
         rows += `<div class="mu-sbs-row">
           <span class="mu-pts ${hWins ? "mu-pts--win" : ""}">${ptsH != null ? ptsH.toFixed(2) : "—"}</span>
           <span class="mu-name mu-name--left">${ph ? _esc(ph.name || ph.pid) : "—"}</span>
@@ -1775,7 +1766,6 @@ const DLRStandings = (() => {
         </div>`;
       }
 
-      // Bench rows
       if (bnH.length || bnA.length) {
         rows += `<div class="mu-bench-header">Bench</div>`;
         const maxBn = Math.max(bnH.length, bnA.length);
@@ -1806,7 +1796,7 @@ const DLRStandings = (() => {
       detail.innerHTML = `<div class="mu-no-detail" style="text-align:center;padding:var(--space-3)">
         Could not load lineups: ${_esc(e.message)}
       </div>`;
-      detail.dataset.loaded = "0";  // allow retry on next tap
+      detail.dataset.loaded = "0";
     }
   }
 
@@ -2059,8 +2049,8 @@ const DLRStandings = (() => {
     initPlayoffs, _mflLoadWeek, _mflLoadBracket,
     _showAllDivisions, _selectDivision,
     getSelectedDivId: () => _mflSelectedDivId,
-    _yahooPickWeek: (w) => {},        // overwritten by _renderYahooMatchups at runtime
-    _yahooExpandMatchup,              // called from inline onclick on Yahoo matchup cards
+    _yahooPickWeek: (w) => {},     // overwritten by _renderYahooMatchups at runtime
+    _yahooExpandMatchup,           // called from inline onclick on Yahoo matchup cards
   };
 
 })();
