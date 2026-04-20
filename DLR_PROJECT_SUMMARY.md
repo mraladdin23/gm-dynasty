@@ -98,22 +98,23 @@ eliminator, and guillotine leagues.
 - Uses `SINCE=1999` bulk fetch first, then year-by-year for any missing years
 - This ensures all historical seasons are returned even when MFL's SINCE= skips years
 
-### Yahoo ⚠️ Mostly working
+### Yahoo ✅ Mostly working (a few open issues)
 - OAuth flow ✅
 - Standings ✅ (CSS matches MFL/Sleeper, sort confirmed)
-- Matchups ✅ (season-pill week bar, click-to-expand with team stats)
-- Playoffs ⚠️ (bracket + finish detection code fixed but needs full verification)
+- Matchups ✅ (season-pill week bar, roster expand with slot-ordered lineup, data-attribute onclick fixes apostrophe bug)
+- Playoffs ✅ (Championship + 3rd Place only; byes shown; semi-loser detection correct; finish detection gated on playoff appearance)
 - Roster ✅ (PREFERRED_ORDER position grouping, detailMap fallback)
 - Players tab ✅ (YTD stats via `/yahoo/playerStats`, position dropdown)
 - Draft ✅ (parser working, grid/list/auction views, 25/page pagination)
-- Transactions ⚠️ (team name blank on some transactions)
-- Analytics ✅ (leagueKey wired)
+- Transactions ⚠️ (team name blank on some transactions — Y3 open)
+- Analytics ✅ (leagueKey wired, Draft Recap uses DLRPlayers.getByYahooId for names)
 - Career stats ✅ (`_renderCSPlatform` and `_renderCSPlatformYear` implemented)
 - Keeper detection ✅
 - League type detection ✅ (`leagueTypeConfirmed` flag)
-- Championship/playoff finish detection ⚠️ (code fixed April 18; needs verification once Yahoo API stabilizes — old leagues 2002–2011 may have no matchup data)
+- Championship/playoff finish detection ✅ (gated on user appearing in playoff matchup; old leagues 2002–2011 with no matchup data return null correctly)
+- Per-league sync button ✅ (🔄 Sync League in detail panel header; clears resolved/playoffFinish and re-fetches)
 - Token persistence ⚠️ (optimistic use when expiresAt=0 fixed; mobile still unreliable — Y4 open)
-- Bundle stability ⚠️ (worker now batches week fetches 3 at a time with 300ms delay + retry; Yahoo still rate-limits under heavy load — Y5 open)
+- Bundle stability ⚠️ (worker batches week fetches 3/batch 300ms delay + retry; still rate-limits under heavy load — Y5 open)
 
 ---
 
@@ -199,11 +200,12 @@ POST /mfl/auctionResults — auction results on-demand
 
 ### Yahoo worker endpoints
 ```
-POST /yahoo/leagueBundle   — full normalized bundle (weeks fetched in batches of 3, 300ms delay)
-POST /yahoo/playerStats    — YTD fantasy points by player ID (batched, 25/req)
-GET  /auth/yahoo/login     — OAuth redirect
-GET  /auth/yahoo/callback  — OAuth callback
-POST /auth/yahoo/refresh   — token refresh
+POST /yahoo/leagueBundle    — full normalized bundle (weeks fetched in batches of 3, 300ms delay)
+POST /yahoo/playerStats     — YTD fantasy points by player ID (batched, 25/req)
+POST /yahoo/matchupRoster   — weekly roster for two teams (starters + bench, selected_position slot)
+GET  /auth/yahoo/login      — OAuth redirect
+GET  /auth/yahoo/callback   — OAuth callback
+POST /auth/yahoo/refresh    — token refresh
 ```
 
 ---
@@ -282,6 +284,15 @@ POST /auth/yahoo/refresh   — token refresh
 - `yahoo.js` token fix restored
 - `base.css` + `index.html` mobile fixes restored
 
+**April 20 (Yahoo polish + analytics session):**
+- Yahoo playoff bracket fully verified: Championship + 3rd Place only, byes shown, semi-loser identification fixed (`bothLosers` check), `_detectYahooPlayoffFinish` gated on playoff appearance (prevents false champion badges)
+- Yahoo matchup expand: roster-only lineup (starters + bench, slot-ordered QB→WR→TE→FLEX→SF→K→DEF), season-pill CSS, team name apostrophe bug fixed via data-attributes on mu-card
+- Per-league Yahoo sync button: 🔄 Sync League in detail panel clears resolved/playoffFinish and re-fetches bundle; wired in `openLeagueDetail` and `switchDetailSeason`
+- Yahoo Analytics Draft Recap: `_yahooRenderDraft` made async, uses `DLRPlayers.load()` + full `getByYahooId` → Sleeper DB → rosterDetails chain for player names
+- Worker: `/yahoo/matchupRoster` endpoint added (roster-only, no stats — Yahoo scoring requires per-league rule application)
+- CSS: `mu-sbs-row--no-pts` / `mu-sbs-header--no-pts` added to `locker.css` for 3-column Yahoo expand layout
+- `yahoo.js`: `getMatchupRoster()` method added
+
 **April 18 (Yahoo playoff + stability session):**
 - `_detectYahooPlayoffFinish` rewritten: identifies championship game via semi-winner detection; correctly assigns 1st/2nd/3rd/4th place; no longer confuses consolation game loser with runner-up
 - Yahoo bracket (`standings.js`): championship game identified by semi-winner set, sorted first in finals display
@@ -325,6 +336,6 @@ Here are the relevant files: [attach files]
 
 ---
 
-*Document updated: April 18, 2026*
-*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — see DLR_TODO_LIST.md.*
-*Yahoo playoff detection code fixed. Bundle stability improved. Y4/Y5 still open.*
+*Document updated: April 20, 2026*
+*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — Y3/Y4/Y5 still open.*
+*Yahoo playoffs, matchup expand, sync button, and analytics draft recap all fixed. See DLR_TODO_LIST.md.*

@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 20, 2026 (session 4)*
+*Updated: April 20, 2026 (session 5)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -19,25 +19,12 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Yahoo Platform Bugs
 
-### Y1 — Yahoo Playoff Tab + Championship Detection
-**Status:** Code fixed April 18 — needs verification once Yahoo API stabilizes.
-Detection logic rewritten to identify championship game via semi-winner set.
-3rd/4th place correctly distinguished. Some old leagues (2002–2011) may have
-no matchup data from Yahoo's API and will show "Missed Playoffs" by default.
-
-**Remaining verification needed:**
-- Confirm bracket display correctly labels Championship vs 3rd Place games
-- Confirm finish detection is correct across multiple leagues once re-import completes
-- Manual surgical fixes still needed for any leagues Yahoo API can't provide data for
-
-**Files:** `profile.js`, `standings.js`
-
----
-
-### Y2 — Yahoo Matchup Pills + Player Score Expand
-**Problem:** Expanded matchup should show lineup with individual player scores,
-not just team totals.
-**Note:** Worker needs `/yahoo/matchupDetail` endpoint confirmed and deployed.
+### Y2 — Yahoo Matchup Pills + Player Score Expand ✅
+**Fixed April 20 (session 5).** Week pills now use `season-pill`/`season-pill--current` CSS
+matching MFL/Sleeper. Expand shows weekly roster (starters + bench) with slot labels in
+correct order (QB→RB→WR→TE→FLEX→SF→K→DEF). Individual scores not shown — Yahoo requires
+per-league scoring rules to compute from raw stats (noted in UI). Team name apostrophes
+fixed via data-attributes instead of inline onclick args.
 **Files:** `standings.js`, `worker.js`
 
 ---
@@ -163,21 +150,19 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
-| 1 | Y1 | Yahoo Playoff/Championship (verify) | Low | `profile.js`, `standings.js` |
-| 2 | Y2 | Yahoo Matchup Pills + Scores | Medium | `standings.js`, `worker.js` |
-| 3 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
-| 4 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
-| 5 | U4 | Broadcast Message | Low | `leaguegroups.js` |
-| 6 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
-| 7 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 8 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
-| 9 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 10 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 11 | F2 | Custom Playoff Tracker | Very High | New module + several files |
-| 12 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 13 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 14 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
-| 15 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
+| 1 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
+| 2 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
+| 3 | U4 | Broadcast Message | Low | `leaguegroups.js` |
+| 4 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
+| 5 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
+| 6 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
+| 7 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
+| 8 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 9 | F2 | Custom Playoff Tracker | Very High | New module + several files |
+| 10 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 11 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 12 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 13 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
 
 ---
 
@@ -222,6 +207,12 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **Bug:** `_updateJumpDropdown` crash on undefined `leagueName` fixed
 - **Worker:** Yahoo week fetches batched (3/batch, 300ms delay, 1 retry)
 - **M1:** MFL championship detection — `_detectAndSetMFLPlayoffFinish()` added to `profile.js`; handles bracket, eliminator, and guillotine leagues; wired into `syncMFLTeams()`
+- **Y1:** Yahoo playoff bracket verified and fully fixed — Championship + 3rd Place only (no 5th/7th), bye teams shown, semi-loser identification corrected, `_detectYahooPlayoffFinish` gated on user appearing in a playoff matchup (fixes false champion badges)
+- **Y2:** Yahoo matchup expand — roster-only lineup (starters + bench, slot-ordered QB→RB→WR→TE→FLEX→SF→K→DEF), week pills use `season-pill` CSS, team name apostrophe bug fixed via data-attributes
+- **Yahoo sync button** — per-league 🔄 Sync League button in detail panel header; clears resolved/playoffFinish flags and re-fetches bundle; wired in `openLeagueDetail` and `switchDetailSeason`
+- **Yahoo Analytics Draft Recap** — now uses `DLRPlayers.getByYahooId` + Sleeper DB + rosterDetails fallback for player names (same chain as `draft.js`); shows pick preview under each team
+- **Yahoo Analytics** — MFL Trade Map, Draft Recap, Waivers fixed (correct raw transaction shapes, `MFLAPI.getPlayers()` for names, auction unit path)
+- **CSS** — `mu-sbs-row--no-pts` / `mu-sbs-header--no-pts` modifier added to `locker.css`; Yahoo expand uses 3-column grid (name | slot | name) instead of 5-column score grid
 - **M2:** MFL Analytics Trade Map, Draft Recap, Waivers — fixed raw MFL transaction/draft shapes (franchise strings, pipe-delimited transaction field, auctionUnit path); added `MFLAPI.getPlayers()` for player name lookup
 - Hallway Scroll + Card Grid
 - Bottom Safe Area Clipping
