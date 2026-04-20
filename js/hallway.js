@@ -12,7 +12,11 @@ const DLRHallway = (() => {
   let _allUsers  = [];   // full result set for pagination
   let _page      = 0;
 
-  const PAGE_SIZE = 12;  // 4 cols × 3 rows desktop / 3 cols × 4 rows mobile
+  const PAGE_SIZE = 12;  // 4 cols × 3 rows desktop; overridden to 5 on mobile via _getPageSize()
+
+  function _getPageSize() {
+    return window.innerWidth <= 640 ? 5 : 12;
+  }
 
   // ── Init (called when hallway view becomes active) ────────
   async function init() {
@@ -122,8 +126,9 @@ const DLRHallway = (() => {
     _allUsers = users;
     _page     = page;
 
-    const totalPages = Math.ceil(users.length / PAGE_SIZE);
-    const pageUsers  = users.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    const pageSize   = _getPageSize();
+    const totalPages = Math.ceil(users.length / pageSize);
+    const pageUsers  = users.slice(page * pageSize, (page + 1) * pageSize);
 
     const paginationHtml = totalPages > 1 ? `
       <div class="hallway-pagination">
