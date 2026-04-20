@@ -1138,6 +1138,29 @@ const DLRAnalytics = (() => {
     _mflBundle    = await MFLAPI.getLeagueBundle(leagueId, season);
     if (token !== _initToken) return;
 
+    // ── Ensure transactions are in the bundle ──────────────────────────────
+    // The worker's /mfl/bundle endpoint includes transactions, but some leagues
+    // (especially older seasons) may return an empty transactions node.
+    // If missing, fetch transactions directly so Trade Map and Waivers work.
+    if (!_mflBundle?.transactions?.transactions?.transaction) {
+      try {
+        const txData = await MFLAPI.getLeagueBundle({ leagueId, year: season, types: "transactions" });
+        if (txData?.transactions?.transactions?.transaction) {
+          _mflBundle = { ..._mflBundle, transactions: txData.transactions };
+        }
+      } catch(e) { /* transactions unavailable for this league/season */ }
+    }
+
+    // ── Ensure draft results are in the bundle ─────────────────────────────
+    if (!_mflBundle?.draft?.draftResults && !_mflBundle?.auctionResults?.auctionResults) {
+      try {
+        const draftData = await MFLAPI.getLeagueBundle({ leagueId, year: season, types: "draftResults" });
+        if (draftData?.draft?.draftResults) {
+          _mflBundle = { ..._mflBundle, draft: draftData.draft };
+        }
+      } catch(e) { /* draft unavailable for this league/season */ }
+    }
+
     const teams = MFLAPI.getTeams(_mflBundle);
     _mflTeamMap = {};
     teams.forEach(t => { _mflTeamMap[String(t.id)] = t.name || `Team ${t.id}`; });
@@ -1580,7 +1603,8 @@ const DLRAnalytics = (() => {
       const txArr   = Array.isArray(rawTx) ? rawTx : [rawTx];
       const waivers = txArr.filter(t => {
         const type = (t.type || t.transaction_type || "").toLowerCase();
-        return type === "waiver" || type === "free_agent" || type === "fa";
+        return type === "waiver" || type === "free_agent" || type === "fa" ||
+               type === "bbid_waiver" || type === "bbid";
       });
 
       if (!waivers.length) { el.innerHTML = _noData("No waiver activity found this season."); return; }
