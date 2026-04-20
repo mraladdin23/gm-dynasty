@@ -978,27 +978,55 @@ const DLRAnalytics = (() => {
   }
 
   // ── Yahoo Tab 4: Draft Recap ──────────────────────────────
-  function _yahooRenderDraft(el) {
+  async function _yahooRenderDraft(el) {
     try {
       const draft = _yahooBundle?.draft || [];
       if (!draft.length) { el.innerHTML = _noData("No draft data available."); return; }
 
-      // Build player name/position lookup using DynastyProcess CSV (Yahoo player IDs)
-      // This is the primary name source — the worker's inline name field is often empty
-      // for older leagues where Yahoo's draftresults endpoint omits player names.
-      function _draftPlayerName(p) {
-        if (p.playerId) {
-          const dp = DLRPlayers.getByYahooId(String(p.playerId));
-          if (dp?.name) return dp.name;
+      // Load DynastyProcess CSV + Sleeper DB so player lookups work.
+      // draft.js does the same before rendering Yahoo draft picks.
+      try { await DLRPlayers.load(); } catch(e) {}
+
+      // Build a per-pick name/pos lookup using the same resolution chain as draft.js:
+      //   1. getByYahooId → Sleeper DB (best data: full name, position, team)
+      //   2. getByYahooId → CSV map name/position directly
+      //   3. rosterDetails from bundle (covers DEF, K, and unmatched players)
+      //   4. Inline name from worker (sometimes populated for recent seasons)
+      const _draftDetailById = {};
+      (_yahooBundle?.rosters || []).flatMap(r => r.playerDetails || []).forEach(d => {
+        if (d.id) _draftDetailById[String(d.id)] = d;
+      });
+
+      const _draftLookup = {};  // pid → { name, pos }
+      (_yahooBundle?.draft || []).forEach(p => {
+        const pid = String(p.playerId || "");
+        if (!pid || _draftLookup[pid]) return;
+        const map      = DLRPlayers.getByYahooId(pid);
+        const sleeperP = map?.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+        let name = p.name || "";
+        let pos  = (p.position || "?").toUpperCase();
+        if (sleeperP && Object.keys(sleeperP).length > 5) {
+          name = `${sleeperP.first_name || ""} ${sleeperP.last_name || ""}`.trim() || name;
+          pos  = (sleeperP.position || pos).toUpperCase();
+        } else if (map) {
+          name = map.name || name;
+          pos  = (map.position || pos).toUpperCase();
         }
-        return p.name || (p.playerId ? `Player ${p.playerId}` : "Unknown");
+        if (!name || pos === "?") {
+          const detail = _draftDetailById[pid];
+          if (detail?.name) {
+            name = name || detail.name;
+            pos  = (pos !== "?" ? pos : (detail.position || pos)).toUpperCase();
+          }
+        }
+        _draftLookup[pid] = { name: name || `Player ${pid}`, pos: pos || "?" };
+      });
+
+      function _draftPlayerName(p) {
+        return _draftLookup[String(p.playerId || "")]?.name || p.name || (p.playerId ? `Player ${p.playerId}` : "Unknown");
       }
       function _draftPlayerPos(p) {
-        if (p.playerId) {
-          const dp = DLRPlayers.getByYahooId(String(p.playerId));
-          if (dp?.position) return dp.position.toUpperCase();
-        }
-        return (p.position || "?").toUpperCase();
+        return _draftLookup[String(p.playerId || "")]?.pos || (p.position || "?").toUpperCase();
       }
 
       const hasAuction = draft.some(p => p.cost != null && Number(p.cost) > 0);
