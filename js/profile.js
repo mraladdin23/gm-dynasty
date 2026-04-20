@@ -555,14 +555,8 @@ const Profile = (() => {
           const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
           const lm     = bundle.leagueMeta || {};
 
-          // Do NOT require is_finished — Yahoo returns 0 for many old completed leagues.
-          // Gate on playoff_start_week + at least one playoff-week matchup existing.
-          const poStart   = lm.playoff_start_week || 0;
-          const muKeys    = Object.keys(bundle.allMatchups || {});
-          const hasPoData = poStart > 0 && muKeys.some(w => Number(w) >= poStart);
-          let playoffFinish = hasPoData
-            ? _detectYahooPlayoffFinish(myId, bundle)
-            : (league.playoffFinish ?? null);
+          // Always run detection — function handles missing data internally.
+          let playoffFinish = _detectYahooPlayoffFinish(myId, bundle, mySt);
 
           const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
 
@@ -659,15 +653,8 @@ const Profile = (() => {
     const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
     const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
 
-    let playoffFinish = null;
-    // Use playoff_start_week + non-empty allMatchups as the gate.
-    // Do NOT require is_finished — Yahoo returns 0 for many old completed leagues.
-    const poStart   = lm.playoff_start_week || 0;
-    const muKeys    = Object.keys(bundle.allMatchups || {});
-    const hasPoData = poStart > 0 && muKeys.some(w => Number(w) >= poStart);
-    if (hasPoData) {
-      playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
-    }
+    // Always run detection — function handles missing data internally.
+    let playoffFinish = _detectYahooPlayoffFinish(myId, bundle, mySt);
 
     const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
 
@@ -690,9 +677,9 @@ const Profile = (() => {
     const isPastSeason = Number(updated.season) < Number(currentYear);
     const isFinished   = lm.is_finished === 1 || lm.is_finished === "1";
     const notRedraft   = updated.leagueType !== "redraft";
-    // Mark resolved if past season + team name present + (has finish data OR no playoff data available).
-    // This prevents old leagues with no Yahoo playoff data from being re-fetched every session.
-    if (isPastSeason && updated.teamName && (updated.playoffFinish != null || !hasPoData) && (notRedraft || isFinished)) {
+    // Mark resolved if past season + team name present.
+    // playoffFinish may be null for very old leagues with no data — that's fine, still resolve them.
+    if (isPastSeason && updated.teamName && (notRedraft || isFinished)) {
       updated.resolved = true;
     }
 
@@ -734,104 +721,46 @@ const Profile = (() => {
     }
   }
 
-  // Detect playoff finish rank from allMatchups.
+  // Detect playoff finish from Yahoo standings rank + playoff appearance.
   //
-  // Simplified strategy — only 5 outcomes:
-  //   1st / 2nd  — determined by the championship game result
-  //   3rd / 4th  — determined by the consolation game result (if present)
-  //   7          — appeared in playoffs but not in either final-week game ("Made Playoffs")
-  //   null       — never appeared in any playoff matchup ("Missed Playoffs")
+  // Yahoo's final standings rank is authoritative — it reflects true playoff
+  // finishing position (1st through last). We map it to 5 outcomes:
+  //   rank 1  → 1  (Champion)
+  //   rank 2  → 2  (Runner-Up)
+  //   rank 3  → 3  (3rd Place)
+  //   rank 4  → 4  (4th Place)
+  //   rank 5+ → 7  (Made Playoffs — appeared in at least one playoff matchup)
+  //   no appearance → null (Missed Playoffs)
   //
-  // Championship game identification:
-  //   If there are 2+ final-week games, the championship is the one whose
-  //   participants both appeared in the semifinal week.
-  //   If only 1 final-week game exists, that is the championship by default.
-  //   The consolation game is any other final-week game.
-  function _detectYahooPlayoffFinish(myId, bundle) {
+  // mySt = the user's standings entry from bundle.standings
+  function _detectYahooPlayoffFinish(myId, bundle, mySt) {
     const lm      = bundle.leagueMeta || {};
     const poStart = lm.playoff_start_week || 0;
     const allMu   = bundle.allMatchups   || {};
-    if (!poStart) return null;
-
-    const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart).sort((a, b) => a - b);
-    if (!poWeeks.length) return null;
-
-    const myStr = String(myId);
+    const myStr   = String(myId);
 
     // ── Gate: user must appear in at least one playoff matchup ────────────────
-    const appearsInPlayoffs = poWeeks.some(w =>
-      (allMu[w] || []).some(m =>
-        String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
-      )
-    );
-    if (!appearsInPlayoffs) return null;
-
-    const finalWeek = poWeeks[poWeeks.length - 1];
-    const semiWeek  = poWeeks.length >= 2 ? poWeeks[poWeeks.length - 2] : null;
-
-    const finalMus = allMu[finalWeek] || [];
-
-    // ── Identify championship game ────────────────────────────────────────────
-    // Build set of teams that played in the semifinal week
-    const semiParticipants = new Set();
-    if (semiWeek != null) {
-      for (const m of (allMu[semiWeek] || [])) {
-        if (m.home?.teamId) semiParticipants.add(String(m.home.teamId));
-        if (m.away?.teamId) semiParticipants.add(String(m.away.teamId));
-      }
+    // This distinguishes "missed playoffs" (null) from "made playoffs" (7).
+    if (poStart > 0 && Object.keys(allMu).length > 0) {
+      const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart);
+      const appearsInPlayoffs = poWeeks.some(w =>
+        (allMu[w] || []).some(m =>
+          String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
+        )
+      );
+      if (!appearsInPlayoffs) return null;
+    } else if (poStart === 0) {
+      // No playoff data at all — can't determine
+      return null;
     }
 
-    // Championship = the final-week game whose both teams were in the semis,
-    // OR the only final-week game if there's just one.
-    let champGame = null;
-    let consolGame = null;
-
-    if (finalMus.length === 1) {
-      champGame = finalMus[0];
-    } else {
-      for (const m of finalMus) {
-        const hId = String(m.home?.teamId ?? "");
-        const aId = String(m.away?.teamId ?? "");
-        const bothInSemis = semiParticipants.has(hId) && semiParticipants.has(aId);
-        if (!champGame && bothInSemis) {
-          champGame = m;
-        } else if (!consolGame) {
-          consolGame = m;
-        }
-      }
-      // Fallback: if semi data was missing, treat first final game as championship
-      if (!champGame && finalMus.length > 0) {
-        champGame  = finalMus[0];
-        consolGame = finalMus[1] || null;
-      }
-    }
-
-    // ── Helper: did I win this matchup? ───────────────────────────────────────
-    function _iWon(m) {
-      if (!m) return false;
-      const hId = String(m.home?.teamId ?? "");
-      const hSc = m.home?.score ?? 0;
-      const aSc = m.away?.score ?? 0;
-      if (m.winnerTeamId) return String(m.winnerTeamId) === myStr;
-      return hId === myStr ? hSc > aSc : aSc > hSc;
-    }
-
-    function _inGame(m) {
-      if (!m) return false;
-      return String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr;
-    }
-
-    // ── Check championship game ───────────────────────────────────────────────
-    if (_inGame(champGame)) {
-      return _iWon(champGame) ? 1 : 2;
-    }
-
-    // ── Check consolation game ────────────────────────────────────────────────
-    if (_inGame(consolGame)) {
-      return _iWon(consolGame) ? 3 : 4;
-    }
-
-    // ── Made playoffs but knocked out before the finals ───────────────────────
+    // ── Use standings rank as source of truth ─────────────────────────────────
+    const rank = mySt?.rank != null ? Number(mySt.rank) : null;
+    if (rank === 1) return 1;
+    if (rank === 2) return 2;
+    if (rank === 3) return 3;
+    if (rank === 4) return 4;
+    // rank 5+ = made playoffs but eliminated early
     return 7;
   }
 
