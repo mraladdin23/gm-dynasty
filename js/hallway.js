@@ -137,9 +137,7 @@ const DLRHallway = (() => {
       </div>` : "";
 
     el.innerHTML = `
-      <div class="hallway-grid">
-        ${pageUsers.map(u => _lockerCard(u)).join("")}
-      </div>
+      ${pageUsers.map(u => _lockerCard(u)).join("")}
       ${paginationHtml}`;
   }
 
