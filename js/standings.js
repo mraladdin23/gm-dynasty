@@ -1159,23 +1159,36 @@ const DLRStandings = (() => {
         ].join("");
 
         // ── Final round: Championship + 3rd Place only ──────────────────────
-        // Championship = matchup where both teams are semi-winners.
-        // 3rd Place = matchup where neither or only one team is a semi-winner
-        //   (i.e. the two semi-losers facing each other).
-        // If no semi data (2-team playoff), first game = championship.
+        // Championship = matchup where BOTH teams are semi-winners.
+        // 3rd Place    = matchup where BOTH teams are semi-losers
+        //               (the two teams who lost in the semis).
+        // We explicitly check both conditions — "not championship" is not enough
+        // because Yahoo may run multiple consolation brackets in the same final week
+        // (e.g. first-round losers play each other too).
+        // If no semi data (e.g. 2-team playoff), first game = champ, second = 3rd.
         const finalMus = finalRound?.matchups || [];
         const wkLabel  = finalRound ? ` · Wk ${finalRound.week}` : "";
 
         let champGame = null;
         let thirdGame = null;
 
-        if (semiWinners.size >= 2) {
+        if (semiRound && semiWinners.size >= 2) {
+          // Semi-losers = teams who played in semis but did NOT win
+          const semiLosers = new Set();
+          semiRound.matchups.forEach(m => {
+            const hId = String(m.home?.teamId ?? "");
+            const aId = String(m.away?.teamId ?? "");
+            if (hId && !semiWinners.has(hId)) semiLosers.add(hId);
+            if (aId && !semiWinners.has(aId)) semiLosers.add(aId);
+          });
+
           for (const m of finalMus) {
             const hId = String(m.home?.teamId ?? "");
             const aId = String(m.away?.teamId ?? "");
             const bothWinners = semiWinners.has(hId) && semiWinners.has(aId);
-            if (bothWinners && !champGame)   champGame = m;
-            else if (!bothWinners && !thirdGame) thirdGame = m;
+            const bothLosers  = semiLosers.has(hId)  && semiLosers.has(aId);
+            if (bothWinners && !champGame)  champGame = m;
+            if (bothLosers  && !thirdGame)  thirdGame = m;
           }
         } else {
           champGame = finalMus[0] || null;
@@ -1636,8 +1649,14 @@ const DLRStandings = (() => {
         const hTeamKey = `${gameLeaguePrefix}.t.${hId}`;
         const aTeamKey = `${gameLeaguePrefix}.t.${aId}`;
 
+        // Store all data in HTML data-attributes to avoid JS string escaping issues
+        // when team names contain apostrophes (e.g. "Bama's Best").
         return `
-          <div class="mu-card" onclick="DLRStandings._yahooExpandMatchup(this,'${_esc(leagueKey)}',${week},'${_esc(hTeamKey)}','${_esc(aTeamKey)}','${_esc(hName)}','${_esc(aName)}')">
+          <div class="mu-card yahoo-mu-card"
+            data-lk="${_esc(leagueKey)}" data-wk="${week}"
+            data-htk="${_esc(hTeamKey)}" data-atk="${_esc(aTeamKey)}"
+            data-hn="${_esc(hName)}" data-an="${_esc(aName)}"
+            onclick="DLRStandings._yahooExpandMatchup(this)">
             <div class="mu-header">
               <div class="mu-team${hMe ? " mu-team--me" : ""}">
                 <div class="st-av" style="${hMe ? "background:var(--color-gold);color:#000;" : ""}">${hName[0]?.toUpperCase() || "?"}</div>
@@ -1656,7 +1675,7 @@ const DLRStandings = (() => {
             <div class="mu-detail hidden">
               <div class="mu-no-detail" style="font-size:.75rem;color:var(--color-text-dim);text-align:center;padding:var(--space-2) var(--space-3)">
                 ${_esc(hName)}: ${hRec}, ${hPF} pts &nbsp;|&nbsp; ${_esc(aName)}: ${aRec}, ${aPF} pts
-                <br><span style="font-size:.7rem;opacity:.6">Tap again to load lineups</span>
+                <br><span style="font-size:.7rem;opacity:.6">Tap to load lineups</span>
               </div>
             </div>
           </div>`;
@@ -1720,7 +1739,13 @@ const DLRStandings = (() => {
     return s || "FLEX";
   }
 
-  async function _yahooExpandMatchup(card, leagueKey, week, homeTeamKey, awayTeamKey, hName, aName) {
+  async function _yahooExpandMatchup(card) {
+    const leagueKey   = card.dataset.lk;
+    const week        = parseInt(card.dataset.wk);
+    const homeTeamKey = card.dataset.htk;
+    const awayTeamKey = card.dataset.atk;
+    const hName       = card.dataset.hn;
+    const aName       = card.dataset.an;
     const detail = card.querySelector(".mu-detail");
     if (!detail) return;
 
