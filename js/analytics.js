@@ -1132,6 +1132,7 @@ const DLRAnalytics = (() => {
   let _mflStandings   = [];    // normalized standings array
   let _mflActiveTab   = 0;
   let _mflWeekScores  = null;  // { franchiseId: [score_wk1, score_wk2, ...] } (lazy-loaded)
+  let _mflPlayerMap   = {};    // mflPlayerId → { name, pos, position } — loaded via MFLAPI.getPlayers()
 
   async function _renderMFLAnalytics(el, leagueId, token) {
     const season = _season || new Date().getFullYear().toString();
@@ -1144,6 +1145,18 @@ const DLRAnalytics = (() => {
     _mflStandings  = MFLAPI.normalizeStandings(_mflBundle);
     _mflWeekScores = null;  // reset; will be fetched lazily by luck/power tabs
     _mflActiveTab  = 0;
+    _mflPlayerMap  = {};    // reset; load full player universe for draft/waiver name lookup
+    try {
+      _mflPlayerMap = await MFLAPI.getPlayers(season, leagueId);
+    } catch(e) {
+      // Fall back to bundle player list if getPlayers fails
+      const raw = _mflBundle?.players?.players?.player;
+      if (raw) {
+        const arr = Array.isArray(raw) ? raw : [raw];
+        arr.forEach(p => { if (p.id) _mflPlayerMap[p.id] = { name: MFLAPI.mflNameToDisplay(p.name) || p.name || "", pos: (p.position || "?").toUpperCase(), position: (p.position || "?").toUpperCase() }; });
+      }
+    }
+    if (token !== _initToken) return;
 
     el.innerHTML = `
       <div class="az-tabs" id="az-tab-bar">
@@ -1491,7 +1504,7 @@ const DLRAnalytics = (() => {
       const picks = Array.isArray(raw) ? raw : (raw ? [raw] : []);
       if (!picks.length) { body.innerHTML = _noData("No auction results found."); return; }
 
-      const playerLookup = _mflBuildPlayerLookup();
+      const playerLookup = _mflPlayerMap;
       const sorted = [...picks].sort((a, b) => parseFloat(b.amount || 0) - parseFloat(a.amount || 0));
       const maxAmt = parseFloat(sorted[0]?.amount || 1);
 
@@ -1533,7 +1546,7 @@ const DLRAnalytics = (() => {
       const picks = unit?.draftPick ? (Array.isArray(unit.draftPick) ? unit.draftPick : [unit.draftPick]) : [];
       if (!picks.length) { body.innerHTML = _noData("No draft picks found."); return; }
 
-      const playerLookup = _mflBuildPlayerLookup();
+      const playerLookup = _mflPlayerMap;
       const byTeam = {};
       picks.forEach(p => {
         const fid = String(p.franchise || "");
@@ -1640,7 +1653,7 @@ const DLRAnalytics = (() => {
       });
 
       // Resolve player names from bundle.players if available, else show id
-      const playerLookup = _mflBuildPlayerLookup();
+      const playerLookup = _mflPlayerMap;
       const hotPlayers   = Object.entries(playerClaims)
         .filter(([, n]) => n > 1)
         .sort((a, b) => b[1] - a[1]).slice(0, 12)
