@@ -14,8 +14,6 @@ const DLRHallway = (() => {
 
   const PAGE_SIZE = 12;  // 4 cols × 3 rows desktop / 3 cols × 4 rows mobile
 
-  const PIN_KEY  = "dlr_hallway_pins";
-
   // ── Init (called when hallway view becomes active) ────────
   async function init() {
     _pinned = _loadPins();
