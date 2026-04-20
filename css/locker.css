@@ -4210,14 +4210,14 @@ select option { background: var(--color-bg-2); }
   .cs-table-wrap { overflow-x: auto; }
 
   /* Hallway */
-  .hallway-grid { grid-template-columns: repeat(3,1fr) !important; gap: var(--space-2) !important; }
+  .hallway-grid { grid-template-columns: 1fr !important; gap: var(--space-2) !important; }
   .hallway-pagination { gap: var(--space-3); }
   .hallway-page-btn { padding: 4px 10px; font-size: .75rem; }
-  .hallway-locker { padding: var(--space-3) !important; }
-  .hl-bio, .hl-leagues { display: none; }
-  .hl-stats { gap: var(--space-2); margin-bottom: var(--space-2); }
-  .hl-username { font-size: .78rem; }
-  .hl-avatar { width: 32px; height: 32px; font-size: .75rem; }
+  .hallway-locker { padding: var(--space-2) var(--space-3) !important; }
+  .hl-leagues { display: none; }
+  .hl-nameplate { margin-bottom: var(--space-1); }
+  .hl-stats { margin-bottom: 0; gap: var(--space-3); }
+  .hl-pin-btn { padding: 8px !important; opacity: 1 !important; font-size: 1.1rem !important; }
   .ms-panel { width: 100% !important; }
   .ms-stats-grid { grid-template-columns: repeat(2, 1fr); }
 
