@@ -21,7 +21,11 @@ const DLRHallway = (() => {
 
   // ── Init (called when hallway view becomes active) ────────
   async function init() {
-    _pinned = _loadPins();
+    // Try Firebase first, fall back to localStorage
+    const fbPins = await _loadPinsFromFirebase();
+    _pinned = fbPins !== null ? fbPins : _loadPinsLocal();
+    // Sync to localStorage as cache
+    _savePinsLocal(_pinned);
     const el = document.getElementById("hallway-results");
     if (!el) return;
 
@@ -280,7 +284,8 @@ const DLRHallway = (() => {
     const idx = _pinned.indexOf(username);
     if (idx >= 0) _pinned.splice(idx, 1);
     else          _pinned.push(username);
-    _savePins(_pinned);
+    _savePinsLocal(_pinned);
+    _savePinsToFirebase(_pinned);  // fire and forget — no await needed
     // Re-render pin buttons without full reload
     document.querySelectorAll(".hl-pin-btn").forEach(btn => {
       const card = btn.closest("[onclick*='openLocker']");
@@ -297,11 +302,30 @@ const DLRHallway = (() => {
 
   function isPinned(username) { return _pinned.includes(username); }
 
-  function _loadPins() {
+  async function _loadPinsFromFirebase() {
+    try {
+      const username = Auth.getCurrentProfile()?.username;
+      if (!username) return null;
+      const data = await GMDB._restGet(`gmd/users/${username.toLowerCase()}/hallwayPins`);
+      if (Array.isArray(data)) return data;
+      if (data && typeof data === 'object') return Object.values(data);
+      return [];
+    } catch(e) { return null; }
+  }
+
+  async function _savePinsToFirebase(pins) {
+    try {
+      const username = Auth.getCurrentProfile()?.username;
+      if (!username) return;
+      await GMDB._restPut(`gmd/users/${username.toLowerCase()}/hallwayPins`, pins);
+    } catch(e) {}
+  }
+
+  function _loadPinsLocal() {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || "[]"); } catch(e) { return []; }
   }
 
-  function _savePins(pins) {
+  function _savePinsLocal(pins) {
     try { localStorage.setItem(PIN_KEY, JSON.stringify(pins)); } catch(e) {}
   }
 
