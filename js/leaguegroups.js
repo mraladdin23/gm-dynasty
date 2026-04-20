@@ -303,7 +303,10 @@ async function renderCommTab(leagueEntries) {
               return entry ? `<span style="font-size:11px;padding:2px 8px;background:${g.color||'var(--color-gold)'}18;color:${g.color||'var(--color-gold)'};border:1px solid ${g.color||'var(--color-gold)'}44;border-radius:99px;">${_esc(entry.league.leagueName)}</span>` : '';
             }).join('')}
           </div>
-          <button onclick="LeagueGroups.showGroupBroadcast('${gid}','${g.name.replace(/'/g,"\\'")}',${JSON.stringify(g.leagueKeys||[])})"
+          <button class="broadcast-btn"
+            data-gid="${gid}"
+            data-name="${_esc(g.name)}"
+            data-keys="${_esc(JSON.stringify(g.leagueKeys||[]))}"
             style="padding:5px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text-muted);cursor:pointer;font-family:var(--font-body);font-size:12px;">
             📣 Broadcast Message
           </button>
@@ -319,6 +322,16 @@ async function renderCommTab(leagueEntries) {
           <div style="font-size:11px;color:var(--color-text-dim);">Created by ${_esc(g.commUsername)}</div>
         </div>`).join('')}
     </div>` : (!myGroups.length ? `<div style="color:var(--color-text-dim);font-size:13px;padding:8px 0;">No commissioner groups yet.</div>` : '')}`;
+
+  // Wire broadcast buttons via data attributes (avoids JSON-in-onclick attribute bug)
+  el.querySelectorAll('.broadcast-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const gid  = btn.dataset.gid;
+      const name = btn.dataset.name;
+      const keys = JSON.parse(btn.dataset.keys || '[]');
+      LeagueGroups.showGroupBroadcast(gid, name, keys);
+    });
+  });
 }
 
 async function createCommGroup() {
