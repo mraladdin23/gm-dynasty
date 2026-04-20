@@ -103,6 +103,7 @@ const DLRHallway = (() => {
       totalLosses:     stats.totalLosses  || 0,
       winPct:          totalGames > 0 ? (stats.totalWins / totalGames * 100).toFixed(1) : null,
       championships:   stats.championships || 0,
+      dynastyScore:    stats.dynastyScore  || 0,
       seasonsPlayed:   stats.seasonsPlayed || 0,
       leagueCount:     Object.keys(data.leagues || {}).length,
       leagues:         data.leagues       || {}
@@ -182,9 +183,10 @@ const DLRHallway = (() => {
           </button>
         </div>
         <div class="hl-stats">
-          ${u.championships > 0 ? `<span class="hl-stat"><span class="hl-stat-val">🏆 ${u.championships}</span><span class="hl-stat-lbl">Titles</span></span>` : ""}
-          ${u.winPct !== null ? `<span class="hl-stat"><span class="hl-stat-val">${u.winPct}%</span><span class="hl-stat-lbl">Win%</span></span>` : ""}
-          ${u.seasonsPlayed > 0 ? `<span class="hl-stat"><span class="hl-stat-val">${u.seasonsPlayed}</span><span class="hl-stat-lbl">Seasons</span></span>` : ""}
+          <span class="hl-stat"><span class="hl-stat-val">🏆 ${u.championships}</span><span class="hl-stat-lbl">Titles</span></span>
+          <span class="hl-stat"><span class="hl-stat-val">${u.winPct !== null ? u.winPct + "%" : "—"}</span><span class="hl-stat-lbl">Win%</span></span>
+          <span class="hl-stat"><span class="hl-stat-val">${u.dynastyScore || "—"}</span><span class="hl-stat-lbl">Dyn. Score</span></span>
+          <span class="hl-stat"><span class="hl-stat-val">${u.seasonsPlayed || "—"}</span><span class="hl-stat-lbl">Yrs Played</span></span>
         </div>
       </div>`;
   }
@@ -232,11 +234,12 @@ const DLRHallway = (() => {
         </div>
         <div class="modal-body">
           <div class="ms-stats-grid" style="margin-bottom:var(--space-5)">
-            <div class="ms-stat-card"><div class="ms-stat-val">${data.seasonsPlayed||0}</div><div class="ms-stat-lbl">Seasons</div></div>
             <div class="ms-stat-card"><div class="ms-stat-val">${data.totalWins}–${data.totalLosses}</div><div class="ms-stat-lbl">Record</div></div>
             <div class="ms-stat-card"><div class="ms-stat-val">${data.winPct !== null ? data.winPct+"%" : "—"}</div><div class="ms-stat-lbl">Win%</div></div>
             <div class="ms-stat-card"><div class="ms-stat-val">${data.championships||0}</div><div class="ms-stat-lbl">🏆 Titles</div></div>
-            <div class="ms-stat-card"><div class="ms-stat-val">${data.leagueCount}</div><div class="ms-stat-lbl">Total Seasons</div></div>
+            <div class="ms-stat-card"><div class="ms-stat-val">${data.dynastyScore||"—"}</div><div class="ms-stat-lbl">Dyn. Score</div></div>
+            <div class="ms-stat-card"><div class="ms-stat-val">${data.seasonsPlayed||0}</div><div class="ms-stat-lbl">Yrs Played</div></div>
+            <div class="ms-stat-card"><div class="ms-stat-val">${data.leagueCount}</div><div class="ms-stat-lbl">Lg. Seasons</div></div>
           </div>
           ${commonLeagues.length ? `
           <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);margin-bottom:var(--space-3)">Common Leagues</div>
