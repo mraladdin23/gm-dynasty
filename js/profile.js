@@ -355,8 +355,8 @@ const Profile = (() => {
   // Runs the same resolution as the background version but returns a promise
   // so the caller can show loading state and wait for completion.
   async function syncMFLTeams() {
-    // Re-fetch each MFL league and refresh teamName + record using the
-    // stored myRosterId (franchise_id).  No email matching needed —
+    // Re-fetch each MFL league and refresh teamName, record, and playoff finish
+    // using the stored myRosterId (franchise_id). No email matching needed —
     // myRosterId was set from the authoritative myleagues response on import.
     if (!_currentUsername || !_currentProfile?.platforms?.mfl?.linked) return 0;
 
@@ -372,32 +372,158 @@ const Profile = (() => {
         if (!myRosterId) return;   // can't resolve without a stored roster id
 
         try {
-          const bundle       = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
-          const leagueInfo   = bundle?.league?.league || {};
+          const bundle        = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+          const leagueInfo    = bundle?.league?.league || {};
           const franchisesRaw = leagueInfo?.franchises?.franchise;
           const franchisesArr = franchisesRaw
             ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
             : [];
-          const myFranchise  = franchisesArr.find(f => String(f.id) === String(myRosterId)) || {};
+          const myFranchise   = franchisesArr.find(f => String(f.id) === String(myRosterId)) || {};
 
-          const standingsMap = MFLAPI.getStandingsMap(bundle);
-          const mySt         = standingsMap[String(myRosterId)] || {};
+          const standingsMap  = MFLAPI.getStandingsMap(bundle);
+          const mySt          = standingsMap[String(myRosterId)] || {};
 
           if (_allLeagues[leagueKey]) {
-            _allLeagues[leagueKey].teamName    = myFranchise.name  || _allLeagues[leagueKey].teamName;
-            _allLeagues[leagueKey].wins        = mySt.wins         || _allLeagues[leagueKey].wins    || 0;
-            _allLeagues[leagueKey].losses      = mySt.losses       || _allLeagues[leagueKey].losses  || 0;
-            _allLeagues[leagueKey].ties        = mySt.ties         || _allLeagues[leagueKey].ties    || 0;
-            _allLeagues[leagueKey].standing    = mySt.rank         || _allLeagues[leagueKey].standing || null;
-            _allLeagues[leagueKey].pointsFor   = mySt.ptsFor       || _allLeagues[leagueKey].pointsFor || 0;
+            _allLeagues[leagueKey].teamName    = myFranchise.name || _allLeagues[leagueKey].teamName;
+            _allLeagues[leagueKey].wins        = mySt.wins        || _allLeagues[leagueKey].wins    || 0;
+            _allLeagues[leagueKey].losses      = mySt.losses      || _allLeagues[leagueKey].losses  || 0;
+            _allLeagues[leagueKey].ties        = mySt.ties        || _allLeagues[leagueKey].ties    || 0;
+            _allLeagues[leagueKey].standing    = mySt.rank        || _allLeagues[leagueKey].standing || null;
+            _allLeagues[leagueKey].pointsFor   = mySt.ptsFor      || _allLeagues[leagueKey].pointsFor || 0;
+
+            // ── Detect playoff finish for past seasons ──────────────────────
+            const isPast = Number(league.season) < Number(new Date().getFullYear());
+            if (isPast && !_allLeagues[leagueKey].playoffFinish) {
+              await _detectAndSetMFLPlayoffFinish(leagueKey, league, bundle, myRosterId);
+            }
+
             GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] }).catch(() => {});
             matched++;
           }
         } catch(e) { /* skip failed league */ }
       }));
     }
+
+    // Recompute stats to reflect any newly set playoff finishes
+    try {
+      const stats = await GMDB.recomputeStats(_currentUsername);
+      if (_currentProfile && stats) _currentProfile.stats = stats;
+      _renderStatsRow(stats || {});
+    } catch(e) {}
+
     _renderLeagues();
+    _renderCareerSummary(_currentProfile || {});
     return matched;
+  }
+
+  // ── MFL playoff finish detection ──────────────────────────────────────────
+  // Called from syncMFLTeams for any past-season MFL league that has no
+  // playoffFinish yet. Mutates _allLeagues[leagueKey] in place.
+  //
+  // Three paths:
+  //   1. Eliminator  — franchises_eliminated on league.league → standings already
+  //                    in ranked order from normalizeStandings(); use rank directly.
+  //   2. Guillotine  — eliminated week-number on each standings row → rank by
+  //                    weekEliminated desc (last alive = 1st).
+  //   3. Bracket     — find the championship bracket (name contains "champion" or
+  //                    largest teamsInvolved), fetch its result, read final-round
+  //                    winner/loser. Also check consolation game for 3rd/4th.
+  async function _detectAndSetMFLPlayoffFinish(leagueKey, league, bundle, myRosterId) {
+    const myStr    = String(myRosterId);
+    const standings = MFLAPI.normalizeStandings(bundle);
+
+    // ── Path 1 & 2: Eliminator or Guillotine ───────────────────────────────
+    const isEliminatorOrGuillotine = standings.length > 0 &&
+      (standings[0].isEliminator || standings[0].isGuillotine);
+
+    if (isEliminatorOrGuillotine) {
+      // normalizeStandings already returns standings in rank order (rank=1 is winner).
+      // For eliminator: winner is the un-eliminated franchise (rank=1).
+      // For guillotine: alive teams sort first by ptsFor desc, then eliminated by weekEliminated desc.
+      const myEntry = standings.find(s => String(s.franchiseId) === myStr);
+      if (myEntry) {
+        const finish = myEntry.rank;
+        _allLeagues[leagueKey].playoffFinish = finish;
+        _allLeagues[leagueKey].isChampion    = finish === 1;
+      }
+      return;
+    }
+
+    // ── Path 3: Bracket league ─────────────────────────────────────────────
+    const brackets = MFLAPI.normalizePlayoffBrackets(bundle);
+    if (!brackets.length) return;
+
+    // Identify championship bracket: prefer one whose name contains "champion",
+    // otherwise fall back to the bracket with the most teams involved.
+    const champBracket = brackets.find(b =>
+      (b.name || "").toLowerCase().includes("champion")
+    ) || brackets.reduce((best, b) => (b.teams > best.teams ? b : best), brackets[0]);
+
+    if (!champBracket?.id) return;
+
+    let bracketData;
+    try {
+      bracketData = await MFLAPI.getPlayoffBracket(league.leagueId, league.season, champBracket.id);
+    } catch(e) { return; }
+
+    const rounds = MFLAPI.normalizePlayoffBracketResult(bracketData);
+    if (!rounds.length) return;
+
+    const finalRound   = rounds[rounds.length - 1];
+    const finalMatchups = finalRound?.matchups || [];
+    if (!finalMatchups.length) return;
+
+    // Championship game = first matchup in the final round.
+    // Consolation (3rd/4th) = second matchup in the final round (if present).
+    // (standings.js uses this same convention for rendering.)
+    for (let gi = 0; gi < finalMatchups.length; gi++) {
+      const m   = finalMatchups[gi];
+      const hId = m.home.id, aId = m.away.id;
+      if (hId !== myStr && aId !== myStr) continue;
+
+      // Only count games that have actually been played (scores present)
+      if (!m.home.won && !m.away.won) continue;
+
+      const iWon = hId === myStr ? m.home.won : m.away.won;
+
+      if (gi === 0) {
+        // Championship game
+        _allLeagues[leagueKey].playoffFinish = iWon ? 1 : 2;
+        _allLeagues[leagueKey].isChampion    = iWon;
+      } else if (gi === 1) {
+        // Consolation game
+        _allLeagues[leagueKey].playoffFinish = iWon ? 3 : 4;
+        _allLeagues[leagueKey].isChampion    = false;
+      } else {
+        // Later place games — gi=2 → 5th/6th, gi=3 → 7th/8th, etc.
+        _allLeagues[leagueKey].playoffFinish = iWon ? (gi * 2 + 1) : (gi * 2 + 2);
+        _allLeagues[leagueKey].isChampion    = false;
+      }
+      return;  // found our game — done
+    }
+
+    // User not in the final round — check earlier rounds to see if they made
+    // the playoffs at all (appeared in any bracket round).
+    const appearedInBracket = rounds.some(r =>
+      r.matchups.some(m => m.home.id === myStr || m.away.id === myStr)
+    );
+    if (appearedInBracket) {
+      // They made playoffs but were eliminated early — use round position for rank.
+      // Find which round they lost in and assign a rough finish.
+      for (let ri = 0; ri < rounds.length - 1; ri++) {
+        const m = rounds[ri].matchups.find(m => m.home.id === myStr || m.away.id === myStr);
+        if (!m || (!m.home.won && !m.away.won)) continue;
+        const iWon = m.home.id === myStr ? m.home.won : m.away.won;
+        if (!iWon) {
+          // Lost in round ri (0-indexed from first playoff round).
+          // Rough placement: round 0 loss in a 3-round bracket = 5th/7th range.
+          const roundsRemaining = (rounds.length - 1) - ri;
+          _allLeagues[leagueKey].playoffFinish = Math.pow(2, roundsRemaining) + 1;
+          _allLeagues[leagueKey].isChampion    = false;
+          return;
+        }
+      }
+    }
   }
 
   // ── Background Yahoo identity resolution ───────────────

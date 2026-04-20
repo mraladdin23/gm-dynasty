@@ -111,22 +111,6 @@ Yahoo → Sleeper) so it shows as a continuous dynasty history.
 
 ## 🟡 Mobile / UI Polish
 
-### U1 — Hallway Scroll + Card Grid
-**Problem:** Hallway won't scroll on mobile. Cards are too large.
-**Fix:** 3-across grid, 4 rows per page, pagination for remaining cards.
-**Files:** `hallway.js`, `locker.css`
-
-### U2 — Bottom Safe Area Clipping
-**Fix:** Add `padding-bottom: env(safe-area-inset-bottom)` to:
-- `.league-detail-body`
-- `.app-view.active`
-**Files:** `locker.css`
-
-### U3 — Groups: League Order + Dynasty Collapse
-**Problem:** When creating/editing groups, leagues should be ordered year descending
-then alphabetically. Dynasty/keeper chains should show only the most recent year.
-**Files:** `leaguegroups.js`
-
 ### U4 — Groups: Broadcast Message Not Working
 **Problem:** Commissioner broadcast message button does nothing.
 **Files:** `leaguegroups.js`
@@ -174,6 +158,12 @@ Reference design/mockup to be provided by Mike.
 **Files:** New `trophy-builder.js` + extend `trophy-room.js`, `firebase-db.js`, `locker.css`, `index.html`
 **Note:** Standalone feature — no blockers.
 
+### F8 — Hallway: H2H Records in Common Leagues
+**Idea:** In the locker modal, show head-to-head record against that manager
+for each common league (dynasty/keeper shows combined H2H, redraft shows per-season).
+**Files:** `hallway.js`
+**Note:** Currently shows combined W-L record. Needs matchup history cross-reference.
+
 ---
 
 ## Suggested Session Order
@@ -186,19 +176,17 @@ Reference design/mockup to be provided by Mike.
 | 4 | Y2 | Yahoo Matchup Pills + Scores | Medium | `standings.js`, `worker.js` |
 | 5 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
 | 6 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
-| 7 | U1 | Hallway Grid + Scroll | Low | `hallway.js`, `locker.css` |
-| 8 | U2 | Bottom Safe Area | Trivial | `locker.css` |
-| 9 | U3 | Groups League Order | Low | `leaguegroups.js` |
-| 10 | U4 | Broadcast Message | Low | `leaguegroups.js` |
-| 11 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
-| 12 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 13 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 14 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 15 | F2 | Custom Playoff Tracker | Very High | New module + several files |
-| 16 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 17 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 18 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
-| 19 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
+| 7 | U4 | Broadcast Message | Low | `leaguegroups.js` |
+| 8 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
+| 9 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
+| 10 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
+| 11 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
+| 12 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 13 | F2 | Custom Playoff Tracker | Very High | New module + several files |
+| 14 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 15 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 16 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 17 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
 
 ---
 
@@ -242,6 +230,12 @@ Reference design/mockup to be provided by Mike.
 - **X1 (partial):** `_isSeasonComplete(l)` helper — "Missed Playoffs" vs "Season in Progress" cross-platform
 - **Bug:** `_updateJumpDropdown` crash on undefined `leagueName` fixed
 - **Worker:** Yahoo week fetches batched (3/batch, 300ms delay, 1 retry)
+- Hallway Scroll + Card Grid
+- Bottom Safe Area Clipping
+- Groups: League Order + Dynasty Collapse
+- Hallway pins moved to Firebase (gmd/users/{username}/hallwayPins), localStorage as cache
+- Hallway card: leagues removed, 4 stats spread evenly, years played calculated from distinct seasons
+- Hallway modal: common leagues only, dynasty/keeper deduplicated to most recent year
 
 ---
 
