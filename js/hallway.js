@@ -9,6 +9,10 @@ const DLRHallway = (() => {
   let _debounce  = null;
   let _cache     = {};
   let _pinned    = [];   // usernames the current user has pinned
+  let _allUsers  = [];   // full result set for pagination
+  let _page      = 0;
+
+  const PAGE_SIZE = 12;  // 3 cols × 4 rows
 
   const PIN_KEY  = "dlr_hallway_pins";
 
@@ -107,7 +111,7 @@ const DLRHallway = (() => {
     } catch(e) { return null; }
   }
 
-  function _renderGrid(el, users) {
+  function _renderGrid(el, users, page = 0) {
     if (users === "loading") {
       el.innerHTML = `<div class="hallway-searching"><div class="spinner"></div> Loading lockers…</div>`;
       return;
@@ -117,7 +121,33 @@ const DLRHallway = (() => {
       return;
     }
 
-    el.innerHTML = users.map(u => _lockerCard(u)).join("");
+    _allUsers = users;
+    _page     = page;
+
+    const totalPages = Math.ceil(users.length / PAGE_SIZE);
+    const pageUsers  = users.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+    const paginationHtml = totalPages > 1 ? `
+      <div class="hallway-pagination">
+        <button class="hallway-page-btn" ${page === 0 ? "disabled" : ""}
+          onclick="DLRHallway.goToPage(${page - 1})">‹ Prev</button>
+        <span class="hallway-page-info">Page ${page + 1} of ${totalPages}</span>
+        <button class="hallway-page-btn" ${page >= totalPages - 1 ? "disabled" : ""}
+          onclick="DLRHallway.goToPage(${page + 1})">Next ›</button>
+      </div>` : "";
+
+    el.innerHTML = `
+      <div class="hallway-grid">
+        ${pageUsers.map(u => _lockerCard(u)).join("")}
+      </div>
+      ${paginationHtml}`;
+  }
+
+  function goToPage(page) {
+    const el = document.getElementById("hallway-results");
+    if (!el) return;
+    _renderGrid(el, _allUsers, page);
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function _lockerCard(u) {
@@ -277,6 +307,6 @@ const DLRHallway = (() => {
     return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
-  return { init, search, openLocker, togglePin, isPinned };
+  return { init, search, openLocker, togglePin, isPinned, goToPage };
 
 })();
