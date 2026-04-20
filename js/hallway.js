@@ -16,7 +16,7 @@ const DLRHallway = (() => {
   const PAGE_SIZE = 12;  // 4 cols × 3 rows desktop; overridden to 5 on mobile via _getPageSize()
 
   function _getPageSize() {
-    return window.innerWidth <= 768 ? 5 : 12;
+    return window.innerWidth <= 768 ? 4 : 12;
   }
 
   // ── Init (called when hallway view becomes active) ────────
@@ -104,7 +104,7 @@ const DLRHallway = (() => {
       winPct:          totalGames > 0 ? (stats.totalWins / totalGames * 100).toFixed(1) : null,
       championships:   stats.championships || 0,
       dynastyScore:    stats.dynastyScore  || 0,
-      seasonsPlayed:   stats.seasonsPlayed || 0,
+      seasonsPlayed:   new Set(Object.values(data.leagues || {}).map(l => l.season).filter(Boolean)).size,
       leagueCount:     Object.keys(data.leagues || {}).length,
       leagues:         data.leagues       || {}
     };
@@ -207,10 +207,19 @@ const DLRHallway = (() => {
     const isPinned  = _pinned.includes(username);
 
     const myLeagueKeys  = new Set(Object.keys(Auth.getCurrentProfile()?.leagues || {}));
+    const seenDynasty   = {};
     const commonLeagues = Object.entries(data.leagues)
       .filter(([key]) => myLeagueKeys.has(key))
       .map(([, l]) => l)
-      .sort((a, b) => (b.season||"").localeCompare(a.season||""));
+      .sort((a, b) => (b.season||"").localeCompare(a.season||""))
+      .filter(l => {
+        const isDynasty = l.leagueType === 'dynasty' || l.leagueType === 'keeper';
+        if (!isDynasty) return true;
+        const nameKey = (l.leagueName || '').toLowerCase().trim();
+        if (seenDynasty[nameKey]) return false;
+        seenDynasty[nameKey] = true;
+        return true;
+      });
 
     modal.innerHTML = `
       <div class="modal-box modal-box--wide">
