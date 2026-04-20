@@ -555,10 +555,14 @@ const Profile = (() => {
           const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
           const lm     = bundle.leagueMeta || {};
 
-          let playoffFinish = league.playoffFinish ?? null;
-          if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
-            playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
-          }
+          // Do NOT require is_finished — Yahoo returns 0 for many old completed leagues.
+          // Gate on playoff_start_week + at least one playoff-week matchup existing.
+          const poStart   = lm.playoff_start_week || 0;
+          const muKeys    = Object.keys(bundle.allMatchups || {});
+          const hasPoData = poStart > 0 && muKeys.some(w => Number(w) >= poStart);
+          let playoffFinish = hasPoData
+            ? _detectYahooPlayoffFinish(myId, bundle)
+            : (league.playoffFinish ?? null);
 
           const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
 
@@ -634,14 +638,34 @@ const Profile = (() => {
     }
 
     const myId = bundle.myTeamId || null;
-    if (!myId) throw new Error("Yahoo did not return your team ID — try reconnecting Yahoo.");
+    const lm   = bundle.leagueMeta || {};
+
+    // If Yahoo returns no team ID for this league (common for very old leagues),
+    // still write cleared flags so the stale playoffFinish doesn't persist.
+    if (!myId) {
+      const isPastSeason = Number(league.season) < Number(currentYear);
+      Object.assign(_allLeagues[leagueKey], {
+        playoffFinish: null,
+        isChampion:    false,
+        resolved:      isPastSeason ? true : null,
+      });
+      await GMDB.saveLeague(_currentUsername, leagueKey, { ..._allLeagues[leagueKey] });
+      _renderLeagues();
+      _renderCareerSummary(_currentProfile || {});
+      showToast(`⚠️ Yahoo returned no team data for ${league.leagueName} — playoff finish cleared.`, "warn");
+      return;
+    }
 
     const myTeam = bundle.teams.find(t => String(t.id) === String(myId)) || {};
     const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
-    const lm     = bundle.leagueMeta || {};
 
     let playoffFinish = null;
-    if (lm.is_finished && lm.playoff_start_week && bundle.allMatchups) {
+    // Use playoff_start_week + non-empty allMatchups as the gate.
+    // Do NOT require is_finished — Yahoo returns 0 for many old completed leagues.
+    const poStart   = lm.playoff_start_week || 0;
+    const muKeys    = Object.keys(bundle.allMatchups || {});
+    const hasPoData = poStart > 0 && muKeys.some(w => Number(w) >= poStart);
+    if (hasPoData) {
       playoffFinish = _detectYahooPlayoffFinish(myId, bundle);
     }
 
@@ -666,7 +690,9 @@ const Profile = (() => {
     const isPastSeason = Number(updated.season) < Number(currentYear);
     const isFinished   = lm.is_finished === 1 || lm.is_finished === "1";
     const notRedraft   = updated.leagueType !== "redraft";
-    if (isPastSeason && updated.playoffFinish != null && updated.teamName && (notRedraft || isFinished)) {
+    // Mark resolved if past season + team name present + (has finish data OR no playoff data available).
+    // This prevents old leagues with no Yahoo playoff data from being re-fetched every session.
+    if (isPastSeason && updated.teamName && (updated.playoffFinish != null || !hasPoData) && (notRedraft || isFinished)) {
       updated.resolved = true;
     }
 
