@@ -288,5 +288,35 @@ const YahooAPI = (() => {
     };
   }
 
-  return { login, getLeagues, getLeagueBundle, storeTokens, _getValidToken, _workerBase: BASE };
+  /**
+   * Fetch starters + weekly points for both teams in a specific matchup week.
+   * Called lazily when the user expands a matchup card.
+   * Returns { home: [{pid, name, pos, slot, score, isStarter}], away: [...] }
+   */
+  async function getMatchupRoster(leagueKey, week, homeTeamKey, awayTeamKey) {
+    const token = await _getValidToken();
+    try {
+      const res = await fetch(`${BASE}/yahoo/matchupRoster`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token:  token,
+          league_key:    leagueKey,
+          week,
+          home_team_key: homeTeamKey,
+          away_team_key: awayTeamKey,
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Yahoo worker error ${res.status}`);
+      }
+      return await res.json();
+    } catch(err) {
+      console.error("YahooAPI.getMatchupRoster error:", err.message);
+      throw err;
+    }
+  }
+
+  return { login, getLeagues, getLeagueBundle, getMatchupRoster, storeTokens, _getValidToken, _workerBase: BASE };
 })();
