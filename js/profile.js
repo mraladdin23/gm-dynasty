@@ -735,17 +735,22 @@ const Profile = (() => {
   // mySt = the user's standings entry from bundle.standings
   // Detect Yahoo playoff finish using standings data.
   //
-  // Uses `clinched` flag as the gate for playoff participation:
-  //   clinched=true  → made playoffs → use rank (1–4), or 7 for early exit
-  //   clinched=false/null → missed playoffs → null
+  // Playoff participation gate (two checks, either is sufficient):
+  //   1. clinched === true
+  //   2. playoffSeed > 0 && playoffSeed <= num_playoff_teams
+  //      (fallback for old leagues where Yahoo didn't set clinched reliably)
   //
   // Outcomes: 1 (Champion), 2 (Runner-Up), 3 (3rd), 4 (4th), 7 (Made Playoffs), null (Missed)
   function _detectYahooPlayoffFinish(myId, bundle, mySt) {
     if (!mySt) return null;
 
-    // clinched=true means they made the playoffs
-    const clinched = mySt.clinched === true || mySt.clinched === 1 || mySt.clinched === "1";
-    if (!clinched) return null;
+    const lm             = bundle.leagueMeta || {};
+    const numPoTeams     = Number(lm.num_playoff_teams || 0);
+    const clinched       = mySt.clinched === true || mySt.clinched === 1 || mySt.clinched === "1";
+    const seed           = Number(mySt.playoffSeed || 0);
+    const madeBySeeding  = seed > 0 && numPoTeams > 0 && seed <= numPoTeams;
+
+    if (!clinched && !madeBySeeding) return null;  // missed playoffs
 
     // Use final standings rank as placement
     const rank = mySt.rank != null ? Number(mySt.rank) : null;
@@ -1766,7 +1771,7 @@ const Profile = (() => {
 
     // Playoff finish icon for current season
     const finish     = league.playoffFinish;
-    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
+    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish && finish <= 7 ? "🏅" : "");
 
     // Best teamName: prefer latest season that actually has one
     const bestTeamName = seasons.reduce((found, s) =>
@@ -2500,7 +2505,7 @@ const Profile = (() => {
       <div class="detail-history-list">
         ${allSeasons.map(([key, s]) => {
           const f    = s.playoffFinish;
-          const icon = { 1:"🏆", 2:"🥈", 3:"🥉" }[f] || "";
+          const icon = { 1:"🏆", 2:"🥈", 3:"🥉" }[f] || (f && f <= 7 ? "🏅" : "");
           return `
             <div class="detail-history-row ${key === leagueKey ? "detail-history-row--current" : ""}"
               onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;">
@@ -2530,7 +2535,7 @@ const Profile = (() => {
       <div class="detail-history-list">
         ${allSeasons.map(([key, s]) => {
           const finish = s.playoffFinish;
-          const icon   = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
+          const icon   = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish ? "🏅" : "");
           const isCurrent = key === leagueKey;
           return `
             <div class="detail-history-row ${isCurrent ? "detail-history-row--current" : ""}">

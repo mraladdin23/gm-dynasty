@@ -210,20 +210,19 @@ const DLRStandings = (() => {
             ${sorted.map((t, i) => {
               const rank      = i + 1;
               const inPO      = rank <= playoffSpots;
-              const bubble    = rank === playoffSpots;
               const initial   = (t.display_name || "?")[0].toUpperCase();
               const avatar    = t.avatar
                 ? `<img src="https://sleepercdn.com/avatars/thumbs/${t.avatar}" class="standings-avatar" onerror="this.outerHTML='<div class=st-av>${initial}</div>'">`
                 : `<div class="st-av">${initial}</div>`;
               const streakColor = t.streak.startsWith("W") ? "var(--color-green)" :
                                   t.streak.startsWith("L") ? "var(--color-red)"   : "var(--color-text-dim)";
-              return `<tr class="${inPO ? "standings-row--playoff" : ""}" style="${inPO ? `border-left:3px solid ${bubble ? "var(--color-gold-dim)" : "var(--color-gold)"}` : "border-left:3px solid transparent"}">
+              return `<tr class="${inPO ? "standings-row--playoff" : ""}" style="${inPO ? "border-left:3px solid var(--color-gold)" : "border-left:3px solid transparent"}">
                 <td class="standings-rank">${rank}</td>
                 <td>
                   <div class="standings-team-cell">
                     ${avatar}
                     <span class="${inPO ? "fw-700" : ""}">${_esc(t.display_name)}</span>
-                    ${bubble ? `<span class="bubble-tag">bubble</span>` : ""}
+                    
                   </div>
                 </td>
                 <td class="standings-win">${t.wins}</td>
@@ -240,7 +239,6 @@ const DLRStandings = (() => {
       </div>
       <div class="standings-legend">
         <span class="legend-dot" style="background:var(--color-gold)"></span>Playoff spot
-        <span class="legend-dot" style="background:var(--color-gold-dim);margin-left:8px;"></span>Bubble
       </div>`;
   }
 
@@ -1511,7 +1509,6 @@ const DLRStandings = (() => {
     const rows = sorted.map((s, i) => {
       const rank    = i + 1;
       const inPO    = rank <= playoffSpots;
-      const bubble  = rank === playoffSpots;
       const tid     = String(s.teamId ?? "");
       const t       = teamMap[tid] || {};
       const name    = t.name || `Team ${tid}`;
@@ -1523,7 +1520,7 @@ const DLRStandings = (() => {
       const seed    = s.playoffSeed;
 
       const borderColor = inPO
-        ? (bubble ? "var(--color-gold-dim)" : "var(--color-gold)")
+        ? "var(--color-gold)"
         : "transparent";
 
       const avStyle = isMe ? "background:var(--color-gold);color:#000;font-weight:700;" : "";
@@ -1543,7 +1540,7 @@ const DLRStandings = (() => {
                 ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}
               </div>
               ${t.owner_name ? `<div class="dim" style="font-size:.72rem">${_esc(t.owner_name)}</div>` : ""}
-              ${bubble ? `<span class="bubble-tag">bubble</span>` : ""}
+              
             </div>
           </div>
         </td>
@@ -1581,7 +1578,6 @@ const DLRStandings = (() => {
       </div>
       <div class="standings-legend">
         <span class="legend-dot" style="background:var(--color-gold)"></span>Playoff spot
-        <span class="legend-dot" style="background:var(--color-gold-dim);margin-left:8px;"></span>Bubble
       </div>`;
   }
 
@@ -1934,11 +1930,10 @@ const DLRStandings = (() => {
       const initial = (name || "?")[0].toUpperCase();
       const isMe   = myRosterId && String(s.franchiseId) === String(myRosterId);
       const inPO   = !isSpecial && rank <= playoffSpots;
-      const bubble = !isSpecial && rank === playoffSpots;
 
       // Border color
       const borderColor = inPO
-        ? (bubble ? "var(--color-gold-dim)" : "var(--color-gold)")
+        ? "var(--color-gold)"
         : isSpecial && !s.eliminated
           ? (guillotineFinalMap[String(s.franchiseId)]?.status === "winner" ? "var(--color-gold)" : "#18e07a")
           : isSpecial && s.eliminated
@@ -2003,7 +1998,7 @@ const DLRStandings = (() => {
               <div class="standings-team-name">
                 ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}
               </div>
-              ${bubble ? `<span class="bubble-tag">bubble</span>` : ""}
+              
             </div>
           </div>
         </td>
@@ -2019,7 +2014,6 @@ const DLRStandings = (() => {
          </div>`
       : `<div class="standings-legend">
           <span class="legend-dot" style="background:var(--color-gold)"></span>Playoff spot
-          <span class="legend-dot" style="background:var(--color-gold-dim);margin-left:8px;"></span>Bubble
          </div>`;
 
     el.innerHTML = `
