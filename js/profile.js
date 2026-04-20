@@ -733,35 +733,27 @@ const Profile = (() => {
   //   no appearance → null (Missed Playoffs)
   //
   // mySt = the user's standings entry from bundle.standings
+  // Detect Yahoo playoff finish using standings data.
+  //
+  // Uses `clinched` flag as the gate for playoff participation:
+  //   clinched=true  → made playoffs → use rank (1–4), or 7 for early exit
+  //   clinched=false/null → missed playoffs → null
+  //
+  // Outcomes: 1 (Champion), 2 (Runner-Up), 3 (3rd), 4 (4th), 7 (Made Playoffs), null (Missed)
   function _detectYahooPlayoffFinish(myId, bundle, mySt) {
-    const lm      = bundle.leagueMeta || {};
-    const poStart = lm.playoff_start_week || 0;
-    const allMu   = bundle.allMatchups   || {};
-    const myStr   = String(myId);
+    if (!mySt) return null;
 
-    // ── Gate: user must appear in at least one playoff matchup ────────────────
-    // This distinguishes "missed playoffs" (null) from "made playoffs" (7).
-    if (poStart > 0 && Object.keys(allMu).length > 0) {
-      const poWeeks = Object.keys(allMu).map(Number).filter(w => w >= poStart);
-      const appearsInPlayoffs = poWeeks.some(w =>
-        (allMu[w] || []).some(m =>
-          String(m.home?.teamId) === myStr || String(m.away?.teamId) === myStr
-        )
-      );
-      if (!appearsInPlayoffs) return null;
-    } else if (poStart === 0) {
-      // No playoff data at all — can't determine
-      return null;
-    }
+    // clinched=true means they made the playoffs
+    const clinched = mySt.clinched === true || mySt.clinched === 1 || mySt.clinched === "1";
+    if (!clinched) return null;
 
-    // ── Use standings rank as source of truth ─────────────────────────────────
-    const rank = mySt?.rank != null ? Number(mySt.rank) : null;
+    // Use final standings rank as placement
+    const rank = mySt.rank != null ? Number(mySt.rank) : null;
     if (rank === 1) return 1;
     if (rank === 2) return 2;
     if (rank === 3) return 3;
     if (rank === 4) return 4;
-    // rank 5+ = made playoffs but eliminated early
-    return 7;
+    return 7;  // made playoffs but eliminated early
   }
 
   // Detect Yahoo league type from API settings fields + name heuristics
@@ -1774,7 +1766,7 @@ const Profile = (() => {
 
     // Playoff finish icon for current season
     const finish     = league.playoffFinish;
-    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish && finish <= 7 ? "🏅" : "");
+    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
 
     // Best teamName: prefer latest season that actually has one
     const bestTeamName = seasons.reduce((found, s) =>
@@ -2508,7 +2500,7 @@ const Profile = (() => {
       <div class="detail-history-list">
         ${allSeasons.map(([key, s]) => {
           const f    = s.playoffFinish;
-          const icon = { 1:"🏆", 2:"🥈", 3:"🥉" }[f] || (f && f <= 7 ? "🏅" : "");
+          const icon = { 1:"🏆", 2:"🥈", 3:"🥉" }[f] || "";
           return `
             <div class="detail-history-row ${key === leagueKey ? "detail-history-row--current" : ""}"
               onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;">
@@ -2538,7 +2530,7 @@ const Profile = (() => {
       <div class="detail-history-list">
         ${allSeasons.map(([key, s]) => {
           const finish = s.playoffFinish;
-          const icon   = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish ? "🏅" : "");
+          const icon   = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
           const isCurrent = key === leagueKey;
           return `
             <div class="detail-history-row ${isCurrent ? "detail-history-row--current" : ""}">
