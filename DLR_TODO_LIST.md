@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 20, 2026 (session 5)*
+*Updated: April 20, 2026 (session 6)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -29,19 +29,15 @@ fixed via data-attributes instead of inline onclick args.
 
 ---
 
-### Y3 — Yahoo Transactions Team Name Blank
-**Root cause:** `roster_ids[0]` comes from `tx.teamId` which may be null when worker
-can't find the team key. For adds, team is `destination_team_key` at transaction level
-(not player level). For drops, it's `source_team_key`.
-- Verify `t.id` in `bundle.teams` matches `teamId` strings (both bare numeric like `"3"`)
-- If `_teamName()` returns `Team ${id}`, check if the `initiator` logic fires for Yahoo FA moves
-**Files:** `transactions.js`, `worker.js`
+### Y3 — Yahoo Transactions Team Name Blank ✅
+**Confirmed resolved (session 6).** Team name resolution working correctly — crossed off.
 
 ---
 
-### Y4 — Yahoo Token Expired on Mobile
+### Y4 — Yahoo Mobile Token + OAuth
 **Problem:** Yahoo leagues work in browser but on mobile every tab says "token expired"
-with no way to refresh. Reconnecting Yahoo does not always fix it.
+with no way to refresh. Reconnecting Yahoo does not always fix it. Also mobile detail
+panel tabs may not render correctly after OAuth redirect.
 **Files:** `yahoo.js`, `worker.js`, `app.js`
 
 ---
@@ -73,12 +69,8 @@ skipped in the filter to prevent re-fetching.
 
 ## 🟡 Cross-Platform Bugs
 
-### X1 — Leagues Show "Season in Progress" After Completion
-**Status:** Partially fixed April 18. `_isSeasonComplete(l)` helper added to
-`profile.js` — correctly shows "Missed Playoffs" for past-season Yahoo/MFL leagues
-using `resolved` flag and `season < currentYear`. Sleeper uses `status === "complete"`.
-**Remaining:** League card grid and other places that show status badges may still
-need audit for non-Sleeper platforms.
+### X1 — Leagues Show "Season in Progress" After Completion ✅
+**Fully resolved (session 6).** Audit confirmed `_isSeasonComplete(l)` handles all platforms correctly. No further changes needed.
 **Files:** `profile.js`, `standings.js`
 
 ### X2 — Link Leagues Across Platforms
@@ -91,8 +83,8 @@ Yahoo → Sleeper) so it shows as a continuous dynasty history.
 
 ## 🟡 Mobile / UI Polish
 
-### U4 — Groups: Broadcast Message Not Working
-**Problem:** Commissioner broadcast message button does nothing.
+### U4 — Groups: Broadcast Message Not Working ✅
+**Fixed April 20 (session 6).** JSON array in inline `onclick` was corrupting the HTML attribute. Fixed by replacing with `data-gid`, `data-name`, `data-keys` attributes and wiring click handler via `addEventListener` after `innerHTML` is set.
 **Files:** `leaguegroups.js`
 
 ---
@@ -150,19 +142,16 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
-| 1 | Y3 | Yahoo Transactions Team Name | Low | `transactions.js`, `worker.js` |
-| 2 | Y4 | Yahoo Mobile Token | High | `yahoo.js`, `worker.js`, `app.js` |
-| 3 | U4 | Broadcast Message | Low | `leaguegroups.js` |
-| 4 | X1 | Season in Progress Badge (audit) | Low | `profile.js`, `standings.js` |
-| 5 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 6 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
-| 7 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 8 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 9 | F2 | Custom Playoff Tracker | Very High | New module + several files |
-| 10 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 11 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 12 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
-| 13 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
+| 1 | Y4 | Yahoo Mobile Token + OAuth | High | `yahoo.js`, `worker.js`, `app.js` |
+| 2 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
+| 3 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
+| 4 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
+| 5 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 6 | F2 | Custom Playoff Tracker | Very High | New module + several files |
+| 7 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 8 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 9 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 10 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
 
 ---
 
@@ -220,6 +209,14 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - Hallway pins moved to Firebase (gmd/users/{username}/hallwayPins), localStorage as cache
 - Hallway card: leagues removed, 4 stats spread evenly, years played calculated from distinct seasons
 - Hallway modal: common leagues only, dynasty/keeper deduplicated to most recent year
+- **U4:** Commissioner broadcast message — JSON-in-onclick bug fixed via data attributes + addEventListener in `leaguegroups.js`
+- **X1:** Season status audit — `_isSeasonComplete(l)` confirmed correct for all platforms; closed
+- **Y3:** Yahoo Transactions team name — confirmed resolved
+- **Yahoo playoff finish detection** — fully rewritten: `clinched`/`playoffSeed` gate replaces matchup parsing; `rank` from standings is source of truth; top-3 badges only (🏆🥈🥉); 🏅 removed
+- **Bubble tag** — removed from all 3 platforms in `standings.js`; no more dim gold border for last playoff seed
+- **`GMDB.saveLeague` singular** — fixed to `GMDB.saveLeagues` in all 6 call sites; was silently failing and preventing sync writes
+- **`syncYahooLeague` null myId** — no longer throws; writes cleared flags + marks resolved, shows warning toast
+- **`is_finished` gate** — removed from playoff detection; Yahoo returns 0 for many old completed leagues
 
 ---
 

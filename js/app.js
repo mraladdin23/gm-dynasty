@@ -249,28 +249,41 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
 });
 
 // ── Yahoo: detect OAuth callback ─────────────────────────
-// Worker redirects back with #yahoo_token=... in the hash
+// Worker now redirects back with ?yahoo_token=... as query params (mobile-safe).
+// Query params survive iOS Safari / Android Chrome redirect chains reliably.
+// Hash-based detection kept as fallback for any cached old-style links.
 (function() {
-  const hash = window.location.hash;
-  if (hash.includes("yahoo_token=")) {
-    const params = new URLSearchParams(hash.slice(1)); // strip leading #
-    const accessToken  = params.get("yahoo_token");
-    const refreshToken = params.get("yahoo_refresh") || "";
-    const expiresIn    = parseInt(params.get("yahoo_expires") || "3600");
-
+  // ── Primary path: query params (mobile-safe) ────────────
+  const qp = new URLSearchParams(window.location.search);
+  if (qp.get("yahoo_token")) {
+    const accessToken  = qp.get("yahoo_token");
+    const refreshToken = qp.get("yahoo_refresh") || "";
+    const expiresIn    = parseInt(qp.get("yahoo_expires") || "3600");
     if (accessToken) {
-      // Store token for pickup after auth loads
-      // Store tokens — YahooAPI handles localStorage + auto-refresh going forward
       YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
       sessionStorage.setItem("dlr_yahoo_pending", "1");
     }
-
-    // Clean the hash from the URL immediately so token isn't visible
+    // Clean query params immediately so token isn't visible in URL bar
     window.history.replaceState({}, "", window.location.pathname);
   }
-  // Legacy query-string path
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("yahoo") === "connected") {
+
+  // ── Fallback: hash-based (desktop / old cached redirects) ──
+  const hash = window.location.hash;
+  if (hash.includes("yahoo_token=")) {
+    const hp = new URLSearchParams(hash.slice(1)); // strip leading #
+    const accessToken  = hp.get("yahoo_token");
+    const refreshToken = hp.get("yahoo_refresh") || "";
+    const expiresIn    = parseInt(hp.get("yahoo_expires") || "3600");
+    if (accessToken) {
+      YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
+      sessionStorage.setItem("dlr_yahoo_pending", "1");
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  // ── Legacy stub: ?yahoo=connected (no token — just triggers re-import) ──
+  const lp = new URLSearchParams(window.location.search);
+  if (lp.get("yahoo") === "connected") {
     window.history.replaceState({}, "", window.location.pathname);
     sessionStorage.setItem("dlr_yahoo_pending", "1");
   }
