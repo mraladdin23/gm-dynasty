@@ -410,6 +410,29 @@ const GMDB = (() => {
     }
   }
 
+  // ── Tournament helpers ─────────────────────────────────
+  // All tournament data lives at gmd/tournaments/{tournamentId}/
+  // These are thin wrappers kept here for consistency — the tournament
+  // module uses GMD.child() SDK refs directly for real-time updates.
+
+  async function getTournament(tournamentId) {
+    try {
+      const snap = await GMD.child(`tournaments/${tournamentId}`).once("value");
+      return snap.val() || null;
+    } catch(e) { return null; }
+  }
+
+  async function saveTournamentMeta(tournamentId, meta) {
+    await GMD.child(`tournaments/${tournamentId}/meta`).update(meta);
+  }
+
+  async function getAllTournaments() {
+    try {
+      const snap = await GMD.child("tournaments").once("value");
+      return snap.val() || {};
+    } catch(e) { return {}; }
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
@@ -444,6 +467,9 @@ const GMDB = (() => {
     getYahooTokens,
     saveMergeLinks,
     removeMergeLinks,
+    getTournament,
+    saveTournamentMeta,
+    getAllTournaments,
     _restGet,
     _restPut
   };

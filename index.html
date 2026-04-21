@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="css/base.css?v=19" />
   <link rel="stylesheet" href="css/auth.css?v=5" />
   <link rel="stylesheet" href="css/locker.css?v=21" />
+  <link rel="stylesheet" href="css/tournament.css?v=1" />
 
   <!-- Firebase v9 compat — loaded async to avoid blocking page render on mobile -->
   <script>
@@ -265,6 +266,7 @@
         <a href="#" class="nav-link active" data-view="locker">My Locker</a>
         <a href="#" class="nav-link" data-view="hallway">Hallway</a>
         <a href="#" class="nav-link" data-view="trophies">Trophies</a>
+        <a href="#" class="nav-link" data-view="tournament">Tournaments</a>
       </div>
       <div class="nav-user">
         <span id="nav-username" class="nav-username"></span>
@@ -282,6 +284,7 @@
         <a href="#" class="nav-drawer-item" data-view="locker" onclick="DLRNav.go('locker')">🏠 My Locker</a>
         <a href="#" class="nav-drawer-item" data-view="hallway" onclick="DLRNav.go('hallway')">🚪 Hallway</a>
         <a href="#" class="nav-drawer-item" data-view="trophies" onclick="DLRNav.go('trophies')">🏆 Trophy Room</a>
+        <a href="#" class="nav-drawer-item" data-view="tournament" onclick="DLRNav.go('tournament')">🏟 Tournaments</a>
       </div>
       <div class="nav-drawer-section">
         <div class="nav-drawer-label">Quick Actions</div>
@@ -492,6 +495,10 @@
           <div class="spinner"></div> Loading trophy room…
         </div>
       </div>
+    </div>
+
+    <div id="view-tournament" class="app-view">
+      <!-- Populated by DLRTournament.init() -->
     </div>
 
   </div>
@@ -795,6 +802,7 @@
   <script src="js/hallway.js"></script>
   <script src="js/trophy-room.js"></script>
   <script src="js/playercard.js"></script>
+  <script src="js/tournament.js?v=1"></script>
   <script src="js/profile.js?v=20"></script>
   <script src="js/app.js?v=19"></script>
 

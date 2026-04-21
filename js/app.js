@@ -34,6 +34,13 @@ const AppState = {
     AppState.showScreen("app-screen");
     setLoading(false);
 
+    // Init tournament module (non-blocking)
+    if (typeof DLRTournament !== "undefined") {
+      DLRTournament.init(profile.username).catch(err =>
+        console.warn("[Tournament] init error:", err.message)
+      );
+    }
+
     // Tell YahooAPI which user this is so Firebase token reads/writes work
     YahooAPI.setUsername(profile.username);
 
@@ -380,6 +387,10 @@ const DLRNav = {
     AppState.currentView = view;
     if (view === "hallway")  DLRHallway.init();
     if (view === "trophies") DLRTrophyRoom.init();
+    if (view === "tournament" && typeof DLRTournament !== "undefined") {
+      const profile = Auth.getCurrentProfile();
+      if (profile) DLRTournament.init(profile.username).catch(() => {});
+    }
   }
 };
 
@@ -422,6 +433,10 @@ document.querySelectorAll(".nav-link").forEach(link => {
     AppState.currentView = view;
     if (view === "hallway") DLRHallway.init();
     if (view === "trophies") DLRTrophyRoom.init();
+    if (view === "tournament" && typeof DLRTournament !== "undefined") {
+      const profile = Auth.getCurrentProfile();
+      if (profile) DLRTournament.init(profile.username).catch(() => {});
+    }
   });
 });
 
