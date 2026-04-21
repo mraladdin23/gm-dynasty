@@ -237,52 +237,46 @@ const Profile = (() => {
       throw new Error("No Yahoo leagues found. Make sure you completed the Yahoo authorization.");
     }
 
-    // Load existing stored leagues so we can preserve accumulated data
-    // (playoffFinish, myRosterId, teamName, resolved, isChampion, wins, etc.)
-    // A reconnect should only refresh identity fields, never wipe history.
-    let existing = {};
-    try {
-      existing = await GMDB.getLeagues(gmdUsername) || {};
-    } catch(e) {
-      console.warn("[linkYahoo] Could not load existing leagues:", e.message);
-    }
-
     const leaguesMap = {};
     for (const l of yahooLeagues) {
       const key        = `yahoo_${l.season}_${l.leagueId}`;
       const leagueName = l.leagueName || `League ${l.leagueId}`;
+      // Chain by normalized league name so same dynasty across seasons links together
       const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
       const franchiseId = `yahoo__${normalizedName}`;
-
-      const prev = existing[key] || {};
-
-      // Merge: identity/structural fields always come from Yahoo API (may have changed).
-      // Accumulated fields are preserved from Firebase — never reset on reconnect.
       leaguesMap[key] = {
-        // Preserve everything already stored
-        ...prev,
-        // Always refresh these from the API
         platform:      "yahoo",
         leagueId:      String(l.leagueId),
-        leagueKey:     l.leagueKey || prev.leagueKey || `nfl.l.${l.leagueId}`,
+        leagueKey:     l.leagueKey || `nfl.l.${l.leagueId}`,  // full Yahoo key e.g. "423.l.12345"
         franchiseId,
         leagueName,
         season:        String(l.season || new Date().getFullYear()),
-        totalTeams:    l.numTeams || prev.totalTeams || 12,
-        // Only set these if not already stored
-        leagueType:    prev.leagueType    || _detectLeagueType(leagueName),
-        teamName:      prev.teamName      || "",
-        isCommissioner: prev.isCommissioner || false,
-        myRosterId:    prev.myRosterId    || null,
-        wins:          prev.wins          ?? 0,
-        losses:        prev.losses        ?? 0,
-        ties:          prev.ties          ?? 0,
-        pointsFor:     prev.pointsFor     ?? 0,
-        pointsAgainst: prev.pointsAgainst ?? 0,
+        leagueType:    _detectLeagueType(leagueName),
+        totalTeams:    l.numTeams || 12,
+        teamName:      "",
+        isCommissioner: false,
+        myRosterId:    null,
+        wins:          0, losses: 0, ties: 0,
+        pointsFor: 0, pointsAgainst: 0
       };
     }
 
     await GMDB.linkPlatform(gmdUsername, "yahoo", { linked: true });
+
+    // Persist the fresh OAuth token to Firebase now that the platform is linked.
+    // showApp's sync block fires before linkYahoo runs (linked was false then),
+    // so this is the only reliable place to save the token on first connect.
+    const cachedToken = localStorage.getItem("dlr_yahoo_access_token");
+    if (cachedToken) {
+      const refresh   = localStorage.getItem("dlr_yahoo_refresh_token");
+      const expiresAt = Number(localStorage.getItem("dlr_yahoo_expires_at") || 0);
+      GMDB.saveYahooTokens(gmdUsername, {
+        accessToken:  cachedToken,
+        refreshToken: refresh || null,
+        expiresAt
+      }).catch(e => console.warn("[Yahoo] saveYahooTokens in linkYahoo failed:", e.message));
+    }
+
     await GMDB.saveLeagues(gmdUsername, leaguesMap);
     await GMDB.recomputeStats(gmdUsername);
     return { leagues: leaguesMap };
@@ -587,6 +581,28 @@ const Profile = (() => {
   // Also detects playoff finish (champion, runner-up, etc.) from allMatchups.
   async function _resolveYahooIdentities(username) {
     if (!username || !_currentProfile?.platforms?.yahoo?.linked) return;
+
+    // Ensure token is available before making any bundle calls.
+    // If localStorage is empty (e.g. after mobile redirect cleared it),
+    // wait for Firebase to restore the token before proceeding.
+    const hasToken = !!localStorage.getItem("dlr_yahoo_access_token");
+    if (!hasToken) {
+      console.log("[resolveYahoo] No token in localStorage — waiting for Firebase load…");
+      // Give loadTokensFromFirebase (fired in showApp) time to complete
+      await new Promise(r => setTimeout(r, 1500));
+      const tokenAfterWait = !!localStorage.getItem("dlr_yahoo_access_token");
+      if (!tokenAfterWait) {
+        // Try loading directly rather than giving up
+        if (typeof YahooAPI !== "undefined" && YahooAPI.loadTokensFromFirebase) {
+          await YahooAPI.loadTokensFromFirebase(username).catch(() => {});
+        }
+        if (!localStorage.getItem("dlr_yahoo_access_token")) {
+          console.warn("[resolveYahoo] No Yahoo token available — skipping identity resolution");
+          return;
+        }
+      }
+    }
+
     const currentYear = String(new Date().getFullYear());
     const allYahoo = Object.entries(_allLeagues).filter(([, l]) => {
       if (l.platform !== "yahoo") return false;
@@ -596,6 +612,8 @@ const Profile = (() => {
       return false;
     });
     if (!allYahoo.length) return;
+
+    console.log(`[resolveYahoo] resolving ${allYahoo.length} Yahoo leagues…`);
 
     const CONCURRENCY = 2;
     for (let i = 0; i < allYahoo.length; i += CONCURRENCY) {
@@ -610,9 +628,7 @@ const Profile = (() => {
           const mySt   = bundle.standings.find(s => String(s.teamId) === String(myId)) || {};
           const lm     = bundle.leagueMeta || {};
 
-          // Always run detection — function handles missing data internally.
           let playoffFinish = _detectYahooPlayoffFinish(myId, bundle, mySt);
-
           const leagueType = _detectYahooLeagueType(lm, league.leagueName || lm.name || "", bundle.hasKeeperPicks);
 
           if (_allLeagues[leagueKey]) {
@@ -644,7 +660,9 @@ const Profile = (() => {
             Object.assign(_allLeagues[leagueKey], updatedLeague);
             GMDB.saveLeagues(username, { [leagueKey]: { ..._allLeagues[leagueKey] } }).catch(() => {});
           }
-        } catch(e) { /* skip failed league silently */ }
+        } catch(e) {
+          console.warn(`[resolveYahoo] failed for ${leagueKey}:`, e.message);
+        }
       }));
       if (i + CONCURRENCY < allYahoo.length) {
         await new Promise(r => setTimeout(r, 500));
@@ -982,7 +1000,7 @@ const Profile = (() => {
     // that doesn't yet have them stored. Same pattern as syncMFLTeams.
     // Runs after first paint so it doesn't block the initial render.
     if (profile.platforms?.yahoo?.linked) {
-      setTimeout(() => _resolveYahooIdentities(_currentUsername), 200);
+      setTimeout(() => _resolveYahooIdentities(_currentUsername), 1000);
       // Recompute stats non-blocking so header reflects latest Yahoo leagues
       GMDB.recomputeStats(_currentUsername).then(stats => {
         if (stats) _renderStatsRow(stats);

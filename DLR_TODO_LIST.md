@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 20, 2026 (session 6)*
+*Updated: April 20, 2026 (session 7)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -19,26 +19,41 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Yahoo Platform Bugs
 
-### Y2 — Yahoo Matchup Pills + Player Score Expand ✅
-**Fixed April 20 (session 5).** Week pills now use `season-pill`/`season-pill--current` CSS
-matching MFL/Sleeper. Expand shows weekly roster (starters + bench) with slot labels in
-correct order (QB→RB→WR→TE→FLEX→SF→K→DEF). Individual scores not shown — Yahoo requires
-per-league scoring rules to compute from raw stats (noted in UI). Team name apostrophes
-fixed via data-attributes instead of inline onclick args.
-**Files:** `standings.js`, `worker.js`
+### Y4 — Yahoo OAuth Token Not Persisting (Mobile + Browser)
+**Status:** Partially fixed. Multiple changes applied this session but token is still
+not being saved to Firebase after OAuth callback. The root cause is a deployment
+sequencing problem — the uploaded files in each session are several versions behind
+the output files, meaning changes are not making it into the repo reliably.
 
----
+**What has been fixed (confirmed in output files):**
+- Worker: `yahooCallback` now uses `?yahoo_token=` query params instead of `#hash`
+  (query params survive mobile Safari redirect chains)
+- Worker: `yahooLeagueBundle` returns real 401 when Yahoo rejects token instead of
+  empty bundle (was causing confusing downstream errors)
+- `app.js`: OAuth IIFE reads query params first, hash as fallback
+- `app.js`: `dlr_yahoo_pending` flag uses `localStorage` not `sessionStorage`
+- `app.js`: `showApp` calls `YahooAPI.setUsername()` and syncs token to Firebase
+- `yahoo.js`: `storeTokens` is localStorage-only (no timing issues with GMDB)
+- `yahoo.js`: `setUsername()` and `loadTokensFromFirebase()` added
+- `yahoo.js`: `_getValidToken` falls back to Firebase if localStorage empty
+- `yahoo.js`: Refresh failure falls back to optimistic token use instead of throwing
+- `firebase-db.js`: `saveYahooTokens` / `getYahooTokens` added
+- `profile.js`: `linkYahoo` now merges with existing league data on reconnect
+  (was wiping playoffFinish, myRosterId, teamName, etc. on every reconnect)
+- `profile.js`: `_resolveYahooIdentities` waits for token before fetching bundles
 
-### Y3 — Yahoo Transactions Team Name Blank ✅
-**Confirmed resolved (session 6).** Team name resolution working correctly — crossed off.
+**What is still broken:**
+- Token is not appearing at `gmd/users/mraladdin23/platforms/yahoo/tokens` in Firebase
+- The most likely remaining cause: the deployed files don't include the Firebase
+  token sync block in `showApp` — confirm by checking if `YahooAPI.setUsername`
+  exists in the live `yahoo.js`
 
----
+**Files needed for next session:** `app.js`, `yahoo.js`, `firebase-db.js`, `profile.js`
 
-### Y4 — Yahoo Mobile Token + OAuth
-**Problem:** Yahoo leagues work in browser but on mobile every tab says "token expired"
-with no way to refresh. Reconnecting Yahoo does not always fix it. Also mobile detail
-panel tabs may not render correctly after OAuth redirect.
-**Files:** `yahoo.js`, `worker.js`, `app.js`
+**Key files to verify are deployed (check live source):**
+- `yahoo.js` should export `setUsername` and `loadTokensFromFirebase`
+- `app.js` `showApp` should call `YahooAPI.setUsername(profile.username)`
+- `firebase-db.js` should have `saveYahooTokens` and `getYahooTokens` in return block
 
 ---
 
@@ -53,14 +68,6 @@ without caching bundles server-side or reducing re-import frequency.
 
 ---
 
-### Y6 — Yahoo Completed Redraft Leagues Not Marked Resolved ✅
-**Fixed April 18.** `_resolveYahooIdentities` now sets `resolved: true` when
-`lm.is_finished === 1` regardless of `leagueType`. Resolved leagues are also
-skipped in the filter to prevent re-fetching.
-**Files:** `profile.js`
-
----
-
 ## 🔴 MFL Platform Bugs
 
 *(none currently)*
@@ -68,10 +75,6 @@ skipped in the filter to prevent re-fetching.
 ---
 
 ## 🟡 Cross-Platform Bugs
-
-### X1 — Leagues Show "Season in Progress" After Completion ✅
-**Fully resolved (session 6).** Audit confirmed `_isSeasonComplete(l)` handles all platforms correctly. No further changes needed.
-**Files:** `profile.js`, `standings.js`
 
 ### X2 — Link Leagues Across Platforms
 **Problem:** No way to connect a franchise that moved platforms (e.g. MFL → Sleeper,
@@ -83,9 +86,7 @@ Yahoo → Sleeper) so it shows as a continuous dynasty history.
 
 ## 🟡 Mobile / UI Polish
 
-### U4 — Groups: Broadcast Message Not Working ✅
-**Fixed April 20 (session 6).** JSON array in inline `onclick` was corrupting the HTML attribute. Fixed by replacing with `data-gid`, `data-name`, `data-keys` attributes and wiring click handler via `addEventListener` after `innerHTML` is set.
-**Files:** `leaguegroups.js`
+*(none currently)*
 
 ---
 
@@ -142,7 +143,7 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
-| 1 | Y4 | Yahoo Mobile Token + OAuth | High | `yahoo.js`, `worker.js`, `app.js` |
+| 1 | Y4 | Yahoo OAuth Token Persistence (finish) | High | `app.js`, `yahoo.js`, `firebase-db.js`, `profile.js` |
 | 2 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
 | 3 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
 | 4 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
@@ -217,6 +218,17 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **`GMDB.saveLeague` singular** — fixed to `GMDB.saveLeagues` in all 6 call sites; was silently failing and preventing sync writes
 - **`syncYahooLeague` null myId** — no longer throws; writes cleared flags + marks resolved, shows warning toast
 - **`is_finished` gate** — removed from playoff detection; Yahoo returns 0 for many old completed leagues
+- **Worker:** `yahooCallback` uses `?yahoo_token=` query params (mobile-safe, not hash)
+- **Worker:** `yahooLeagueBundle` returns real 401 when Yahoo rejects token
+- **`app.js`:** OAuth IIFE reads query params first, hash as fallback; `dlr_yahoo_pending` uses `localStorage`
+- **`yahoo.js`:** Refresh failure falls back to optimistic use; stale refresh token cleared on reconnect
+- **`profile.js`:** `linkYahoo` preserves existing league data on reconnect (no more data wipe)
+- **`profile.js`:** MFL sync button added to detail panel for all MFL leagues (not just Yahoo)
+- **`profile.js`:** `_detectAndSetMFLPlayoffFinish` persists `isGuillotine`/`isEliminator` to Firebase
+- **`profile.js`:** Eliminator/guillotine leagues show "No Playoffs Scheduled" not "Missed Playoffs"
+- **`profile.js`:** `finishIcon` on league cards top-3 only (🏆🥈🥉), no more 🏅
+- **`profile.js`:** MFL sync error messaging — rate-limit suggestion, network error distinction
+- **`firebase-db.js`:** `saveYahooTokens` / `getYahooTokens` added for durable token storage
 
 ---
 
@@ -242,6 +254,12 @@ console.log('Yahoo total:', yahoo.length);
 console.log('Resolved:', yahoo.filter(([k,v]) => v.resolved).length);
 console.log('With playoffFinish:', yahoo.filter(([k,v]) => v.playoffFinish != null).length);
 console.log('Missing teamName:', yahoo.filter(([k,v]) => !v.teamName).length);
+```
+
+### Check Yahoo token in Firebase
+```js
+const snap = await firebase.database().ref('gmd/users/mraladdin23/platforms/yahoo/tokens').get();
+console.log('Yahoo tokens:', snap.val());
 ```
 
 ### Find resolved Yahoo leagues with no playoff finish (Yahoo had no data)
@@ -279,6 +297,24 @@ console.log("Reset", key, "— click Sync to re-detect");
 await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
 console.log("Bundles cleared");
 ```
+
+---
+
+## ⚠️ Notes for Next Session (Y4 continuation)
+
+**Before starting next session, verify these files are current in the repo:**
+1. Open `yahoo.js` in the repo — does it contain `function setUsername`? If not, the Firebase token changes were never deployed.
+2. Open `app.js` in the repo — does `showApp` contain `YahooAPI.setUsername`? If not, same problem.
+3. Open `firebase-db.js` in the repo — does the return block contain `saveYahooTokens`?
+
+**If any of the above are missing:** attach those files fresh from the repo to the next session — not from local copies — and apply the changes from scratch against the actual live files. The disconnect between output files and deployed files has been the main blocker this session.
+
+**Deployment checklist for Y4 fixes:**
+- `firebase-db.js` → git push (no Cloudflare needed)
+- `yahoo.js` → git push
+- `profile.js` → git push
+- `app.js` → git push
+- `worker.js` → paste into Cloudflare dashboard (git push alone is not enough)
 
 ---
 
