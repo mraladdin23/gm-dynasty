@@ -22,6 +22,9 @@ const Profile = (() => {
   let _archivedPage    = 0;
   let _filteredCache   = [];
   let _archivedCache   = [];
+  // Cache of loaded groups data for synchronous use in _franchiseMatchesFilter
+  // { personalLabels: [{name, leagueKeys, color}], commishGroups: [{name, leagueKeys, color}] }
+  let _groupsCache     = { personalLabels: [], commishGroups: [] };
 
   // ── Platform linking ───────────────────────────────────
 
@@ -1526,6 +1529,32 @@ const Profile = (() => {
 
   // ── Filter bar ─────────────────────────────────────────
   function _renderLeagueFilters() {
+    const customLabels  = new Set();
+    const commishGroups = new Set();
+
+    Object.values(_leagueMeta).forEach(m => {
+      if (m && m.customLabel  && m.customLabel.trim())  customLabels.add(m.customLabel.trim());
+      if (m && m.commishGroup && m.commishGroup.trim()) commishGroups.add(m.commishGroup.trim());
+    });
+
+    // Show/hide group buttons
+    document.getElementById("filter-groups-btn")?.style.setProperty("display", customLabels.size > 0 ? "" : "none");
+    document.getElementById("filter-commish-btn")?.style.setProperty("display", commishGroups.size > 0 ? "" : "none");
+
+    // Populate groups panel
+    const groupsList = document.getElementById("filter-groups-list");
+    if (groupsList) {
+      groupsList.innerHTML = [...customLabels].map(l =>
+        `<button class="filter-chip" data-filter="label:${_escHtml(l)}" onclick="Profile.toggleFilter('label:${_escHtml(l)}')">🏷 ${_escHtml(l)}</button>`
+      ).join("");
+    }
+    const commishList = document.getElementById("filter-commish-list");
+    if (commishList) {
+      commishList.innerHTML = [...commishGroups].map(g =>
+        `<button class="filter-chip" data-filter="group:${_escHtml(g)}" onclick="Profile.toggleFilter('group:${_escHtml(g)}')">⚡ ${_escHtml(g)}</button>`
+      ).join("");
+    }
+
     // Wire checkboxes in main panel
     document.querySelectorAll("#filter-panel-main input[type=checkbox]").forEach(cb => {
       cb.addEventListener("change", () => {
@@ -1536,6 +1565,7 @@ const Profile = (() => {
             x.checked = x.dataset.filter === "all";
           });
         } else {
+          // Uncheck "all" when specific filter selected
           document.querySelector('#filter-panel-main input[data-filter="all"]').checked = false;
           if (cb.checked) _activeFilters.add(f);
           else _activeFilters.delete(f);
@@ -1567,8 +1597,8 @@ const Profile = (() => {
     _refreshGroupsFilter();
   }
 
-  // Async: fetch personal labels + commish groups from Firebase and populate
-  // the unified "My Groups" filter panel. Shows the button only if content exists.
+  // Async: fetch personal labels + commish groups from Firebase, populate
+  // the unified "My Groups" filter panel, and cache data for _franchiseMatchesFilter.
   async function _refreshGroupsFilter() {
     const myLeagueKeys = new Set(Object.keys(_allLeagues));
     const uname = (_currentUsername || "").toLowerCase();
@@ -1606,6 +1636,9 @@ const Profile = (() => {
         commishGroups.push({ name, color: "var(--color-gold)", leagueKeys: [] });
       }
     });
+
+    // Cache for synchronous use in _franchiseMatchesFilter
+    _groupsCache = { personalLabels, commishGroups };
 
     const totalGroups = personalLabels.length + commishGroups.length;
 
@@ -1649,6 +1682,11 @@ const Profile = (() => {
     }
 
     _updateGroupsBtnCount();
+
+    // Re-render leagues in case a group filter was already active when data loaded
+    if ([..._activeFilters].some(f => f.startsWith("label:") || f.startsWith("group:"))) {
+      _renderLeagues();
+    }
   }
 
   function _updateFilterBtnCount() {
@@ -1961,8 +1999,26 @@ const Profile = (() => {
       case "keeper":       return latest?.leagueType === "keeper";
       case "commissioner": return f.seasons.some(s => s.league.isCommissioner);
       default:
-        if (filter.startsWith("label:"))    return meta.customLabel === filter.slice(6);
-        if (filter.startsWith("group:"))    return meta.commishGroup === filter.slice(6);
+        if (filter.startsWith("label:")) {
+          const labelName = filter.slice(6);
+          // Check _groupsCache first (Firebase labels with leagueKeys arrays)
+          const cachedLabel = _groupsCache.personalLabels.find(l => l.name === labelName);
+          if (cachedLabel) {
+            return f.seasons.some(s => (cachedLabel.leagueKeys || []).includes(s.key));
+          }
+          // Fallback: legacy customLabel text field on leagueMeta
+          return f.seasons.some(s => (_leagueMeta[s.key] || {}).customLabel === labelName);
+        }
+        if (filter.startsWith("group:")) {
+          const groupName = filter.slice(6);
+          // Check _groupsCache (Firebase commGroups with leagueKeys arrays)
+          const cachedGroup = _groupsCache.commishGroups.find(g => g.name === groupName);
+          if (cachedGroup) {
+            return f.seasons.some(s => (cachedGroup.leagueKeys || []).includes(s.key));
+          }
+          // Fallback: legacy commishGroup text field on leagueMeta
+          return f.seasons.some(s => (_leagueMeta[s.key] || {}).commishGroup === groupName);
+        }
         if (filter.startsWith("platform:")) return latest?.platform === filter.slice(9);
         return true;
     }
@@ -2537,13 +2593,11 @@ const Profile = (() => {
     return league?.franchiseId || leagueKey;
   }
 
-  // Returns all [key, league] pairs that belong to the same effective franchise chain,
+  // Returns all [key, league] pairs belonging to the same effective franchise chain,
   // including seasons merged in via mergedInto links.
   function _getAllSeasonsForFranchise(targetFid) {
     return Object.entries(_allLeagues).filter(([key, l]) => {
-      // Direct match on franchiseId
       if ((l.franchiseId || key) === targetFid) return true;
-      // Merged-in match
       const meta = _leagueMeta[key] || {};
       if (meta.mergedInto && !meta.suppressMerge && meta.mergedInto === targetFid) return true;
       return false;
@@ -3033,7 +3087,7 @@ const Profile = (() => {
   }
 
   function _renderHistory(el, leagueKey, league) {
-    // Find all seasons of same franchise chain, including merged-in seasons
+    // Find all seasons of same franchise (same franchiseId)
     const franchiseId = _resolveEffectiveFid(leagueKey);
     const allSeasons  = _getAllSeasonsForFranchise(franchiseId)
       .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
