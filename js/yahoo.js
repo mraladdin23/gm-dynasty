@@ -142,6 +142,12 @@ const YahooAPI = (() => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ access_token: token, league_key: leagueKey })
       });
+      if (res.status === 401) {
+        // Worker detected Yahoo rejected the token — clear stored expiry so next
+        // call knows the token is dead, then throw so UI shows reconnect prompt.
+        localStorage.removeItem("dlr_yahoo_expires_at");
+        throw new Error("Yahoo token expired — please reconnect Yahoo in Edit Profile.");
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `Yahoo worker error ${res.status}`);

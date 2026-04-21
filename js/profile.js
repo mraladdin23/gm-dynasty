@@ -439,9 +439,41 @@ const Profile = (() => {
       (standings[0].isEliminator || standings[0].isGuillotine);
 
     if (isEliminatorOrGuillotine) {
-      // normalizeStandings already returns standings in rank order (rank=1 is winner).
-      // For eliminator: winner is the un-eliminated franchise (rank=1).
-      // For guillotine: alive teams sort first by ptsFor desc, then eliminated by weekEliminated desc.
+      const isGuillotine = standings[0].isGuillotine || false;
+      const isEliminator = standings[0].isEliminator || false;
+
+      // Persist the league type flags so _renderOverviewHTML can use them
+      // even after a page reload (they were previously only set in memory).
+      if (_allLeagues[leagueKey]) {
+        _allLeagues[leagueKey].isGuillotine = isGuillotine;
+        _allLeagues[leagueKey].isEliminator = isEliminator;
+      }
+
+      const myEntry = standings.find(s => String(s.franchiseId) === myStr);
+      if (myEntry) {
+        const finish = myEntry.rank;
+        _allLeagues[leagueKey].playoffFinish = finish;
+        _allLeagues[leagueKey].isChampion    = finish === 1;
+      }
+      return;
+    }
+
+    // ── Also check league info directly for eliminator flag ───────────────
+    // MFL sometimes clears franchises_eliminated after the season ends, so
+    // normalizeStandings may not detect it. Check the league object directly.
+    const leagueInfo = bundle?.league?.league || {};
+    const leagueType = (leagueInfo.leagueType || leagueInfo.league_type || "").toLowerCase();
+    const isKnownEliminator = leagueType === "survivor" || leagueType === "eliminator"
+      || (leagueInfo.franchises_eliminated != null && String(leagueInfo.franchises_eliminated).trim() !== "");
+
+    if (isKnownEliminator) {
+      // Persist flag so UI shows correct label
+      if (_allLeagues[leagueKey]) {
+        _allLeagues[leagueKey].isEliminator = true;
+        _allLeagues[leagueKey].isGuillotine = false;
+      }
+      // Use standings rank directly — even without franchises_eliminated,
+      // normalizeStandings returns rows in rank order for standard leagues.
       const myEntry = standings.find(s => String(s.franchiseId) === myStr);
       if (myEntry) {
         const finish = myEntry.rank;
@@ -1835,9 +1867,9 @@ const Profile = (() => {
     const cL  = currentSeason?.league.losses || 0;
     const cPF = currentSeason?.league.pointsFor ? parseFloat(currentSeason.league.pointsFor).toFixed(0) : "—";
 
-    // Playoff finish icon for current season
+    // Playoff finish icon for current season — top 3 only, no 🏅
     const finish     = league.playoffFinish;
-    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || (finish && finish <= 7 ? "🏅" : "");
+    const finishIcon = { 1:"🏆", 2:"🥈", 3:"🥉" }[finish] || "";
 
     // Best teamName: prefer latest season that actually has one
     const bestTeamName = seasons.reduce((found, s) =>
@@ -2517,9 +2549,18 @@ const Profile = (() => {
   function _renderOverviewHTML(el, leagueKey, league) {
     const finish      = league.playoffFinish;
     const isComplete  = _isSeasonComplete(league);
+    // isGuillotine/isEliminator are persisted after first sync. Also treat any
+    // league where playoffFinish > 4 as "no-bracket" (eliminator/guillotine rank).
     const isElimStyle = !!(league.isGuillotine || league.isEliminator);
     const missedLabel = isElimStyle ? "No Playoffs Scheduled" : "Missed Playoffs";
-    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 7:"Made Playoffs" }[finish] || (isComplete ? missedLabel : "Season in Progress");
+    // For eliminator/guillotine: show rank-based finish (1=Champion, 2=Runner-Up, 3=3rd)
+    // but don't show "Made Playoffs" (finish=7) or misleading bracket labels.
+    const finishLabel = finish === 1 ? "🏆 Champion"
+      : finish === 2 ? "🥈 Runner-Up"
+      : finish === 3 ? "🥉 3rd Place"
+      : finish === 4 && !isElimStyle ? "4th Place"
+      : finish != null && !isElimStyle ? "Made Playoffs"
+      : (isComplete ? missedLabel : "Season in Progress");
     const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";
 
     // Franchise all-time stats

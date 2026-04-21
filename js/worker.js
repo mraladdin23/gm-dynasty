@@ -405,15 +405,25 @@ async function yahooLeagueBundle(accessToken, leagueKey) {
       fetch(`${base}/league/${leagueKey}/players;status=K?format=json`,                  { headers: authHdr }),
     ]);
 
+  // Track whether any Yahoo call returned 401 (expired/invalid token)
+  let yahooUnauthorized = false;
+
   async function toJson(s) {
     if (s.status !== "fulfilled") return null;
     const r = s.value;
+    if (r.status === 401) { yahooUnauthorized = true; return null; }
     if (!r.ok) return null;
     try { return await r.json(); } catch { return null; }
   }
 
   const [settingsData, standingsData, rostersData, matchupsData, transactionsData, draftData, keepersData] =
     await Promise.all([toJson(settingsRes), toJson(standingsRes), toJson(rostersRes), toJson(matchupsRes), toJson(transactionsRes), toJson(draftRes), toJson(keepersRes)]);
+
+  // If Yahoo rejected our token, surface a real 401 so the frontend can show
+  // a reconnect prompt instead of silently rendering an empty bundle.
+  if (yahooUnauthorized && !standingsData && !settingsData && !rostersData) {
+    return new Response(JSON.stringify({ error: "yahoo_token_expired", message: "Yahoo token expired — please reconnect Yahoo." }), { status: 401, headers: corsHeaders() });
+  }
 
   // Use standings response for league meta; fall back to settings
   const leagueRaw = standingsData?.fantasy_content?.league || settingsData?.fantasy_content?.league || null;
