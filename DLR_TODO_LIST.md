@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 20, 2026 (session 7)*
+*Updated: April 20, 2026 (session 8)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -19,41 +19,12 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Yahoo Platform Bugs
 
-### Y4 — Yahoo OAuth Token Not Persisting (Mobile + Browser)
-**Status:** Partially fixed. Multiple changes applied this session but token is still
-not being saved to Firebase after OAuth callback. The root cause is a deployment
-sequencing problem — the uploaded files in each session are several versions behind
-the output files, meaning changes are not making it into the repo reliably.
-
-**What has been fixed (confirmed in output files):**
-- Worker: `yahooCallback` now uses `?yahoo_token=` query params instead of `#hash`
-  (query params survive mobile Safari redirect chains)
-- Worker: `yahooLeagueBundle` returns real 401 when Yahoo rejects token instead of
-  empty bundle (was causing confusing downstream errors)
-- `app.js`: OAuth IIFE reads query params first, hash as fallback
-- `app.js`: `dlr_yahoo_pending` flag uses `localStorage` not `sessionStorage`
-- `app.js`: `showApp` calls `YahooAPI.setUsername()` and syncs token to Firebase
-- `yahoo.js`: `storeTokens` is localStorage-only (no timing issues with GMDB)
-- `yahoo.js`: `setUsername()` and `loadTokensFromFirebase()` added
-- `yahoo.js`: `_getValidToken` falls back to Firebase if localStorage empty
-- `yahoo.js`: Refresh failure falls back to optimistic token use instead of throwing
-- `firebase-db.js`: `saveYahooTokens` / `getYahooTokens` added
-- `profile.js`: `linkYahoo` now merges with existing league data on reconnect
-  (was wiping playoffFinish, myRosterId, teamName, etc. on every reconnect)
-- `profile.js`: `_resolveYahooIdentities` waits for token before fetching bundles
-
-**What is still broken:**
-- Token is not appearing at `gmd/users/mraladdin23/platforms/yahoo/tokens` in Firebase
-- The most likely remaining cause: the deployed files don't include the Firebase
-  token sync block in `showApp` — confirm by checking if `YahooAPI.setUsername`
-  exists in the live `yahoo.js`
-
-**Files needed for next session:** `app.js`, `yahoo.js`, `firebase-db.js`, `profile.js`
-
-**Key files to verify are deployed (check live source):**
-- `yahoo.js` should export `setUsername` and `loadTokensFromFirebase`
-- `app.js` `showApp` should call `YahooAPI.setUsername(profile.username)`
-- `firebase-db.js` should have `saveYahooTokens` and `getYahooTokens` in return block
+### ~~Y4~~ — Yahoo OAuth Token Not Persisting ✅ CLOSED
+**Root cause:** `YAHOO_REDIRECT_URI` Cloudflare env var was `dynastylockerroom.com` instead of
+`https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback`. All tokens were DOA.
+**Code fixes also applied:**
+- `app.js`: removed `yahoo.linked` gate from token sync — was skipping save on first connect
+- `profile.js`: `linkYahoo` now calls `GMDB.saveYahooTokens` after `linkPlatform`
 
 ---
 
@@ -117,9 +88,71 @@ Reference design/mockup to be provided by Mike.
 **Note:** Needs design mockup attached to session.
 
 ### F5 — Tournament Mode (Cross-Platform)
-**Idea:** A full tournament feature that works across Sleeper, MFL, and Yahoo.
-**Files:** New `tournament.js` module + `firebase-db.js`, `index.html`, `locker.css`
-**Note:** Very large feature. Needs scoping session.
+**Spec:** `GMDynasty_Tournament_Spec.docx` (v1.0) — attach to any tournament session.
+**Summary:** Structured multi-platform tournament layer for large-scale events (e.g. Scott Fish Bowl).
+Commissioners manage leagues across MFL, Yahoo, and Sleeper. Users auto-discover tournaments
+when their leagues match a tournament's league ID list. Five build phases.
+
+**New files needed:**
+- `tournament.js` — main module (admin setup, views, standings, playoffs)
+- `tournament.css` — tournament-specific styles
+- Firebase paths: `gmd/tournaments/{tournamentId}/` (meta, leagues, registrations, standings, playoff)
+
+**Existing files touched:**
+- `firebase-db.js` — tournament read/write helpers
+- `index.html` — Tournament tab/button in header, view shell
+- `profile.js` — auto-discovery hook (check user leagues against tournament league IDs on sync)
+- `app.js` — Tournament tab navigation
+
+**Phase breakdown:**
+
+**Phase 1 — Foundation** *(start here)*
+- Admin create/edit tournament; enter league IDs across platforms
+- Role management: Tournament Admin + scoped sub-admins per conference/division
+- Tournament lifecycle status: Draft → Registration Open → Active → Playoffs → Completed
+- Registration form builder (standard + custom fields); open or invite-only
+- Admin approves/denies applicants; triggers acceptance email with league invite link
+- CSV export + import of registration list
+- Auto-discovery: on sync, silently match user's leagues to tournament league IDs → show in "My Tournaments"
+- **Files:** `tournament.js`, `firebase-db.js`, `index.html`, `app.js`
+
+**Phase 2 — Core Views**
+- Tournament info/bio page: rich text, donation link, social links, status banner
+- Rules tab: rich text, versioned
+- Tiebreaker config: Points For or H2H (applies to standings + playoff seeding)
+- Consolidated standings: all teams, rank/record/PF/division, search + filter by division/conference
+- Division/conference sub-views with qualifier callouts (clinched, eliminated, in contention)
+- **Files:** `tournament.js`, `tournament.css`, `firebase-db.js`
+- **Open question:** Rich text editor library — Quill, TipTap, or ProseMirror?
+
+**Phase 3 — Analytics & Weekly Views**
+- Consolidated draft board: all picks across tournament, filter by division/conference/position
+- ADP calculation from picks across all tournament leagues
+- Individual team draft board (formatted for copy/paste sharing)
+- Weekly matchup summary tab: all matchups for selected week, highlights (top score, closest, blowout)
+- Admin weekly recap: manual text entry + AI-assisted draft (Claude API call)
+- Top rosters view: highest-scoring teams, filterable by week or season-to-date
+- **Files:** `tournament.js`, `firebase-db.js`
+- **Open question:** AI recap — Claude API call from worker or Firebase Function?
+
+**Phase 4 — Custom Playoffs**
+- Playoff format config: overall top-X by PF, top-N per division, H2H bracket (single/double elim), hybrid
+- Byes, total spots, advancement criteria
+- Rendering: list view (scoring-based) or bracket view (H2H) — paginated by round
+- Lineup view per matchup using historical week roster data
+- **Files:** `tournament.js`, `firebase-db.js`
+- **Open question:** Double elimination in Phase 4 or defer?
+
+**Phase 5 — Advanced**
+- Cross-platform identity merging: auto-match by shared email/username; admin manual link/unlink
+- Combined profile: aggregates tournament history across platforms under single identity
+- Weekly summary emails (SendGrid or similar): matchup results, top scores, standings snapshot
+- Message board integration (ties into planned Message Board feature)
+- **Files:** `tournament.js`, `firebase-db.js`, new email worker endpoint
+- **Open question:** Email provider (SendGrid vs other); fallback for low-confidence identity merge?
+
+**Note:** F2 (Custom Playoff Tracker) overlaps with Phase 4 — consider merging or building F2
+as a lightweight precursor that Phase 4 expands. Needs decision before scoping Phase 4.
 
 ### F6 — Locker Room Post-It Trash Talk Wall
 **Idea:** Post-it style sticky notes on lockers, stored in Firebase.
@@ -143,16 +176,19 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
-| 1 | Y4 | Yahoo OAuth Token Persistence (finish) | High | `app.js`, `yahoo.js`, `firebase-db.js`, `profile.js` |
-| 2 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 3 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
-| 4 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 5 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 6 | F2 | Custom Playoff Tracker | Very High | New module + several files |
-| 7 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 8 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 9 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
-| 10 | F5 | Tournament Mode | Very High | New `tournament.js` + several files |
+| 1 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
+| 2 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
+| 3 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
+| 4 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 5 | F2 | Custom Playoff Tracker | High | New module + several files |
+| 6 | F5-P1 | Tournament Mode — Phase 1 (Foundation) | Very High | `tournament.js`, `firebase-db.js`, `index.html`, `app.js` |
+| 7 | F5-P2 | Tournament Mode — Phase 2 (Core Views) | Very High | `tournament.js`, `tournament.css`, `firebase-db.js` |
+| 8 | F5-P3 | Tournament Mode — Phase 3 (Analytics) | Very High | `tournament.js`, `firebase-db.js` |
+| 9 | F5-P4 | Tournament Mode — Phase 4 (Playoffs) | Very High | `tournament.js`, `firebase-db.js` |
+| 10 | F5-P5 | Tournament Mode — Phase 5 (Advanced) | Very High | `tournament.js`, `firebase-db.js`, worker |
+| 11 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 12 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 13 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -229,6 +265,7 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **`profile.js`:** `finishIcon` on league cards top-3 only (🏆🥈🥉), no more 🏅
 - **`profile.js`:** MFL sync error messaging — rate-limit suggestion, network error distinction
 - **`firebase-db.js`:** `saveYahooTokens` / `getYahooTokens` added for durable token storage
+- **Y4 CLOSED:** Yahoo OAuth token persistence fully fixed — root cause was `YAHOO_REDIRECT_URI` Cloudflare env var pointing to frontend (`dynastylockerroom.com`) instead of worker callback (`https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback`); also fixed `linked` gate in `app.js` `showApp` and added `saveYahooTokens` call in `profile.js` `linkYahoo`
 
 ---
 
@@ -297,24 +334,6 @@ console.log("Reset", key, "— click Sync to re-detect");
 await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
 console.log("Bundles cleared");
 ```
-
----
-
-## ⚠️ Notes for Next Session (Y4 continuation)
-
-**Before starting next session, verify these files are current in the repo:**
-1. Open `yahoo.js` in the repo — does it contain `function setUsername`? If not, the Firebase token changes were never deployed.
-2. Open `app.js` in the repo — does `showApp` contain `YahooAPI.setUsername`? If not, same problem.
-3. Open `firebase-db.js` in the repo — does the return block contain `saveYahooTokens`?
-
-**If any of the above are missing:** attach those files fresh from the repo to the next session — not from local copies — and apply the changes from scratch against the actual live files. The disconnect between output files and deployed files has been the main blocker this session.
-
-**Deployment checklist for Y4 fixes:**
-- `firebase-db.js` → git push (no Cloudflare needed)
-- `yahoo.js` → git push
-- `profile.js` → git push
-- `app.js` → git push
-- `worker.js` → paste into Cloudflare dashboard (git push alone is not enough)
 
 ---
 
