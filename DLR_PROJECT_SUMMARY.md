@@ -380,9 +380,25 @@ POST /auth/yahoo/refresh    — token refresh
 - `index.html`: `#label-merge-section` div added inside `#label-commish-section` with "🔗 Dynasty Chain" divider
 - `locker.css`: merge candidate and merge state styles added
 
----
+**April 21 (sessions 13–15 — bug fixes post-deploy):**
 
-## Tips for Starting a New Claude Chat
+*Group filter not appearing (Bug B1):*
+- Root cause: `index.html` with old `filter-groups-btn`/`filter-commish-btn` IDs was never replaced — new JS looked for `filter-mygroups-btn` which didn't exist in DOM
+- Fix: Session B HTML finally deployed — old two-button structure replaced with unified `filter-mygroups-btn` + `filter-panel-mygroups`
+
+*Group filter showing "no leagues match" (Bug B2):*
+- Root cause: `_franchiseMatchesFilter` checked `meta.commishGroup === groupName` — a plain text field nobody uses; actual groups are in Firebase `commGroups` with `leagueKeys` arrays
+- Fix: Added `_groupsCache` module-level variable; `_refreshGroupsFilter()` now populates it after loading; `_franchiseMatchesFilter` `group:` case checks `cachedGroup.leagueKeys.includes(season.key)` across all franchise seasons; legacy `commishGroup` text kept as fallback
+- Also fixed `commUsername` check so groups you *created* always appear even if your league keys aren't listed
+
+*Merge detail panel not showing extra seasons (Bug C1):*
+- Root cause: `openLeagueDetail`, `_renderOverviewHTML`, `_renderHistory` all filtered on `league.franchiseId` directly — didn't follow `_leagueMeta[key].mergedInto`
+- Fix: Added `_resolveEffectiveFid(leagueKey)` and `_getAllSeasonsForFranchise(targetFid)` helpers; all three functions updated to use them; merged MFL seasons now show in season pills and history tab
+
+*Merge commish requirement too strict (Bug C2):*
+- Root cause: `_detectMergeCandidates` required `isCommissioner` on both franchises
+- Fix: Only requires commish on the league you're opening options for; other franchise can be non-commish (e.g. MFL leagues imported as member)
+- Also: `_normalizeName` strips emoji so "Ballers Empire 💵📜" matches "Ballers Empire"
 
 1. **Attach this document** + `DLR_TODO_LIST.md` + **the specific file(s)** for the task
 2. **One task per session** — attach only the 1–3 files needed for that task
@@ -415,6 +431,6 @@ Here are the relevant files: [attach files]
 
 ---
 
-*Document updated: April 21, 2026 (session 12)*
-*All three platforms fully working. Items 1, 2, 3 (options gating, group filter, cross-platform merge) complete.*
+*Document updated: April 21, 2026 (session 15)*
+*All three platforms fully working. Items 1, 2, 3 fully verified and bug-fixed.*
 *Next: F1 (Dynasty/Keeper Overview Tab) or F5-P1 (Tournament Mode Phase 1).*
