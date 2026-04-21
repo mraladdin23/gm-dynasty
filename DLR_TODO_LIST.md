@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 20, 2026 (session 8)*
+*Updated: April 21, 2026 (session 12)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -47,11 +47,10 @@ without caching bundles server-side or reducing re-import frequency.
 
 ## 🟡 Cross-Platform Bugs
 
-### X2 — Link Leagues Across Platforms
-**Problem:** No way to connect a franchise that moved platforms (e.g. MFL → Sleeper,
-Yahoo → Sleeper) so it shows as a continuous dynasty history.
-**Note:** Needs design decision — manual linking (user picks) or auto-match by name/roster?
-**Files:** `profile.js`, `firebase-db.js`, `leaguegroups.js`
+### ~~X2~~ — Link Leagues Across Platforms ✅ CLOSED
+**Resolution:** Commissioner-only merge via options modal (⋯). Auto-detects same-name
+franchises across platforms where user is commish of both. Merge folds older chain into
+newer; Unlink (suppressMerge) is a soft undo. Data stored at `leagueMeta/{key}.mergedInto`.
 
 ---
 
@@ -193,6 +192,11 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ---
 
 ## ✅ Completed
+
+- **Item 2 (Session A):** Options modal gating — commish-only fields hidden from non-commish users; read-only groups/labels display shown to all; `leaguegroups.js` exports `loadCommGroups`
+- **Item 1 (Session B):** Group filter — unified 🗂 My Groups button + panel with "My Labels" / "Commissioner Groups" subsections loaded async from Firebase; count badge on active filters
+- **X2 / Item 3 (Session C):** Cross-platform merge — auto-detects same-name commish leagues; Merge folds older chain into newer; Unlink is soft undo (`suppressMerge`); `_buildFranchises()` applies merge links transparently; `firebase-db.js` gets `saveMergeLinks`/`removeMergeLinks`
+- **Y5 CLOSED:** Yahoo bundle instability — batching + per-league Sync button declared best achievable
 
 - Yahoo Draft tab: endpoint fixed, multi-shape parser (Shapes 1–5), grid/list/auction views, 25/page pagination, DEF fallback
 - Yahoo Keeper detection: `players;status=K` cross-reference, `isKeeper` on picks, K badge in list+grid, KEEPER badge in toggle bar

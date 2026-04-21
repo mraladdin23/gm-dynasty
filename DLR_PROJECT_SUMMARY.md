@@ -98,7 +98,7 @@ eliminator, and guillotine leagues.
 - Uses `SINCE=1999` bulk fetch first, then year-by-year for any missing years
 - This ensures all historical seasons are returned even when MFL's SINCE= skips years
 
-### Yahoo ✅ Mostly working (a few open issues)
+### Yahoo ✅ Fully working
 - OAuth flow ✅
 - Standings ✅ (CSS matches MFL/Sleeper, sort confirmed; bubble tag removed — in playoffs or not)
 - Matchups ✅ (season-pill week bar, roster expand with slot-ordered lineup, data-attribute onclick fixes apostrophe bug)
@@ -350,6 +350,36 @@ POST /auth/yahoo/refresh    — token refresh
 - Commissioner broadcast message fixed in `leaguegroups.js` — JSON array in inline onclick was corrupting HTML; replaced with data attributes + addEventListener
 - U4 (broadcast) and X1 (season status audit) both closed
 
+**April 21 (session 9 — Y5 closed + doc update):**
+- Y5 declared closed — bundle batching + per-league Sync button is best achievable without server-side caching
+- All three platforms now fully working
+
+**April 21 (sessions 10–12 — pre-F1/F5 polish: Items 1, 2, 3):**
+
+*Session A — Options modal gating (Item 2):*
+- `league-label-modal` restructured: Custom Label + Pin + Archive visible to all users; League Type Override, Commish Group, Enable Auction, Include Draft Picks gated behind `#label-commish-section` (hidden unless `league.isCommissioner`)
+- New `#label-groups-display` read-only block shows colored chips for every label/group this league belongs to (personal labels from `leagueLabels` + commish groups from `commGroups` + legacy `commishGroup` text)
+- `leaguegroups.js`: `loadCommGroups` added to public API
+- `locker.css`: `.label-commish-divider`, `.label-groups-display`, `.label-group-chip` styles added (v=21)
+
+*Session B — Group filter dropdown (Item 1):*
+- Two separate `filter-groups-btn` / `filter-commish-btn` buttons replaced with single `filter-mygroups-btn` (🗂 My Groups) with active-filter count badge
+- New unified `filter-panel-mygroups` panel with two subsections: "🏷 My Labels" and "⚡ Commissioner Groups"
+- `_renderLeagueFilters()` refactored — checkbox wiring separated from group population; group data now loaded async from Firebase via `_refreshGroupsFilter()`
+- `_refreshGroupsFilter()` fetches personal labels + commish groups from Firebase, filters to user's league keys, populates both subsections
+- `_updateGroupsBtnCount()` keeps badge + button highlight in sync with active `label:`/`group:` filters
+- `locker.css`: `.filter-group-section`, `.filter-group-section-title` added
+
+*Session C — Cross-platform merge (Item 3 / X2):*
+- `firebase-db.js`: `saveMergeLinks()` and `removeMergeLinks()` added — write `mergedInto` / `suppressMerge` to `gmd/users/{u}/leagueMeta/{key}`
+- `_buildFranchises()` updated: checks `_leagueMeta[key].mergedInto` before assigning franchiseId — merged keys fold into their target chain seamlessly
+- `_detectMergeCandidates(leagueKey)` — finds same-name franchises on different chains where user is commish of both
+- `_applyMerge()` — determines primary (newer) vs absorbed (older) chain, persists to Firebase, updates local meta, re-renders
+- `_removeMerge()` — sets `suppressMerge: true` on absorbed keys (soft undo, data preserved)
+- `_renderMergeSection()` — populates `#label-merge-section` in options modal: shows candidate rows + Merge buttons, or current merged state + Unlink button
+- `index.html`: `#label-merge-section` div added inside `#label-commish-section` with "🔗 Dynasty Chain" divider
+- `locker.css`: merge candidate and merge state styles added
+
 ---
 
 ## Tips for Starting a New Claude Chat
@@ -366,7 +396,7 @@ I'm building Dynasty Locker Room (DLR), a fantasy football SPA at dynastylockerr
 Repo: mraladdin23/gm-dynasty (GitHub Pages).
 Stack: Vanilla JS, Firebase Realtime DB, Cloudflare Worker (mfl-proxy.mraladdin23.workers.dev).
 Worker deployed by pasting into Cloudflare dashboard editor (no wrangler.toml).
-Platforms: Sleeper ✅, MFL ✅, Yahoo ⚠️.
+Platforms: Sleeper ✅, MFL ✅, Yahoo ✅.
 [Attach DLR_PROJECT_SUMMARY.md + DLR_TODO_LIST.md]
 Today I want to work on: [specific task]
 Here are the relevant files: [attach files]
@@ -380,9 +410,11 @@ Here are the relevant files: [attach files]
 - Yahoo game key format: `"{game_id}.l.{league_id}"` — always use stored `league.leagueKey`
 - Worker changes require a **separate paste into Cloudflare dashboard** — git push alone is not enough
 - Yahoo rate limiting: don't run multiple tabs or hammer the import button repeatedly
+- **Merge links** stored at `gmd/users/{u}/leagueMeta/{key}.mergedInto` — `suppressMerge: true` = soft unlinked
+- **locker.css is now at v=21** — Sessions A/B/C styles all consolidated there
 
 ---
 
-*Document updated: April 20, 2026 (session 8)*
-*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — Y5 still open.*
-*Y4 (OAuth token persistence) fully closed. Tournament feature spec (F5) added — 5 phases, start with F5-P1. Next: Y5 (bundle instability).*
+*Document updated: April 21, 2026 (session 12)*
+*All three platforms fully working. Items 1, 2, 3 (options gating, group filter, cross-platform merge) complete.*
+*Next: F1 (Dynasty/Keeper Overview Tab) or F5-P1 (Tournament Mode Phase 1).*

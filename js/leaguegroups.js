@@ -458,6 +458,7 @@ const LeagueGroups = {
   applyLeagueOrder,
   getLeagueLabelMap,
   getPersonalLabels,
+  loadCommGroups,
   onLeagueDragStart,
   onLeagueDragEnd,
   onLeagueDragOver,
