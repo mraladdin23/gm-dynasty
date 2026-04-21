@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 21, 2026 (session 12)*
+*Updated: April 21, 2026 (session 15)*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -194,8 +194,8 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ## ✅ Completed
 
 - **Item 2 (Session A):** Options modal gating — commish-only fields hidden from non-commish users; read-only groups/labels display shown to all; `leaguegroups.js` exports `loadCommGroups`
-- **Item 1 (Session B):** Group filter — unified 🗂 My Groups button + panel with "My Labels" / "Commissioner Groups" subsections loaded async from Firebase; count badge on active filters
-- **X2 / Item 3 (Session C):** Cross-platform merge — auto-detects same-name commish leagues; Merge folds older chain into newer; Unlink is soft undo (`suppressMerge`); `_buildFranchises()` applies merge links transparently; `firebase-db.js` gets `saveMergeLinks`/`removeMergeLinks`
+- **Item 1 (Session B):** Group filter — unified 🗂 My Groups button + panel with "My Labels" / "Commissioner Groups" subsections loaded async from Firebase; count badge on active filters. Bug fixes: old HTML IDs replaced (`filter-groups-btn` → `filter-mygroups-btn`); `_franchiseMatchesFilter` now uses `_groupsCache.leagueKeys` arrays instead of legacy `commishGroup` text; `commUsername` check ensures group creators always see their groups
+- **X2 / Item 3 (Session C):** Cross-platform merge — auto-detects same-name commish leagues (emoji stripped by `_normalizeName`); Merge folds older chain into newer; Unlink is soft undo (`suppressMerge`); `_buildFranchises()` applies merge links transparently; `firebase-db.js` gets `saveMergeLinks`/`removeMergeLinks`. Bug fixes: detail panel/overview/history use `_resolveEffectiveFid` + `_getAllSeasonsForFranchise` so merged seasons show in season pills; commish requirement relaxed to current league only
 - **Y5 CLOSED:** Yahoo bundle instability — batching + per-league Sync button declared best achievable
 
 - Yahoo Draft tab: endpoint fixed, multi-shape parser (Shapes 1–5), grid/list/auction views, 25/page pagination, DEF fallback
