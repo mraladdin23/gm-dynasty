@@ -40,8 +40,11 @@ const AppState = {
     const banner = document.getElementById("mfl-resync-banner");
     if (banner) banner.classList.toggle("hidden", !needsResync);
 
-    // If returning from Yahoo OAuth, auto-trigger the import
-    if (sessionStorage.getItem("dlr_yahoo_pending") === "1") {
+    // If returning from Yahoo OAuth, auto-trigger the import.
+    // Uses localStorage (not sessionStorage) — sessionStorage is wiped on mobile redirect.
+    if (localStorage.getItem("dlr_yahoo_pending") === "1") {
+      localStorage.removeItem("dlr_yahoo_pending");
+      localStorage.removeItem("dlr_yahoo_linking_user");
       sessionStorage.removeItem("dlr_yahoo_pending");
       sessionStorage.removeItem("dlr_yahoo_linking_user");
       setTimeout(async () => {
@@ -252,6 +255,8 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
 // Worker now redirects back with ?yahoo_token=... as query params (mobile-safe).
 // Query params survive iOS Safari / Android Chrome redirect chains reliably.
 // Hash-based detection kept as fallback for any cached old-style links.
+// NOTE: dlr_yahoo_pending stored in localStorage (not sessionStorage) so it
+// survives the full-page redirect on mobile where sessionStorage is wiped.
 (function() {
   // ── Primary path: query params (mobile-safe) ────────────
   const qp = new URLSearchParams(window.location.search);
@@ -261,7 +266,7 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
     const expiresIn    = parseInt(qp.get("yahoo_expires") || "3600");
     if (accessToken) {
       YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
-      sessionStorage.setItem("dlr_yahoo_pending", "1");
+      localStorage.setItem("dlr_yahoo_pending", "1");
     }
     // Clean query params immediately so token isn't visible in URL bar
     window.history.replaceState({}, "", window.location.pathname);
@@ -270,22 +275,22 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
   // ── Fallback: hash-based (desktop / old cached redirects) ──
   const hash = window.location.hash;
   if (hash.includes("yahoo_token=")) {
-    const hp = new URLSearchParams(hash.slice(1)); // strip leading #
+    const hp = new URLSearchParams(hash.slice(1));
     const accessToken  = hp.get("yahoo_token");
     const refreshToken = hp.get("yahoo_refresh") || "";
     const expiresIn    = parseInt(hp.get("yahoo_expires") || "3600");
     if (accessToken) {
       YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
-      sessionStorage.setItem("dlr_yahoo_pending", "1");
+      localStorage.setItem("dlr_yahoo_pending", "1");
     }
     window.history.replaceState({}, "", window.location.pathname);
   }
 
-  // ── Legacy stub: ?yahoo=connected (no token — just triggers re-import) ──
+  // ── Legacy stub: ?yahoo=connected (no token) ──
   const lp = new URLSearchParams(window.location.search);
   if (lp.get("yahoo") === "connected") {
     window.history.replaceState({}, "", window.location.pathname);
-    sessionStorage.setItem("dlr_yahoo_pending", "1");
+    localStorage.setItem("dlr_yahoo_pending", "1");
   }
 })();
 
@@ -301,7 +306,8 @@ document.getElementById("yahoo-link-btn")?.addEventListener("click", async () =>
   statusEl.textContent = "Opening Yahoo login…";
 
   // Store current username so we can resume after OAuth redirect
-  sessionStorage.setItem("dlr_yahoo_linking_user", profile.username);
+  // Use localStorage — sessionStorage is wiped on mobile full-page redirect
+  localStorage.setItem("dlr_yahoo_linking_user", profile.username);
 
   // Redirect to Yahoo OAuth — worker handles the redirect
   YahooAPI.login();
@@ -453,9 +459,9 @@ document.getElementById("relink-sleeper-btn")?.addEventListener("click", async (
 document.getElementById("relink-yahoo-btn")?.addEventListener("click", async () => {
   const profile = Auth.getCurrentProfile();
   if (!profile) return;
-  // Store username so we can resume after OAuth redirect
-  sessionStorage.setItem("dlr_yahoo_linking_user", profile.username);
-  sessionStorage.setItem("dlr_yahoo_pending", "1");
+  // Use localStorage — sessionStorage is wiped on mobile full-page redirect
+  localStorage.setItem("dlr_yahoo_linking_user", profile.username);
+  localStorage.setItem("dlr_yahoo_pending", "1");
   Profile.closeEditProfileModal();
   YahooAPI.login();
 });

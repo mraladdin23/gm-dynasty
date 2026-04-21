@@ -815,7 +815,20 @@ const Profile = (() => {
     } catch(e) {
       btn.textContent = "Failed";
       setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2500);
-      showToast(e.message || "MFL sync failed", "error");
+      // Give specific guidance for MFL rate-limiting vs other errors
+      const isRateLimit = e.message?.toLowerCase().includes("rate") ||
+        e.message?.toLowerCase().includes("throttl") ||
+        e.message?.toLowerCase().includes("429") ||
+        e.message?.toLowerCase().includes("too many");
+      const isNetwork = e.message?.toLowerCase().includes("fetch") ||
+        e.message?.toLowerCase().includes("network") ||
+        e.message?.toLowerCase().includes("failed to fetch");
+      const userMsg = isRateLimit
+        ? "MFL is rate-limiting requests — wait 2–3 minutes and try again."
+        : isNetwork
+        ? "Could not reach MFL — check your connection and try again."
+        : e.message || "MFL sync failed — try again in a moment.";
+      showToast(userMsg, "error", 6000);
     }
   }
 
@@ -2186,11 +2199,13 @@ const Profile = (() => {
       if (league.platform === "yahoo") {
         syncBtn.style.display = "";
         syncBtn.textContent = "🔄 Sync League";
+        syncBtn.title = "Re-fetch this Yahoo league and update playoff finish";
         syncBtn.disabled = false;
         syncBtn.onclick = () => _triggerYahooSync(leagueKey);
       } else if (league.platform === "mfl") {
         syncBtn.style.display = "";
         syncBtn.textContent = "🔄 Sync League";
+        syncBtn.title = "Re-fetch this MFL league and update playoff finish";
         syncBtn.disabled = false;
         syncBtn.onclick = () => _triggerMFLSync(leagueKey);
       } else {
@@ -2333,11 +2348,13 @@ const Profile = (() => {
       if (newLeague.platform === "yahoo") {
         syncBtnSw.style.display = "";
         syncBtnSw.textContent = "🔄 Sync League";
+        syncBtnSw.title = "Re-fetch this Yahoo league and update playoff finish";
         syncBtnSw.disabled = false;
         syncBtnSw.onclick = () => _triggerYahooSync(newKey);
       } else if (newLeague.platform === "mfl") {
         syncBtnSw.style.display = "";
         syncBtnSw.textContent = "🔄 Sync League";
+        syncBtnSw.title = "Re-fetch this MFL league and update playoff finish";
         syncBtnSw.disabled = false;
         syncBtnSw.onclick = () => _triggerMFLSync(newKey);
       } else {
