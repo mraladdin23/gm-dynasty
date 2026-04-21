@@ -18,7 +18,10 @@ const YahooAPI = (() => {
   function storeTokens(accessToken, refreshToken, expiresIn) {
     localStorage.setItem(KEY_ACCESS,  accessToken);
     if (refreshToken) localStorage.setItem(KEY_REFRESH, refreshToken);
-    localStorage.setItem(KEY_EXPIRES, String(Date.now() + (Number(expiresIn) || 3600) * 1000));
+    // Guard against NaN/invalid expiresIn — default to 3600s
+    const ttl = Number(expiresIn);
+    const expiresAt = Date.now() + (Number.isFinite(ttl) && ttl > 0 ? ttl : 3600) * 1000;
+    localStorage.setItem(KEY_EXPIRES, String(expiresAt));
     // Also keep sessionStorage copy for backward compat
     sessionStorage.setItem("dlr_yahoo_access_token",  accessToken);
     sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken || "");

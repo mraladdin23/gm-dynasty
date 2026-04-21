@@ -992,7 +992,7 @@ async function yahooCallback(req, env) {
   let tokenData;
   try { tokenData = JSON.parse(tokenText); } catch(e) { return new Response("Token parse error: " + tokenText, { status: 500 }); }
   if (tokenData.error) return new Response(`Yahoo auth error: ${tokenData.error} — ${tokenData.error_description || ""}`, { status: 400 });
-  const appUrl = `https://dynastylockerroom.com/#yahoo_token=${encodeURIComponent(tokenData.access_token)}&yahoo_refresh=${encodeURIComponent(tokenData.refresh_token || "")}&yahoo_expires=${tokenData.expires_in || 3600}`;
+  const appUrl = `https://dynastylockerroom.com/?yahoo_token=${encodeURIComponent(tokenData.access_token)}&yahoo_refresh=${encodeURIComponent(tokenData.refresh_token || "")}&yahoo_expires=${tokenData.expires_in || 3600}`;
   return Response.redirect(appUrl, 302);
 }
 

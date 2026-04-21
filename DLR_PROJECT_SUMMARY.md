@@ -100,19 +100,20 @@ eliminator, and guillotine leagues.
 
 ### Yahoo ✅ Mostly working (a few open issues)
 - OAuth flow ✅
-- Standings ✅ (CSS matches MFL/Sleeper, sort confirmed)
+- Standings ✅ (CSS matches MFL/Sleeper, sort confirmed; bubble tag removed — in playoffs or not)
 - Matchups ✅ (season-pill week bar, roster expand with slot-ordered lineup, data-attribute onclick fixes apostrophe bug)
-- Playoffs ✅ (Championship + 3rd Place only; byes shown; semi-loser detection correct; finish detection gated on playoff appearance)
+- Playoffs ✅ (Championship + 3rd Place only; byes shown; bubble removed)
 - Roster ✅ (PREFERRED_ORDER position grouping, detailMap fallback)
 - Players tab ✅ (YTD stats via `/yahoo/playerStats`, position dropdown)
 - Draft ✅ (parser working, grid/list/auction views, 25/page pagination)
-- Transactions ⚠️ (team name blank on some transactions — Y3 open)
+- Transactions ✅ (team name blank confirmed resolved)
 - Analytics ✅ (leagueKey wired, Draft Recap uses DLRPlayers.getByYahooId for names)
 - Career stats ✅ (`_renderCSPlatform` and `_renderCSPlatformYear` implemented)
 - Keeper detection ✅
 - League type detection ✅ (`leagueTypeConfirmed` flag)
-- Championship/playoff finish detection ✅ (gated on user appearing in playoff matchup; old leagues 2002–2011 with no matchup data return null correctly)
-- Per-league sync button ✅ (🔄 Sync League in detail panel header; clears resolved/playoffFinish and re-fetches)
+- Championship/playoff finish detection ✅ (uses standings `rank` + `clinched`/`playoffSeed` gate; badges for top 3 only; no 🏅 for made playoffs)
+- Per-league sync button ✅ (🔄 Sync League; null myId handled gracefully; clears stale data even when Yahoo returns no team info)
+- Commissioner broadcast message ✅ (fixed JSON-in-onclick bug via data attributes)
 - Token persistence ⚠️ (optimistic use when expiresAt=0 fixed; mobile still unreliable — Y4 open)
 - Bundle stability ⚠️ (worker batches week fetches 3/batch 300ms delay + retry; still rate-limits under heavy load — Y5 open)
 
@@ -225,7 +226,7 @@ POST /auth/yahoo/refresh    — token refresh
 ---
 
 ## CSS Key Classes (confirmed)
-- Standings: `standings-row--me`, `standings-win`, `standings-loss`, `standings-num`, `st-av`, `bubble-tag`, `standings-legend`, `standings-table-wrap`
+- Standings: `standings-row--me`, `standings-win`, `standings-loss`, `standings-num`, `st-av`, `standings-legend`, `standings-table-wrap`
 - Matchups: `mu-card`, `mu-header`, `mu-team`, `mu-team--right`, `mu-scores`, `mu-score`, `mu-score--win`, `mu-score--lose`, `mu-dash`, `mu-no-detail`, `fw-700`, `mu-sbs-row`, `mu-sbs-header`, `mu-slot`, `mu-name`, `mu-pts`, `mu-pts--win`, `mu-bench-header`
 - Week pills: `season-pill`, `season-pill--current` (all platforms including Yahoo)
 - Playoffs: `bracket-wrap`, `bracket-section`, `bracket-match`, `bracket-slot`, `bracket-slot--win`, `bracket-slot--lose`, `bracket-slot--me`, `bracket-team`, `bracket-score`, `bracket-tbd`, `bracket-finals`
@@ -304,6 +305,17 @@ POST /auth/yahoo/refresh    — token refresh
 - All Yahoo leagues deleted and reimported fresh; placeholder Firebase keys from bad console script cleaned up
 - Note: Yahoo API still rate-limits under heavy load; old leagues (2002–2011) may have no matchup data and will show "Missed Playoffs" by default
 
+**April 20 (Yahoo playoff finish + sync overhaul session):**
+- `_detectYahooPlayoffFinish` fully rewritten — now uses standings `rank` + `clinched`/`playoffSeed` gate instead of bracket parsing; outcomes: 1/2/3/4/7/null only
+- Playoff participation gate: `clinched === true` OR `playoffSeed <= num_playoff_teams` (fallback for old leagues where Yahoo didn't set `clinched` reliably)
+- Bubble tag removed from all platforms (Sleeper, Yahoo, MFL) in `standings.js` — you're either in or out
+- Playoff finish badges top-3 only: 🏆🥈🥉; 🏅 removed everywhere; 4th place and "Made Playoffs" show no badge
+- `syncYahooLeague` overhauled: null `myTeamId` no longer throws — writes cleared flags + marks resolved, shows warning toast
+- `GMDB.saveLeague` (singular, non-existent) fixed to `GMDB.saveLeagues` in all 6 call sites in `profile.js` — was silently failing everywhere, preventing sync from ever writing to Firebase
+- `is_finished` gate removed from detection — Yahoo returns 0 for many old completed leagues
+- Commissioner broadcast message fixed in `leaguegroups.js` — JSON array in inline onclick was corrupting HTML; replaced with data attributes + addEventListener
+- U4 (broadcast) and X1 (season status audit) both closed
+
 ---
 
 ## Tips for Starting a New Claude Chat
@@ -336,6 +348,6 @@ Here are the relevant files: [attach files]
 
 ---
 
-*Document updated: April 20, 2026*
-*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — Y3/Y4/Y5 still open.*
-*Yahoo playoffs, matchup expand, sync button, and analytics draft recap all fixed. See DLR_TODO_LIST.md.*
+*Document updated: April 20, 2026 (session 6)*
+*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — Y4/Y5 still open.*
+*Playoff finish detection, sync reliability, broadcast message, and bubble tag all fixed. Next: Y4 (Yahoo mobile OAuth) + mobile detail tab fixes.*
