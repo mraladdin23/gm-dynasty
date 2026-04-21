@@ -39,23 +39,22 @@ const AppState = {
 
     // ── Yahoo token sync ──────────────────────────────────────
     // Always keep Firebase and localStorage in sync.
-    // On normal loads: if localStorage has a token, persist it to Firebase.
-    // On loads after localStorage was cleared: load from Firebase into localStorage.
-    if (profile.platforms?.yahoo?.linked) {
-      const cachedToken = localStorage.getItem("dlr_yahoo_access_token");
-      if (cachedToken) {
-        // localStorage has a token — make sure Firebase has it too (fire-and-forget)
-        const refresh   = localStorage.getItem("dlr_yahoo_refresh_token");
-        const expiresAt = Number(localStorage.getItem("dlr_yahoo_expires_at") || 0);
-        GMDB.saveYahooTokens(profile.username, {
-          accessToken:  cachedToken,
-          refreshToken: refresh || null,
-          expiresAt
-        }).catch(() => {});
-      } else {
-        // localStorage is empty — try restoring from Firebase
-        YahooAPI.loadTokensFromFirebase(profile.username).catch(() => {});
-      }
+    // IMPORTANT: do NOT gate on profile.platforms.yahoo.linked — on a first-time
+    // OAuth connect, linked is still false here because linkYahoo runs 500ms later.
+    // Gating would silently skip the save for every new connection.
+    const cachedToken = localStorage.getItem("dlr_yahoo_access_token");
+    if (cachedToken) {
+      // localStorage has a token — persist to Firebase regardless of linked status
+      const refresh   = localStorage.getItem("dlr_yahoo_refresh_token");
+      const expiresAt = Number(localStorage.getItem("dlr_yahoo_expires_at") || 0);
+      GMDB.saveYahooTokens(profile.username, {
+        accessToken:  cachedToken,
+        refreshToken: refresh || null,
+        expiresAt
+      }).catch(() => {});
+    } else if (profile.platforms?.yahoo?.linked) {
+      // No localStorage token but Yahoo is linked — try restoring from Firebase
+      YahooAPI.loadTokensFromFirebase(profile.username).catch(() => {});
     }
 
     // Show resync nudge if MFL is connected but no email stored (legacy username-only import)
