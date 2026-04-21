@@ -358,6 +358,31 @@ const GMDB = (() => {
     await GMD.child(`salaryCap/${leagueKey}/rosters`).set(rosters);
   }
 
+  // ── Cross-platform merge links ─────────────────────────
+  // mergedInto: the franchiseId of the target chain (the newer/primary chain)
+  // Stored at leagueMeta/{key}.mergedInto for each absorbed key.
+  // suppressMerge: true = treat as unmerged (soft undo without deleting data).
+
+  async function saveMergeLinks(username, absorbedKeys, targetFranchiseId) {
+    const u = username.toLowerCase();
+    await Promise.all(absorbedKeys.map(key =>
+      GMD.child(`users/${u}/leagueMeta/${key}`).update({
+        mergedInto:    targetFranchiseId,
+        suppressMerge: false
+      })
+    ));
+  }
+
+  async function removeMergeLinks(username, absorbedKeys) {
+    const u = username.toLowerCase();
+    await Promise.all(absorbedKeys.map(key =>
+      GMD.child(`users/${u}/leagueMeta/${key}`).update({
+        mergedInto:    null,
+        suppressMerge: true
+      })
+    ));
+  }
+
   // ── Yahoo token persistence ────────────────────────────
   // Stored at gmd/users/{username}/platforms/yahoo/tokens so they survive
   // browser storage clearing and work across devices/browsers.
@@ -417,6 +442,8 @@ const GMDB = (() => {
     saveSalaryRosters,
     saveYahooTokens,
     getYahooTokens,
+    saveMergeLinks,
+    removeMergeLinks,
     _restGet,
     _restPut
   };

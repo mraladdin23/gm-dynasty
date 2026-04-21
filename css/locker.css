@@ -903,6 +903,134 @@
   cursor: pointer;
 }
 
+/* ── Options modal: commish section divider (Sessions A & C) ── */
+.label-commish-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 12px;
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-gold);
+}
+.label-commish-divider::before,
+.label-commish-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+/* ── Options modal: read-only groups/labels block (Session A) ── */
+.label-groups-display {
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.label-groups-title {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  margin-bottom: 8px;
+}
+.label-groups-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.label-group-chip {
+  font-size: .75rem;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px solid;
+  background: transparent;
+  font-weight: 600;
+}
+
+/* ── Options modal: cross-platform merge (Session C) ── */
+.label-merge-section { margin-top: var(--space-2); }
+
+.merge-candidates { display: flex; flex-direction: column; gap: var(--space-3); }
+.merge-candidate-hint {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  line-height: 1.4;
+  margin-bottom: var(--space-2);
+}
+.merge-candidate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.merge-candidate-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.merge-candidate-name {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merge-candidate-meta {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+}
+
+.merge-state--active {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-gold);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  flex-wrap: wrap;
+}
+.merge-state-label {
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--color-gold);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
+.merge-state-name {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+.merge-state-meta {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+/* ── My Groups filter panel section headers (Session B) ── */
+.filter-group-section { margin-bottom: var(--space-3); }
+.filter-group-section:last-child { margin-bottom: 0; }
+.filter-group-section-title {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+
 /* Select element styling */
 select {
   width: 100%;

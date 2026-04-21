@@ -1656,15 +1656,19 @@ const Profile = (() => {
     const franchises = {};
 
     Object.entries(_allLeagues).forEach(([key, league]) => {
-      // Use franchiseId if present (set during import via prev_league_id chain)
-      // Fall back to the league's own key so it shows as a solo card
-      const fid = league.franchiseId || key;
+      // Check for an active merge link first — if this key has been merged into
+      // another franchise chain, use that target franchiseId instead of its own.
+      const meta = _leagueMeta[key] || {};
+      let fid = league.franchiseId || key;
+      if (meta.mergedInto && !meta.suppressMerge) {
+        fid = meta.mergedInto;
+      }
 
       if (!franchises[fid]) {
         franchises[fid] = { franchiseId: fid, seasons: [], latestKey: key };
       }
 
-      franchises[fid].seasons.push({ key, league, meta: _leagueMeta[key] || {} });
+      franchises[fid].seasons.push({ key, league, meta });
     });
 
     // For each franchise, sort seasons newest first and set latestKey
@@ -2004,27 +2008,265 @@ const Profile = (() => {
 
   // ── League label modal ─────────────────────────────────
 
+  // ── Cross-platform merge helpers ───────────────────────
+
+  // Returns an array of franchise objects that are merge candidates for leagueKey:
+  // same league name (normalized), different franchiseId, user is commish of both,
+  // and not already merged together.
+  function _detectMergeCandidates(leagueKey) {
+    const league = _allLeagues[leagueKey];
+    if (!league?.isCommissioner) return [];
+
+    const myFranchiseId  = league.franchiseId || leagueKey;
+    const myMeta         = _leagueMeta[leagueKey] || {};
+    const myEffectiveFid = myMeta.mergedInto && !myMeta.suppressMerge
+      ? myMeta.mergedInto : myFranchiseId;
+    const myName         = _normalizeName(league.leagueName);
+
+    const franchises = _buildFranchises();
+    const candidates = [];
+
+    Object.values(franchises).forEach(f => {
+      if (f.franchiseId === myEffectiveFid) return; // same chain
+
+      // Must be commish of at least one season in the other franchise
+      const otherIsCommish = f.seasons.some(s => s.league.isCommissioner);
+      if (!otherIsCommish) return;
+
+      // Name must match (normalized)
+      const otherLatest = _allLeagues[f.latestKey];
+      if (!otherLatest) return;
+      if (_normalizeName(otherLatest.leagueName) !== myName) return;
+
+      // Must be on a different platform or different chain (not same franchiseId already)
+      candidates.push(f);
+    });
+
+    return candidates;
+  }
+
+  function _normalizeName(name) {
+    return (name || "").toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+  }
+
+  // Apply merge: absorb the older/other franchise chain into the newer (primary) one.
+  // The primary is whichever franchise has the more recent latest season.
+  async function _applyMerge(leagueKey, otherFranchiseId) {
+    const league       = _allLeagues[leagueKey];
+    const myFranchiseId = league?.franchiseId || leagueKey;
+    const myMeta        = _leagueMeta[leagueKey] || {};
+    const myEffectiveFid = myMeta.mergedInto && !myMeta.suppressMerge
+      ? myMeta.mergedInto : myFranchiseId;
+
+    const franchises = _buildFranchises();
+    const myFranchise    = franchises[myEffectiveFid];
+    const otherFranchise = franchises[otherFranchiseId];
+    if (!myFranchise || !otherFranchise) return;
+
+    // Primary = franchise with the more recent latest season; absorbed = the other
+    const myLatestSeason    = _allLeagues[myFranchise.latestKey]?.season    || "0";
+    const otherLatestSeason = _allLeagues[otherFranchise.latestKey]?.season || "0";
+
+    let primaryFid, absorbedFranchise;
+    if (myLatestSeason >= otherLatestSeason) {
+      primaryFid        = myEffectiveFid;
+      absorbedFranchise = otherFranchise;
+    } else {
+      primaryFid        = otherFranchiseId;
+      absorbedFranchise = myFranchise;
+    }
+
+    // Write mergedInto for every key in the absorbed franchise
+    const absorbedKeys = absorbedFranchise.seasons.map(s => s.key);
+    await GMDB.saveMergeLinks(_currentUsername, absorbedKeys, primaryFid);
+
+    // Update local _leagueMeta immediately so UI reflects the merge without reload
+    absorbedKeys.forEach(k => {
+      _leagueMeta[k] = { ...(_leagueMeta[k] || {}), mergedInto: primaryFid, suppressMerge: false };
+    });
+
+    showToast("Leagues merged ✓");
+    closeLabelModal();
+    _renderLeagues();
+  }
+
+  // Remove merge: restore the absorbed franchise back to its own chain.
+  async function _removeMerge(leagueKey) {
+    const franchise = Object.values(_buildFranchises()).find(f =>
+      f.seasons.some(s => s.key === leagueKey)
+    );
+    if (!franchise) return;
+
+    // Find all keys in this franchise that have a mergedInto pointing elsewhere
+    const mergedKeys = franchise.seasons
+      .map(s => s.key)
+      .filter(k => _leagueMeta[k]?.mergedInto && !_leagueMeta[k]?.suppressMerge);
+
+    if (!mergedKeys.length) return;
+
+    await GMDB.removeMergeLinks(_currentUsername, mergedKeys);
+
+    mergedKeys.forEach(k => {
+      _leagueMeta[k] = { ...(_leagueMeta[k] || {}), mergedInto: null, suppressMerge: true };
+    });
+
+    showToast("Leagues unlinked ✓");
+    closeLabelModal();
+    _renderLeagues();
+  }
+
+  // Populate the merge section inside the options modal (commish-only).
+  // Shows either: merge candidates to link, or current merge state + unlink option.
+  function _renderMergeSection(leagueKey) {
+    const el = document.getElementById("label-merge-section");
+    if (!el) return;
+
+    const meta         = _leagueMeta[leagueKey] || {};
+    const isMerged     = !!(meta.mergedInto && !meta.suppressMerge);
+
+    if (isMerged) {
+      // Show current merged state
+      const primaryFid = meta.mergedInto;
+      const franchises = _buildFranchises();
+      const primary    = franchises[primaryFid];
+      const primaryLeague = primary ? _allLeagues[primary.latestKey] : null;
+      const seasonRange = primary
+        ? _franchiseSeasonRange(primary)
+        : primaryFid;
+
+      el.innerHTML = `
+        <div class="merge-state merge-state--active">
+          <div class="merge-state-label">🔗 Merged into</div>
+          <div class="merge-state-name">${_escHtml(primaryLeague?.leagueName || primaryFid)}</div>
+          <div class="merge-state-meta">${_escHtml(seasonRange)}</div>
+          <button class="btn-secondary btn-sm merge-unlink-btn" id="merge-unlink-btn">Unlink</button>
+        </div>`;
+      el.querySelector("#merge-unlink-btn")?.addEventListener("click", () => _removeMerge(leagueKey));
+      el.style.display = "";
+      return;
+    }
+
+    // Check for candidates
+    const candidates = _detectMergeCandidates(leagueKey);
+    if (!candidates.length) {
+      el.style.display = "none";
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="merge-candidates">
+        <div class="merge-candidate-hint">
+          🔗 Same-name league found on another platform. Merge to create a continuous dynasty chain.
+        </div>
+        ${candidates.map(f => {
+          const other = _allLeagues[f.latestKey];
+          const range = _franchiseSeasonRange(f);
+          return `
+            <div class="merge-candidate-row">
+              <div class="merge-candidate-info">
+                <span class="merge-candidate-name">${_escHtml(other?.leagueName || f.franchiseId)}</span>
+                <span class="merge-candidate-meta">${_escHtml((other?.platform || "").toUpperCase())} · ${_escHtml(range)}</span>
+              </div>
+              <button class="btn-primary btn-sm merge-apply-btn"
+                data-fid="${_escHtml(f.franchiseId)}">Merge</button>
+            </div>`;
+        }).join("")}
+      </div>`;
+
+    el.querySelectorAll(".merge-apply-btn").forEach(btn => {
+      btn.addEventListener("click", () => _applyMerge(leagueKey, btn.dataset.fid));
+    });
+    el.style.display = "";
+  }
+
+  // Returns a human-readable season range string for a franchise, e.g. "2019–2024"
+  function _franchiseSeasonRange(franchise) {
+    const seasons = franchise.seasons.map(s => s.league.season).filter(Boolean).sort();
+    if (!seasons.length) return "";
+    if (seasons.length === 1) return seasons[0];
+    return `${seasons[0]}–${seasons[seasons.length - 1]}`;
+  }
+
   function openLeagueLabelModal(leagueKey) {
     const league = _allLeagues[leagueKey];
     const meta   = _leagueMeta[leagueKey] || {};
     if (!league) return;
 
+    const isCommish = !!league.isCommissioner;
+
     document.getElementById("label-league-name").textContent = league.leagueName;
-    document.getElementById("label-custom-input").value  = meta.customLabel  || "";
-    document.getElementById("label-commish-input").value = meta.commishGroup || "";
+    document.getElementById("label-custom-input").value  = meta.customLabel || "";
     document.getElementById("label-pin-check").checked     = !!meta.pinned;
     document.getElementById("label-archive-check").checked = !!meta.archived;
-    document.getElementById("label-auction-check").checked = !!meta.auctionEnabled;
-    document.getElementById("label-picks-check").checked   = !!meta.auctionIncludePicks;
 
-    // Type override — show current effective type
-    const typeEl = document.getElementById("label-type-override");
-    if (typeEl) typeEl.value = meta.leagueTypeOverride || "";
+    // ── Commissioner-only section ──────────────────────────
+    const commishSection = document.getElementById("label-commish-section");
+    if (commishSection) commishSection.classList.toggle("hidden", !isCommish);
+
+    if (isCommish) {
+      document.getElementById("label-commish-input").value   = meta.commishGroup || "";
+      document.getElementById("label-auction-check").checked = !!meta.auctionEnabled;
+      document.getElementById("label-picks-check").checked   = !!meta.auctionIncludePicks;
+      const typeEl = document.getElementById("label-type-override");
+      if (typeEl) typeEl.value = meta.leagueTypeOverride || "";
+      // Merge section — detect candidates or show current merge state
+      _renderMergeSection(leagueKey);
+    }
+
+    // ── Read-only groups & labels display ──────────────────
+    // Collect every group/label this league belongs to across both systems
+    _populateLabelGroupsDisplay(leagueKey);
 
     document.getElementById("label-modal-save").onclick = () => _saveLeagueLabelModal();
     document.getElementById("league-label-modal").classList.remove("hidden");
     // Store the current leagueKey so _saveLeagueLabelModal can access it
     document.getElementById("league-label-modal").dataset.leagueKey = leagueKey;
+  }
+
+  // Build the read-only "Groups & Labels" chips shown to all users at the top of the modal.
+  // Shows: personal labels that include this key + commish groups that include this key.
+  async function _populateLabelGroupsDisplay(leagueKey) {
+    const displayEl = document.getElementById("label-groups-display");
+    const chipsEl   = document.getElementById("label-groups-chips");
+    if (!displayEl || !chipsEl) return;
+
+    const chips = [];
+
+    // Personal labels (from leaguegroups — stored per-user in Firebase)
+    try {
+      const labels = await LeagueGroups.getPersonalLabels(_currentUsername);
+      Object.values(labels).forEach(l => {
+        if ((l.leagueKeys || []).includes(leagueKey)) {
+          chips.push({ text: `🏷 ${l.name}`, color: l.color || "var(--color-gold)" });
+        }
+      });
+    } catch(e) {}
+
+    // Commissioner groups (from gmd/commGroups — shared)
+    try {
+      const commGroups = await LeagueGroups.loadCommGroups?.() || {};
+      Object.values(commGroups).forEach(g => {
+        if ((g.leagueKeys || []).includes(leagueKey)) {
+          chips.push({ text: `⚡ ${g.name}`, color: g.color || "var(--color-gold)" });
+        }
+      });
+    } catch(e) {}
+
+    // Also check leagueMeta commishGroup (legacy text field)
+    const meta = _leagueMeta[leagueKey] || {};
+    if (meta.commishGroup && !chips.some(c => c.text.includes(meta.commishGroup))) {
+      chips.push({ text: `⚡ ${meta.commishGroup}`, color: "var(--color-gold)" });
+    }
+
+    if (chips.length === 0) {
+      displayEl.classList.add("hidden");
+      return;
+    }
+
+    displayEl.classList.remove("hidden");
+    chipsEl.innerHTML = chips.map(c => `
+      <span class="label-group-chip" style="border-color:${c.color};color:${c.color};">${_escHtml(c.text)}</span>
+    `).join("");
   }
 
   async function _saveLeagueLabelModal() {
@@ -2034,22 +2276,32 @@ const Profile = (() => {
     if (!_currentUsername) { showToast("Error: not logged in", "error"); return; }
     const saveBtn  = document.getElementById("label-modal-save");
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
-    const typeOverride = document.getElementById("label-type-override")?.value || "";
-    const commishGroup = document.getElementById("label-commish-input")?.value?.trim() || "";
-    const customLabel  = document.getElementById("label-custom-input")?.value?.trim()  || "";
+
+    const league       = _allLeagues[leagueKey] || {};
+    const isCommish    = !!league.isCommissioner;
+    const customLabel  = document.getElementById("label-custom-input")?.value?.trim() || "";
+
+    // Commish-only fields — only read if section is visible
+    const typeOverride = isCommish ? (document.getElementById("label-type-override")?.value || "") : undefined;
+    const commishGroup = isCommish ? (document.getElementById("label-commish-input")?.value?.trim() || "") : undefined;
+
     try {
-      await saveLeagueMeta(_currentUsername, leagueKey, {
+      const metaUpdate = {
         customLabel,
-        commishGroup,
-        pinned:              document.getElementById("label-pin-check")?.checked     || false,
-        archived:            document.getElementById("label-archive-check")?.checked || false,
-        auctionEnabled:      document.getElementById("label-auction-check")?.checked || false,
-        auctionIncludePicks: document.getElementById("label-picks-check")?.checked   || false,
-        leagueTypeOverride:  typeOverride || null
-      });
+        pinned:   document.getElementById("label-pin-check")?.checked     || false,
+        archived: document.getElementById("label-archive-check")?.checked || false,
+      };
+      if (isCommish) {
+        metaUpdate.commishGroup        = commishGroup;
+        metaUpdate.auctionEnabled      = document.getElementById("label-auction-check")?.checked || false;
+        metaUpdate.auctionIncludePicks = document.getElementById("label-picks-check")?.checked   || false;
+        metaUpdate.leagueTypeOverride  = typeOverride || null;
+      }
+
+      await saveLeagueMeta(_currentUsername, leagueKey, metaUpdate);
 
       // Propagate leagueTypeOverride to all seasons in the same franchise chain
-      if (typeOverride) {
+      if (isCommish && typeOverride) {
         const franchise = Object.values(_buildFranchises()).find(f =>
           f.seasons.some(s => s.key === leagueKey)
         );
@@ -2072,7 +2324,7 @@ const Profile = (() => {
       // Force re-read from Firebase to verify
       await loadLeagueMeta(_currentUsername);
       // Apply type override to all affected leagues in local state
-      if (typeOverride) {
+      if (isCommish && typeOverride) {
         const franchise = Object.values(_buildFranchises()).find(f =>
           f.seasons.some(s => s.key === leagueKey)
         );
