@@ -6,61 +6,93 @@
 const YahooAPI = (() => {
   const BASE = "https://mfl-proxy.mraladdin23.workers.dev";
 
-  // ── Token storage keys ────────────────────────────────────
+  // ── Token storage keys (localStorage fast cache) ─────────
   const KEY_ACCESS    = "dlr_yahoo_access_token";
   const KEY_REFRESH   = "dlr_yahoo_refresh_token";
   const KEY_EXPIRES   = "dlr_yahoo_expires_at";   // absolute ms timestamp
 
+  // Username for Firebase writes — set by app.js once auth resolves.
+  let _fbUsername = null;
+  function setUsername(username) { _fbUsername = username || null; }
+
   /**
-   * Stores tokens after OAuth callback. Call this from app.js when
-   * the #yahoo_token= hash is received.
+   * Stores tokens in localStorage (fast cache) AND Firebase (durable).
+   * Firebase write is fire-and-forget — never blocks the token being usable.
    */
   function storeTokens(accessToken, refreshToken, expiresIn) {
-    localStorage.setItem(KEY_ACCESS, accessToken);
-    // Always write refresh token slot — clear stale value if Yahoo didn't send one.
-    // Yahoo only issues a refresh token on first authorization; reconnects may omit it.
-    // Keeping a stale refresh token is worse than having none (it causes failed refresh
-    // attempts which throw "token expired" instead of falling back to the access token).
-    if (refreshToken) {
-      localStorage.setItem(KEY_REFRESH, refreshToken);
-      sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken);
-    } else {
-      localStorage.removeItem(KEY_REFRESH);
-      sessionStorage.removeItem("dlr_yahoo_refresh_token");
-    }
-    // Guard against NaN/invalid expiresIn — default to 3600s
+    // Guard against NaN/invalid expiresIn
     const ttl = Number(expiresIn);
     const expiresAt = Date.now() + (Number.isFinite(ttl) && ttl > 0 ? ttl : 3600) * 1000;
+
+    // localStorage fast cache
+    localStorage.setItem(KEY_ACCESS,  accessToken);
     localStorage.setItem(KEY_EXPIRES, String(expiresAt));
-    // sessionStorage copy for backward compat
-    sessionStorage.setItem("dlr_yahoo_access_token", accessToken);
+    if (refreshToken) {
+      localStorage.setItem(KEY_REFRESH, refreshToken);
+    } else {
+      // Clear stale refresh token — keeping it causes failed refresh attempts
+      localStorage.removeItem(KEY_REFRESH);
+    }
+
+    // Firebase durable storage — write whenever we have a username
+    if (_fbUsername && typeof GMDB !== "undefined" && GMDB.saveYahooTokens) {
+      GMDB.saveYahooTokens(_fbUsername, { accessToken, refreshToken: refreshToken || null, expiresAt })
+        .catch(e => console.warn("[Yahoo] Firebase token save failed:", e.message));
+    }
+  }
+
+  /**
+   * Loads tokens from Firebase into localStorage cache.
+   * Called once on startup when username becomes known.
+   * Returns true if tokens were found and loaded.
+   */
+  async function loadTokensFromFirebase(username) {
+    if (!username || typeof GMDB === "undefined" || !GMDB.getYahooTokens) return false;
+    try {
+      const stored = await GMDB.getYahooTokens(username);
+      if (!stored?.accessToken) return false;
+      // Hydrate localStorage cache from Firebase
+      localStorage.setItem(KEY_ACCESS,  stored.accessToken);
+      localStorage.setItem(KEY_EXPIRES, String(stored.expiresAt || 0));
+      if (stored.refreshToken) {
+        localStorage.setItem(KEY_REFRESH, stored.refreshToken);
+      } else {
+        localStorage.removeItem(KEY_REFRESH);
+      }
+      console.log("[Yahoo] tokens loaded from Firebase, expiresAt:",
+        stored.expiresAt ? new Date(stored.expiresAt).toISOString() : "unknown");
+      return true;
+    } catch(e) {
+      console.warn("[Yahoo] loadTokensFromFirebase failed:", e.message);
+      return false;
+    }
   }
 
   /**
    * Returns a valid access token, refreshing if needed.
-   * Throws only if no token is stored at all.
-   *
-   * Strategy:
-   *   1. If token clearly still valid (>2 min left), use directly.
-   *   2. If expiry unknown (0), use optimistically.
-   *   3. If expired AND we have a refresh token, try to refresh.
-   *   4. If refresh fails or no refresh token, use access token optimistically
-   *      rather than throwing — Yahoo tokens often remain valid past stated expiry,
-   *      and the actual API call will surface a real error if truly invalid.
+   * Priority: localStorage cache → Firebase fallback → refresh → optimistic use.
    */
   async function _getValidToken() {
-    const access    = localStorage.getItem(KEY_ACCESS)  || sessionStorage.getItem("dlr_yahoo_access_token");
-    const refresh   = localStorage.getItem(KEY_REFRESH) || sessionStorage.getItem("dlr_yahoo_refresh_token");
-    const expiresAt = Number(localStorage.getItem(KEY_EXPIRES) || 0);
+    let access    = localStorage.getItem(KEY_ACCESS);
+    let refresh   = localStorage.getItem(KEY_REFRESH);
+    let expiresAt = Number(localStorage.getItem(KEY_EXPIRES) || 0);
+
+    // If localStorage is empty, try loading from Firebase before giving up
+    if (!access && _fbUsername) {
+      console.log("[Yahoo] localStorage empty — trying Firebase fallback…");
+      await loadTokensFromFirebase(_fbUsername);
+      access    = localStorage.getItem(KEY_ACCESS);
+      refresh   = localStorage.getItem(KEY_REFRESH);
+      expiresAt = Number(localStorage.getItem(KEY_EXPIRES) || 0);
+    }
 
     if (!access) throw new Error("No Yahoo access token — please reconnect Yahoo.");
 
-    // Token still valid (or expiry unknown) — use it directly
+    // Token still valid (or expiry unknown) — use directly
     if (!expiresAt || Date.now() < expiresAt - 120_000) return access;
 
-    // Token is past stated expiry — try refresh if we have a token
-    const hasRefresh = refresh && refresh.length > 0;
-    if (hasRefresh) {
+    // Token past stated expiry — try refresh
+    if (refresh && refresh.length > 0) {
       try {
         const res = await fetch(`${BASE}/auth/yahoo/refresh`, {
           method: "POST",
@@ -73,15 +105,13 @@ const YahooAPI = (() => {
         storeTokens(data.access_token, data.refresh_token || refresh, data.expires_in || 3600);
         return data.access_token;
       } catch(e) {
-        console.warn("[Yahoo] Token refresh failed, using access token optimistically:", e.message);
-        // Fall through — try the access token anyway rather than hard-failing
+        console.warn("[Yahoo] Token refresh failed, using optimistically:", e.message);
       }
     }
 
-    // No refresh token or refresh failed — use access token optimistically.
-    // Yahoo tokens often remain valid beyond the stated 1-hour expiry.
-    // The actual API call will return a 401 if truly invalid.
-    console.warn("[Yahoo] Using access token optimistically (expired or no refresh token)");
+    // Fall back to using the access token optimistically —
+    // Yahoo tokens often remain valid past stated 1-hour expiry.
+    console.warn("[Yahoo] Using access token optimistically");
     return access;
   }
 
@@ -344,5 +374,5 @@ const YahooAPI = (() => {
     }
   }
 
-  return { login, getLeagues, getLeagueBundle, getMatchupRoster, storeTokens, _getValidToken, _workerBase: BASE };
+  return { login, getLeagues, getLeagueBundle, getMatchupRoster, storeTokens, setUsername, loadTokensFromFirebase, _getValidToken, _workerBase: BASE };
 })();
