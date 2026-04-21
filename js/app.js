@@ -34,22 +34,38 @@ const AppState = {
     AppState.showScreen("app-screen");
     setLoading(false);
 
+    // Tell YahooAPI which user this is — enables Firebase token read/write
+    YahooAPI.setUsername(profile.username);
+
+    // If localStorage has no Yahoo token, try loading from Firebase.
+    // This handles the case where localStorage was cleared on mobile.
+    if (!localStorage.getItem("dlr_yahoo_access_token") && profile.platforms?.yahoo?.linked) {
+      YahooAPI.loadTokensFromFirebase(profile.username).catch(() => {});
+    }
+
     // Show resync nudge if MFL is connected but no email stored (legacy username-only import)
     const mfl = profile?.platforms?.mfl;
     const needsResync = mfl?.linked && !mfl?.mflEmail;
     const banner = document.getElementById("mfl-resync-banner");
     if (banner) banner.classList.toggle("hidden", !needsResync);
 
-    // If returning from Yahoo OAuth, auto-trigger the import.
+    // If returning from Yahoo OAuth — save tokens to Firebase then trigger import.
     // Uses localStorage (not sessionStorage) — sessionStorage is wiped on mobile redirect.
-    const yahooPending = localStorage.getItem("dlr_yahoo_pending");
-    console.log("[Yahoo OAuth] showApp — pending flag:", yahooPending, "| token present:", !!localStorage.getItem("dlr_yahoo_access_token"));
-    if (yahooPending === "1") {
+    if (localStorage.getItem("dlr_yahoo_pending") === "1") {
       localStorage.removeItem("dlr_yahoo_pending");
       localStorage.removeItem("dlr_yahoo_linking_user");
       sessionStorage.removeItem("dlr_yahoo_pending");
       sessionStorage.removeItem("dlr_yahoo_linking_user");
-      console.log("[Yahoo OAuth] triggering linkYahoo…");
+
+      // Persist fresh tokens to Firebase now that we know the username
+      const access    = localStorage.getItem("dlr_yahoo_access_token");
+      const refresh   = localStorage.getItem("dlr_yahoo_refresh_token");
+      const expiresAt = Number(localStorage.getItem("dlr_yahoo_expires_at") || 0);
+      if (access) {
+        GMDB.saveYahooTokens(profile.username, { accessToken: access, refreshToken: refresh || null, expiresAt })
+          .catch(e => console.warn("[Yahoo OAuth] Firebase token save failed:", e.message));
+      }
+
       setTimeout(async () => {
         try {
           setLoading(true, "Importing Yahoo leagues…");
@@ -263,16 +279,13 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
 (function() {
   // ── Primary path: query params (mobile-safe) ────────────
   const qp = new URLSearchParams(window.location.search);
-  console.log("[Yahoo OAuth] page load — search:", window.location.search.slice(0, 80), "| hash:", window.location.hash.slice(0, 40));
   if (qp.get("yahoo_token")) {
     const accessToken  = qp.get("yahoo_token");
     const refreshToken = qp.get("yahoo_refresh") || "";
     const expiresIn    = parseInt(qp.get("yahoo_expires") || "3600");
-    console.log("[Yahoo OAuth] query param token found, length:", accessToken?.length, "expiresIn:", expiresIn);
     if (accessToken) {
       YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
       localStorage.setItem("dlr_yahoo_pending", "1");
-      console.log("[Yahoo OAuth] tokens stored, pending flag set in localStorage");
     }
     // Clean query params immediately so token isn't visible in URL bar
     window.history.replaceState({}, "", window.location.pathname);
@@ -285,11 +298,9 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
     const accessToken  = hp.get("yahoo_token");
     const refreshToken = hp.get("yahoo_refresh") || "";
     const expiresIn    = parseInt(hp.get("yahoo_expires") || "3600");
-    console.log("[Yahoo OAuth] hash token found, length:", accessToken?.length);
     if (accessToken) {
       YahooAPI.storeTokens(accessToken, refreshToken, expiresIn);
       localStorage.setItem("dlr_yahoo_pending", "1");
-      console.log("[Yahoo OAuth] hash tokens stored, pending flag set in localStorage");
     }
     window.history.replaceState({}, "", window.location.pathname);
   }
@@ -300,14 +311,6 @@ document.getElementById("mfl-link-btn")?.addEventListener("click", async () => {
     window.history.replaceState({}, "", window.location.pathname);
     localStorage.setItem("dlr_yahoo_pending", "1");
   }
-
-  // Log current token state on every page load for diagnosis
-  const storedAccess  = localStorage.getItem("dlr_yahoo_access_token");
-  const storedExpires = localStorage.getItem("dlr_yahoo_expires_at");
-  const pendingFlag   = localStorage.getItem("dlr_yahoo_pending");
-  console.log("[Yahoo OAuth] state after IIFE — token present:", !!storedAccess,
-    "| expiresAt:", storedExpires ? new Date(Number(storedExpires)).toISOString() : "none",
-    "| pending:", pendingFlag);
 })();
 
 // ── Yahoo: connect button ─────────────────────────────────

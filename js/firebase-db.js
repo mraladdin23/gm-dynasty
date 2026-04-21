@@ -358,6 +358,33 @@ const GMDB = (() => {
     await GMD.child(`salaryCap/${leagueKey}/rosters`).set(rosters);
   }
 
+  // ── Yahoo token persistence ────────────────────────────
+  // Stored at gmd/users/{username}/platforms/yahoo/tokens so they survive
+  // browser storage clearing and work across devices/browsers.
+
+  async function saveYahooTokens(username, { accessToken, refreshToken, expiresAt }) {
+    try {
+      await GMD.child(`users/${username.toLowerCase()}/platforms/yahoo/tokens`).set({
+        accessToken,
+        refreshToken: refreshToken || null,
+        expiresAt:    expiresAt    || 0,
+        savedAt:      Date.now()
+      });
+    } catch(e) {
+      console.warn("[GMDB] saveYahooTokens failed:", e.message);
+    }
+  }
+
+  async function getYahooTokens(username) {
+    try {
+      const snap = await GMD.child(`users/${username.toLowerCase()}/platforms/yahoo/tokens`).once("value");
+      return snap.val() || null;
+    } catch(e) {
+      console.warn("[GMDB] getYahooTokens failed:", e.message);
+      return null;
+    }
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
@@ -388,6 +415,8 @@ const GMDB = (() => {
     saveSalarySettings,
     getSalaryRosters,
     saveSalaryRosters,
+    saveYahooTokens,
+    getYahooTokens,
     _restGet,
     _restPut
   };
