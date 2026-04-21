@@ -16,20 +16,37 @@ const YahooAPI = (() => {
    * the #yahoo_token= hash is received.
    */
   function storeTokens(accessToken, refreshToken, expiresIn) {
-    localStorage.setItem(KEY_ACCESS,  accessToken);
-    if (refreshToken) localStorage.setItem(KEY_REFRESH, refreshToken);
+    localStorage.setItem(KEY_ACCESS, accessToken);
+    // Always write refresh token slot — clear stale value if Yahoo didn't send one.
+    // Yahoo only issues a refresh token on first authorization; reconnects may omit it.
+    // Keeping a stale refresh token is worse than having none (it causes failed refresh
+    // attempts which throw "token expired" instead of falling back to the access token).
+    if (refreshToken) {
+      localStorage.setItem(KEY_REFRESH, refreshToken);
+      sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken);
+    } else {
+      localStorage.removeItem(KEY_REFRESH);
+      sessionStorage.removeItem("dlr_yahoo_refresh_token");
+    }
     // Guard against NaN/invalid expiresIn — default to 3600s
     const ttl = Number(expiresIn);
     const expiresAt = Date.now() + (Number.isFinite(ttl) && ttl > 0 ? ttl : 3600) * 1000;
     localStorage.setItem(KEY_EXPIRES, String(expiresAt));
-    // Also keep sessionStorage copy for backward compat
-    sessionStorage.setItem("dlr_yahoo_access_token",  accessToken);
-    sessionStorage.setItem("dlr_yahoo_refresh_token", refreshToken || "");
+    // sessionStorage copy for backward compat
+    sessionStorage.setItem("dlr_yahoo_access_token", accessToken);
   }
 
   /**
    * Returns a valid access token, refreshing if needed.
-   * Throws if no tokens are stored or refresh fails.
+   * Throws only if no token is stored at all.
+   *
+   * Strategy:
+   *   1. If token clearly still valid (>2 min left), use directly.
+   *   2. If expiry unknown (0), use optimistically.
+   *   3. If expired AND we have a refresh token, try to refresh.
+   *   4. If refresh fails or no refresh token, use access token optimistically
+   *      rather than throwing — Yahoo tokens often remain valid past stated expiry,
+   *      and the actual API call will surface a real error if truly invalid.
    */
   async function _getValidToken() {
     const access    = localStorage.getItem(KEY_ACCESS)  || sessionStorage.getItem("dlr_yahoo_access_token");
@@ -38,34 +55,34 @@ const YahooAPI = (() => {
 
     if (!access) throw new Error("No Yahoo access token — please reconnect Yahoo.");
 
-    // If token is still valid (with 2-minute buffer), use it
-    // If expiry is unknown (0), use token optimistically — it might still be valid.
-    // Only attempt refresh if we know for certain the token has expired.
+    // Token still valid (or expiry unknown) — use it directly
     if (!expiresAt || Date.now() < expiresAt - 120_000) return access;
 
-    // Token is definitively expired — try to refresh
+    // Token is past stated expiry — try refresh if we have a token
     const hasRefresh = refresh && refresh.length > 0;
-    if (!hasRefresh) {
-      throw new Error("Yahoo token expired — please reconnect Yahoo.");
+    if (hasRefresh) {
+      try {
+        const res = await fetch(`${BASE}/auth/yahoo/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refresh })
+        });
+        if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+        const data = await res.json();
+        if (!data.access_token) throw new Error("No access_token in refresh response");
+        storeTokens(data.access_token, data.refresh_token || refresh, data.expires_in || 3600);
+        return data.access_token;
+      } catch(e) {
+        console.warn("[Yahoo] Token refresh failed, using access token optimistically:", e.message);
+        // Fall through — try the access token anyway rather than hard-failing
+      }
     }
 
-    try {
-      const res = await fetch(`${BASE}/auth/yahoo/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refresh })
-      });
-      if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
-      const data = await res.json();
-      if (!data.access_token) throw new Error("No access token in refresh response");
-
-      // Store refreshed tokens
-      storeTokens(data.access_token, data.refresh_token || refresh, data.expires_in || 3600);
-      return data.access_token;
-    } catch(e) {
-      console.error("[Yahoo] Token refresh failed:", e.message);
-      throw new Error("Yahoo token expired — please reconnect Yahoo.");
-    }
+    // No refresh token or refresh failed — use access token optimistically.
+    // Yahoo tokens often remain valid beyond the stated 1-hour expiry.
+    // The actual API call will return a 401 if truly invalid.
+    console.warn("[Yahoo] Using access token optimistically (expired or no refresh token)");
+    return access;
   }
 
   /**
