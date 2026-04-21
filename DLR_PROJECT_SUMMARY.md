@@ -114,8 +114,36 @@ eliminator, and guillotine leagues.
 - Championship/playoff finish detection ✅ (uses standings `rank` + `clinched`/`playoffSeed` gate; badges for top 3 only; no 🏅 for made playoffs)
 - Per-league sync button ✅ (🔄 Sync League; null myId handled gracefully; clears stale data even when Yahoo returns no team info)
 - Commissioner broadcast message ✅ (fixed JSON-in-onclick bug via data attributes)
-- Token persistence ⚠️ (optimistic use when expiresAt=0 fixed; mobile still unreliable — Y4 open)
+- Token persistence ✅ (Y4 closed — root cause was `YAHOO_REDIRECT_URI` env var in Cloudflare pointing to frontend instead of worker callback; also fixed `linked` gate in `showApp` and added save in `linkYahoo`)
 - Bundle stability ⚠️ (worker batches week fetches 3/batch 300ms delay + retry; still rate-limits under heavy load — Y5 open)
+
+---
+
+## Tournament Feature (F5) — Planned
+
+**Spec doc:** `GMDynasty_Tournament_Spec.docx` v1.0 — attach to any tournament session.
+**Purpose:** Structured multi-platform competition layer for large-scale fantasy tournaments
+(e.g. Scott Fish Bowl) spanning MFL, Yahoo, and Sleeper leagues.
+
+**Firebase data root:** `gmd/tournaments/{tournamentId}/`
+**New files:** `tournament.js`, `tournament.css`
+**Existing files touched:** `firebase-db.js`, `index.html`, `app.js`, `profile.js`
+
+**Five build phases:**
+- **Phase 1 — Foundation:** Admin setup, league loading (multi-platform), role permissions (admin + scoped sub-admins), tournament lifecycle (Draft→Registration→Active→Playoffs→Complete), registration form builder, applicant approval, CSV export/import, auto-discovery (user's leagues silently matched to tournament league IDs on sync)
+- **Phase 2 — Core Views:** Tournament bio/info page (rich text, donation link), rules tab (versioned), tiebreaker config, consolidated standings (all teams, search/filter), division/conference sub-views
+- **Phase 3 — Analytics:** Consolidated draft board (all picks, ADP calc, filter by position/division), individual team draft board, weekly matchup summary tab (highlights + admin recap + AI-assisted recap via Claude API), top rosters view
+- **Phase 4 — Playoffs:** Format config (top-X by PF, top-N per division, H2H bracket, hybrid), list or bracket rendering, lineup view per matchup, winners advance / losers dimmed
+- **Phase 5 — Advanced:** Cross-platform identity merging (auto-match + admin override), weekly summary emails (SendGrid), message board integration
+
+**Open questions (resolve before each phase):**
+- P2: Rich text editor library — Quill, TipTap, or ProseMirror?
+- P3: AI recap — Claude API call from Cloudflare Worker or Firebase Function?
+- P4: Double elimination in Phase 4 or defer to Phase 5?
+- P5: Email provider; fallback for low-confidence identity auto-match?
+
+**Note:** F2 (Custom Playoff Tracker) overlaps with Phase 4 — decide before scoping P4 whether
+to merge them or keep F2 as a standalone lightweight precursor.
 
 ---
 
@@ -305,6 +333,12 @@ POST /auth/yahoo/refresh    — token refresh
 - All Yahoo leagues deleted and reimported fresh; placeholder Firebase keys from bad console script cleaned up
 - Note: Yahoo API still rate-limits under heavy load; old leagues (2002–2011) may have no matchup data and will show "Missed Playoffs" by default
 
+**April 20 (Y4 — Yahoo OAuth token persistence session):**
+- Root cause: `YAHOO_REDIRECT_URI` Cloudflare env var was set to `dynastylockerroom.com` (frontend) instead of `https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback` — Yahoo tokens were DOA
+- `app.js`: removed `yahoo.linked` gate from token sync block — was silently skipping save on every first connect since `linked` is false until `linkYahoo` runs 500ms later
+- `profile.js`: added `GMDB.saveYahooTokens` call inside `linkYahoo` after `linkPlatform` — reliable save point for first-time connects
+- ⚠️ **Cloudflare env var tip:** `YAHOO_REDIRECT_URI` must be `https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback` — never the frontend URL
+
 **April 20 (Yahoo playoff finish + sync overhaul session):**
 - `_detectYahooPlayoffFinish` fully rewritten — now uses standings `rank` + `clinched`/`playoffSeed` gate instead of bracket parsing; outcomes: 1/2/3/4/7/null only
 - Playoff participation gate: `clinched === true` OR `playoffSeed <= num_playoff_teams` (fallback for old leagues where Yahoo didn't set `clinched` reliably)
@@ -339,6 +373,7 @@ Here are the relevant files: [attach files]
 ```
 
 ### Tips:
+- **`YAHOO_REDIRECT_URI` Cloudflare env var** must be `https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback` — setting it to the frontend URL makes every token DOA ("Request denied")
 - Test Yahoo on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
 - `standings-row--me` is correct (NOT `standings-row--mine`)
 - Yahoo week pills use `season-pill` / `season-pill--current` (same as MFL/Sleeper)
@@ -348,6 +383,6 @@ Here are the relevant files: [attach files]
 
 ---
 
-*Document updated: April 20, 2026 (session 6)*
-*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — Y4/Y5 still open.*
-*Playoff finish detection, sync reliability, broadcast message, and bubble tag all fixed. Next: Y4 (Yahoo mobile OAuth) + mobile detail tab fixes.*
+*Document updated: April 20, 2026 (session 8)*
+*MFL: fully working. Sleeper: fully working. Yahoo: mostly working — Y5 still open.*
+*Y4 (OAuth token persistence) fully closed. Tournament feature spec (F5) added — 5 phases, start with F5-P1. Next: Y5 (bundle instability).*
