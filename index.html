@@ -349,11 +349,8 @@
             <button class="filter-btn" id="filter-archived-btn" onclick="Profile.toggleFilter('archived')">
               📦 Archived
             </button>
-            <button class="filter-btn" id="filter-groups-btn" onclick="Profile.toggleFilterPanel('groups')" style="display:none">
-              🗂 Groups
-            </button>
-            <button class="filter-btn" id="filter-commish-btn" onclick="Profile.toggleFilterPanel('commish')" style="display:none">
-              ⚡ Commish Groups
+            <button class="filter-btn" id="filter-mygroups-btn" onclick="Profile.toggleFilterPanel('mygroups')" style="display:none">
+              🗂 My Groups <span id="filter-mygroups-count" class="filter-btn-count" style="display:none"></span>
             </button>
           </div>
           <!-- Filter panels (hidden by default) -->
@@ -383,11 +380,16 @@
             </div>
             <button class="filter-panel-clear btn-secondary btn-sm" onclick="Profile.clearFilters()">Clear All</button>
           </div>
-          <div class="filter-panel hidden" id="filter-panel-groups">
-            <div id="filter-groups-list" class="filter-chip-list"></div>
-          </div>
-          <div class="filter-panel hidden" id="filter-panel-commish">
-            <div id="filter-commish-list" class="filter-chip-list"></div>
+          <!-- Unified My Groups panel: My Labels + Commissioner Groups -->
+          <div class="filter-panel hidden" id="filter-panel-mygroups">
+            <div id="filter-mygroups-labels-section" class="filter-group-section" style="display:none">
+              <div class="filter-group-section-title">🏷 My Labels</div>
+              <div id="filter-mygroups-labels-list" class="filter-chip-list"></div>
+            </div>
+            <div id="filter-mygroups-commish-section" class="filter-group-section" style="display:none">
+              <div class="filter-group-section-title">⚡ Commissioner Groups</div>
+              <div id="filter-mygroups-commish-list" class="filter-chip-list"></div>
+            </div>
           </div>
           <!-- Legacy hidden filter bar (still used by JS internally) -->
           <div class="league-filters" id="league-filters" style="display:none">

@@ -1585,8 +1585,6 @@ const Profile = (() => {
     // ── Commissioner groups ───────────────────────────────
     // Show a group if: this user created it (commUsername match) OR
     // any of its leagueKeys matches one of the user's league keys.
-    // This ensures group creators always see their own groups even when
-    // they're not a member of every league in the group.
     let commishGroups = [];
     try {
       const allGroups = await LeagueGroups.loadCommGroups();
@@ -2081,9 +2079,8 @@ const Profile = (() => {
   // ── Cross-platform merge helpers ───────────────────────
 
   // Returns an array of franchise objects that are merge candidates for leagueKey:
-  // same league name (normalized), different franchiseId, user is commish of the
-  // current league (authority to decide the chain), and not already merged together.
-  // The other franchise does NOT need commish — you're linking your own chain backwards.
+  // same league name (normalized), different franchiseId, user is commish of both,
+  // and not already merged together.
   function _detectMergeCandidates(leagueKey) {
     const league = _allLeagues[leagueKey];
     if (!league?.isCommissioner) return [];
@@ -2105,7 +2102,7 @@ const Profile = (() => {
       if (!otherLatest) return;
       if (_normalizeName(otherLatest.leagueName) !== myName) return;
 
-      // Don't surface if this other franchise is already merged into something
+      // Don't surface if already merged into something else
       const otherMeta = _leagueMeta[f.latestKey] || {};
       if (otherMeta.mergedInto && !otherMeta.suppressMerge) return;
 
@@ -2532,13 +2529,33 @@ const Profile = (() => {
   let _detailLeagueKey = null;
   let _detailLeague    = null;
 
+  // Returns the effective franchiseId for a leagueKey, following mergedInto if set.
+  function _resolveEffectiveFid(leagueKey) {
+    const league = _allLeagues[leagueKey];
+    const meta   = _leagueMeta[leagueKey] || {};
+    if (meta.mergedInto && !meta.suppressMerge) return meta.mergedInto;
+    return league?.franchiseId || leagueKey;
+  }
+
+  // Returns all [key, league] pairs that belong to the same effective franchise chain,
+  // including seasons merged in via mergedInto links.
+  function _getAllSeasonsForFranchise(targetFid) {
+    return Object.entries(_allLeagues).filter(([key, l]) => {
+      // Direct match on franchiseId
+      if ((l.franchiseId || key) === targetFid) return true;
+      // Merged-in match
+      const meta = _leagueMeta[key] || {};
+      if (meta.mergedInto && !meta.suppressMerge && meta.mergedInto === targetFid) return true;
+      return false;
+    });
+  }
+
   function openLeagueDetail(leagueKey) {
     const league = _allLeagues[leagueKey];
     if (!league) return;
 
-    const franchiseId      = league.franchiseId || league.leagueId;
-    const franchiseSeasons = Object.entries(_allLeagues)
-      .filter(([, l]) => (l.franchiseId || l.leagueId) === franchiseId)
+    const franchiseId      = _resolveEffectiveFid(leagueKey);
+    const franchiseSeasons = _getAllSeasonsForFranchise(franchiseId)
       .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
 
     _detailLeagueKey = leagueKey;
@@ -2942,9 +2959,8 @@ const Profile = (() => {
     const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";
 
     // Franchise all-time stats
-    const franchiseId = league.franchiseId || league.leagueId;
-    const allSeasons  = Object.entries(_allLeagues)
-      .filter(([, l]) => (l.franchiseId || l.leagueId) === franchiseId)
+    const franchiseId = _resolveEffectiveFid(leagueKey);
+    const allSeasons  = _getAllSeasonsForFranchise(franchiseId)
       .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
 
     const totalWins   = allSeasons.reduce((s, [,l]) => s + (l.wins   || 0), 0);
@@ -3017,10 +3033,9 @@ const Profile = (() => {
   }
 
   function _renderHistory(el, leagueKey, league) {
-    // Find all seasons of same franchise (same franchiseId)
-    const franchiseId = league.franchiseId || league.leagueId;
-    const allSeasons  = Object.entries(_allLeagues)
-      .filter(([, l]) => l.franchiseId === franchiseId || l.leagueId === league.leagueId)
+    // Find all seasons of same franchise chain, including merged-in seasons
+    const franchiseId = _resolveEffectiveFid(leagueKey);
+    const allSeasons  = _getAllSeasonsForFranchise(franchiseId)
       .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
 
     if (allSeasons.length <= 1) {
