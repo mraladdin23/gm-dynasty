@@ -392,8 +392,10 @@ const Profile = (() => {
             _allLeagues[leagueKey].pointsFor   = mySt.ptsFor      || _allLeagues[leagueKey].pointsFor || 0;
 
             // ── Detect playoff finish for past seasons ──────────────────────
+            // Always re-run — don't skip leagues with an existing value since
+            // the stored value may be stale or wrong (e.g. wrong eliminator rank).
             const isPast = Number(league.season) < Number(new Date().getFullYear());
-            if (isPast && !_allLeagues[leagueKey].playoffFinish) {
+            if (isPast) {
               await _detectAndSetMFLPlayoffFinish(leagueKey, league, bundle, myRosterId);
             }
 
@@ -718,6 +720,70 @@ const Profile = (() => {
       btn.textContent = "Failed";
       setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2500);
       showToast(e.message || "Sync failed", "error");
+    }
+  }
+
+  // Per-league MFL sync — clears stale playoff finish, re-fetches bundle, re-detects, saves.
+  async function _triggerMFLSync(leagueKey) {
+    const btn = document.getElementById("detail-yahoo-sync-btn");
+    if (!btn) return;
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Syncing…";
+    try {
+      const league = _allLeagues[leagueKey];
+      if (!league || league.platform !== "mfl") throw new Error("Not an MFL league");
+      if (!league.myRosterId) throw new Error("No roster ID stored — re-import this league first");
+
+      // Clear stale flags so detection runs fresh
+      _allLeagues[leagueKey].playoffFinish = null;
+      _allLeagues[leagueKey].isChampion    = false;
+
+      const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
+      const leagueInfo    = bundle?.league?.league || {};
+      const franchisesRaw = leagueInfo?.franchises?.franchise;
+      const franchisesArr = franchisesRaw
+        ? (Array.isArray(franchisesRaw) ? franchisesRaw : [franchisesRaw])
+        : [];
+      const myFranchise = franchisesArr.find(f => String(f.id) === String(league.myRosterId)) || {};
+      const standingsMap = MFLAPI.getStandingsMap(bundle);
+      const mySt         = standingsMap[String(league.myRosterId)] || {};
+
+      // Update team info
+      if (myFranchise.name) _allLeagues[leagueKey].teamName  = myFranchise.name;
+      _allLeagues[leagueKey].wins        = mySt.wins    || _allLeagues[leagueKey].wins    || 0;
+      _allLeagues[leagueKey].losses      = mySt.losses  || _allLeagues[leagueKey].losses  || 0;
+      _allLeagues[leagueKey].ties        = mySt.ties    || _allLeagues[leagueKey].ties    || 0;
+      _allLeagues[leagueKey].standing    = mySt.rank    || _allLeagues[leagueKey].standing || null;
+      _allLeagues[leagueKey].pointsFor   = mySt.ptsFor  || _allLeagues[leagueKey].pointsFor || 0;
+
+      // Always re-run playoff detection (force-cleared above)
+      await _detectAndSetMFLPlayoffFinish(leagueKey, league, bundle, league.myRosterId);
+
+      await GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } });
+
+      try {
+        const stats = await GMDB.recomputeStats(_currentUsername);
+        if (_currentProfile && stats) _currentProfile.stats = stats;
+        _renderStatsRow(stats || {});
+      } catch(e) {}
+
+      _renderLeagues();
+      _renderCareerSummary(_currentProfile || {});
+
+      // Re-render overview tab immediately
+      if (_detailLeagueKey === leagueKey) {
+        _detailLeague = { ..._allLeagues[leagueKey] };
+        const overviewEl = document.getElementById("dtab-overview");
+        if (overviewEl) await _renderOverview(overviewEl, leagueKey, _detailLeague);
+      }
+
+      btn.textContent = "✓ Synced";
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+    } catch(e) {
+      btn.textContent = "Failed";
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2500);
+      showToast(e.message || "MFL sync failed", "error");
     }
   }
 
@@ -2082,7 +2148,7 @@ const Profile = (() => {
       ${league.isCommissioner ? '<span class="league-tag league-tag--commish">👑 Commish</span>' : ""}
     `;
 
-    // Yahoo sync button — show only for Yahoo leagues
+    // Sync button — Yahoo gets "🔄 Sync League", MFL gets "🔄 Sync League" too
     const syncBtn = document.getElementById("detail-yahoo-sync-btn");
     if (syncBtn) {
       if (league.platform === "yahoo") {
@@ -2090,6 +2156,11 @@ const Profile = (() => {
         syncBtn.textContent = "🔄 Sync League";
         syncBtn.disabled = false;
         syncBtn.onclick = () => _triggerYahooSync(leagueKey);
+      } else if (league.platform === "mfl") {
+        syncBtn.style.display = "";
+        syncBtn.textContent = "🔄 Sync League";
+        syncBtn.disabled = false;
+        syncBtn.onclick = () => _triggerMFLSync(leagueKey);
       } else {
         syncBtn.style.display = "none";
       }
@@ -2232,6 +2303,11 @@ const Profile = (() => {
         syncBtnSw.textContent = "🔄 Sync League";
         syncBtnSw.disabled = false;
         syncBtnSw.onclick = () => _triggerYahooSync(newKey);
+      } else if (newLeague.platform === "mfl") {
+        syncBtnSw.style.display = "";
+        syncBtnSw.textContent = "🔄 Sync League";
+        syncBtnSw.disabled = false;
+        syncBtnSw.onclick = () => _triggerMFLSync(newKey);
       } else {
         syncBtnSw.style.display = "none";
       }
@@ -2441,7 +2517,9 @@ const Profile = (() => {
   function _renderOverviewHTML(el, leagueKey, league) {
     const finish      = league.playoffFinish;
     const isComplete  = _isSeasonComplete(league);
-    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 7:"Made Playoffs" }[finish] || (isComplete ? "Missed Playoffs" : "Season in Progress");
+    const isElimStyle = !!(league.isGuillotine || league.isEliminator);
+    const missedLabel = isElimStyle ? "No Playoffs Scheduled" : "Missed Playoffs";
+    const finishLabel = { 1:"🏆 Champion", 2:"🥈 Runner-Up", 3:"🥉 3rd Place", 4:"4th Place", 7:"Made Playoffs" }[finish] || (isComplete ? missedLabel : "Season in Progress");
     const finishColor = { 1:"var(--color-gold)", 2:"#94a3b8", 3:"#cd7f32" }[finish] || "var(--color-text-dim)";
 
     // Franchise all-time stats
