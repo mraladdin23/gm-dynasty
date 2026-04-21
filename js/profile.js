@@ -1526,32 +1526,6 @@ const Profile = (() => {
 
   // ── Filter bar ─────────────────────────────────────────
   function _renderLeagueFilters() {
-    const customLabels  = new Set();
-    const commishGroups = new Set();
-
-    Object.values(_leagueMeta).forEach(m => {
-      if (m && m.customLabel  && m.customLabel.trim())  customLabels.add(m.customLabel.trim());
-      if (m && m.commishGroup && m.commishGroup.trim()) commishGroups.add(m.commishGroup.trim());
-    });
-
-    // Show/hide group buttons
-    document.getElementById("filter-groups-btn")?.style.setProperty("display", customLabels.size > 0 ? "" : "none");
-    document.getElementById("filter-commish-btn")?.style.setProperty("display", commishGroups.size > 0 ? "" : "none");
-
-    // Populate groups panel
-    const groupsList = document.getElementById("filter-groups-list");
-    if (groupsList) {
-      groupsList.innerHTML = [...customLabels].map(l =>
-        `<button class="filter-chip" data-filter="label:${_escHtml(l)}" onclick="Profile.toggleFilter('label:${_escHtml(l)}')">🏷 ${_escHtml(l)}</button>`
-      ).join("");
-    }
-    const commishList = document.getElementById("filter-commish-list");
-    if (commishList) {
-      commishList.innerHTML = [...commishGroups].map(g =>
-        `<button class="filter-chip" data-filter="group:${_escHtml(g)}" onclick="Profile.toggleFilter('group:${_escHtml(g)}')">⚡ ${_escHtml(g)}</button>`
-      ).join("");
-    }
-
     // Wire checkboxes in main panel
     document.querySelectorAll("#filter-panel-main input[type=checkbox]").forEach(cb => {
       cb.addEventListener("change", () => {
@@ -1562,7 +1536,6 @@ const Profile = (() => {
             x.checked = x.dataset.filter === "all";
           });
         } else {
-          // Uncheck "all" when specific filter selected
           document.querySelector('#filter-panel-main input[data-filter="all"]').checked = false;
           if (cb.checked) _activeFilters.add(f);
           else _activeFilters.delete(f);
@@ -1589,6 +1562,95 @@ const Profile = (() => {
         });
       });
     }
+
+    // Load groups from Firebase async — populates the My Groups panel
+    _refreshGroupsFilter();
+  }
+
+  // Async: fetch personal labels + commish groups from Firebase and populate
+  // the unified "My Groups" filter panel. Shows the button only if content exists.
+  async function _refreshGroupsFilter() {
+    const myLeagueKeys = new Set(Object.keys(_allLeagues));
+    const uname = (_currentUsername || "").toLowerCase();
+
+    // ── Personal labels ───────────────────────────────────
+    let personalLabels = [];
+    try {
+      const labelsObj = await LeagueGroups.getPersonalLabels(_currentUsername);
+      personalLabels = Object.values(labelsObj || {}).filter(l =>
+        l.name && (l.leagueKeys || []).some(k => myLeagueKeys.has(k))
+      );
+    } catch(e) { console.warn("[Groups filter] personalLabels error:", e); }
+
+    // ── Commissioner groups ───────────────────────────────
+    // Show a group if: this user created it (commUsername match) OR
+    // any of its leagueKeys matches one of the user's league keys.
+    // This ensures group creators always see their own groups even when
+    // they're not a member of every league in the group.
+    let commishGroups = [];
+    try {
+      const allGroups = await LeagueGroups.loadCommGroups();
+      commishGroups = Object.values(allGroups || {}).filter(g => {
+        if (!g.name) return false;
+        if ((g.commUsername || "").toLowerCase() === uname) return true;
+        return (g.leagueKeys || []).some(k => myLeagueKeys.has(k));
+      });
+    } catch(e) { console.warn("[Groups filter] commishGroups error:", e); }
+
+    // Also pull legacy commishGroup text values from _leagueMeta
+    const legacyCommishNames = new Set();
+    Object.values(_leagueMeta).forEach(m => {
+      if (m?.commishGroup?.trim()) legacyCommishNames.add(m.commishGroup.trim());
+    });
+    const commishGroupNames = new Set(commishGroups.map(g => g.name));
+    legacyCommishNames.forEach(name => {
+      if (!commishGroupNames.has(name)) {
+        commishGroups.push({ name, color: "var(--color-gold)", leagueKeys: [] });
+      }
+    });
+
+    const totalGroups = personalLabels.length + commishGroups.length;
+
+    // Show/hide the My Groups button
+    const btn = document.getElementById("filter-mygroups-btn");
+    if (btn) btn.style.display = totalGroups > 0 ? "" : "none";
+
+    // ── Personal labels section ───────────────────────────
+    const labelsSection = document.getElementById("filter-mygroups-labels-section");
+    const labelsList    = document.getElementById("filter-mygroups-labels-list");
+    if (labelsSection && labelsList) {
+      if (personalLabels.length > 0) {
+        labelsSection.style.display = "";
+        labelsList.innerHTML = personalLabels.map(l => {
+          const f = `label:${_escHtml(l.name)}`;
+          return `<button class="filter-chip ${_activeFilters.has(f) ? "filter-chip--active" : ""}"
+            data-filter="${f}"
+            onclick="Profile.toggleFilter('${f}')">🏷 ${_escHtml(l.name)}</button>`;
+        }).join("");
+      } else {
+        labelsSection.style.display = "none";
+      }
+    }
+
+    // ── Commissioner groups section ───────────────────────
+    const commishSection = document.getElementById("filter-mygroups-commish-section");
+    const commishList    = document.getElementById("filter-mygroups-commish-list");
+    if (commishSection && commishList) {
+      if (commishGroups.length > 0) {
+        commishSection.style.display = "";
+        commishList.innerHTML = commishGroups.map(g => {
+          const f = `group:${_escHtml(g.name)}`;
+          return `<button class="filter-chip ${_activeFilters.has(f) ? "filter-chip--active" : ""}"
+            data-filter="${f}"
+            style="${g.color && g.color !== "var(--color-gold)" ? `border-color:${g.color};color:${g.color}` : ""}"
+            onclick="Profile.toggleFilter('${f}')">⚡ ${_escHtml(g.name)}</button>`;
+        }).join("");
+      } else {
+        commishSection.style.display = "none";
+      }
+    }
+
+    _updateGroupsBtnCount();
   }
 
   function _updateFilterBtnCount() {
@@ -1597,24 +1659,32 @@ const Profile = (() => {
     const n = _activeFilters.size;
     countEl.textContent = n;
     countEl.style.display = n > 0 ? "" : "none";
-    // Update archived button highlight
     document.getElementById("filter-archived-btn")?.classList.toggle("filter-btn--active",
       _activeFilters.has("archived"));
   }
 
+  function _updateGroupsBtnCount() {
+    const countEl = document.getElementById("filter-mygroups-count");
+    if (!countEl) return;
+    const active = [..._activeFilters].filter(f => f.startsWith("label:") || f.startsWith("group:")).length;
+    countEl.textContent = active;
+    countEl.style.display = active > 0 ? "" : "none";
+    document.getElementById("filter-mygroups-btn")?.classList.toggle("filter-btn--active", active > 0);
+  }
+
   function toggleFilterPanel(name) {
-    const panels = ["main","groups","commish"];
+    const panels = ["main", "mygroups"];
     panels.forEach(p => {
       const el = document.getElementById(`filter-panel-${p}`);
       if (!el) return;
       if (p === name) el.classList.toggle("hidden");
       else el.classList.add("hidden");
     });
-    // Update button active states
     panels.forEach(p => {
       document.getElementById(`filter-${p}-btn`)?.classList.toggle("filter-btn--active",
         !document.getElementById(`filter-panel-${p}`)?.classList.contains("hidden"));
     });
+    _updateGroupsBtnCount();
   }
 
   function toggleFilter(f) {
@@ -1625,13 +1695,12 @@ const Profile = (() => {
     } else {
       if (_activeFilters.has(f)) _activeFilters.delete(f);
       else _activeFilters.add(f);
-      // Sync checkbox if panel exists
       const cb = document.querySelector(`#filter-panel-main input[data-filter="${CSS.escape(f)}"]`);
       if (cb) cb.checked = _activeFilters.has(f);
-      // Sync chip
       document.querySelectorAll(`.filter-chip[data-filter="${CSS.escape(f)}"]`).forEach(c =>
         c.classList.toggle("filter-chip--active", _activeFilters.has(f)));
       _updateFilterBtnCount();
+      if (f.startsWith("label:") || f.startsWith("group:")) _updateGroupsBtnCount();
     }
     _renderLeagues();
   }
@@ -1643,6 +1712,7 @@ const Profile = (() => {
     });
     document.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("filter-chip--active"));
     _updateFilterBtnCount();
+    _updateGroupsBtnCount();
     _renderLeagues();
   }
 
@@ -2011,8 +2081,9 @@ const Profile = (() => {
   // ── Cross-platform merge helpers ───────────────────────
 
   // Returns an array of franchise objects that are merge candidates for leagueKey:
-  // same league name (normalized), different franchiseId, user is commish of both,
-  // and not already merged together.
+  // same league name (normalized), different franchiseId, user is commish of the
+  // current league (authority to decide the chain), and not already merged together.
+  // The other franchise does NOT need commish — you're linking your own chain backwards.
   function _detectMergeCandidates(leagueKey) {
     const league = _allLeagues[leagueKey];
     if (!league?.isCommissioner) return [];
@@ -2027,18 +2098,17 @@ const Profile = (() => {
     const candidates = [];
 
     Object.values(franchises).forEach(f => {
-      if (f.franchiseId === myEffectiveFid) return; // same chain
+      if (f.franchiseId === myEffectiveFid) return; // same chain already
 
-      // Must be commish of at least one season in the other franchise
-      const otherIsCommish = f.seasons.some(s => s.league.isCommissioner);
-      if (!otherIsCommish) return;
-
-      // Name must match (normalized)
+      // Name must match (normalized — strips emoji, punctuation, case)
       const otherLatest = _allLeagues[f.latestKey];
       if (!otherLatest) return;
       if (_normalizeName(otherLatest.leagueName) !== myName) return;
 
-      // Must be on a different platform or different chain (not same franchiseId already)
+      // Don't surface if this other franchise is already merged into something
+      const otherMeta = _leagueMeta[f.latestKey] || {};
+      if (otherMeta.mergedInto && !otherMeta.suppressMerge) return;
+
       candidates.push(f);
     });
 
