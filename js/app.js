@@ -34,13 +34,28 @@ const AppState = {
     AppState.showScreen("app-screen");
     setLoading(false);
 
-    // Tell YahooAPI which user this is — enables Firebase token read/write
+    // Tell YahooAPI which user this is so Firebase token reads/writes work
     YahooAPI.setUsername(profile.username);
 
-    // If localStorage has no Yahoo token, try loading from Firebase.
-    // This handles the case where localStorage was cleared on mobile.
-    if (!localStorage.getItem("dlr_yahoo_access_token") && profile.platforms?.yahoo?.linked) {
-      YahooAPI.loadTokensFromFirebase(profile.username).catch(() => {});
+    // ── Yahoo token sync ──────────────────────────────────────
+    // Always keep Firebase and localStorage in sync.
+    // On normal loads: if localStorage has a token, persist it to Firebase.
+    // On loads after localStorage was cleared: load from Firebase into localStorage.
+    if (profile.platforms?.yahoo?.linked) {
+      const cachedToken = localStorage.getItem("dlr_yahoo_access_token");
+      if (cachedToken) {
+        // localStorage has a token — make sure Firebase has it too (fire-and-forget)
+        const refresh   = localStorage.getItem("dlr_yahoo_refresh_token");
+        const expiresAt = Number(localStorage.getItem("dlr_yahoo_expires_at") || 0);
+        GMDB.saveYahooTokens(profile.username, {
+          accessToken:  cachedToken,
+          refreshToken: refresh || null,
+          expiresAt
+        }).catch(() => {});
+      } else {
+        // localStorage is empty — try restoring from Firebase
+        YahooAPI.loadTokensFromFirebase(profile.username).catch(() => {});
+      }
     }
 
     // Show resync nudge if MFL is connected but no email stored (legacy username-only import)
@@ -49,23 +64,13 @@ const AppState = {
     const banner = document.getElementById("mfl-resync-banner");
     if (banner) banner.classList.toggle("hidden", !needsResync);
 
-    // If returning from Yahoo OAuth — save tokens to Firebase then trigger import.
+    // If returning from Yahoo OAuth, auto-trigger the import.
     // Uses localStorage (not sessionStorage) — sessionStorage is wiped on mobile redirect.
     if (localStorage.getItem("dlr_yahoo_pending") === "1") {
       localStorage.removeItem("dlr_yahoo_pending");
       localStorage.removeItem("dlr_yahoo_linking_user");
       sessionStorage.removeItem("dlr_yahoo_pending");
       sessionStorage.removeItem("dlr_yahoo_linking_user");
-
-      // Persist fresh tokens to Firebase now that we know the username
-      const access    = localStorage.getItem("dlr_yahoo_access_token");
-      const refresh   = localStorage.getItem("dlr_yahoo_refresh_token");
-      const expiresAt = Number(localStorage.getItem("dlr_yahoo_expires_at") || 0);
-      if (access) {
-        GMDB.saveYahooTokens(profile.username, { accessToken: access, refreshToken: refresh || null, expiresAt })
-          .catch(e => console.warn("[Yahoo OAuth] Firebase token save failed:", e.message));
-      }
-
       setTimeout(async () => {
         try {
           setLoading(true, "Importing Yahoo leagues…");

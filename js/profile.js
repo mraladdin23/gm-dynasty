@@ -237,27 +237,48 @@ const Profile = (() => {
       throw new Error("No Yahoo leagues found. Make sure you completed the Yahoo authorization.");
     }
 
+    // Load existing stored leagues so we can preserve accumulated data
+    // (playoffFinish, myRosterId, teamName, resolved, isChampion, wins, etc.)
+    // A reconnect should only refresh identity fields, never wipe history.
+    let existing = {};
+    try {
+      existing = await GMDB.getLeagues(gmdUsername) || {};
+    } catch(e) {
+      console.warn("[linkYahoo] Could not load existing leagues:", e.message);
+    }
+
     const leaguesMap = {};
     for (const l of yahooLeagues) {
       const key        = `yahoo_${l.season}_${l.leagueId}`;
       const leagueName = l.leagueName || `League ${l.leagueId}`;
-      // Chain by normalized league name so same dynasty across seasons links together
       const normalizedName = leagueName.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
       const franchiseId = `yahoo__${normalizedName}`;
+
+      const prev = existing[key] || {};
+
+      // Merge: identity/structural fields always come from Yahoo API (may have changed).
+      // Accumulated fields are preserved from Firebase — never reset on reconnect.
       leaguesMap[key] = {
+        // Preserve everything already stored
+        ...prev,
+        // Always refresh these from the API
         platform:      "yahoo",
         leagueId:      String(l.leagueId),
-        leagueKey:     l.leagueKey || `nfl.l.${l.leagueId}`,  // full Yahoo key e.g. "423.l.12345"
+        leagueKey:     l.leagueKey || prev.leagueKey || `nfl.l.${l.leagueId}`,
         franchiseId,
         leagueName,
         season:        String(l.season || new Date().getFullYear()),
-        leagueType:    _detectLeagueType(leagueName),
-        totalTeams:    l.numTeams || 12,
-        teamName:      "",
-        isCommissioner: false,
-        myRosterId:    null,
-        wins:          0, losses: 0, ties: 0,
-        pointsFor: 0, pointsAgainst: 0
+        totalTeams:    l.numTeams || prev.totalTeams || 12,
+        // Only set these if not already stored
+        leagueType:    prev.leagueType    || _detectLeagueType(leagueName),
+        teamName:      prev.teamName      || "",
+        isCommissioner: prev.isCommissioner || false,
+        myRosterId:    prev.myRosterId    || null,
+        wins:          prev.wins          ?? 0,
+        losses:        prev.losses        ?? 0,
+        ties:          prev.ties          ?? 0,
+        pointsFor:     prev.pointsFor     ?? 0,
+        pointsAgainst: prev.pointsAgainst ?? 0,
       };
     }
 
@@ -433,7 +454,6 @@ const Profile = (() => {
   async function _detectAndSetMFLPlayoffFinish(leagueKey, league, bundle, myRosterId) {
     const myStr    = String(myRosterId);
     const standings = MFLAPI.normalizeStandings(bundle);
-    console.log(`[MFL detect] leagueKey=${leagueKey} myRosterId=${myStr} standings.length=${standings.length}`, standings[0] || "(empty)");
 
     // ── Path 1 & 2: Eliminator or Guillotine ───────────────────────────────
     const isEliminatorOrGuillotine = standings.length > 0 &&
@@ -442,80 +462,71 @@ const Profile = (() => {
     if (isEliminatorOrGuillotine) {
       const isGuillotine = standings[0].isGuillotine || false;
       const isEliminator = standings[0].isEliminator || false;
-      console.log(`[MFL detect] eliminator/guillotine path — isEliminator:${isEliminator} isGuillotine:${isGuillotine}`);
 
+      // Persist the league type flags so _renderOverviewHTML can use them
+      // even after a page reload (they were previously only set in memory).
       if (_allLeagues[leagueKey]) {
         _allLeagues[leagueKey].isGuillotine = isGuillotine;
         _allLeagues[leagueKey].isEliminator = isEliminator;
       }
 
       const myEntry = standings.find(s => String(s.franchiseId) === myStr);
-      console.log(`[MFL detect] myEntry:`, myEntry || "(not found)");
       if (myEntry) {
         const finish = myEntry.rank;
         _allLeagues[leagueKey].playoffFinish = finish;
         _allLeagues[leagueKey].isChampion    = finish === 1;
-        console.log(`[MFL detect] set playoffFinish=${finish} isChampion=${finish===1}`);
       }
       return;
     }
 
     // ── Also check league info directly for eliminator flag ───────────────
+    // MFL sometimes clears franchises_eliminated after the season ends, so
+    // normalizeStandings may not detect it. Check the league object directly.
     const leagueInfo = bundle?.league?.league || {};
     const leagueType = (leagueInfo.leagueType || leagueInfo.league_type || "").toLowerCase();
     const isKnownEliminator = leagueType === "survivor" || leagueType === "eliminator"
       || (leagueInfo.franchises_eliminated != null && String(leagueInfo.franchises_eliminated).trim() !== "");
 
-    console.log(`[MFL detect] leagueType="${leagueType}" isKnownEliminator=${isKnownEliminator} franchises_eliminated="${leagueInfo.franchises_eliminated}"`);
-
     if (isKnownEliminator) {
+      // Persist flag so UI shows correct label
       if (_allLeagues[leagueKey]) {
         _allLeagues[leagueKey].isEliminator = true;
         _allLeagues[leagueKey].isGuillotine = false;
       }
+      // Use standings rank directly — even without franchises_eliminated,
+      // normalizeStandings returns rows in rank order for standard leagues.
       const myEntry = standings.find(s => String(s.franchiseId) === myStr);
-      console.log(`[MFL detect] known eliminator myEntry:`, myEntry || "(not found)");
       if (myEntry) {
         const finish = myEntry.rank;
         _allLeagues[leagueKey].playoffFinish = finish;
         _allLeagues[leagueKey].isChampion    = finish === 1;
-        console.log(`[MFL detect] set playoffFinish=${finish} isChampion=${finish===1}`);
       }
       return;
     }
 
     // ── Path 3: Bracket league ─────────────────────────────────────────────
     const brackets = MFLAPI.normalizePlayoffBrackets(bundle);
-    console.log(`[MFL detect] bracket path — brackets.length=${brackets.length}`, brackets);
-    if (!brackets.length) {
-      console.log(`[MFL detect] no brackets found — leaving playoffFinish as-is`);
-      return;
-    }
+    if (!brackets.length) return;
 
+    // Identify championship bracket: prefer one whose name contains "champion",
+    // otherwise fall back to the bracket with the most teams involved.
     const champBracket = brackets.find(b =>
       (b.name || "").toLowerCase().includes("champion")
     ) || brackets.reduce((best, b) => (b.teams > best.teams ? b : best), brackets[0]);
 
-    console.log(`[MFL detect] champBracket:`, champBracket);
     if (!champBracket?.id) return;
 
     let bracketData;
     try {
       bracketData = await MFLAPI.getPlayoffBracket(league.leagueId, league.season, champBracket.id);
-      console.log(`[MFL detect] bracketData received`);
-    } catch(e) {
-      // Don't silently swallow — re-throw so the caller knows detection failed
-      console.warn(`[MFL detect] bracket fetch failed:`, e.message);
-      throw new Error(`Could not fetch playoff bracket: ${e.message}`);
-    }
+    } catch(e) { return; }
 
     const rounds = MFLAPI.normalizePlayoffBracketResult(bracketData);
-    console.log(`[MFL detect] rounds.length=${rounds.length}`);
     if (!rounds.length) return;
 
-    const finalRound    = rounds[rounds.length - 1];
+    const finalRound   = rounds[rounds.length - 1];
     const finalMatchups = finalRound?.matchups || [];
-    console.log(`[MFL detect] finalMatchups.length=${finalMatchups.length}`, finalMatchups);
+    if (!finalMatchups.length) return;
 
     // Championship game = first matchup in the final round.
     // Consolation (3rd/4th) = second matchup in the final round (if present).
@@ -774,7 +785,6 @@ const Profile = (() => {
     btn.textContent = "Syncing…";
     try {
       const league = _allLeagues[leagueKey];
-      console.log(`[MFL sync] starting for leagueKey=${leagueKey} platform=${league?.platform} myRosterId=${league?.myRosterId}`);
       if (!league || league.platform !== "mfl") throw new Error("Not an MFL league");
       if (!league.myRosterId) throw new Error("No roster ID stored — re-import this league first");
 
@@ -782,9 +792,7 @@ const Profile = (() => {
       _allLeagues[leagueKey].playoffFinish = null;
       _allLeagues[leagueKey].isChampion    = false;
 
-      console.log(`[MFL sync] fetching bundle for leagueId=${league.leagueId} season=${league.season}…`);
       const bundle = await MFLAPI.getLeagueBundle(league.leagueId, league.season);
-      console.log(`[MFL sync] bundle received — league.league keys:`, Object.keys(bundle?.league?.league || {}));
       const leagueInfo    = bundle?.league?.league || {};
       const franchisesRaw = leagueInfo?.franchises?.franchise;
       const franchisesArr = franchisesRaw
