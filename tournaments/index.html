@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Tournaments — Dynasty Locker Room</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
+  <link rel="stylesheet" href="../css/base.css?v=19" />
+  <link rel="stylesheet" href="../css/locker.css?v=21" />
+  <link rel="stylesheet" href="../css/tournament.css?v=1" />
+  <style>
+    /* ── Public tournament page overrides ── */
+    body { background: var(--color-bg); }
+
+    .pub-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-3) var(--space-5);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .pub-nav-brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      font-weight: 800;
+      font-size: 1rem;
+      text-decoration: none;
+      color: var(--color-text);
+    }
+
+    .pub-nav-actions { display: flex; gap: var(--space-2); }
+
+    .pub-main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: var(--space-6) var(--space-4) 120px;
+    }
+
+    /* ── Loading ── */
+    #pub-loading {
+      text-align: center;
+      padding: var(--space-10) var(--space-4);
+      color: var(--color-text-dim);
+    }
+
+    /* ── Sign-up banner ── */
+    .pub-signup-banner {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(135deg, var(--color-primary, #6366f1), #8b5cf6);
+      color: #fff;
+      padding: var(--space-4) var(--space-5);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      flex-wrap: wrap;
+      z-index: 200;
+      box-shadow: 0 -4px 24px rgba(0,0,0,.3);
+    }
+
+    .pub-signup-banner-text {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .pub-signup-banner-title {
+      font-weight: 700;
+      font-size: .95rem;
+      margin-bottom: 2px;
+    }
+
+    .pub-signup-banner-sub {
+      font-size: .8rem;
+      opacity: .85;
+    }
+
+    .pub-signup-banner-btn {
+      background: #fff;
+      color: var(--color-primary, #6366f1);
+      border: none;
+      border-radius: var(--radius-lg, 8px);
+      padding: var(--space-2) var(--space-4);
+      font-weight: 700;
+      font-size: .88rem;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .pub-signup-banner-dismiss {
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,.7);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 0 var(--space-1);
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 500px) {
+      .pub-nav { padding: var(--space-3); }
+      .pub-main { padding: var(--space-4) var(--space-3) 120px; }
+      .pub-signup-banner { padding: var(--space-3); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Nav ── -->
+  <nav class="pub-nav">
+    <a href="../" class="pub-nav-brand">
+      <span>🏆</span>
+      <span>Dynasty Locker Room</span>
+    </a>
+    <div class="pub-nav-actions">
+      <a href="../" class="btn-secondary btn-sm" style="text-decoration:none">Sign In</a>
+      <a href="../?register=1" class="btn-primary btn-sm" id="pub-nav-signup" style="text-decoration:none">Sign Up Free</a>
+    </div>
+  </nav>
+
+  <!-- ── Main content ── -->
+  <main class="pub-main">
+    <div id="pub-loading">
+      <div class="spinner" style="margin:0 auto var(--space-3)"></div>
+      Loading tournaments…
+    </div>
+    <div id="pub-content" style="display:none"></div>
+  </main>
+
+  <!-- ── Sign-up banner ── -->
+  <div class="pub-signup-banner" id="pub-signup-banner">
+    <div class="pub-signup-banner-text">
+      <div class="pub-signup-banner-title">🏈 Want to track your fantasy leagues?</div>
+      <div class="pub-signup-banner-sub">Sign up for Dynasty Locker Room — free forever. Link your Sleeper, MFL, and Yahoo leagues.</div>
+    </div>
+    <a href="../?register=1" class="pub-signup-banner-btn">Sign Up Free →</a>
+    <button class="pub-signup-banner-dismiss" id="pub-banner-dismiss" title="Dismiss">✕</button>
+  </div>
+
+  <!-- ── Firebase SDK ── -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="../firebase/config.js"></script>
+
+  <script>
+    // ── Public tournaments page ─────────────────────────────
+    // Reads from gmd/publicTournaments/{tid} — no auth required.
+    // Firebase rules: "publicTournaments": { ".read": true }
+
+    const STATUS_LABELS = {
+      draft:             "Draft",
+      registration_open: "Registration Open",
+      active:            "In Season",
+      playoffs:          "Playoffs",
+      completed:         "Completed"
+    };
+    const STATUS_ICONS = {
+      draft:             "📝",
+      registration_open: "📬",
+      active:            "🏈",
+      playoffs:          "🏆",
+      completed:         "✅"
+    };
+
+    // ── Check if a specific tournament was requested ────────
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedTid = urlParams.get("t");
+
+    // ── Dismiss banner ──────────────────────────────────────
+    const bannerDismissed = localStorage.getItem("dlr_pub_banner_dismissed");
+    const banner = document.getElementById("pub-signup-banner");
+    if (bannerDismissed) banner.style.display = "none";
+    document.getElementById("pub-banner-dismiss")?.addEventListener("click", () => {
+      banner.style.display = "none";
+      localStorage.setItem("dlr_pub_banner_dismissed", "1");
+    });
+
+    // ── Load and render ─────────────────────────────────────
+    const db      = firebase.database();
+    const pubRef  = () => db.ref("gmd/publicTournaments");
+    const tRef    = (tid) => db.ref("gmd/publicTournaments/" + tid);
+
+    function esc(s) {
+      return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    async function init() {
+      try {
+        if (requestedTid) {
+          await loadTournament(requestedTid);
+        } else {
+          await loadDirectory();
+        }
+      } catch(err) {
+        showError("Failed to load tournaments: " + err.message);
+      }
+    }
+
+    // ── Directory ───────────────────────────────────────────
+    async function loadDirectory() {
+      const snap = await pubRef().once("value");
+      const all  = snap.val() || {};
+      const entries = Object.entries(all)
+        .filter(([, t]) => t?.status !== "draft")
+        .sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+
+      const loading = document.getElementById("pub-loading");
+      const content = document.getElementById("pub-content");
+      loading.style.display = "none";
+      content.style.display = "";
+
+      if (!entries.length) {
+        content.innerHTML = `
+          <div style="text-align:center;padding:80px 16px;color:var(--color-text-dim)">
+            <div style="font-size:2.5rem;margin-bottom:16px">🏆</div>
+            <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px">No public tournaments yet</div>
+            <div style="font-size:.88rem">Check back soon.</div>
+          </div>`;
+        return;
+      }
+
+      content.innerHTML = `
+        <div style="margin-bottom:var(--space-6)">
+          <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 var(--space-1)">🏆 Tournaments</h1>
+          <p style="color:var(--color-text-dim);font-size:.88rem;margin:0">${entries.length} tournament${entries.length !== 1 ? "s" : ""}</p>
+        </div>
+        <div class="trn-cards-grid" id="pub-cards">
+          ${entries.map(([tid, t]) => renderCard(tid, t)).join("")}
+        </div>`;
+
+      document.querySelectorAll("[data-pub-open]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const tid = btn.dataset.pubOpen;
+          window.history.pushState({}, "", "?t=" + tid);
+          loadTournament(tid);
+        });
+      });
+    }
+
+    function renderCard(tid, t) {
+      const status = t.status || "draft";
+      return `
+        <div class="trn-card">
+          <div class="trn-card-header">
+            <div class="trn-card-name">${esc(t.name || "Untitled Tournament")}</div>
+            <span class="trn-status-badge trn-status-${status}">
+              ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
+            </span>
+          </div>
+          <div class="trn-card-meta">
+            <span>🏟 ${t.leagueCount || 0} league${(t.leagueCount || 0) !== 1 ? "s" : ""}</span>
+            <span>👥 ${t.registrationCount || 0} registered</span>
+          </div>
+          ${t.tagline ? `<div class="trn-card-tagline">${esc(t.tagline)}</div>` : ""}
+          <div class="trn-card-actions">
+            <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">View</button>
+          </div>
+        </div>`;
+    }
+
+    // ── Single tournament view ───────────────────────────────
+    let _currentTid = null;
+    let _currentT   = null;
+    let _activeTab  = "info";
+
+    async function loadTournament(tid) {
+      const loading = document.getElementById("pub-loading");
+      const content = document.getElementById("pub-content");
+      loading.style.display = "block";
+      content.style.display = "none";
+
+      const snap = await tRef(tid).once("value");
+      const t    = snap.val();
+      if (!t) { showError("Tournament not found."); return; }
+
+      _currentTid = tid;
+      _currentT   = t;
+      loading.style.display = "none";
+      content.style.display = "";
+
+      const hasStandings = t.standingsCache && Object.keys(t.standingsCache).length > 0;
+      const regOpen      = ["registration_open", "active"].includes(t.status);
+
+      content.innerHTML = `
+        <div style="margin-bottom:var(--space-4)">
+          <button id="pub-back-btn" class="btn-ghost btn-sm">← All Tournaments</button>
+        </div>
+
+        <div class="trn-detail-title-row" style="margin-bottom:var(--space-4)">
+          <div>
+            <h1 class="trn-detail-name">${esc(t.name || "Tournament")}</h1>
+            ${t.tagline ? `<p class="trn-detail-tagline">${esc(t.tagline)}</p>` : ""}
+          </div>
+          <span class="trn-status-badge trn-status-${t.status || "draft"}">
+            ${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}
+          </span>
+        </div>
+
+        <div class="trn-tabs" id="pub-tabs">
+          <button class="trn-tab ${_activeTab === "info"       ? "active" : ""}" data-pub-tab="info">Info</button>
+          ${hasStandings ? `<button class="trn-tab ${_activeTab === "standings" ? "active" : ""}" data-pub-tab="standings">Standings</button>` : ""}
+          ${regOpen      ? `<button class="trn-tab ${_activeTab === "register"  ? "active" : ""}" data-pub-tab="register">Register</button>` : ""}
+        </div>
+
+        <div id="pub-tab-body" class="trn-tab-body"></div>
+      `;
+
+      document.getElementById("pub-back-btn")?.addEventListener("click", () => {
+        window.history.pushState({}, "", window.location.pathname);
+        loadDirectory();
+      });
+
+      document.querySelectorAll("[data-pub-tab]").forEach(tab => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll("[data-pub-tab]").forEach(t => t.classList.remove("active"));
+          tab.classList.add("active");
+          _activeTab = tab.dataset.pubTab;
+          renderTab(_activeTab);
+        });
+      });
+
+      renderTab(_activeTab);
+    }
+
+    function renderTab(tab) {
+      const body = document.getElementById("pub-tab-body");
+      if (!body) return;
+      if (tab === "info")      renderInfoTab(body);
+      else if (tab === "standings") renderStandingsTab(body);
+      else if (tab === "register")  renderRegisterTab(body);
+    }
+
+    // ── Info tab ────────────────────────────────────────────
+    function renderInfoTab(body) {
+      const t = _currentT;
+      body.innerHTML = `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">About</div>
+          <p style="color:var(--color-text-dim);font-size:.88rem;line-height:1.7">
+            ${t.bio ? esc(t.bio) : "No description provided."}
+          </p>
+        </div>
+        <div class="trn-info-stats" style="justify-content:flex-start">
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${t.leagueCount || 0}</div>
+            <div class="trn-stat-label">Leagues</div>
+          </div>
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${t.registrationCount || 0}</div>
+            <div class="trn-stat-label">Registered</div>
+          </div>
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${t.regType === "invite" ? "Invite" : "Open"}</div>
+            <div class="trn-stat-label">Registration</div>
+          </div>
+        </div>`;
+    }
+
+    // ── Standings tab (read-only, reuses cached data) ───────
+    let _stSort = { col: "overallRank", dir: "asc" };
+
+    function renderStandingsTab(body) {
+      const t       = _currentT;
+      const cache   = t.standingsCache || {};
+      const rankBy  = t.rankBy || "record";
+      const entries = Object.entries(cache);
+      if (!entries.length) {
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No standings yet</div></div>`;
+        return;
+      }
+
+      // Build rows (same logic as tournament.js)
+      let allRows = [];
+      let lastSynced = 0;
+      for (const [leagueId, lc] of entries) {
+        const teams = [...(lc.teams || [])].sort((a, b) => {
+          if (rankBy === "pf") return b.pf - a.pf;
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          return b.pf - a.pf;
+        });
+        teams.forEach((team, i) => {
+          allRows.push({
+            overallRank: 0,
+            teamName:   team.teamName  || "Unknown",
+            leagueName: lc.leagueName || leagueId,
+            conference: lc.conference || "",
+            division:   lc.division   || "",
+            wins:       team.wins     || 0,
+            losses:     team.losses   || 0,
+            pf:         team.pf       || 0,
+            pa:         team.pa       || 0
+          });
+        });
+        if ((lc.lastSynced || 0) > lastSynced) lastSynced = lc.lastSynced;
+      }
+
+      // Overall rank
+      allRows.sort((a, b) => rankBy === "pf"
+        ? b.pf - a.pf
+        : b.wins !== a.wins ? b.wins - a.wins : b.pf - a.pf
+      );
+      allRows.forEach((r, i) => r.overallRank = i + 1);
+
+      const conferences = [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort();
+      const hasConf     = conferences.length > 0;
+      const lastStr     = lastSynced ? new Date(lastSynced).toLocaleString() : "Unknown";
+
+      sortAndRenderStandings(body, allRows, hasConf, lastStr);
+    }
+
+    function sortAndRenderStandings(body, allRows, hasConf, lastStr) {
+      const mult = _stSort.dir === "asc" ? 1 : -1;
+      const sorted = [...allRows].sort((a, b) => {
+        const col = _stSort.col;
+        if (col === "teamName" || col === "leagueName" || col === "conference")
+          return mult * String(a[col]||"").localeCompare(String(b[col]||""));
+        return mult * ((Number(a[col])||0) - (Number(b[col])||0));
+      });
+
+      const si = (col) => {
+        const active = _stSort.col === col;
+        return `<span class="trn-st-sort-icon${active ? " trn-st-sort-icon--active" : ""}">${active ? (_stSort.dir === "asc" ? "↑" : "↓") : "⇅"}</span>`;
+      };
+
+      body.innerHTML = `
+        <div style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+          Last synced: ${esc(lastStr)} &middot; ${allRows.length} teams
+        </div>
+        <div style="margin-bottom:var(--space-3)">
+          <input type="text" id="pub-st-search" placeholder="Search team or league"
+            style="width:100%;padding:8px 12px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);color:var(--color-text);font-size:.85rem" />
+        </div>
+        <div class="trn-standings-table-wrap">
+          <table class="trn-standings-table" id="pub-st-table">
+            <thead><tr>
+              <th class="trn-st-th trn-st-th--num" data-col="overallRank">Rank ${si("overallRank")}</th>
+              <th class="trn-st-th" data-col="teamName">Team ${si("teamName")}</th>
+              <th class="trn-st-th" data-col="leagueName">League ${si("leagueName")}</th>
+              ${hasConf ? `<th class="trn-st-th" data-col="conference">Conf ${si("conference")}</th>` : ""}
+              <th class="trn-st-th trn-st-th--num" data-col="wins">W ${si("wins")}</th>
+              <th class="trn-st-th trn-st-th--num" data-col="losses">L ${si("losses")}</th>
+              <th class="trn-st-th trn-st-th--num" data-col="pf">PF ${si("pf")}</th>
+              <th class="trn-st-th trn-st-th--num" data-col="pa">PA ${si("pa")}</th>
+            </tr></thead>
+            <tbody id="pub-st-tbody">
+              ${sorted.map(r => `
+                <tr class="trn-st-row" data-name="${esc(r.teamName.toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
+                  <td class="trn-st-td trn-st-td--num trn-st-rank">${r.overallRank}</td>
+                  <td class="trn-st-td trn-st-td--name">${esc(r.teamName)}</td>
+                  <td class="trn-st-td trn-st-td--league">${esc(r.leagueName)}</td>
+                  ${hasConf ? `<td class="trn-st-td">${esc(r.conference)}</td>` : ""}
+                  <td class="trn-st-td trn-st-td--num">${r.wins}</td>
+                  <td class="trn-st-td trn-st-td--num">${r.losses}</td>
+                  <td class="trn-st-td trn-st-td--num">${r.pf.toFixed(2)}</td>
+                  <td class="trn-st-td trn-st-td--num">${r.pa.toFixed(2)}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>`;
+
+      // Search
+      document.getElementById("pub-st-search")?.addEventListener("input", function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll("#pub-st-tbody tr").forEach(row => {
+          const match = !q || row.dataset.name?.includes(q) || row.dataset.league?.includes(q);
+          row.style.display = match ? "" : "none";
+        });
+      });
+
+      // Sort headers
+      document.querySelectorAll("[data-col]").forEach(th => {
+        th.addEventListener("click", () => {
+          const col = th.dataset.col;
+          if (_stSort.col === col) _stSort.dir = _stSort.dir === "asc" ? "desc" : "asc";
+          else { _stSort.col = col; _stSort.dir = "asc"; }
+          sortAndRenderStandings(body, allRows, hasConf, lastStr);
+        });
+      });
+    }
+
+    // ── Register tab (public, no auth) ──────────────────────
+    function renderRegisterTab(body) {
+      const t    = _currentT;
+      const form = t.registrationForm || {};
+      const opts = form.optionalFields || [];
+      const custom = form.customQuestions || [];
+
+      const STD_LABELS = { displayName: "Display Name", email: "Email Address" };
+      const OPT_LABELS = {
+        sleeperUsername: "Sleeper Username",
+        mflEmail:        "MFL Email Address",
+        yahooUsername:   "Yahoo Username",
+        teamName:        "Team Name",
+        twitterHandle:   "Twitter/X Handle",
+        gender:          "Gender (Male / Female)"
+      };
+      const label = (f) => STD_LABELS[f] || OPT_LABELS[f] || f;
+      const allFlds = ["displayName", "email", ...opts];
+
+      body.innerHTML = `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")}</div>
+          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
+            Fill in the form below. Your registration will be reviewed by the tournament admin.
+          </p>
+          ${allFlds.map(f => `
+            <div class="form-group">
+              <label>${esc(label(f))}${["displayName","email"].includes(f) ? ' <span class="required">*</span>' : ""}</label>
+              <input type="text" id="pub-reg-${f}" placeholder="${esc(label(f))}" />
+            </div>`).join("")}
+          ${custom.map((q, i) => `
+            <div class="form-group">
+              <label>${esc(q.question)}${q.required ? ' <span class="required">*</span>' : ""}</label>
+              ${q.type === "textarea"
+                ? `<textarea id="pub-reg-custom-${i}" rows="3" placeholder="Your answer"></textarea>`
+                : `<input type="text" id="pub-reg-custom-${i}" placeholder="Your answer" />`}
+            </div>`).join("")}
+          <div class="form-group" style="margin-top:var(--space-4);padding:var(--space-3);background:var(--color-bg);border-radius:var(--radius-md);border:1px solid var(--color-border)">
+            <div style="font-size:.82rem;color:var(--color-text-dim);line-height:1.6">
+              Already have a Dynasty Locker Room account?
+              <a href="../?register=1" style="color:var(--color-primary)">Sign in to register with your DLR account →</a>
+            </div>
+          </div>
+          <div id="pub-reg-error" class="auth-error hidden"></div>
+          <div class="trn-form-actions">
+            <button class="btn-primary" id="pub-reg-submit">Submit Registration</button>
+          </div>
+        </div>`;
+
+      document.getElementById("pub-reg-submit")?.addEventListener("click", () =>
+        submitPublicRegistration(allFlds, custom, form)
+      );
+    }
+
+    async function submitPublicRegistration(fields, custom, form) {
+      const errEl = document.getElementById("pub-reg-error");
+      const entry = {
+        status:      "pending",
+        submittedAt: Date.now(),
+        source:      "public_form",
+        dlrUsername: null,
+        dlrLinked:   false
+      };
+
+      // Collect fields
+      for (const f of fields) {
+        const val = document.getElementById("pub-reg-" + f)?.value.trim();
+        if (!val && ["displayName", "email"].includes(f)) {
+          errEl.textContent = (f === "displayName" ? "Display Name" : "Email Address") + " is required.";
+          errEl.classList.remove("hidden");
+          return;
+        }
+        entry[f] = val || null;
+      }
+
+      // Custom questions
+      for (let i = 0; i < custom.length; i++) {
+        const q   = custom[i];
+        const val = document.getElementById("pub-reg-custom-" + i)?.value.trim();
+        if (q.required && !val) {
+          errEl.textContent = '"' + q.question + '" is required.';
+          errEl.classList.remove("hidden");
+          return;
+        }
+        if (val) entry["custom_" + i] = val;
+      }
+
+      const btn = document.getElementById("pub-reg-submit");
+      if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
+      errEl.classList.add("hidden");
+
+      try {
+        const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        await db.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
+
+        // Also update public registrationCount
+        const newCount = (_currentT.registrationCount || 0) + 1;
+        await db.ref("gmd/publicTournaments/" + _currentTid + "/registrationCount").set(newCount);
+        _currentT.registrationCount = newCount;
+
+        const body = document.getElementById("pub-tab-body");
+        if (body) {
+          body.innerHTML = `
+            <div class="trn-success">
+              <div class="trn-success-icon">✅</div>
+              <h3>Registration Submitted!</h3>
+              <p>Your registration for <strong>${esc(_currentT.name || "this tournament")}</strong>
+              is pending review. You'll receive a league invite link once approved.</p>
+              <p style="font-size:.85rem;color:var(--color-text-dim);margin-top:var(--space-3)">
+                Want to track all your leagues in one place?
+                <a href="../?register=1" style="color:var(--color-primary)">Sign up for Dynasty Locker Room →</a>
+              </p>
+            </div>`;
+        }
+      } catch(err) {
+        if (btn) { btn.disabled = false; btn.textContent = "Submit Registration"; }
+        errEl.textContent = "Submission failed: " + err.message;
+        errEl.classList.remove("hidden");
+      }
+    }
+
+    function showError(msg) {
+      const loading = document.getElementById("pub-loading");
+      const content = document.getElementById("pub-content");
+      loading.style.display = "none";
+      content.style.display = "";
+      content.innerHTML = `<div style="text-align:center;padding:60px 16px;color:var(--color-text-dim)">${esc(msg)}</div>`;
+    }
+
+    // ── Handle browser back/forward ─────────────────────────
+    window.addEventListener("popstate", () => {
+      const p = new URLSearchParams(window.location.search);
+      const tid = p.get("t");
+      if (tid) loadTournament(tid);
+      else loadDirectory();
+    });
+
+    // ── Boot ────────────────────────────────────────────────
+    init();
+  </script>
+
+</body>
+</html>
