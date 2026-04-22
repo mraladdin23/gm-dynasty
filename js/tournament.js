@@ -351,6 +351,7 @@ const DLRTournament = (() => {
       showToast(`Tournament "${name}" created ✓`);
       _tournaments[tid] = tournament;
       _activeTournamentId = tid;
+      _writePublicSummary(tid, tournament);
       _openTournamentView(tid);
     } catch(err) {
       if (btn) { btn.disabled = false; btn.textContent = "Create Tournament"; }
@@ -591,6 +592,7 @@ const DLRTournament = (() => {
       // Reload view
       const snap = await _tRef(tid).once("value");
       _tournaments[tid] = snap.val();
+      _writePublicSummary(tid, _tournaments[tid]);
       _openTournamentView(tid);
     } catch(err) {
       showToast("Failed to update status", "error");
@@ -1652,6 +1654,7 @@ const DLRTournament = (() => {
       _tournaments[tid] = snap.val();
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
       showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
+      _writePublicSummary(tid, _tournaments[tid]);
       const body = document.getElementById("trn-tab-body");
       if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
     } catch(err) {
@@ -2317,6 +2320,7 @@ const DLRTournament = (() => {
         _closeModal();
         const snap = await _tRef(tid).once("value");
         _tournaments[tid] = snap.val();
+        _writePublicSummary(tid, _tournaments[tid]);
         _openTournamentView(tid);
       } catch(err) {
         showToast("Failed to save", "error");
@@ -2499,6 +2503,11 @@ const DLRTournament = (() => {
       const rid = _genId();
       await _tRegsRef(tid).child(rid).set(entry);
 
+      // Update public registration count
+      const freshForPub = await _tRef(tid).once("value");
+      _tournaments[tid] = freshForPub.val();
+      _writePublicSummary(tid, _tournaments[tid]);
+
       // If auto-register, also save preference on the participant record if one exists
       if (autoRegister) {
         const participants = t.participants || {};
@@ -2557,6 +2566,40 @@ const DLRTournament = (() => {
       .replace(/([A-Z])/g, " $1")
       .replace(/^./, c => c.toUpperCase())
       .trim();
+  }
+
+  // ── Public tournament summary ─────────────────────────
+  // Written to gmd/publicTournaments/{tid} — readable without auth.
+  // Contains only non-sensitive data: meta, standings cache, league/reg counts.
+  // Called after: standings sync, meta updates, new registrations, status changes.
+
+  async function _writePublicSummary(tid, t) {
+    try {
+      const meta  = t.meta || {};
+      const regs  = t.registrations || {};
+      const leagues = t.leagues || {};
+      const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
+      const leagueCount = Object.entries(leagues).reduce((sum, [, v]) =>
+        sum + (isBatch(v) ? Object.keys(v.leagues || {}).length : 1), 0);
+
+      const summary = {
+        name:              meta.name    || "",
+        tagline:           meta.tagline || "",
+        status:            meta.status  || "draft",
+        regType:           meta.regType || "open",
+        rankBy:            meta.rankBy  || "record",
+        bio:               meta.bio     || "",
+        createdAt:         meta.createdAt || 0,
+        leagueCount,
+        registrationCount: Object.keys(regs).length,
+        registrationForm:  meta.registrationForm || { fields: [], optionalFields: [], customQuestions: [] },
+        standingsCache:    t.standingsCache || {}
+      };
+
+      await GMD.child("publicTournaments/" + tid).set(summary);
+    } catch(err) {
+      console.warn("[Tournament] _writePublicSummary failed:", err.message);
+    }
   }
 
   // ── Public API ─────────────────────────────────────────

@@ -118,7 +118,9 @@ const GMDB = (() => {
     await _restPut(`gmd/users/${key}`, profile);
     console.log("[GMDB] createUser step 2 — writing uid_map via REST");
     await _restPut(`gmd/uid_map/${uid}`, key);
-    console.log("[GMDB] createUser step 3 — done");
+    console.log("[GMDB] createUser step 3 — auto-linking public registrations");
+    autoLinkPublicRegistrations(key, { email: email || "" }).catch(() => {});
+    console.log("[GMDB] createUser step 4 — done");
     return profile;
   }
 
@@ -433,6 +435,59 @@ const GMDB = (() => {
     } catch(e) { return {}; }
   }
 
+  // ── Public tournament helpers ─────────────────────────
+  // gmd/publicTournaments/{tid} is readable without auth (Firebase rules: .read: true)
+
+  async function getPublicTournaments() {
+    try {
+      const snap = await GMD.child("publicTournaments").once("value");
+      return snap.val() || {};
+    } catch(e) { return {}; }
+  }
+
+  async function getPublicTournament(tid) {
+    try {
+      const snap = await GMD.child("publicTournaments/" + tid).once("value");
+      return snap.val() || null;
+    } catch(e) { return null; }
+  }
+
+  // ── Auto-link public registrations on DLR account creation ──
+  // Called from createUser after a new account is made.
+  // Searches all tournament registrations for matching email/Sleeper/Yahoo username
+  // and links them to the new DLR account silently.
+  async function autoLinkPublicRegistrations(username, { email, sleeperUsername, yahooUsername }) {
+    try {
+      const snap = await GMD.child("tournaments").once("value");
+      const tournaments = snap.val() || {};
+      const updates = {};
+
+      for (const [tid, t] of Object.entries(tournaments)) {
+        if (!t?.registrations) continue;
+        for (const [rid, reg] of Object.entries(t.registrations)) {
+          if (reg.dlrLinked) continue;
+          if (reg.source !== "public_form" && reg.source !== "csv_import") continue;
+
+          const emailMatch   = email          && reg.email?.toLowerCase()          === email.toLowerCase();
+          const sleeperMatch = sleeperUsername && reg.sleeperUsername?.toLowerCase() === sleeperUsername.toLowerCase();
+          const yahooMatch   = yahooUsername   && reg.yahooUsername?.toLowerCase()   === yahooUsername.toLowerCase();
+
+          if (emailMatch || sleeperMatch || yahooMatch) {
+            updates["tournaments/" + tid + "/registrations/" + rid + "/dlrLinked"]   = true;
+            updates["tournaments/" + tid + "/registrations/" + rid + "/dlrUsername"] = username;
+          }
+        }
+      }
+
+      if (Object.keys(updates).length) {
+        await GMD.update(updates);
+        console.log("[GMDB] Auto-linked", Object.keys(updates).length / 2, "registration(s) for", username);
+      }
+    } catch(err) {
+      console.warn("[GMDB] autoLinkPublicRegistrations failed:", err.message);
+    }
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     sanitizeUsername,
@@ -470,6 +525,9 @@ const GMDB = (() => {
     getTournament,
     saveTournamentMeta,
     getAllTournaments,
+    getPublicTournaments,
+    getPublicTournament,
+    autoLinkPublicRegistrations,
     _restGet,
     _restPut
   };

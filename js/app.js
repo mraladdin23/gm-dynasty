@@ -961,5 +961,17 @@ function showToast(message, type = "success", duration = 3500) {
 }
 
 // ── Init ───────────────────────────────────────────────────
+// If arriving from public tournaments page with ?register=1, pre-select register tab
+(function() {
+  const qp = new URLSearchParams(window.location.search);
+  if (qp.get("register") === "1") {
+    // Clean the URL
+    window.history.replaceState({}, "", window.location.pathname);
+    // When auth screen shows, activate the register tab
+    const registerTab = document.querySelector('.auth-tab[data-tab="register"]');
+    if (registerTab) registerTab.click();
+  }
+})();
+
 // Show loading overlay while Firebase auth initializes
 setLoading(true, "Loading GM Dynasty...");
