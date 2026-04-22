@@ -54,11 +54,13 @@ const DLRTournament = (() => {
   }
 
   // ── State ──────────────────────────────────────────────
-  let _currentUsername = null;
-  let _tournaments     = {};      // { [tournamentId]: tournament }
-  let _activeTournamentId = null; // currently open tournament
-  let _activeAdminTab  = "overview";
-  let _activeUserTab   = "info";
+  let _currentUsername    = null;
+  let _tournaments        = {};
+  let _activeTournamentId = null;
+  let _activeAdminTab     = "overview";
+  let _activeUserTab      = "info";
+  let _tournamentYear     = null;   // global year filter — null = latest
+  let _viewingAsUser      = false;  // admin clicked "View" (participant mode)
 
   // ── Firebase helpers ───────────────────────────────────
   function _tRef(tid)        { return GMD.child(`tournaments/${tid}`); }
@@ -242,7 +244,16 @@ const DLRTournament = (() => {
       </div>`;
 
     body.querySelectorAll("[data-trn-open]").forEach(btn => {
-      btn.addEventListener("click", () => _openTournamentView(btn.dataset.trnOpen));
+      btn.addEventListener("click", () => {
+        _viewingAsUser = true;
+        _openTournamentView(btn.dataset.trnOpen);
+      });
+    });
+    body.querySelectorAll("[data-trn-manage]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _viewingAsUser = false;
+        _openTournamentView(btn.dataset.trnManage);
+      });
     });
   }
 
@@ -266,9 +277,12 @@ const DLRTournament = (() => {
         </div>
         ${meta.tagline ? `<div class="trn-card-tagline">${_esc(meta.tagline)}</div>` : ""}
         <div class="trn-card-actions">
-          <button class="btn-secondary btn-sm" data-trn-open="${_esc(tid)}">
-            ${isAdmin ? "Manage" : "View"}
-          </button>
+          ${isAdmin ? `
+            <button class="btn-primary btn-sm" data-trn-manage="${_esc(tid)}">🛠 Manage</button>
+            <button class="btn-secondary btn-sm" data-trn-open="${_esc(tid)}">👁 View</button>
+          ` : `
+            <button class="btn-secondary btn-sm" data-trn-open="${_esc(tid)}">View</button>
+          `}
         </div>
       </div>`;
   }
@@ -378,10 +392,53 @@ const DLRTournament = (() => {
     if (!t) { showToast("Tournament not found", "error"); return; }
     _tournaments[tid] = t;
 
-    const isAdmin    = t.roles?.[_currentUsername]?.role === "admin";
-    const isSubAdmin = t.roles?.[_currentUsername]?.role === "sub_admin";
-    const canAdmin   = isAdmin || isSubAdmin;
-    const meta       = t.meta || {};
+    const isAdmin      = t.roles?.[_currentUsername]?.role === "admin";
+    const isSubAdmin   = t.roles?.[_currentUsername]?.role === "sub_admin";
+    const canAdmin     = isAdmin || isSubAdmin;
+    // Admin can choose to view as participant via the card's "View" button
+    const showAdminNav = canAdmin && !_viewingAsUser;
+    const meta         = t.meta || {};
+
+    // Derive available years from standingsCache for the global year selector
+    const scEntries    = Object.entries(t.standingsCache || {});
+    const hasNewKeys   = scEntries.some(([k]) => /^\d{4}_/.test(k));
+    const yearEntries  = hasNewKeys ? scEntries.filter(([k]) => /^\d{4}_/.test(k)) : scEntries;
+    const availableYrs = [...new Set(yearEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a,b) => b-a);
+    if (!_tournamentYear || !availableYrs.includes(_tournamentYear)) {
+      _tournamentYear = availableYrs[0] || null;
+    }
+    // Keep _standingsYear in sync
+    _standingsYear = _tournamentYear;
+
+    const yearSel = availableYrs.length > 1 ? `
+      <div class="trn-year-selector">
+        <select id="trn-global-year" class="trn-filter-select">
+          ${availableYrs.map(y => `<option value="${y}" ${y === _tournamentYear ? "selected" : ""}>${y}</option>`).join("")}
+        </select>
+      </div>` : (availableYrs.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${availableYrs[0]}</span></div>` : "");
+
+    // Build tab options based on mode
+    const adminOpts = `
+      <option value="overview"      ${_activeAdminTab === "overview"      ? "selected" : ""}>📊 Overview</option>
+      <option value="leagues"       ${_activeAdminTab === "leagues"       ? "selected" : ""}>🏟 Leagues</option>
+      <option value="roles"         ${_activeAdminTab === "roles"         ? "selected" : ""}>👤 Roles</option>
+      <option value="registration"  ${_activeAdminTab === "registration"  ? "selected" : ""}>📝 Registration Form</option>
+      <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>📋 Registrants${Object.keys(t.registrations||{}).length ? " (" + Object.keys(t.registrations).length + ")" : ""}</option>
+      <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>👥 Participants${Object.keys(t.participants||{}).length ? " (" + Object.keys(t.participants).length + ")" : ""}</option>
+      <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>🏆 Standings</option>
+      <option value="draft"         ${_activeAdminTab === "draft"         ? "selected" : ""}>📋 Draft</option>
+      <option value="matchups"      ${_activeAdminTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
+      <option value="rosters"       ${_activeAdminTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
+      <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>`;
+
+    const userOpts = `
+      <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
+      <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>📬 Register</option>
+      <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>📋 Rules</option>
+      <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
+      <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>📋 Draft</option>
+      <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>🏈 Matchups</option>
+      <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>🗂 Rosters</option>`;
 
     container.innerHTML = `
       <div class="trn-detail-container">
@@ -389,9 +446,13 @@ const DLRTournament = (() => {
         <!-- Back + Header -->
         <div class="trn-detail-topbar">
           <button class="btn-ghost btn-sm" id="trn-back-btn">← All Tournaments</button>
-          <span class="trn-status-badge trn-status-${meta.status || "draft"}">
-            ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || "Draft"}
-          </span>
+          <div style="display:flex;align-items:center;gap:var(--space-2)">
+            ${canAdmin && _viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-switch-manage-btn">🛠 Manage</button>` : ""}
+            ${canAdmin && !_viewingAsUser ? `<button class="btn-ghost btn-sm" id="trn-switch-view-btn">👁 View</button>` : ""}
+            <span class="trn-status-badge trn-status-${meta.status || "draft"}">
+              ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || "Draft"}
+            </span>
+          </div>
         </div>
 
         <div class="trn-detail-title-row">
@@ -399,57 +460,16 @@ const DLRTournament = (() => {
             <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
             ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
           </div>
-          ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
+          ${canAdmin && !_viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
         </div>
 
-        <!-- Tab bar (desktop) -->
-        <div class="trn-tabs" id="trn-tabs">
-          ${canAdmin ? `
-            <button class="trn-tab ${_activeAdminTab === "overview"      ? "active" : ""}" data-tab="overview">Overview</button>
-            <button class="trn-tab ${_activeAdminTab === "leagues"       ? "active" : ""}" data-tab="leagues">Leagues</button>
-            <button class="trn-tab ${_activeAdminTab === "roles"         ? "active" : ""}" data-tab="roles">Roles</button>
-            <button class="trn-tab ${_activeAdminTab === "registration"  ? "active" : ""}" data-tab="registration">Registration</button>
-            <button class="trn-tab ${_activeAdminTab === "registrations" ? "active" : ""}" data-tab="registrations">
-              Registrants
-              ${Object.keys(t.registrations || {}).length ? `<span class="trn-tab-count">${Object.keys(t.registrations).length}</span>` : ""}
-            </button>
-            <button class="trn-tab ${_activeAdminTab === "participants" ? "active" : ""}" data-tab="participants">
-              Participants
-              ${Object.keys(t.participants || {}).length ? `<span class="trn-tab-count">${Object.keys(t.participants).length}</span>` : ""}
-            </button>
-            <button class="trn-tab ${_activeAdminTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
-            <button class="trn-tab ${_activeAdminTab === "info_edit"  ? "active" : ""}" data-tab="info_edit">Info / Rules</button>
-          ` : `
-            <button class="trn-tab ${_activeUserTab === "info"       ? "active" : ""}" data-tab="info">Info</button>
-            <button class="trn-tab ${_activeUserTab === "register"   ? "active" : ""}" data-tab="register">Register</button>
-            <button class="trn-tab ${_activeUserTab === "rules"      ? "active" : ""}" data-tab="rules">Rules</button>
-            <button class="trn-tab ${_activeUserTab === "standings"  ? "active" : ""}" data-tab="standings">Standings</button>
-            <button class="trn-tab ${_activeUserTab === "draft"      ? "active" : ""}" data-tab="draft">Draft</button>
-            <button class="trn-tab ${_activeUserTab === "matchups"   ? "active" : ""}" data-tab="matchups">Matchups</button>
-            <button class="trn-tab ${_activeUserTab === "rosters"    ? "active" : ""}" data-tab="rosters">Rosters</button>
-          `}
+        <!-- Global year + tab nav row -->
+        <div class="trn-nav-row">
+          ${yearSel}
+          <select class="trn-tab-select trn-tab-select--main" id="trn-tab-select">
+            ${showAdminNav ? adminOpts : userOpts}
+          </select>
         </div>
-        <!-- Tab select (mobile) -->
-        <select class="trn-tab-select" id="trn-tab-select">
-          ${canAdmin ? `
-            <option value="overview"      ${_activeAdminTab === "overview"      ? "selected" : ""}>Overview</option>
-            <option value="leagues"       ${_activeAdminTab === "leagues"       ? "selected" : ""}>Leagues</option>
-            <option value="roles"         ${_activeAdminTab === "roles"         ? "selected" : ""}>Roles</option>
-            <option value="registration"  ${_activeAdminTab === "registration"  ? "selected" : ""}>Registration Form</option>
-            <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>Registrants</option>
-            <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>Participants</option>
-            <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>Standings</option>
-            <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>Info / Rules</option>
-          ` : `
-            <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
-            <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
-            <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
-            <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
-            <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>Draft</option>
-            <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>Matchups</option>
-            <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>Rosters</option>
-          `}
-        </select>
 
         <div id="trn-tab-body" class="trn-tab-body"></div>
       </div>
@@ -457,38 +477,44 @@ const DLRTournament = (() => {
 
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
-
-    // Tab wire-up (buttons)
-    container.querySelectorAll(".trn-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        const tabName = tab.dataset.tab;
-        if (canAdmin) _activeAdminTab = tabName;
-        else _activeUserTab = tabName;
-        const sel = document.getElementById("trn-tab-select");
-        if (sel) sel.value = tabName;
-        _renderTab(tid, tabName, t, canAdmin);
-      });
+    document.getElementById("trn-switch-view-btn")?.addEventListener("click", () => {
+      _viewingAsUser = true;
+      _activeUserTab = "info";
+      _openTournamentView(tid);
+    });
+    document.getElementById("trn-switch-manage-btn")?.addEventListener("click", () => {
+      _viewingAsUser = false;
+      _openTournamentView(tid);
     });
 
-    // Tab wire-up (select — mobile)
+    // Global year selector
+    document.getElementById("trn-global-year")?.addEventListener("change", function() {
+      _tournamentYear = parseInt(this.value);
+      _standingsYear  = _tournamentYear;
+      // Invalidate analytics caches that are year-specific
+      _draftCache    = null;
+      _matchupsCache = {};
+      _recapCache    = {};
+      _rostersCache  = null;
+      // Re-render current tab with new year
+      const curTab = showAdminNav ? _activeAdminTab : _activeUserTab;
+      _renderTab(tid, curTab, t, showAdminNav);
+    });
+
+    // Tab select
     document.getElementById("trn-tab-select")?.addEventListener("change", function() {
       const tabName = this.value;
-      container.querySelectorAll(".trn-tab").forEach(tb => {
-        tb.classList.toggle("active", tb.dataset.tab === tabName);
-      });
-      if (canAdmin) _activeAdminTab = tabName;
+      if (showAdminNav) _activeAdminTab = tabName;
       else _activeUserTab = tabName;
-      _renderTab(tid, tabName, t, canAdmin);
+      _renderTab(tid, tabName, t, showAdminNav);
     });
 
     // Render default tab
-    const defaultTab = canAdmin ? _activeAdminTab : _activeUserTab;
-    _renderTab(tid, defaultTab, t, canAdmin);
+    const defaultTab = showAdminNav ? _activeAdminTab : _activeUserTab;
+    _renderTab(tid, defaultTab, t, showAdminNav);
 
-    // For non-admin users: toast if they are a linked participant with missing fields
-    if (!canAdmin) {
+    // Toast for non-admin users with missing registration fields
+    if (!showAdminNav) {
       const form    = t.meta?.registrationForm || {};
       const opts    = form.optionalFields || [];
       const missing = _getMissingFields(t, opts);
@@ -500,11 +526,12 @@ const DLRTournament = (() => {
   }
 
   // ── Tab router ─────────────────────────────────────────
-  function _renderTab(tid, tab, t, canAdmin) {
+  // showAdminNav: true = admin manage mode, false = participant view mode
+  function _renderTab(tid, tab, t, showAdminNav) {
     const body = document.getElementById("trn-tab-body");
     if (!body) return;
 
-    if (canAdmin) {
+    if (showAdminNav) {
       switch (tab) {
         case "overview":      return _renderAdminOverview(tid, t, body);
         case "leagues":       return _renderLeaguesTab(tid, t, body);
@@ -513,6 +540,9 @@ const DLRTournament = (() => {
         case "registrations": return _renderRegistrantsTab(tid, t, body);
         case "participants":  return _renderParticipantsTab(tid, t, body);
         case "standings":     return _renderStandingsTab(tid, t, body, true);
+        case "draft":         return _renderAnalyticsDraft(tid, t, body);
+        case "matchups":      return _renderAnalyticsMatchups(tid, t, body);
+        case "rosters":       return _renderAnalyticsRosters(tid, t, body);
         case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
         default:              return _renderAdminOverview(tid, t, body);
       }
@@ -809,84 +839,14 @@ const DLRTournament = (() => {
       } catch(e) { showToast("Failed to save", "error"); }
     });
 
-    // Preview as User — temporarily renders the user view for this tournament
+    // Preview as User — switch to participant view mode
     document.getElementById("trn-preview-user-btn")?.addEventListener("click", () => {
-      _openTournamentViewAsUser(tid, t);
+      _viewingAsUser = true;
+      _openTournamentView(tid);
     });
   }
 
-  // ── Preview as User — renders user view with an admin-return banner ──
-  function _openTournamentViewAsUser(tid, t) {
-    const container = document.getElementById("view-tournament");
-    if (!container) return;
-    const meta = t.meta || {};
-
-    container.innerHTML = `
-      <div class="trn-preview-banner">
-        <span>👁 Previewing as participant — admin tabs hidden</span>
-        <button class="btn-secondary btn-sm" id="trn-exit-preview-btn">Exit Preview</button>
-      </div>
-      <div class="trn-detail-container">
-        <div class="trn-detail-topbar">
-          <div></div>
-          <span class="trn-status-badge trn-status-${meta.status || "draft"}">
-            ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || "Draft"}
-          </span>
-        </div>
-        <div class="trn-detail-title-row">
-          <div>
-            <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
-            ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
-          </div>
-        </div>
-        <div class="trn-tabs" id="trn-tabs">
-          <button class="trn-tab ${_activeUserTab === "info"      ? "active" : ""}" data-tab="info">Info</button>
-          <button class="trn-tab ${_activeUserTab === "register"  ? "active" : ""}" data-tab="register">Register</button>
-          <button class="trn-tab ${_activeUserTab === "rules"     ? "active" : ""}" data-tab="rules">Rules</button>
-          <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
-          <button class="trn-tab ${_activeUserTab === "draft"     ? "active" : ""}" data-tab="draft">Draft</button>
-          <button class="trn-tab ${_activeUserTab === "matchups"  ? "active" : ""}" data-tab="matchups">Matchups</button>
-          <button class="trn-tab ${_activeUserTab === "rosters"   ? "active" : ""}" data-tab="rosters">Rosters</button>
-        </div>
-        <select class="trn-tab-select" id="trn-tab-select">
-          <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
-          <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
-          <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
-          <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
-          <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>Draft</option>
-          <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>Matchups</option>
-          <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>Rosters</option>
-        </select>
-        <div id="trn-tab-body" class="trn-tab-body"></div>
-      </div>
-    `;
-
-    document.getElementById("trn-exit-preview-btn")?.addEventListener("click", () => _openTournamentView(tid));
-
-    container.querySelectorAll(".trn-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        const tabName = tab.dataset.tab;
-        _activeUserTab = tabName;
-        const sel = document.getElementById("trn-tab-select");
-        if (sel) sel.value = tabName;
-        _renderTab(tid, tabName, t, false);
-      });
-    });
-
-    document.getElementById("trn-tab-select")?.addEventListener("change", function() {
-      const tabName = this.value;
-      container.querySelectorAll(".trn-tab").forEach(tb => {
-        tb.classList.toggle("active", tb.dataset.tab === tabName);
-      });
-      _activeUserTab = tabName;
-      _renderTab(tid, tabName, t, false);
-    });
-
-    const defaultTab = _activeUserTab;
-    _renderTab(tid, defaultTab, t, false);
-  }
+  // _openTournamentViewAsUser removed — now handled via _viewingAsUser flag in _openTournamentView
 
   async function _changeStatus(tid, newStatus) {
     try {
@@ -1721,13 +1681,14 @@ const DLRTournament = (() => {
       return;
     }
 
-    // Available years
+    // Available years — year is driven by the global _tournamentYear selector in the header
     const availableYears = [...new Set(allEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a,b) => b-a);
-    if (!_standingsYear || !availableYears.includes(_standingsYear)) {
-      _standingsYear = availableYears[0] || null;
+    if (!_tournamentYear || !availableYears.includes(_tournamentYear)) {
+      _tournamentYear = availableYears[0] || null;
+      _standingsYear  = _tournamentYear;
     }
-    const entries = _standingsYear
-      ? allEntries.filter(([, lc]) => lc.year === _standingsYear)
+    const entries = _tournamentYear
+      ? allEntries.filter(([, lc]) => lc.year === _tournamentYear)
       : allEntries;
 
     // Build participant lookup — keyed by sleeperUsername/displayName/teamName.
@@ -1802,9 +1763,6 @@ const DLRTournament = (() => {
     body.innerHTML = `
       <div class="trn-standings-toolbar">
         <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
-          <select id="trn-st-year" class="trn-filter-select" style="min-width:0">
-            ${availableYears.map(y => `<option value="${y}" ${y === _standingsYear ? "selected" : ""}>${y}</option>`).join("")}
-          </select>
           ${hasConf ? `<select id="trn-st-group" class="trn-filter-select" style="min-width:0">
             <option value="flat">All Conferences</option>
             ${conferences.map(conf => `<option value="conf_${_esc(conf)}">${_esc(conf)}</option>`).join("")}
@@ -1851,10 +1809,6 @@ const DLRTournament = (() => {
       _wireStandingSortHeaders(allRows, hasConf, hasDiv);
     };
 
-    document.getElementById("trn-st-year")?.addEventListener("change", function() {
-      _standingsYear = parseInt(this.value);
-      _renderStandingsTab(tid, t, body, isAdmin);
-    });
     document.getElementById("trn-st-search")?.addEventListener("input", refilter);
     document.getElementById("trn-st-group")?.addEventListener("change", refilter);
     _wireStandingSortHeaders(allRows, hasConf, hasDiv);
@@ -2867,6 +2821,27 @@ const DLRTournament = (() => {
   // ═══════════════════════════════════════════════════════
 
   const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af", OL:"#9ca3af" };
+
+  // Returns a Set of sanitized keys that match the current user in the participant map.
+  // Used to highlight "you" across analytics tabs.
+  function _findMyKeys(t) {
+    const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const parts = Object.values(t.participants || {}).filter(p =>
+      p.dlrLinked && p.dlrUsername === _currentUsername
+    );
+    if (!parts.length) return new Set();
+    const keys = new Set();
+    parts.forEach(p => {
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(v => keys.add(_sk(v)));
+    });
+    return keys;
+  }
+
+  function _isMyTeam(name, myKeys) {
+    if (!myKeys.size || !name) return false;
+    const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    return myKeys.has(_sk(name));
+  }
   const PREFERRED_POS_ORDER = ["QB","RB","WR","TE","FLEX","K","DEF","DB","LB","DL","OL"];
 
   // ── Normalize picks from any platform into a common shape ──
@@ -3141,22 +3116,22 @@ const DLRTournament = (() => {
     });
     document.getElementById("trn-draft-league-sel")?.addEventListener("change", function() {
       _draftLeague = this.value;
-      _renderDraftContent(document.getElementById("trn-draft-content"), cache);
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
     document.getElementById("trn-draft-card-team")?.addEventListener("change", function() {
       _draftCardTeam = this.value || null;
-      _renderDraftContent(document.getElementById("trn-draft-content"), cache);
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
 
-    _renderDraftContent(document.getElementById("trn-draft-content"), cache);
+    _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
   }
 
-  function _renderDraftContent(el, cache) {
+  function _renderDraftContent(el, cache, t) {
     if (!el) return;
     const { picks, adp, byLeague } = cache;
 
     if (_draftView === "adp") {
-      _renderDraftADP(el, adp);
+      _renderDraftADP(el, adp, t);
     } else if (_draftView === "board") {
       const filtered = _draftLeague === "all"
         ? picks
@@ -3167,8 +3142,9 @@ const DLRTournament = (() => {
     }
   }
 
-  function _renderDraftADP(el, adp) {
+  function _renderDraftADP(el, adp, t) {
     if (!adp.length) { el.innerHTML = `<div class="trn-empty">No draft data available yet.</div>`; return; }
+    const myKeys  = _findMyKeys(t || {});
     const groups = { QB:[], RB:[], WR:[], TE:[], K:[], DEF:[], Other:[] };
     adp.forEach(p => {
       const pos = p.position || "?";
@@ -3188,14 +3164,16 @@ const DLRTournament = (() => {
             <div class="trn-az-pos-section">
               <div class="trn-az-pos-header" style="color:${col}">${pos}</div>
               <div class="trn-az-adp-list">
-                ${players.map((p, i) => `
-                  <div class="trn-az-adp-row">
+                ${players.map((p, i) => {
+                  const isMe = _isMyTeam(p.draftedBy || "", myKeys);
+                  return `
+                  <div class="trn-az-adp-row ${isMe ? "trn-az-row--me" : ""}">
                     <span class="trn-az-adp-rank">${i + 1}.</span>
                     <span class="trn-az-adp-pos" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
                     <span class="trn-az-adp-name">${_esc(p.name)}</span>
                     <span class="trn-az-adp-adp">ADP ${p.adp.toFixed(1)}</span>
                     <span class="trn-az-adp-count dim">${p.count}×</span>
-                  </div>`).join("")}
+                  </div>`}).join("")}
               </div>
             </div>`;
         }).join("")}
@@ -3497,17 +3475,20 @@ const DLRTournament = (() => {
     }
     const recapData = _recapCache[ck] || null;
 
-    const matchupRow = (m, highlight) => {
-      const aWon = m.home.score > m.away.score;
+    const myKeys      = _findMyKeys(t);
+    const matchupRow  = (m, highlight) => {
+      const aWon  = m.home.score > m.away.score;
+      const aMeH  = _isMyTeam(m.home.name, myKeys);
+      const aMeA  = _isMyTeam(m.away.name, myKeys);
       return `
-        <div class="trn-mu-row">
-          <div class="trn-mu-team ${aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.home.name)}</div>
+        <div class="trn-mu-row ${aMeH || aMeA ? "trn-mu-row--me" : ""}">
+          <div class="trn-mu-team ${aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.home.name)}${aMeH ? ' <span class="trn-you-badge">you</span>' : ""}</div>
           <div class="trn-mu-scores">
             <span class="trn-mu-score ${aWon ? "trn-mu-score--win" : ""}">${m.home.score.toFixed(2)}</span>
             <span class="trn-mu-sep">–</span>
             <span class="trn-mu-score ${!aWon ? "trn-mu-score--win" : ""}">${m.away.score.toFixed(2)}</span>
           </div>
-          <div class="trn-mu-team ${!aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.away.name)}</div>
+          <div class="trn-mu-team ${!aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.away.name)}${aMeA ? ' <span class="trn-you-badge">you</span>' : ""}</div>
           ${highlight ? `<span class="trn-mu-tag">${_esc(highlight)}</span>` : `<span class="trn-mu-diff">Δ${m.diff.toFixed(2)}</span>`}
         </div>`;
     };
@@ -3740,14 +3721,15 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
   }
 
   function _renderRostersView(body, rows, t) {
-    const year = _standingsYear || new Date().getFullYear();
+    const year   = _tournamentYear || new Date().getFullYear();
+    const myKeys = _findMyKeys(t);
     body.innerHTML = `
       <div class="trn-az-meta">Top ${rows.length} teams · ${year} season</div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
         <button class="btn-secondary btn-sm" id="trn-rosters-refresh-btn">↺ Refresh</button>
       </div>
       <div id="trn-rosters-list">
-        ${rows.map(row => _renderRosterCard(row)).join("")}
+        ${rows.map(row => _renderRosterCard(row, myKeys)).join("")}
       </div>`;
 
     document.getElementById("trn-rosters-refresh-btn")?.addEventListener("click", () => {
@@ -3756,17 +3738,18 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
     });
   }
 
-  function _renderRosterCard(row) {
+  function _renderRosterCard(row, myKeys) {
     const medals = ["🥇","🥈","🥉"];
     const medal  = medals[row.overallRank - 1] || `#${row.overallRank}`;
+    const isMe   = _isMyTeam(row.teamName || "", myKeys || new Set());
+    const youBadge = isMe ? ' <span class="trn-you-badge">you</span>' : "";
 
     if (!row.players) {
-      // No roster data (non-Sleeper or fetch failed) — show standings row only
       return `
-        <div class="trn-roster-card trn-roster-card--slim">
+        <div class="trn-roster-card trn-roster-card--slim ${isMe ? "trn-roster-card--me" : ""}">
           <div class="trn-roster-card-header">
             <span class="trn-roster-rank">${medal}</span>
-            <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}</span>
+            <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}${youBadge}</span>
             <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
             <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
             <span class="trn-platform-badge trn-platform-${row.platform || "unknown"}">${(row.platform || "?").toUpperCase()}</span>
@@ -3787,10 +3770,10 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
     const bench    = row.players.filter(p => !p.isStarter);
 
     return `
-      <div class="trn-roster-card">
+      <div class="trn-roster-card ${isMe ? "trn-roster-card--me" : ""}">
         <div class="trn-roster-card-header">
           <span class="trn-roster-rank">${medal}</span>
-          <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}</span>
+          <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}${youBadge}</span>
           <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
           <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
         </div>

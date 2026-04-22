@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
   <link rel="stylesheet" href="../css/base.css?v=19" />
   <link rel="stylesheet" href="../css/locker.css?v=21" />
-  <link rel="stylesheet" href="../css/tournament.css?v=1" />
+  <link rel="stylesheet" href="../css/tournament.css?v=2" />
   <style>
     /* ── Public tournament page overrides ── */
     body { background: var(--color-bg); }
@@ -342,16 +342,19 @@
           }
         </div>
 
-        <div class="trn-tabs" id="pub-tabs">
-          ${!isDraft ? `<button class="trn-tab ${_activeTab === "info" ? "active" : ""}" data-pub-tab="info">Info</button>` : ""}
-          ${hasStandings ? `<button class="trn-tab ${_activeTab === "standings" ? "active" : ""}" data-pub-tab="standings">Standings</button>` : ""}
-          ${regOpen      ? `<button class="trn-tab ${_activeTab === "register"  ? "active" : ""}" data-pub-tab="register">Register</button>` : ""}
+        <div class="trn-nav-row">
+          ${years.length > 1 ? `
+            <div class="trn-year-selector">
+              <select id="pub-year-sel" class="trn-filter-select">
+                ${years.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
+              </select>
+            </div>` : years.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${years[0]}</span></div>` : ""}
+          <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
+            ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
+            ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
+            ${regOpen      ? `<option value="register" ${_activeTab === "register" ? "selected" : ""}>📬 Register</option>` : ""}
+          </select>
         </div>
-        <select class="trn-tab-select" id="pub-tab-select">
-          ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>Info</option>` : ""}
-          ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>Standings</option>` : ""}
-          ${regOpen      ? `<option value="register" ${_activeTab === "register" ? "selected" : ""}>Register</option>` : ""}
-        </select>
 
         <div id="pub-tab-body" class="trn-tab-body"></div>
       `;
@@ -363,22 +366,15 @@
         loadDirectory();
       });
 
-      document.querySelectorAll("[data-pub-tab]").forEach(tab => {
-        tab.addEventListener("click", () => {
-          document.querySelectorAll("[data-pub-tab]").forEach(t => t.classList.remove("active"));
-          tab.classList.add("active");
-          _activeTab = tab.dataset.pubTab;
-          const sel = document.getElementById("pub-tab-select");
-          if (sel) sel.value = _activeTab;
-          renderTab(_activeTab);
-        });
+      // Year selector (global — controls all tabs)
+      document.getElementById("pub-year-sel")?.addEventListener("change", function() {
+        _selectedYear = parseInt(this.value);
+        renderTab(_activeTab);
       });
 
+      // Tab select
       document.getElementById("pub-tab-select")?.addEventListener("change", function() {
         _activeTab = this.value;
-        document.querySelectorAll("[data-pub-tab]").forEach(t => {
-          t.classList.toggle("active", t.dataset.pubTab === _activeTab);
-        });
         renderTab(_activeTab);
       });
 
@@ -395,28 +391,56 @@
 
     // ── Info tab ────────────────────────────────────────────
     function renderInfoTab(body) {
-      const t = _currentT;
+      const t      = _currentT;
+      const social = t.socialLinks || {};
+      const rawBio = t.bio || "";
+      const linkedBio = rawBio
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+        .replace(/\n/g, "<br>")
+        .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+      const socialIcons = { twitter:"𝕏", discord:"💬", reddit:"🤖", website:"🌐", instagram:"📸", youtube:"▶" };
+      const socialHtml = Object.entries(social)
+        .filter(([,url]) => url)
+        .map(([key,url]) => {
+          const icon = socialIcons[key] || "🔗";
+          const label = key.charAt(0).toUpperCase() + key.slice(1);
+          return `<a href="${esc(url)}" target="_blank" rel="noopener" class="trn-social-link">${icon} ${label}</a>`;
+        }).join("");
+      // Rules preview (first 3 lines)
+      const rules = t.rules || null;
+      const rulesPreview = rules?.content
+        ? rules.content.split("\n").slice(0,3).map(l => esc(l)).join("<br>") + (rules.content.split("\n").length > 3 ? "<br><em>…</em>" : "")
+        : null;
+
       body.innerHTML = `
-        <div class="trn-section-card">
-          <div class="trn-section-card-title">About</div>
-          <p style="color:var(--color-text-dim);font-size:.88rem;line-height:1.7">
-            ${t.bio ? esc(t.bio) : "No description provided."}
-          </p>
-        </div>
         <div class="trn-info-stats" style="justify-content:flex-start">
-          <div class="trn-stat-card">
-            <div class="trn-stat-value">${t.leagueCount || 0}</div>
-            <div class="trn-stat-label">Leagues</div>
-          </div>
-          <div class="trn-stat-card">
-            <div class="trn-stat-value">${t.registrationCount || 0}</div>
-            <div class="trn-stat-label">Registered</div>
-          </div>
-          <div class="trn-stat-card">
-            <div class="trn-stat-value">${t.regType === "invite" ? "Invite" : "Open"}</div>
-            <div class="trn-stat-label">Registration</div>
-          </div>
-        </div>`;
+          <div class="trn-stat-card"><div class="trn-stat-value">${t.leagueCount || 0}</div><div class="trn-stat-label">Leagues</div></div>
+          <div class="trn-stat-card"><div class="trn-stat-value">${t.registrationCount || 0}</div><div class="trn-stat-label">Registered</div></div>
+          <div class="trn-stat-card"><div class="trn-stat-value">${t.regType === "invite" ? "Invite" : "Open"}</div><div class="trn-stat-label">Registration</div></div>
+        </div>
+        ${rawBio ? `
+          <div class="trn-section-card">
+            <div class="trn-section-card-title">About This Tournament</div>
+            <div class="trn-info-bio">${linkedBio}</div>
+          </div>` : ""}
+        ${t.donationLink ? `
+          <div class="trn-section-card trn-info-donation">
+            <div class="trn-section-card-title">Support the Tournament</div>
+            <a href="${esc(t.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">💰 Donate / Entry Fee</a>
+          </div>` : ""}
+        ${socialHtml ? `
+          <div class="trn-section-card">
+            <div class="trn-section-card-title">Follow Us</div>
+            <div class="trn-social-links">${socialHtml}</div>
+          </div>` : ""}
+        ${rulesPreview ? `
+          <div class="trn-section-card">
+            <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>Rules</span>
+              ${rules?.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">v${esc(String(rules.version))}</span>` : ""}
+            </div>
+            <div class="trn-info-bio trn-rules-preview">${rulesPreview}</div>
+          </div>` : ""}`;
     }
 
     // ── Standings tab (read-only, reuses cached data) ───────
@@ -510,9 +534,6 @@
 
       body.innerHTML = `
         <div class="trn-standings-toolbar">
-          ${allYears.length > 1 ? `<select id="pub-st-year" class="trn-filter-select" style="margin-bottom:var(--space-2);display:block;width:auto">
-            ${allYears.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
-          </select>` : ""}
           <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
         </div>
         <div class="trn-standings-meta">
@@ -523,7 +544,6 @@
             <thead><tr>
               <th class="standings-rank" data-col="overallRank" style="${thStyle}">#${si("overallRank")}</th>
               <th data-col="teamName" style="${thStyle}">Team${si("teamName")}</th>
-              <th data-col="leagueName" style="${thStyle};color:var(--color-text-dim)">League${si("leagueName")}</th>
               ${hasConf ? `<th data-col="conference" style="${thStyle}">Conf${si("conference")}</th>` : ""}
               <th class="standings-win"  data-col="wins"   style="${thStyle}">W${si("wins")}</th>
               <th class="standings-loss" data-col="losses" style="${thStyle}">L${si("losses")}</th>
@@ -534,8 +554,15 @@
               ${sorted.map(r => `
                 <tr data-name="${esc(r.teamName.toLowerCase())}" data-raw="${esc((r.rawTeamName||r.teamName).toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
                   <td class="standings-rank">${r.overallRank}</td>
-                  <td><span class="standings-team-cell"><span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}</span></td>
-                  <td style="color:var(--color-text-dim);font-size:.78rem">${esc(r.leagueName)}</td>
+                  <td>
+                    <span class="standings-team-cell">
+                      <span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>
+                      <span class="trn-st-name-wrap">
+                        <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}</span>
+                        <span class="trn-st-league">${esc(r.leagueName)}</span>
+                      </span>
+                    </span>
+                  </td>
                   ${hasConf ? `<td>${esc(r.conference)}</td>` : ""}
                   <td class="standings-win">${r.wins}</td>
                   <td class="standings-loss">${r.losses}</td>
@@ -545,12 +572,6 @@
             </tbody>
           </table>
         </div>`;
-
-      // Year select (if rendered inside toolbar)
-      document.getElementById("pub-st-year")?.addEventListener("change", function() {
-        _selectedYear = this.value ? parseInt(this.value) : null;
-        renderStandingsTab(body);
-      });
 
       // Search
       document.getElementById("pub-st-search")?.addEventListener("input", function() {
