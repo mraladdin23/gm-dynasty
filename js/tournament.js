@@ -25,20 +25,21 @@ const DLRTournament = (() => {
     completed:         "✅"
   };
 
-  // Standard registration fields (always shown)
-  const STD_FIELDS = ["teamName", "displayName", "email", "platformUsername"];
+  // Standard registration fields (always shown, always required)
+  const STD_FIELDS = ["displayName", "email", "sleeperUsername"];
   const STD_FIELD_LABELS = {
-    teamName:         "Team Name",
-    displayName:      "Display Name",
-    email:            "Email Address",
-    platformUsername: "Platform Username"
+    displayName:     "Display Name",
+    email:           "Email Address",
+    sleeperUsername: "Sleeper Username"
   };
-  // Optional toggle fields
-  const OPT_FIELDS = ["twitterHandle", "favoriteNflTeam", "gender"];
+  // Optional toggle fields (admin enables per tournament)
+  const OPT_FIELDS = ["teamName", "twitterHandle", "yahooUsername", "favoriteNflTeam", "gender"];
   const OPT_FIELD_LABELS = {
-    twitterHandle:    "Twitter/X Handle",
-    favoriteNflTeam:  "Favorite NFL Team",
-    gender:           "Gender"
+    teamName:        "Team Name",
+    twitterHandle:   "Twitter/X Handle",
+    yahooUsername:   "Yahoo Username",
+    favoriteNflTeam: "Favorite NFL Team",
+    gender:          "Gender"
   };
 
   // ── State ──────────────────────────────────────────────
@@ -399,6 +400,10 @@ const DLRTournament = (() => {
               Registrants
               ${Object.keys(t.registrations || {}).length ? `<span class="trn-tab-count">${Object.keys(t.registrations).length}</span>` : ""}
             </button>
+            <button class="trn-tab ${_activeAdminTab === "participants" ? "active" : ""}" data-tab="participants">
+              Participants
+              ${Object.keys(t.participants || {}).length ? `<span class="trn-tab-count">${Object.keys(t.participants).length}</span>` : ""}
+            </button>
           ` : `
             <button class="trn-tab ${_activeUserTab === "info" ? "active" : ""}" data-tab="info">Info</button>
             <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
@@ -441,6 +446,7 @@ const DLRTournament = (() => {
         case "roles":         return _renderRolesTab(tid, t, body);
         case "registration":  return _renderRegistrationFormTab(tid, t, body);
         case "registrations": return _renderRegistrantsTab(tid, t, body);
+        case "participants":   return _renderParticipantsTab(tid, t, body);
         default:              return _renderAdminOverview(tid, t, body);
       }
     } else {
@@ -550,157 +556,334 @@ const DLRTournament = (() => {
   }
 
   // ── Admin: Leagues tab ─────────────────────────────────
+  // Leagues are stored as batches: gmd/tournaments/{tid}/leagues/{batchId}
+  // Each batch = { platform, year, conferences: bool, leagues: { [leagueId]: {name, conference?} } }
+
   function _renderLeaguesTab(tid, t, body) {
-    const leagues = t.leagues || {};
-    const leagueList = Object.entries(leagues);
+    const batches = t.leagues || {};
+    const batchEntries = Object.entries(batches);
+
+    // Group individual leagues (legacy flat structure) vs batches
+    const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
+    const realBatches = batchEntries.filter(([, v]) => isBatch(v));
+    const legacyLeagues = batchEntries.filter(([, v]) => !isBatch(v));
+
+    // Total league count across all batches
+    const totalLeagues = realBatches.reduce((s, [, b]) => s + Object.keys(b.leagues || {}).length, 0)
+                       + legacyLeagues.length;
+
+    // Build conferences list for manual assignment
+    const allConferences = [...new Set(
+      realBatches.flatMap(([, b]) =>
+        Object.values(b.leagues || {}).map(l => l.conference).filter(Boolean)
+      )
+    )];
 
     body.innerHTML = `
       <div class="trn-section-card">
         <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>Tournament Leagues (${leagueList.length})</span>
-          <button class="btn-primary btn-sm" id="trn-add-league-btn">+ Add League</button>
+          <span>League Batches (${totalLeagues} total leagues)</span>
+          <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
         </div>
 
-        ${leagueList.length ? `
-          <div class="trn-league-list" id="trn-league-list">
-            ${leagueList.map(([lid, l]) => `
-              <div class="trn-league-row" data-lid="${_esc(lid)}">
-                <div class="trn-league-row-main">
-                  <span class="trn-platform-badge trn-platform-${l.platform || "unknown"}">${(l.platform || "?").toUpperCase()}</span>
-                  <div class="trn-league-row-info">
-                    <div class="trn-league-row-name">${_esc(l.name || l.leagueId || lid)}</div>
-                    <div class="trn-league-row-meta">
-                      ID: ${_esc(String(l.leagueId || lid))}
-                      ${l.conference ? ` · ${_esc(l.conference)}` : ""}
-                      ${l.division   ? ` · Div: ${_esc(l.division)}` : ""}
-                    </div>
-                  </div>
-                </div>
-                <div class="trn-league-row-actions">
-                  <button class="btn-secondary btn-sm" data-edit-lid="${_esc(lid)}">Edit</button>
-                  <button class="btn-ghost btn-sm trn-delete-btn" data-del-lid="${_esc(lid)}">✕</button>
-                </div>
+        ${realBatches.length ? realBatches.sort((a, b) => (b[1].year || 0) - (a[1].year || 0)).map(([bid, batch]) => `
+          <div class="trn-batch-block">
+            <div class="trn-batch-header">
+              <div class="trn-batch-title">
+                <span class="trn-platform-badge trn-platform-${batch.platform || "unknown"}">${(batch.platform || "?").toUpperCase()}</span>
+                <span class="trn-batch-year">${batch.year || "—"}</span>
+                <span class="trn-batch-count">${Object.keys(batch.leagues || {}).length} leagues</span>
+                ${batch.hasConferences ? `<span class="trn-batch-tag">Conferences</span>` : ""}
               </div>
-            `).join("")}
+              <div class="trn-batch-actions">
+                <button class="btn-secondary btn-sm" data-edit-batch="${_esc(bid)}">Edit Conferences</button>
+                <button class="btn-ghost btn-sm" data-del-batch="${_esc(bid)}">✕</button>
+              </div>
+            </div>
+            <div class="trn-batch-leagues">
+              ${Object.entries(batch.leagues || {}).map(([lid, l]) => `
+                <div class="trn-batch-league-row">
+                  <span class="trn-batch-league-name">${_esc(l.name || lid)}</span>
+                  ${l.conference ? `<span class="trn-batch-conf-tag">${_esc(l.conference)}</span>` : ""}
+                  <span class="trn-batch-league-id dim">${_esc(String(lid))}</span>
+                </div>
+              `).join("")}
+            </div>
           </div>
-        ` : `<div class="trn-empty-inline">No leagues added yet. Add league IDs from MFL, Yahoo, or Sleeper.</div>`}
+        `).join("") : `<div class="trn-empty-inline">No league batches yet. Add a batch to upload league IDs.</div>`}
+
+        ${legacyLeagues.length ? `
+          <div class="trn-batch-block">
+            <div class="trn-batch-header">
+              <div class="trn-batch-title"><span class="trn-batch-tag">Legacy</span> Individual Leagues (${legacyLeagues.length})</div>
+            </div>
+            <div class="trn-batch-leagues">
+              ${legacyLeagues.map(([lid, l]) => `
+                <div class="trn-batch-league-row">
+                  <span class="trn-platform-badge trn-platform-${l.platform || "unknown"}">${(l.platform || "?").toUpperCase()}</span>
+                  <span class="trn-batch-league-name">${_esc(l.name || l.leagueId || lid)}</span>
+                  <span class="trn-batch-league-id dim">${_esc(String(l.leagueId || lid))}</span>
+                  <button class="btn-ghost btn-sm" data-del-lid="${_esc(lid)}">✕</button>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""}
       </div>
     `;
 
-    document.getElementById("trn-add-league-btn")?.addEventListener("click", () =>
-      _openAddLeagueModal(tid)
+    document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
+    body.querySelectorAll("[data-edit-batch]").forEach(btn =>
+      btn.addEventListener("click", () => _openEditConferencesModal(tid, btn.dataset.editBatch, batches[btn.dataset.editBatch]))
     );
-    body.querySelectorAll("[data-edit-lid]").forEach(btn =>
-      btn.addEventListener("click", () => _openEditLeagueModal(tid, btn.dataset.editLid, leagues[btn.dataset.editLid]))
+    body.querySelectorAll("[data-del-batch]").forEach(btn =>
+      btn.addEventListener("click", () => _deleteBatch(tid, btn.dataset.delBatch))
     );
     body.querySelectorAll("[data-del-lid]").forEach(btn =>
       btn.addEventListener("click", () => _deleteLeague(tid, btn.dataset.delLid))
     );
   }
 
-  function _openAddLeagueModal(tid) {
+  // ── Add batch modal — bulk upload ──────────────────────
+  function _openAddBatchModal(tid, t) {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let y = currentYear; y >= 2000; y--) years.push(y);
+
     _showModal(`
       <div class="modal-header">
-        <h3>Add League</h3>
+        <h3>Add League Batch</h3>
         <button class="modal-close" id="trn-modal-close">✕</button>
       </div>
       <div class="modal-body trn-form-body">
         <div class="form-group">
           <label>Platform <span class="required">*</span></label>
-          <select id="trn-lg-platform">
+          <select id="trn-batch-platform">
             <option value="sleeper">Sleeper</option>
             <option value="mfl">MyFantasyLeague (MFL)</option>
             <option value="yahoo">Yahoo Fantasy</option>
           </select>
         </div>
         <div class="form-group">
-          <label>League ID <span class="required">*</span></label>
-          <input type="text" id="trn-lg-id" placeholder="Platform league ID" />
-          <span class="field-hint">The numeric or alphanumeric league ID from the platform URL.</span>
+          <label>Year <span class="required">*</span></label>
+          <select id="trn-batch-year">
+            ${years.map(y => `<option value="${y}" ${y === currentYear ? "selected" : ""}>${y}</option>`).join("")}
+          </select>
         </div>
         <div class="form-group">
-          <label>Display Name (optional)</label>
-          <input type="text" id="trn-lg-name" placeholder="e.g. NFC East Division A" maxlength="60" />
+          <label class="trn-field-toggle" style="margin:0">
+            <input type="checkbox" id="trn-batch-has-conf" />
+            This batch uses conferences
+          </label>
         </div>
         <div class="form-group">
-          <label>Conference (optional)</label>
-          <input type="text" id="trn-lg-conf" placeholder="e.g. NFC" maxlength="40" />
+          <label>League IDs <span class="required">*</span></label>
+          <textarea id="trn-batch-ids" rows="8"
+            placeholder="Paste one league ID per line.&#10;&#10;Optionally add a conference in a second column:&#10;123456789&#10;987654321,NFC&#10;111222333,AFC&#10;&#10;Or upload a CSV file below."></textarea>
+          <span class="field-hint">One ID per line. Second column (comma-separated) = conference name.</span>
         </div>
         <div class="form-group">
-          <label>Division (optional)</label>
-          <input type="text" id="trn-lg-div" placeholder="e.g. East" maxlength="40" />
+          <label>Or upload a CSV file</label>
+          <input type="file" id="trn-batch-csv" accept=".csv,.txt" />
+          <span class="field-hint">CSV with league IDs in column 1, optional conference in column 2.</span>
         </div>
-        <div id="trn-lg-error" class="auth-error hidden"></div>
+        <div id="trn-batch-preview" class="trn-batch-preview hidden"></div>
+        <div id="trn-batch-error" class="auth-error hidden"></div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
-        <button class="btn-primary"   id="trn-modal-confirm">Add League</button>
+        <button class="btn-secondary" id="trn-batch-preview-btn">Preview</button>
+        <button class="btn-primary"   id="trn-modal-confirm">Import Leagues</button>
       </div>
     `);
 
     document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
     document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
-    document.getElementById("trn-modal-confirm")?.addEventListener("click", async () => {
-      const platform = document.getElementById("trn-lg-platform")?.value;
-      const leagueId = document.getElementById("trn-lg-id")?.value.trim();
-      const name     = document.getElementById("trn-lg-name")?.value.trim();
-      const conf     = document.getElementById("trn-lg-conf")?.value.trim();
-      const div      = document.getElementById("trn-lg-div")?.value.trim();
-      const errEl    = document.getElementById("trn-lg-error");
 
-      if (!leagueId) {
-        errEl.textContent = "League ID is required.";
-        errEl.classList.remove("hidden");
-        return;
-      }
-
-      const lid = `${platform}_${leagueId}`;
-      const data = { platform, leagueId, name: name || leagueId };
-      if (conf) data.conference = conf;
-      if (div)  data.division   = div;
-
-      try {
-        await _tLeaguesRef(tid).child(lid).set(data);
-        showToast("League added ✓");
-        _closeModal();
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
-        _openTournamentView(tid);
-        _activeAdminTab = "leagues";
-      } catch(err) {
-        errEl.textContent = err.message;
-        errEl.classList.remove("hidden");
-      }
+    // CSV file → populate textarea
+    document.getElementById("trn-batch-csv")?.addEventListener("change", async function() {
+      const file = this.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      document.getElementById("trn-batch-ids").value = text.trim();
     });
+
+    // Preview button — parse IDs and show what will be fetched
+    document.getElementById("trn-batch-preview-btn")?.addEventListener("click", () => {
+      const raw = document.getElementById("trn-batch-ids")?.value.trim();
+      if (!raw) return;
+      const parsed = _parseBatchIds(raw);
+      const preview = document.getElementById("trn-batch-preview");
+      preview.innerHTML = `
+        <div class="trn-batch-preview-title">${parsed.length} league ID${parsed.length !== 1 ? "s" : ""} found:</div>
+        ${parsed.slice(0, 10).map(r => `<div class="trn-batch-preview-row">
+          <span>${_esc(r.leagueId)}</span>
+          ${r.conference ? `<span class="trn-batch-conf-tag">${_esc(r.conference)}</span>` : ""}
+        </div>`).join("")}
+        ${parsed.length > 10 ? `<div class="dim">…and ${parsed.length - 10} more</div>` : ""}
+      `;
+      preview.classList.remove("hidden");
+    });
+
+    document.getElementById("trn-modal-confirm")?.addEventListener("click", () => _doImportBatch(tid, t));
   }
 
-  function _openEditLeagueModal(tid, lid, league) {
+  function _parseBatchIds(raw) {
+    return raw.split("\n")
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("#"))
+      .map(line => {
+        const parts = line.split(/[,\t]/);
+        const leagueId   = parts[0]?.trim();
+        const conference = parts[1]?.trim() || null;
+        return leagueId ? { leagueId, conference } : null;
+      })
+      .filter(Boolean);
+  }
+
+  async function _doImportBatch(tid, t) {
+    const platform = document.getElementById("trn-batch-platform")?.value;
+    const year     = document.getElementById("trn-batch-year")?.value;
+    const hasConf  = document.getElementById("trn-batch-has-conf")?.checked;
+    const raw      = document.getElementById("trn-batch-ids")?.value.trim();
+    const errEl    = document.getElementById("trn-batch-error");
+    const btn      = document.getElementById("trn-modal-confirm");
+
+    if (!raw) {
+      errEl.textContent = "Paste or upload league IDs first.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+
+    const parsed = _parseBatchIds(raw);
+    if (!parsed.length) {
+      errEl.textContent = "No valid league IDs found.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = `Fetching names… (0/${parsed.length})`;
+    errEl.classList.add("hidden");
+
+    // Fetch league names from platform APIs
+    const leaguesData = {};
+    let done = 0;
+
+    for (const { leagueId, conference } of parsed) {
+      let name = leagueId; // fallback
+      try {
+        if (platform === "sleeper") {
+          const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`);
+          if (r.ok) {
+            const d = await r.json();
+            name = d?.name || leagueId;
+          }
+        } else if (platform === "mfl") {
+          const r = await fetch(
+            `https://mfl-proxy.mraladdin23.workers.dev/mfl/leagueName`,
+            { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ leagueId, year }) }
+          ).catch(() => null);
+          // Worker endpoint we'll add — fallback to direct MFL public API
+          if (!r || !r.ok) {
+            const mflR = await fetch(
+              `https://api.myfantasyleague.com/${year}/export?TYPE=league&L=${leagueId}&JSON=1`
+            ).catch(() => null);
+            if (mflR?.ok) {
+              const d = await mflR.json().catch(() => null);
+              name = d?.league?.name || leagueId;
+            }
+          } else {
+            const d = await r.json().catch(() => null);
+            name = d?.name || leagueId;
+          }
+        } else if (platform === "yahoo") {
+          // Yahoo needs an OAuth token — use stored token if available
+          const token = localStorage.getItem("dlr_yahoo_access_token");
+          if (token) {
+            // Yahoo league key format: {gameId}.l.{leagueId}
+            // gameId for NFL varies by year — use stored leagueKey if available
+            // For batch import we use leagueId directly as the key fallback
+            const leagueKey = leagueId.includes(".l.") ? leagueId : `${leagueId}`;
+            const r = await fetch(
+              `https://mfl-proxy.mraladdin23.workers.dev/yahoo/leagueName`,
+              { method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ access_token: token, league_key: leagueKey }) }
+            ).catch(() => null);
+            if (r?.ok) {
+              const d = await r.json().catch(() => null);
+              name = d?.name || leagueId;
+            }
+          }
+        }
+      } catch(e) {
+        // Name fetch failed — use ID as name, still import
+      }
+
+      const entry = { name };
+      if (conference) entry.conference = conference;
+      leaguesData[leagueId] = entry;
+
+      done++;
+      if (btn) btn.textContent = `Fetching names… (${done}/${parsed.length})`;
+    }
+
+    // Write batch to Firebase
+    const batchId = `${platform}_${year}_${Date.now().toString(36)}`;
+    const batch = {
+      platform,
+      year: parseInt(year),
+      hasConferences: hasConf,
+      createdAt: Date.now(),
+      leagues: leaguesData
+    };
+
+    try {
+      await _tLeaguesRef(tid).child(batchId).set(batch);
+      showToast(`${parsed.length} league${parsed.length !== 1 ? "s" : ""} imported ✓`);
+      _closeModal();
+      const snap = await _tRef(tid).once("value");
+      _tournaments[tid] = snap.val();
+      _openTournamentView(tid);
+      _activeAdminTab = "leagues";
+    } catch(err) {
+      btn.disabled    = false;
+      btn.textContent = "Import Leagues";
+      errEl.textContent = "Failed to save: " + err.message;
+      errEl.classList.remove("hidden");
+    }
+  }
+
+  // ── Edit conferences modal (post-import assignment) ────
+  function _openEditConferencesModal(tid, batchId, batch) {
+    const leagues = batch.leagues || {};
+    const existingConfs = [...new Set(Object.values(leagues).map(l => l.conference).filter(Boolean))];
+
     _showModal(`
       <div class="modal-header">
-        <h3>Edit League</h3>
+        <h3>Edit Conferences — ${_esc(batch.platform?.toUpperCase())} ${batch.year || ""}</h3>
         <button class="modal-close" id="trn-modal-close">✕</button>
       </div>
-      <div class="modal-body trn-form-body">
+      <div class="modal-body trn-form-body" style="max-height:60vh;overflow-y:auto">
         <div class="form-group">
-          <label>Platform</label>
-          <input type="text" value="${_esc(league.platform || "")}" disabled class="input-disabled" />
+          <label class="trn-field-toggle" style="margin:0 0 var(--space-3)">
+            <input type="checkbox" id="trn-conf-enabled" ${batch.hasConferences ? "checked" : ""} />
+            This batch uses conferences
+          </label>
         </div>
-        <div class="form-group">
-          <label>League ID</label>
-          <input type="text" value="${_esc(String(league.leagueId || ""))}" disabled class="input-disabled" />
-        </div>
-        <div class="form-group">
-          <label>Display Name</label>
-          <input type="text" id="trn-edit-lg-name" value="${_esc(league.name || "")}" maxlength="60" />
-        </div>
-        <div class="form-group">
-          <label>Conference</label>
-          <input type="text" id="trn-edit-lg-conf" value="${_esc(league.conference || "")}" maxlength="40" />
-        </div>
-        <div class="form-group">
-          <label>Division</label>
-          <input type="text" id="trn-edit-lg-div" value="${_esc(league.division || "")}" maxlength="40" />
-        </div>
+        ${Object.entries(leagues).map(([lid, l]) => `
+          <div class="trn-conf-row">
+            <span class="trn-conf-league-name">${_esc(l.name || lid)}</span>
+            <input type="text" class="trn-conf-input" data-lid="${_esc(lid)}"
+              value="${_esc(l.conference || "")}"
+              placeholder="Conference"
+              list="trn-conf-datalist" />
+          </div>
+        `).join("")}
+        <datalist id="trn-conf-datalist">
+          ${existingConfs.map(c => `<option value="${_esc(c)}">`).join("")}
+        </datalist>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
@@ -711,27 +894,44 @@ const DLRTournament = (() => {
     document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
     document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
     document.getElementById("trn-modal-confirm")?.addEventListener("click", async () => {
-      const updates = {
-        name:       document.getElementById("trn-edit-lg-name")?.value.trim() || league.leagueId,
-        conference: document.getElementById("trn-edit-lg-conf")?.value.trim() || null,
-        division:   document.getElementById("trn-edit-lg-div")?.value.trim() || null
-      };
+      const hasConf  = document.getElementById("trn-conf-enabled")?.checked;
+      const updates  = { hasConferences: hasConf };
+      document.querySelectorAll(".trn-conf-input").forEach(input => {
+        const lid  = input.dataset.lid;
+        const conf = input.value.trim() || null;
+        updates[`leagues/${lid}/conference`] = conf;
+      });
       try {
-        await _tLeaguesRef(tid).child(lid).update(updates);
-        showToast("League updated ✓");
+        await _tLeaguesRef(tid).child(batchId).update(updates);
+        showToast("Conferences saved ✓");
         _closeModal();
         const snap = await _tRef(tid).once("value");
         _tournaments[tid] = snap.val();
         _openTournamentView(tid);
         _activeAdminTab = "leagues";
       } catch(err) {
-        showToast("Failed to update league", "error");
+        showToast("Failed to save", "error");
       }
     });
   }
 
+  async function _deleteBatch(tid, batchId) {
+    if (!confirm("Remove this entire league batch?")) return;
+    try {
+      await _tLeaguesRef(tid).child(batchId).remove();
+      showToast("Batch removed ✓");
+      const snap = await _tRef(tid).once("value");
+      _tournaments[tid] = snap.val();
+      _openTournamentView(tid);
+      _activeAdminTab = "leagues";
+    } catch(err) {
+      showToast("Failed to remove batch", "error");
+    }
+  }
+
+  // Legacy single-league delete (for any old flat-structure entries)
   async function _deleteLeague(tid, lid) {
-    if (!confirm("Remove this league from the tournament?")) return;
+    if (!confirm("Remove this league?")) return;
     try {
       await _tLeaguesRef(tid).child(lid).remove();
       showToast("League removed ✓");
@@ -742,6 +942,303 @@ const DLRTournament = (() => {
     } catch(err) {
       showToast("Failed to remove league", "error");
     }
+  }
+
+  // ── Admin: Participants tab ───────────────────────────
+  // Participant database — historical and cross-year records.
+  // Firebase: gmd/tournaments/{tid}/participants/{pid}
+
+  function _tParticipantsRef(tid) { return GMD.child(`tournaments/${tid}/participants`); }
+
+  function _renderParticipantsTab(tid, t, body) {
+    const participants = t.participants || {};
+    const pList = Object.entries(participants);
+    const linked   = pList.filter(([, p]) => p.dlrLinked);
+    const unlinked = pList.filter(([, p]) => !p.dlrLinked);
+    const autoReg  = pList.filter(([, p]) => p.autoRegister);
+
+    body.innerHTML = `
+      <div class="trn-reg-toolbar">
+        <span class="trn-reg-count">
+          ${pList.length} total &middot;
+          <span style="color:var(--color-green)">${linked.length} DLR linked</span> &middot;
+          ${unlinked.length} unlinked &middot;
+          ${autoReg.length} auto-register
+        </span>
+        <div style="display:flex;gap:var(--space-2)">
+          <button class="btn-primary btn-sm" id="trn-import-participants-btn">Import CSV</button>
+          <button class="btn-secondary btn-sm" id="trn-export-participants-btn">Export CSV</button>
+        </div>
+      </div>
+      <input type="file" id="trn-participants-csv-input" accept=".csv" style="display:none" />
+
+      ${pList.length ? `
+        <div class="trn-reg-toolbar" style="margin-top:0;margin-bottom:var(--space-3)">
+          <input type="text" id="trn-participants-search" placeholder="Search name, email, username"
+            style="flex:1;padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem" />
+          <select id="trn-participants-filter" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">
+            <option value="all">All</option>
+            <option value="linked">DLR Linked</option>
+            <option value="unlinked">Not Linked</option>
+            <option value="auto">Auto-Register</option>
+          </select>
+        </div>
+        <div id="trn-participants-list">
+          ${pList.map(([pid, p]) => _renderParticipantRow(tid, pid, p)).join("")}
+        </div>
+      ` : `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">👥</div>
+          <div class="trn-empty-title">No participants yet</div>
+          <div class="trn-empty-sub">Import a CSV of historical participants to build your tournament database.</div>
+        </div>
+      `}
+
+      <div class="trn-section-card" style="margin-top:var(--space-4)">
+        <div class="trn-section-card-title">CSV Import Format</div>
+        <div style="font-size:.8rem;color:var(--color-text-dim);line-height:1.7">
+          Required header row. Columns: <code>displayName, email, sleeperUsername, mflEmail, yahooUsername, teamName, years</code><br>
+          Match logic: Sleeper by username &middot; MFL by email &middot; Yahoo by username<br>
+          years column: pipe-separated e.g. <code>2023|2024</code>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("trn-import-participants-btn")?.addEventListener("click", () =>
+      document.getElementById("trn-participants-csv-input")?.click()
+    );
+    document.getElementById("trn-participants-csv-input")?.addEventListener("change", async e => {
+      const file = e.target.files?.[0];
+      if (file) await _importParticipantsCSV(tid, file);
+    });
+    document.getElementById("trn-export-participants-btn")?.addEventListener("click", () =>
+      _exportParticipantsCSV(t)
+    );
+
+    const searchAndFilter = () => {
+      const q      = (document.getElementById("trn-participants-search")?.value || "").toLowerCase();
+      const filter = document.getElementById("trn-participants-filter")?.value || "all";
+      document.querySelectorAll(".trn-participant-row").forEach(row => {
+        const text     = row.dataset.search || "";
+        const isLinked = row.dataset.linked === "1";
+        const isAuto   = row.dataset.auto   === "1";
+        const matchQ = !q || text.includes(q);
+        const matchF = filter === "all"
+          || (filter === "linked"   && isLinked)
+          || (filter === "unlinked" && !isLinked)
+          || (filter === "auto"     && isAuto);
+        row.style.display = (matchQ && matchF) ? "" : "none";
+      });
+    };
+    document.getElementById("trn-participants-search")?.addEventListener("input", searchAndFilter);
+    document.getElementById("trn-participants-filter")?.addEventListener("change", searchAndFilter);
+
+    body.querySelectorAll("[data-view-participant]").forEach(btn =>
+      btn.addEventListener("click", () =>
+        _openParticipantDetail(tid, btn.dataset.viewParticipant, participants[btn.dataset.viewParticipant], t)
+      )
+    );
+    body.querySelectorAll("[data-toggle-auto]").forEach(btn =>
+      btn.addEventListener("click", () =>
+        _toggleAutoRegister(tid, btn.dataset.toggleAuto, participants[btn.dataset.toggleAuto])
+      )
+    );
+  }
+
+  function _renderParticipantRow(tid, pid, p) {
+    const searchText = [p.displayName, p.email, p.sleeperUsername, p.teamName, p.dlrUsername]
+      .filter(Boolean).join(" ").toLowerCase();
+    const yearsStr = Array.isArray(p.years) ? p.years.join(", ") : (p.years || "");
+    return `
+      <div class="trn-reg-row trn-participant-row ${p.dlrLinked ? "trn-participant--linked" : ""}"
+           data-pid="${_esc(pid)}" data-search="${_esc(searchText)}"
+           data-linked="${p.dlrLinked ? "1" : "0"}" data-auto="${p.autoRegister ? "1" : "0"}">
+        <div class="trn-reg-main">
+          <div class="trn-reg-name">
+            ${_esc(p.displayName || p.teamName || "Unknown")}
+            ${p.dlrLinked
+              ? `<span class="trn-dlr-badge">DLR @${_esc(p.dlrUsername || "")}</span>`
+              : `<span class="trn-unlinked-badge">Not on DLR</span>`}
+          </div>
+          <div class="trn-reg-meta">
+            ${p.email           ? `${_esc(p.email)} &middot; ` : ""}
+            ${p.sleeperUsername ? `Sleeper: ${_esc(p.sleeperUsername)} &middot; ` : ""}
+            ${yearsStr          ? `Years: ${_esc(yearsStr)}` : ""}
+          </div>
+        </div>
+        <div class="trn-reg-actions">
+          <button class="btn-ghost btn-sm ${p.autoRegister ? "trn-auto-on" : ""}"
+                  data-toggle-auto="${_esc(pid)}"
+                  title="${p.autoRegister ? "Auto-register ON" : "Enable auto-register"}">🔁</button>
+          <button class="btn-secondary btn-sm" data-view-participant="${_esc(pid)}">View</button>
+        </div>
+      </div>`;
+  }
+
+  function _openParticipantDetail(tid, pid, p, t) {
+    _showModal(`
+      <div class="modal-header">
+        <h3>${_esc(p.displayName || p.teamName || "Participant")}</h3>
+        <button class="modal-close" id="trn-modal-close">X</button>
+      </div>
+      <div class="modal-body trn-form-body">
+        <div class="${p.dlrLinked ? "trn-dlr-badge" : "trn-unlinked-badge"}" style="margin-bottom:var(--space-3);font-size:.85rem">
+          ${p.dlrLinked ? `Linked to DLR @${_esc(p.dlrUsername || "")}` : "Not yet on DLR"}
+        </div>
+        ${[["Display Name",p.displayName],["Team Name",p.teamName],["Email",p.email],
+           ["Sleeper Username",p.sleeperUsername],["MFL Email",p.mflEmail],
+           ["Yahoo Username",p.yahooUsername],
+           ["Years", Array.isArray(p.years) ? p.years.join(", ") : p.years]
+          ].filter(([,v]) => v).map(([label,val]) => `
+          <div class="trn-detail-row"><span>${_esc(label)}</span><span>${_esc(String(val))}</span></div>
+        `).join("")}
+        <div class="trn-detail-row" style="margin-top:var(--space-3)">
+          <span>Auto-register future years</span>
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
+            <input type="checkbox" id="trn-p-auto" ${p.autoRegister ? "checked" : ""} />
+            <span>${p.autoRegister ? "Enabled" : "Disabled"}</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Close</button>
+        ${p.email ? `<button class="btn-secondary btn-sm" id="trn-send-invite-btn">Send Invite</button>` : ""}
+        <button class="btn-primary" id="trn-save-participant-btn">Save</button>
+      </div>
+    `);
+
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-send-invite-btn")?.addEventListener("click", () => {
+      const subject = encodeURIComponent("You are invited to " + (t?.meta?.name || "the tournament"));
+      const body    = encodeURIComponent("Hi " + (p.displayName || "") + ",\n\nYou are invited to register for this year's tournament at https://dynastylockerroom.com");
+      window.open("mailto:" + encodeURIComponent(p.email) + "?subject=" + subject + "&body=" + body, "_blank");
+    });
+    document.getElementById("trn-save-participant-btn")?.addEventListener("click", async () => {
+      const autoReg = document.getElementById("trn-p-auto")?.checked;
+      try {
+        await _tParticipantsRef(tid).child(pid).update({ autoRegister: autoReg });
+        showToast("Saved");
+        _closeModal();
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        const body = document.getElementById("trn-tab-body");
+        if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
+      } catch(err) { showToast("Failed to save", "error"); }
+    });
+  }
+
+  async function _toggleAutoRegister(tid, pid, p) {
+    const newVal = !p.autoRegister;
+    try {
+      await _tParticipantsRef(tid).child(pid).update({ autoRegister: newVal });
+      showToast(newVal ? "Auto-register enabled" : "Auto-register disabled");
+      const snap = await _tRef(tid).once("value");
+      _tournaments[tid] = snap.val();
+      const body = document.getElementById("trn-tab-body");
+      if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
+    } catch(err) { showToast("Failed to update", "error"); }
+  }
+
+  async function _importParticipantsCSV(tid, file) {
+    try {
+      const text  = await file.text();
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) { showToast("CSV has no data rows", "error"); return; }
+      const headers = _parseCSVRow(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, ""));
+      const updates = {};
+      let count = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const vals = _parseCSVRow(lines[i]);
+        if (!vals.length) continue;
+        const row = {};
+        headers.forEach((h, idx) => { if (vals[idx] !== undefined) row[h] = vals[idx]; });
+        const pid   = _genId();
+        const entry = {
+          displayName:     row.displayname     || row.display_name || "",
+          email:           row.email           || "",
+          sleeperUsername: row.sleeperusername || row.sleeper      || "",
+          mflEmail:        row.mflemail        || row.mfl          || "",
+          yahooUsername:   row.yahoousername   || row.yahoo        || "",
+          teamName:        row.teamname        || row.team_name    || "",
+          years:           row.years ? row.years.split("|").map(y => y.trim()).filter(Boolean) : [],
+          autoRegister:    false,
+          dlrLinked:       false,
+          dlrUsername:     null,
+          source:          "csv_import",
+          importedAt:      Date.now()
+        };
+        Object.keys(entry).forEach(k => { if (entry[k] === "") entry[k] = null; });
+        updates[pid] = entry;
+        count++;
+      }
+      if (!count) { showToast("No valid rows found", "error"); return; }
+      await _tParticipantsRef(tid).update(updates);
+      showToast(count + " participant" + (count !== 1 ? "s" : "") + " imported — matching DLR accounts...");
+      _matchParticipantsToDLR(tid, updates);
+    } catch(err) { showToast("Import failed: " + err.message, "error"); }
+  }
+
+  async function _matchParticipantsToDLR(tid, participantsMap) {
+    try {
+      const usersSnap = await GMD.child("users").once("value");
+      const users = usersSnap.val() || {};
+      const bySleeperUsername = {};
+      const byMflEmail        = {};
+      const byYahooUsername   = {};
+      for (const [username, u] of Object.entries(users)) {
+        const s = u?.platforms?.sleeper?.username?.toLowerCase();
+        const m = u?.platforms?.mfl?.mflEmail?.toLowerCase();
+        const y = u?.platforms?.yahoo?.username?.toLowerCase();
+        if (s) bySleeperUsername[s] = username;
+        if (m) byMflEmail[m]        = username;
+        if (y) byYahooUsername[y]   = username;
+      }
+      const matchUpdates = {};
+      for (const [pid, p] of Object.entries(participantsMap)) {
+        let matched = null;
+        if (p.sleeperUsername) matched = bySleeperUsername[p.sleeperUsername.toLowerCase()];
+        if (!matched && p.mflEmail)      matched = byMflEmail[p.mflEmail.toLowerCase()];
+        if (!matched && p.yahooUsername) matched = byYahooUsername[p.yahooUsername.toLowerCase()];
+        if (matched) {
+          matchUpdates[pid + "/dlrLinked"]   = true;
+          matchUpdates[pid + "/dlrUsername"] = matched;
+        }
+      }
+      if (Object.keys(matchUpdates).length) {
+        await _tParticipantsRef(tid).update(matchUpdates);
+        const mc = Object.keys(matchUpdates).length / 2;
+        showToast(mc + " participant" + (mc !== 1 ? "s" : "") + " matched to DLR accounts");
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        const body = document.getElementById("trn-tab-body");
+        if (body && _activeAdminTab === "participants") _renderParticipantsTab(tid, _tournaments[tid], body);
+      } else {
+        showToast("Import complete — no DLR matches found");
+      }
+    } catch(err) { console.warn("[Tournament] DLR match error:", err.message); }
+  }
+
+  function _exportParticipantsCSV(t) {
+    const participants = Object.entries(t.participants || {});
+    if (!participants.length) { showToast("No participants to export", "info"); return; }
+    const headers = ["pid","displayName","email","sleeperUsername","mflEmail","yahooUsername","teamName","years","dlrLinked","dlrUsername","autoRegister"];
+    const rows = participants.map(([pid, p]) =>
+      headers.map(h => {
+        let val = h === "pid" ? pid : (p[h] ?? "");
+        if (Array.isArray(val)) val = val.join("|");
+        return `"${String(val).replace(/"/g, '""')}"`; 
+      }).join(",")
+    );
+    const csv  = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = "participants_" + (t.meta?.name || "tournament").replace(/\s+/g, "_") + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("CSV exported");
   }
 
   // ── Admin: Roles tab ───────────────────────────────────
