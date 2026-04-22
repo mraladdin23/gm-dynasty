@@ -443,6 +443,9 @@
         return;
       }
 
+      // Build participant lookup from publicTournaments data
+      const pMap = t.participantMap || {};
+
       // Build rows
       let allRows = [];
       let lastSynced = 0;
@@ -453,16 +456,20 @@
           return b.pf - a.pf;
         });
         teams.forEach(team => {
+          const key = (team.teamName || "").trim().toLowerCase();
+          const p   = pMap[key] || {};
           allRows.push({
             overallRank: 0,
-            teamName:   team.teamName  || "Unknown",
-            leagueName: lc.leagueName || leagueId,
-            conference: lc.conference || "",
-            division:   lc.division   || "",
-            wins:       team.wins     || 0,
-            losses:     team.losses   || 0,
-            pf:         team.pf       || 0,
-            pa:         team.pa       || 0
+            teamName:    p.displayName || team.teamName || "Unknown",
+            rawTeamName: team.teamName || "Unknown",
+            leagueName:  lc.leagueName || leagueId,
+            conference:  lc.conference || "",
+            division:    lc.division   || "",
+            wins:        team.wins     || 0,
+            losses:      team.losses   || 0,
+            pf:          team.pf       || 0,
+            pa:          team.pa       || 0,
+            gender:      p.gender      || ""
           });
         });
         if ((lc.lastSynced || 0) > lastSynced) lastSynced = lc.lastSynced;
@@ -523,9 +530,9 @@
             </tr></thead>
             <tbody id="pub-st-tbody">
               ${sorted.map(r => `
-                <tr data-name="${esc(r.teamName.toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
+                <tr data-name="${esc(r.teamName.toLowerCase())}" data-raw="${esc((r.rawTeamName||r.teamName).toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
                   <td class="standings-rank">${r.overallRank}</td>
-                  <td><span class="standings-team-cell"><span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>${esc(r.teamName)}</span></td>
+                  <td><span class="standings-team-cell"><span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}</span></td>
                   <td style="color:var(--color-text-dim);font-size:.78rem">${esc(r.leagueName)}</td>
                   ${hasConf ? `<td>${esc(r.conference)}</td>` : ""}
                   <td class="standings-win">${r.wins}</td>
@@ -547,7 +554,7 @@
       document.getElementById("pub-st-search")?.addEventListener("input", function() {
         const q = this.value.toLowerCase();
         document.querySelectorAll("#pub-st-tbody tr").forEach(row => {
-          const match = !q || row.dataset.name?.includes(q) || row.dataset.league?.includes(q);
+          const match = !q || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q);
           row.style.display = match ? "" : "none";
         });
       });

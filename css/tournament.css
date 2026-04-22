@@ -756,7 +756,19 @@
 .required { color: var(--color-red, #ef4444); }
 
 /* ── Mobile ──────────────────────────────────────────────── */
-@media (max-width: 600px) {
+/* ── view-tournament scroll fix ─────────────────────────────
+   locker.css sets .screen.active { overflow: hidden } which clips
+   the scroll container. Override so the tournament view can scroll
+   exactly like #view-hallway does (locker.css line 4519). ── */
+@media (max-width: 640px) {
+  #view-tournament.active {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    height: calc(100dvh - 48px) !important;
+  }
+}
+
+@media (max-width: 640px) {
   /* The app-view is the scroll container on mobile (locker.css sets
      overflow-y:auto + height:calc(100vh-48px)). Do NOT set overflow
      on child containers — it creates a nested scroll context that
