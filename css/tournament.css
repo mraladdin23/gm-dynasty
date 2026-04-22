@@ -239,6 +239,128 @@
 
 .trn-tab-body { min-height: 200px; }
 
+/* ── Tab select (mobile only — hidden by default, shown at <=600px) ── */
+.trn-tab-select {
+  display: none;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: .9rem;
+  font-weight: 500;
+  margin-bottom: var(--space-4);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.trn-tab-select:focus {
+  outline: none;
+  border-color: var(--color-gold);
+}
+
+/* ── Standings toolbar & search ──────────────────────────── */
+.trn-standings-toolbar {
+  margin-bottom: var(--space-2);
+}
+
+.trn-st-search {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: .85rem;
+  box-sizing: border-box;
+}
+.trn-st-search:focus {
+  outline: none;
+  border-color: var(--color-gold);
+}
+
+/* ── Standings meta (last synced) — small and dim ─────────── */
+.trn-standings-meta {
+  font-size: .7rem;
+  color: var(--color-text-dim);
+  opacity: .55;
+  margin-bottom: var(--space-3);
+}
+
+/* ── Standings table wrapper ─────────────────────────────── */
+.standings-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-md);
+}
+
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .85rem;
+}
+
+.standings-table thead th {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-text-dim);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.standings-table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+  transition: background .1s;
+}
+.standings-table tbody tr:last-child { border-bottom: none; }
+.standings-table tbody tr:hover { background: rgba(255,255,255,.03); }
+
+.standings-table tbody td {
+  padding: var(--space-2) var(--space-3);
+  vertical-align: middle;
+}
+
+.standings-rank  { width: 36px; text-align: center; font-weight: 700; color: var(--color-text-dim); }
+.standings-win   { text-align: center; color: var(--color-green); font-weight: 600; }
+.standings-loss  { text-align: center; color: var(--color-red, #ef4444); font-weight: 600; }
+.standings-num   { text-align: right; font-variant-numeric: tabular-nums; }
+.standings-num.dim { color: var(--color-text-dim); }
+
+.standings-team-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.st-av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-border);
+  color: var(--color-text-dim);
+  font-size: .6rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+/* ── Group label (conference/division headers) ───────────── */
+.trn-st-group-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  margin-top: var(--space-2);
+}
+
 /* ── Section card ────────────────────────────────────────── */
 .trn-section-card {
   background: var(--color-surface);
