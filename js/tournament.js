@@ -398,7 +398,10 @@ const DLRTournament = (() => {
             <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
             ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
           </div>
-          ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
+          <div style="display:flex;gap:var(--space-2);align-items:center">
+            ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
+            ${canAdmin ? `<button class="btn-ghost btn-sm" id="trn-preview-toggle" title="Toggle user/admin view">👁 Preview as User</button>` : ""}
+          </div>
         </div>
 
         <!-- Tab bar -->
@@ -430,6 +433,10 @@ const DLRTournament = (() => {
 
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
+    document.getElementById("trn-preview-toggle")?.addEventListener("click", () => {
+      // Re-open same tournament but pretending canAdmin = false
+      _openTournamentViewAs(tid, false);
+    });
 
     // Tab wire-up
     container.querySelectorAll(".trn-tab").forEach(tab => {
@@ -457,6 +464,66 @@ const DLRTournament = (() => {
         showToast(`Your registration for ${meta.name || "this tournament"} is missing: ${labels}`, "info", 6000);
       }
     }
+  }
+
+  // ── Preview mode ───────────────────────────────────────
+  // Lets admin see the user-facing view without a second account
+  async function _openTournamentViewAs(tid, asAdmin) {
+    const container = document.getElementById("view-tournament");
+    if (!container) return;
+    const snap = await _tRef(tid).once("value");
+    const t = snap.val();
+    if (!t) return;
+    _tournaments[tid] = t;
+    const meta = t.meta || {};
+
+    const regOpen = ["registration_open","active"].includes(meta.status);
+    const hasStandings = !!(t.standingsCache && Object.keys(t.standingsCache).length);
+
+    container.innerHTML = `
+      <div class="trn-detail-container">
+        <div class="trn-detail-topbar">
+          <button class="btn-ghost btn-sm" id="trn-preview-back-btn">← Back to Manage</button>
+          <span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">👁 User Preview</span>
+        </div>
+        <div class="trn-detail-title-row">
+          <div>
+            <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
+            ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
+          </div>
+          <span class="trn-status-badge trn-status-${meta.status||"draft"}">
+            ${STATUS_ICONS[meta.status]||""} ${STATUS_LABELS[meta.status]||""}
+          </span>
+        </div>
+        <div class="trn-tabs" id="trn-tabs">
+          <button class="trn-tab active" data-tab="info">Info</button>
+          ${hasStandings ? `<button class="trn-tab" data-tab="standings">Standings</button>` : ""}
+          ${regOpen      ? `<button class="trn-tab" data-tab="register">Register</button>`  : ""}
+        </div>
+        <div id="trn-tab-body" class="trn-tab-body"></div>
+      </div>`;
+
+    document.getElementById("trn-preview-back-btn")?.addEventListener("click", () => {
+      _activeAdminTab = "overview";
+      _openTournamentView(tid);
+    });
+
+    container.querySelectorAll(".trn-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        const body = document.getElementById("trn-tab-body");
+        if (!body) return;
+        const name = tab.dataset.tab;
+        if (name === "info")      _renderInfoTab(t, body);
+        else if (name === "standings") _renderStandingsTab(tid, t, body, false);
+        else if (name === "register")  _renderRegisterTab(tid, t, body);
+      });
+    });
+
+    // Render info tab by default
+    const body = document.getElementById("trn-tab-body");
+    if (body) _renderInfoTab(t, body);
   }
 
   // ── Tab router ─────────────────────────────────────────
@@ -556,6 +623,17 @@ const DLRTournament = (() => {
           </div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
           <div class="trn-detail-row"><span>Created</span><span>${meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : "—"}</span></div>
+          <div class="trn-detail-row">
+            <span>Playoffs Start Week</span>
+            <span>
+              <select id="trn-playoff-week-select" style="font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                <option value="">Not set</option>
+                ${Array.from({length:18},(_,i)=>i+1).map(w =>
+                  `<option value="${w}" ${meta.playoffStartWeek === w ? "selected" : ""}>Week ${w}</option>`
+                ).join("")}
+              </select>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -582,6 +660,14 @@ const DLRTournament = (() => {
         showToast("Ranking method saved ✓");
         _tournaments[tid].meta.rankBy = this.value;
       } catch(e) { showToast("Failed to save ranking method", "error"); }
+    });
+    document.getElementById("trn-playoff-week-select")?.addEventListener("change", async function() {
+      const week = this.value ? parseInt(this.value) : null;
+      try {
+        await _tMetaRef(tid).update({ playoffStartWeek: week });
+        showToast("Playoff start week saved ✓");
+        _tournaments[tid].meta.playoffStartWeek = week;
+      } catch(e) { showToast("Failed to save", "error"); }
     });
   }
 
@@ -1390,13 +1476,15 @@ const DLRTournament = (() => {
     });
   }
 
+  let _standingsYear = null; // null = most recent year
+
   function _renderStandingsTab(tid, t, body, isAdmin) {
     const cache  = t.standingsCache || {};
     const meta   = t.meta || {};
     const rankBy = meta.rankBy || "record";
-    const entries = Object.entries(cache);
+    const allEntries = Object.entries(cache);
 
-    if (!entries.length) {
+    if (!allEntries.length) {
       body.innerHTML = `
         <div class="trn-empty">
           <div class="trn-empty-icon">📊</div>
@@ -1408,16 +1496,28 @@ const DLRTournament = (() => {
       return;
     }
 
+    // Get all available years from cache
+    const availableYears = [...new Set(allEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a, b) => b - a);
+    // Default to most recent year
+    if (!_standingsYear || !availableYears.includes(_standingsYear)) {
+      _standingsYear = availableYears[0] || null;
+    }
+
+    // Filter entries to selected year
+    const entries = _standingsYear
+      ? allEntries.filter(([, lc]) => lc.year === _standingsYear)
+      : allEntries;
+
     // Build flat rows
     let allRows = [];
     let lastSynced = 0;
-    for (const [leagueId, lc] of entries) {
+    for (const [cacheKey, lc] of entries) {
       const ranked = _rankTeams(lc.teams || [], rankBy);
       ranked.forEach(team => {
         allRows.push({
           rank:       team.computedRank,
           teamName:   team.teamName  || "Unknown",
-          leagueName: lc.leagueName || leagueId,
+          leagueName: lc.leagueName || cacheKey,
           conference: lc.conference || "",
           division:   lc.division   || "",
           wins:       team.wins     || 0,
@@ -1425,7 +1525,7 @@ const DLRTournament = (() => {
           ties:       team.ties     || 0,
           pf:         team.pf       || 0,
           pa:         team.pa       || 0,
-          leagueId,
+          cacheKey,
           platform:   lc.platform   || ""
         });
       });
@@ -1445,7 +1545,10 @@ const DLRTournament = (() => {
     body.innerHTML = `
       <div class="trn-standings-toolbar">
         <input type="text" id="trn-st-search" placeholder="Search team or league" class="trn-st-search" />
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
+          <select id="trn-st-year" class="trn-filter-select" style="min-width:0">
+            ${availableYears.map(y => `<option value="${y}" ${y === _standingsYear ? "selected" : ""}>${y}</option>`).join("")}
+          </select>
           ${hasConf ? `<select id="trn-st-conf" class="trn-filter-select" style="min-width:0">
             <option value="">All Conferences</option>
             ${conferences.map(c => "<option>" + _esc(c) + "</option>").join("")}
@@ -1487,6 +1590,11 @@ const DLRTournament = (() => {
       _wireStandingSortHeaders(allRows, hasConf, hasDiv);
     };
 
+    // Year change re-renders the whole tab
+    document.getElementById("trn-st-year")?.addEventListener("change", function() {
+      _standingsYear = parseInt(this.value);
+      _renderStandingsTab(tid, t, body, isAdmin);
+    });
     document.getElementById("trn-st-search")?.addEventListener("input",  refilter);
     document.getElementById("trn-st-conf")?.addEventListener("change",   refilter);
     document.getElementById("trn-st-div")?.addEventListener("change",    refilter);
@@ -1603,11 +1711,14 @@ const DLRTournament = (() => {
     const yahoos   = toSync.filter(l => l.platform === "yahoo");
     const cacheUpdates = {};
 
+    // Cache key: year_leagueId — prevents cross-year collisions for same league ID
+    const cacheKey = (l) => l.year + "_" + l.leagueId;
+
     // Sleeper — parallel
     await Promise.allSettled(sleepers.map(async (l) => {
       try {
         const data = await _fetchSleeperStandings(l.leagueId);
-        if (data) cacheUpdates[l.leagueId] = { ...l, ...data, lastSynced: Date.now() };
+        if (data) cacheUpdates[cacheKey(l)] = { ...l, ...data, lastSynced: Date.now() };
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
       done++; setP("Syncing " + done + "/" + total + "...");
     }));
@@ -1617,7 +1728,7 @@ const DLRTournament = (() => {
       await Promise.allSettled(mfls.slice(i, i + 3).map(async (l) => {
         try {
           const data = await _fetchMFLStandings(l.leagueId, l.year);
-          if (data) cacheUpdates[l.leagueId] = { ...l, ...data, lastSynced: Date.now() };
+          if (data) cacheUpdates[cacheKey(l)] = { ...l, ...data, lastSynced: Date.now() };
         } catch(e) { console.warn("[Standings] MFL", l.leagueId, e.message); }
         done++; setP("Syncing " + done + "/" + total + "...");
       }));
@@ -1634,7 +1745,7 @@ const DLRTournament = (() => {
         await Promise.allSettled(yahoos.slice(i, i + 2).map(async (l) => {
           try {
             const data = await _fetchYahooStandings(l.leagueId, yahooToken);
-            if (data) cacheUpdates[l.leagueId] = { ...l, ...data, lastSynced: Date.now() };
+            if (data) cacheUpdates[cacheKey(l)] = { ...l, ...data, lastSynced: Date.now() };
           } catch(e) { console.warn("[Standings] Yahoo", l.leagueId, e.message); }
           done++; setP("Syncing " + done + "/" + total + "...");
         }));
