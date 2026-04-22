@@ -1310,3 +1310,26 @@
   .trn-nav-row { gap: var(--space-2); }
   .trn-tab-select--main { font-size: .82rem; }
 }
+
+/* ── Standings: inline Twitter link ─────────────────── */
+.trn-st-twitter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .65rem;
+  font-weight: 700;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--color-border);
+  color: var(--color-text-dim);
+  text-decoration: none;
+  margin-left: 4px;
+  vertical-align: middle;
+  transition: background .15s, color .15s;
+  line-height: 1;
+}
+.trn-st-twitter:hover {
+  background: #000;
+  color: #fff;
+}

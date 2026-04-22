@@ -1755,10 +1755,8 @@ const DLRTournament = (() => {
     const hasDiv        = divisions.length > 0;
     const lastSyncedStr = lastSynced ? new Date(lastSynced).toLocaleString() : "Never";
     // gender is shown as inline badge on team name, not a column
-    // twitterHandle column is opt-in via meta.showTwitter
-    const extraCols = (meta.showTwitter && Object.keys(twitterByKey).length > 0)
-      ? [{ key: "twitterHandle", label: "Twitter/X" }]
-      : [];
+    // twitterHandle is shown as a link icon on the name cell, not a column
+    const extraCols = [];
 
     body.innerHTML = `
       <div class="trn-standings-toolbar">
@@ -1844,16 +1842,17 @@ const DLRTournament = (() => {
     };
 
     const thStyle = "cursor:pointer;user-select:none";
+    const w = (px) => "width:" + px + "px;min-width:" + px + "px;max-width:" + px + "px;";
     const thead = "<thead><tr>" +
-      '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + '">#' + si("overallRank") + "</th>" +
+      '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + ";width:28px" + '">#' + si("overallRank") + "</th>" +
       '<th data-sort-col="teamName" style="' + thStyle + '">Team' + si("teamName") + "</th>" +
-      (hasConf ? '<th data-sort-col="conference" style="' + thStyle + '">Conf' + si("conference") + "</th>" : "") +
-      (hasDiv  ? '<th data-sort-col="division" style="'   + thStyle + '">Div'  + si("division")   + "</th>" : "") +
+      (hasConf ? '<th data-sort-col="conference" style="' + thStyle + ";width:48px" + '">Conf' + si("conference") + "</th>" : "") +
+      (hasDiv  ? '<th data-sort-col="division"   style="' + thStyle + ";width:48px" + '">Div'  + si("division")   + "</th>" : "") +
       extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thStyle + '">' + col.label + si(col.key) + "</th>").join("") +
-      '<th class="standings-win"  data-sort-col="wins"   style="' + thStyle + '">W'  + si("wins")   + "</th>" +
-      '<th class="standings-loss" data-sort-col="losses" style="' + thStyle + '">L'  + si("losses") + "</th>" +
-      '<th class="standings-num"  data-sort-col="pf"     style="' + thStyle + '">PF' + si("pf")     + "</th>" +
-      '<th class="standings-num dim" data-sort-col="pa"  style="' + thStyle + '">PA' + si("pa")     + "</th>" +
+      '<th class="standings-win"  data-sort-col="wins"   style="' + thStyle + ";width:30px" + '">W'  + si("wins")   + "</th>" +
+      '<th class="standings-loss" data-sort-col="losses" style="' + thStyle + ";width:30px" + '">L'  + si("losses") + "</th>" +
+      '<th class="standings-num"  data-sort-col="pf"     style="' + thStyle + ";width:58px" + '">PF' + si("pf")     + "</th>" +
+      '<th class="standings-num dim" data-sort-col="pa"  style="' + thStyle + ";width:58px" + '">PA' + si("pa")     + "</th>" +
       "</tr></thead>";
 
     const genderBadge = (g) => {
@@ -1863,10 +1862,16 @@ const DLRTournament = (() => {
       return "";
     };
 
+    const twitterLink = (r) => {
+      if (!r.twitterHandle) return "";
+      const h = r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle;
+      return ' <a href="https://x.com/' + _esc(h) + '" target="_blank" rel="noopener" class="trn-st-twitter" title="@' + _esc(h) + '">𝕏</a>';
+    };
+
     const rowHtml = (r) =>
       "<tr>" +
       '<td class="standings-rank">' + r.overallRank + "</td>" +
-      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + "</span><span class=\"trn-st-league\">" + _esc(r.leagueName) + "</span></span></span></td>" +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league\">" + _esc(r.leagueName) + "</span></span></span></td>" +
       (hasConf ? "<td>" + _esc(r.conference) + "</td>" : "") +
       (hasDiv  ? "<td>" + _esc(r.division)   + "</td>" : "") +
       extra.map(col => {
@@ -3053,6 +3058,15 @@ const DLRTournament = (() => {
         allPicks = allPicks.concat(normalized);
       }
 
+      if (!allPicks.length) {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">📋</div>
+            <div class="trn-empty-title">No draft data yet</div>
+            <div class="trn-empty-sub">Draft data will appear once leagues have completed their startup drafts and the worker has fetched them.</div>
+          </div>`;
+        return;
+      }
       const adp = _computeADP(allPicks);
       _draftCache = { picks: allPicks, adp, byLeague, fetchedAt: Date.now(), tid };
       _renderDraftView(tid, t, body, _draftCache);
