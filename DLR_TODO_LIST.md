@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 21, 2026 (session 15)*
+*Updated: April 22, 2026 — F5-P1 complete, F5-P2 standings complete, active bugs tracked as F5-T1 through F5-T4*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -19,23 +19,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Yahoo Platform Bugs
 
-### ~~Y4~~ — Yahoo OAuth Token Not Persisting ✅ CLOSED
-**Root cause:** `YAHOO_REDIRECT_URI` Cloudflare env var was `dynastylockerroom.com` instead of
-`https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback`. All tokens were DOA.
-**Code fixes also applied:**
-- `app.js`: removed `yahoo.linked` gate from token sync — was skipping save on first connect
-- `profile.js`: `linkYahoo` now calls `GMDB.saveYahooTokens` after `linkPlatform`
-
----
-
-### Y5 — Yahoo Bundle Instability
-**Status:** Partially improved — worker now batches week fetches (3/batch, 300ms delay,
-1 retry) instead of firing all weeks in parallel. Yahoo still rate-limits under heavy
-load (59 leagues re-importing at once). Bundle reliability for normal single-league
-tab opens should be meaningfully better.
-**Remaining:** Yahoo still blocks the app token under heavy load. No reliable fix
-without caching bundles server-side or reducing re-import frequency.
-**Files:** `worker.js`, `yahoo.js`
+*(none currently)*
 
 ---
 
@@ -47,10 +31,7 @@ without caching bundles server-side or reducing re-import frequency.
 
 ## 🟡 Cross-Platform Bugs
 
-### ~~X2~~ — Link Leagues Across Platforms ✅ CLOSED
-**Resolution:** Commissioner-only merge via options modal (⋯). Auto-detects same-name
-franchises across platforms where user is commish of both. Merge folds older chain into
-newer; Unlink (suppressMerge) is a soft undo. Data stored at `leagueMeta/{key}.mergedInto`.
+*(none currently)*
 
 ---
 
@@ -75,9 +56,6 @@ independent of what the platform reports.
 **Files:** New module likely needed + `firebase-db.js`, `standings.js`, `index.html`
 **Note:** Large feature. Related to F5 Tournament Mode below.
 
-### F3 — Cross-Platform League Linking (see X2)
-Tracked under X2 above.
-
 ### F4 — Locker Room Visual Redesign + Team Customization
 **Idea:** Redesign the main locker room UI to look like an actual locker. User can
 select their favorite NFL team and the locker theme (colors, logo, textures) updates
@@ -88,70 +66,64 @@ Reference design/mockup to be provided by Mike.
 
 ### F5 — Tournament Mode (Cross-Platform)
 **Spec:** `GMDynasty_Tournament_Spec.docx` (v1.0) — attach to any tournament session.
-**Summary:** Structured multi-platform tournament layer for large-scale events (e.g. Scott Fish Bowl).
-Commissioners manage leagues across MFL, Yahoo, and Sleeper. Users auto-discover tournaments
-when their leagues match a tournament's league ID list. Five build phases.
+**Files:** `tournament.js`, `tournament.css`, `tournaments/index.html`
+**Public URL:** `dynastylockerroom.com/tournaments`
 
-**New files needed:**
-- `tournament.js` — main module (admin setup, views, standings, playoffs)
-- `tournament.css` — tournament-specific styles
-- Firebase paths: `gmd/tournaments/{tournamentId}/` (meta, leagues, registrations, standings, playoff)
+**Phase 1 — Foundation ✅ COMPLETE**
 
-**Existing files touched:**
-- `firebase-db.js` — tournament read/write helpers
-- `index.html` — Tournament tab/button in header, view shell
-- `profile.js` — auto-discovery hook (check user leagues against tournament league IDs on sync)
-- `app.js` — Tournament tab navigation
+**Phase 2 — Core Views (Standings ✅, remaining items below)**
 
-**Phase breakdown:**
+### F5-T1 — Standings column settings + median wins
+**What:** Admin settings (on Overview tab or new Settings tab) to:
+1. Select which extra columns appear in standings (Twitter handle, gender, custom fields).
+   Currently these appear automatically if data exists — should be opt-in instead.
+2. Toggle median wins on/off (`meta.medianWins`). When enabled, any team scoring above
+   the weekly median score gets +1 win. Sleeper only: fetch weekly scores per league,
+   compute median, add to W/L before caching.
+**Files:** `tournament.js`
 
-**Phase 1 — Foundation** *(start here)*
-- Admin create/edit tournament; enter league IDs across platforms
-- Role management: Tournament Admin + scoped sub-admins per conference/division
-- Tournament lifecycle status: Draft → Registration Open → Active → Playoffs → Completed
-- Registration form builder (standard + custom fields); open or invite-only
-- Admin approves/denies applicants; triggers acceptance email with league invite link
-- CSV export + import of registration list
-- Auto-discovery: on sync, silently match user's leagues to tournament league IDs → show in "My Tournaments"
-- **Files:** `tournament.js`, `firebase-db.js`, `index.html`, `app.js`
+### F5-T2 — Participant list fixes
+**What:**
+1. Twitter handle not showing in participant list — add display + make it a clickable
+   link to `https://x.com/{handle}` (strip leading @ if present).
+2. DLR match for Sleeper uses `platforms.sleeper.username` but the display name shown
+   in standings comes from Sleeper's `/users` endpoint as `display_name`. Match should
+   use `platforms.sleeper.sleeperUsername` (or `displayName` field — check which is stored)
+   so standings show the correct name instead of the raw Sleeper handle.
+**Files:** `tournament.js`
 
-**Phase 2 — Core Views**
-- Tournament info/bio page: rich text, donation link, social links, status banner
-- Rules tab: rich text, versioned
-- Tiebreaker config: Points For or H2H (applies to standings + playoff seeding)
-- Consolidated standings: all teams, rank/record/PF/division, search + filter by division/conference
-- Division/conference sub-views with qualifier callouts (clinched, eliminated, in contention)
-- **Files:** `tournament.js`, `tournament.css`, `firebase-db.js`
-- **Open question:** Rich text editor library — Quill, TipTap, or ProseMirror?
+### F5-T3 — Standings / UI fixes (active bugs)
+**What:**
+1. Playoff start week setting not visible in admin Overview — DOM ID or render issue
+2. "Preview as User" button missing after recent deploys
+3. Filter UI: remove flat list / conference / division / gender dropdowns from standings toolbar.
+   Keep only year dropdown (move above search with padding). Conference/division grouping can
+   stay in the "group by" select if needed but gender filter should be removed from toolbar.
+4. Mobile: tournament cards stretch past screen width and are not clickable — CSS overflow issue
+**Files:** `tournament.js`, `tournament.css`
+
+### F5-T4 — Public page fixes
+**What:** Changes to `tournament.js` are not reflected in `tournaments/index.html` because
+the public page has its own copy of the standings render logic. Need to:
+1. Fix Firebase auth error (`firebase.auth is not a function`) — `firebase-auth-compat.js` was
+   added but may not have deployed
+2. Fix duplicate `db` variable collision with `config.js`
+3. Sync standings CSS, year filter, and other render improvements to public page
+4. Fix mobile card overflow
+**Files:** `tournaments/index.html`, `tournament.css`
 
 **Phase 3 — Analytics & Weekly Views**
-- Consolidated draft board: all picks across tournament, filter by division/conference/position
-- ADP calculation from picks across all tournament leagues
-- Individual team draft board (formatted for copy/paste sharing)
-- Weekly matchup summary tab: all matchups for selected week, highlights (top score, closest, blowout)
-- Admin weekly recap: manual text entry + AI-assisted draft (Claude API call)
-- Top rosters view: highest-scoring teams, filterable by week or season-to-date
-- **Files:** `tournament.js`, `firebase-db.js`
-- **Open question:** AI recap — Claude API call from worker or Firebase Function?
+- Consolidated draft board + ADP, weekly matchup summary, top rosters, AI-assisted recap
+- **Open question:** AI recap — Claude API from Cloudflare Worker or Firebase Function?
 
 **Phase 4 — Custom Playoffs**
-- Playoff format config: overall top-X by PF, top-N per division, H2H bracket (single/double elim), hybrid
-- Byes, total spots, advancement criteria
-- Rendering: list view (scoring-based) or bracket view (H2H) — paginated by round
-- Lineup view per matchup using historical week roster data
-- **Files:** `tournament.js`, `firebase-db.js`
+- Format config (top-X by PF, divisional, H2H bracket, hybrid), list/bracket rendering
 - **Open question:** Double elimination in Phase 4 or defer?
+- **Note:** F2 (Custom Playoff Tracker) overlaps — decide before scoping.
 
 **Phase 5 — Advanced**
-- Cross-platform identity merging: auto-match by shared email/username; admin manual link/unlink
-- Combined profile: aggregates tournament history across platforms under single identity
-- Weekly summary emails (SendGrid or similar): matchup results, top scores, standings snapshot
-- Message board integration (ties into planned Message Board feature)
-- **Files:** `tournament.js`, `firebase-db.js`, new email worker endpoint
-- **Open question:** Email provider (SendGrid vs other); fallback for low-confidence identity merge?
-
-**Note:** F2 (Custom Playoff Tracker) overlaps with Phase 4 — consider merging or building F2
-as a lightweight precursor that Phase 4 expands. Needs decision before scoping Phase 4.
+- Cross-platform identity merging, weekly summary emails, message board integration
+- **Open question:** Email provider; fallback for low-confidence auto-match?
 
 ### F6 — Locker Room Post-It Trash Talk Wall
 **Idea:** Post-it style sticky notes on lockers, stored in Firebase.
@@ -180,11 +152,15 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 | 3 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
 | 4 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
 | 5 | F2 | Custom Playoff Tracker | High | New module + several files |
-| 6 | F5-P1 | Tournament Mode — Phase 1 (Foundation) | Very High | `tournament.js`, `firebase-db.js`, `index.html`, `app.js` |
-| 7 | F5-P2 | Tournament Mode — Phase 2 (Core Views) | Very High | `tournament.js`, `tournament.css`, `firebase-db.js` |
-| 8 | F5-P3 | Tournament Mode — Phase 3 (Analytics) | Very High | `tournament.js`, `firebase-db.js` |
-| 9 | F5-P4 | Tournament Mode — Phase 4 (Playoffs) | Very High | `tournament.js`, `firebase-db.js` |
-| 10 | F5-P5 | Tournament Mode — Phase 5 (Advanced) | Very High | `tournament.js`, `firebase-db.js`, worker |
+| 6 | ~~F5-P1~~ | ~~Tournament Mode Phase 1~~ | ✅ DONE | — |
+| 7 | F5-T3 | Standings UI fixes (playoff week, preview, mobile, filters) | Low | `tournament.js`, `tournament.css` |
+| 8 | F5-T2 | Participant: Twitter handle + Sleeper display name fix | Low | `tournament.js` |
+| 9 | F5-T4 | Public page fixes | Medium | `tournaments/index.html`, `tournament.css` |
+| 10 | F5-T1 | Standings column settings + median wins | Medium | `tournament.js` |
+| 11 | F5-P2 | Tournament Phase 2 remaining (bio/rules rich text, info page) | High | `tournament.js`, `tournament.css` |
+| 12 | F5-P3 | Tournament Phase 3 (Analytics) | Very High | `tournament.js`, `firebase-db.js` |
+| 13 | F5-P4 | Tournament Phase 4 (Playoffs) | Very High | `tournament.js`, `firebase-db.js` |
+| 14 | F5-P5 | Tournament Phase 5 (Advanced) | Very High | `tournament.js`, `firebase-db.js`, worker |
 | 11 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
 | 12 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
 | 13 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
@@ -196,6 +172,12 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **Item 2 (Session A):** Options modal gating — commish-only fields hidden from non-commish users; read-only groups/labels display shown to all; `leaguegroups.js` exports `loadCommGroups`
 - **Item 1 (Session B):** Group filter — unified 🗂 My Groups button + panel with "My Labels" / "Commissioner Groups" subsections loaded async from Firebase; count badge on active filters. Bug fixes: old HTML IDs replaced (`filter-groups-btn` → `filter-mygroups-btn`); `_franchiseMatchesFilter` now uses `_groupsCache.leagueKeys` arrays instead of legacy `commishGroup` text; `commUsername` check ensures group creators always see their groups
 - **X2 / Item 3 (Session C):** Cross-platform merge — auto-detects same-name commish leagues (emoji stripped by `_normalizeName`); Merge folds older chain into newer; Unlink is soft undo (`suppressMerge`); `_buildFranchises()` applies merge links transparently; `firebase-db.js` gets `saveMergeLinks`/`removeMergeLinks`. Bug fixes: detail panel/overview/history use `_resolveEffectiveFid` + `_getAllSeasonsForFranchise` so merged seasons show in season pills; commish requirement relaxed to current league only
+- **F5-P1 COMPLETE:** Tournament Mode Phase 1 — admin create/edit, league batches, roles, lifecycle,
+  registration form builder, registrant review, participant DB + DLR matching, auto-discovery,
+  CSV export/import, view persistence, public tournament directory at /tournaments
+- **F5-P2 Standings COMPLETE:** Sync from Sleeper/MFL/Yahoo, year_leagueId cache keys (dedup fix),
+  year dropdown, ranking methods, playoff start week with Sleeper regular-season-only W/L recompute,
+  gender column + filter, CSS match to locker.css, admin preview-as-user toggle, public page standings
 - **Y5 CLOSED:** Yahoo bundle instability — batching + per-league Sync button declared best achievable
 
 - Yahoo Draft tab: endpoint fixed, multi-shape parser (Shapes 1–5), grid/list/auction views, 25/page pagination, DEF fallback

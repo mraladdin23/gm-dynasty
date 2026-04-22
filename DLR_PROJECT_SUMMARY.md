@@ -67,6 +67,7 @@ GitHub Pages (dynastylockerroom.com)
 | `players-db.js` | Cross-platform player DB. DynastyProcess CSV mappings. `MAPPINGS_VERSION = "2026-04b"`. |
 | `idb-cache.js` | IndexedDB wrapper. |
 | `playercard.js` | Player card modal. |
+| `tournament.js` | Tournament module — admin setup, standings, registration, participant DB, public summary. |
 | `playerreport.js` | Cross-league player report panel |
 | `chat.js` | League chat (Firebase Realtime DB) |
 | `hallway.js` | The Hallway social feature |
@@ -119,31 +120,94 @@ eliminator, and guillotine leagues.
 
 ---
 
-## Tournament Feature (F5) — Planned
+## Tournament Feature (F5) — In Progress (P1 complete, P2 standings complete)
 
 **Spec doc:** `GMDynasty_Tournament_Spec.docx` v1.0 — attach to any tournament session.
 **Purpose:** Structured multi-platform competition layer for large-scale fantasy tournaments
-(e.g. Scott Fish Bowl) spanning MFL, Yahoo, and Sleeper leagues.
+(e.g. Scott Fish Bowl, Battle of the Sexes) spanning MFL, Yahoo, and Sleeper leagues.
 
-**Firebase data root:** `gmd/tournaments/{tournamentId}/`
-**New files:** `tournament.js`, `tournament.css`
-**Existing files touched:** `firebase-db.js`, `index.html`, `app.js`, `profile.js`
+**Firebase data roots:**
+- `gmd/tournaments/{tid}/` — full tournament data (auth required)
+- `gmd/publicTournaments/{tid}/` — sanitized public copy (no auth required)
 
-**Five build phases:**
-- **Phase 1 — Foundation:** Admin setup, league loading (multi-platform), role permissions (admin + scoped sub-admins), tournament lifecycle (Draft→Registration→Active→Playoffs→Complete), registration form builder, applicant approval, CSV export/import, auto-discovery (user's leagues silently matched to tournament league IDs on sync)
-- **Phase 2 — Core Views:** Tournament bio/info page (rich text, donation link), rules tab (versioned), tiebreaker config, consolidated standings (all teams, search/filter), division/conference sub-views
-- **Phase 3 — Analytics:** Consolidated draft board (all picks, ADP calc, filter by position/division), individual team draft board, weekly matchup summary tab (highlights + admin recap + AI-assisted recap via Claude API), top rosters view
-- **Phase 4 — Playoffs:** Format config (top-X by PF, top-N per division, H2H bracket, hybrid), list or bracket rendering, lineup view per matchup, winners advance / losers dimmed
-- **Phase 5 — Advanced:** Cross-platform identity merging (auto-match + admin override), weekly summary emails (SendGrid), message board integration
+**Files:** `tournament.js`, `tournament.css`, `tournaments/index.html` (public page)
+**Existing files touched:** `firebase-db.js`, `index.html`, `app.js`
+
+**Public URL:** `dynastylockerroom.com/tournaments` — GitHub Pages `tournaments/index.html` shell.
+No auth required. Shows non-draft tournaments + draft tournaments with prior standings history.
+
+**Phase 1 — Foundation ✅ COMPLETE**
+- Admin create/edit/delete tournament
+- League batch upload: platform + year + CSV of league IDs; division names fetched from platform APIs
+- Conference assignment: in CSV (column 2) or manual post-import via Edit Conferences modal
+- Role management: Admin + scoped Sub-Admins; DLR username validation on add
+- Lifecycle status: Draft → Registration Open → Active → Playoffs → Completed (manual transitions)
+- Registration form builder: required fields (Display Name, Email), platform fields (Sleeper Username,
+  MFL Email, Yahoo Username), extra fields (Team Name, Twitter/X Handle, Gender), custom questions
+- Registrant review: approve/deny/invite link per applicant; CSV export/import
+- Participant database: CSV import, DLR auto-match (Sleeper username / MFL email / Yahoo username),
+  DLR-linked vs unlinked display, auto-register toggle per participant
+- Auto-discovery: `DLRTournament.runDiscovery()` — matches user leagues to tournament league IDs on sync
+- View persistence: `sessionStorage` saves active nav view (Locker/Hallway/Trophies/Tournaments) across refresh
+- `_writePublicSummary()` keeps `gmd/publicTournaments/{tid}` in sync after every relevant write
+
+**Standings (P2 partial) ✅ COMPLETE**
+- Sync Standings button on Leagues tab: fetches from platform APIs, writes to `standingsCache`
+- Cache key format: `{year}_{leagueId}` — prevents cross-year collision for same league ID
+- Dedup logic: if new-format keys exist, old flat `leagueId` keys are filtered out at render
+- Year dropdown: always visible, defaults to most recent, filters to that year's leagues
+- Ranking methods: Record then PF (default) or PF only — saved to `meta.rankBy`
+- Playoff start week: saved to `meta.playoffStartWeek`; Sleeper recomputes W/L from weekly
+  matchup results for weeks 1 through playoffStartWeek-1 (regular season only)
+- Gender column: appears when participant records have gender data; filter + "By Gender" grouping
+- CSS matches `locker.css` standings table classes (`.standings-table`, `.standings-rank` etc.)
+- Admin "👁 Preview as User" toggle — shows user-facing view without needing a second account
+- Public page shows standings read-only with same year dropdown and CSS
+
+**Outstanding bugs / next items (F5-P2 remaining):**
+- Standings columns are opt-in (admin selects which extra columns to show): Twitter handle as
+  clickable link (https://x.com/{handle}), gender — configured in Settings tab
+- Median wins support: setting per tournament (`meta.medianWins: true`); any team scoring
+  above weekly median gets +1 win; Sleeper only for now (fetches weekly scores)
+- Participant list needs to show Twitter handle field + DLR match uses Sleeper displayName
+  (stored as `platforms.sleeper.displayName`) not just `username`
+- Public page: CSS mismatch, year filter, Firebase auth error — partially fixed, needs full pass
+- Mobile: tournament cards stretch past screen width; clickability issues
+- "Preview as User" button missing after recent deploys (DOM ID issue)
+
+**Standings settings (stored in `meta`):**
+- `rankBy`: "record" | "pf"
+- `playoffStartWeek`: 1–18 | null
+- `medianWins`: true | false (planned)
+- `standingsColumns`: string[] of extra column keys to show (planned)
+
+**Firebase paths (tournaments):**
+```
+gmd/tournaments/{tid}/
+  meta/                    — name, tagline, status, rankBy, playoffStartWeek, medianWins,
+                             regType, registrationForm, createdBy, createdAt
+  leagues/{batchId}/       — platform, year, hasConferences, leagues: { [leagueId]: {name, conference} }
+  roles/{username}/        — role, scope, grantedAt
+  registrations/{rid}/     — displayName, email, sleeperUsername, status, source, dlrUsername
+  participants/{pid}/      — displayName, email, sleeperUsername, gender, twitterHandle,
+                             dlrLinked, dlrUsername, autoRegister, years[]
+  standingsCache/{year}_{leagueId}/ — leagueName, platform, year, teams[], lastSynced
+
+gmd/publicTournaments/{tid}/
+  name, tagline, status, rankBy, leagueCount, registrationCount,
+  registrationForm, standingsCache
+```
+
+**Public page access:** `gmd/publicTournaments` requires Firebase rule `".read": true`
+**Tournaments node:** `gmd/tournaments` requires `".read": "auth != null"`, `".write": "auth != null"`
 
 **Open questions (resolve before each phase):**
-- P2: Rich text editor library — Quill, TipTap, or ProseMirror?
+- P2: Rich text editor for bio/rules — Quill, TipTap, or ProseMirror? (deferred)
 - P3: AI recap — Claude API call from Cloudflare Worker or Firebase Function?
-- P4: Double elimination in Phase 4 or defer to Phase 5?
+- P4: Double elimination in Phase 4 or defer?
 - P5: Email provider; fallback for low-confidence identity auto-match?
 
-**Note:** F2 (Custom Playoff Tracker) overlaps with Phase 4 — decide before scoping P4 whether
-to merge them or keep F2 as a standalone lightweight precursor.
+**Note:** F2 (Custom Playoff Tracker) overlaps with Phase 4 — decide before scoping P4.
 
 ---
 
@@ -427,10 +491,20 @@ Here are the relevant files: [attach files]
 - Worker changes require a **separate paste into Cloudflare dashboard** — git push alone is not enough
 - Yahoo rate limiting: don't run multiple tabs or hammer the import button repeatedly
 - **Merge links** stored at `gmd/users/{u}/leagueMeta/{key}.mergedInto` — `suppressMerge: true` = soft unlinked
-- **locker.css is now at v=21** — Sessions A/B/C styles all consolidated there
+- **locker.css is now at v=21** — Sessions A/B/C styles consolidated. `tournament.css` added at v=1. — Sessions A/B/C styles all consolidated there
 
 ---
 
-*Document updated: April 21, 2026 (session 15)*
-*All three platforms fully working. Items 1, 2, 3 fully verified and bug-fixed.*
-*Next: F1 (Dynasty/Keeper Overview Tab) or F5-P1 (Tournament Mode Phase 1).*
+**April 22–ongoing (F5 Tournament Mode sessions):**
+- F5-P1 fully built and deployed: tournament creation, league batches, roles, registration form builder,
+  participant DB with DLR matching, auto-discovery, lifecycle status, CSV export/import
+- Standings (P2 partial): sync from Sleeper/MFL/Yahoo, year filter, ranking methods, playoff start week,
+  gender column, CSS match to locker.css, dedup fix (year_leagueId cache key), public page
+- Public directory at `dynastylockerroom.com/tournaments` (GitHub Pages `tournaments/index.html`)
+- Draft tournaments with prior standings visible publicly with "View History" label
+- Auto-link: public registrations linked to DLR accounts on account creation (`autoLinkPublicRegistrations`)
+- View persistence: `sessionStorage` saves active nav view across refresh
+
+*Document updated: April 22, 2026*
+*F5-P1 complete. F5-P2 standings in progress. Next: standings column settings, median wins,
+participant Twitter handle display, public page CSS fixes, mobile card fix.*

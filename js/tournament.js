@@ -554,8 +554,30 @@ const DLRTournament = (() => {
               </select>
             </span>
           </div>
+          <div class="trn-detail-row">
+            <span>Playoff Start Week</span>
+            <span>
+              <input type="number" id="trn-playoff-week-input" min="1" max="18"
+                value="${meta.playoffStartWeek || ""}"
+                placeholder="e.g. 15"
+                style="width:70px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+            </span>
+          </div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
           <div class="trn-detail-row"><span>Created</span><span>${meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : "—"}</span></div>
+        </div>
+      </div>
+
+      <!-- Preview as User -->
+      <div class="trn-section-card">
+        <div class="trn-section-card-title">Admin Tools</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+          <div style="font-size:.85rem;color:var(--color-text-dim)">
+            Preview this tournament as a regular participant (hides admin tabs).
+          </div>
+          <button class="btn-secondary btn-sm" id="trn-preview-user-btn">
+            👁 Preview as User
+          </button>
         </div>
       </div>
 
@@ -583,6 +605,75 @@ const DLRTournament = (() => {
         _tournaments[tid].meta.rankBy = this.value;
       } catch(e) { showToast("Failed to save ranking method", "error"); }
     });
+
+    // Playoff start week — save on blur or Enter
+    const playoffWeekInput = document.getElementById("trn-playoff-week-input");
+    const _savePlayoffWeek = async function() {
+      const raw = parseInt(playoffWeekInput?.value) || null;
+      const prev = t.meta?.playoffStartWeek || null;
+      if (raw === prev) return; // no change
+      try {
+        await _tMetaRef(tid).update({ playoffStartWeek: raw });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.playoffStartWeek = raw;
+        showToast(raw ? `Playoff start week set to ${raw} ✓` : "Playoff start week cleared ✓");
+      } catch(e) { showToast("Failed to save playoff week", "error"); }
+    };
+    playoffWeekInput?.addEventListener("blur", _savePlayoffWeek);
+    playoffWeekInput?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); _savePlayoffWeek(); } });
+
+    // Preview as User — temporarily renders the user view for this tournament
+    document.getElementById("trn-preview-user-btn")?.addEventListener("click", () => {
+      _openTournamentViewAsUser(tid, t);
+    });
+  }
+
+  // ── Preview as User — renders user view with an admin-return banner ──
+  function _openTournamentViewAsUser(tid, t) {
+    const container = document.getElementById("view-tournament");
+    if (!container) return;
+    const meta = t.meta || {};
+
+    container.innerHTML = `
+      <div class="trn-preview-banner">
+        <span>👁 Previewing as participant — admin tabs hidden</span>
+        <button class="btn-secondary btn-sm" id="trn-exit-preview-btn">Exit Preview</button>
+      </div>
+      <div class="trn-detail-container">
+        <div class="trn-detail-topbar">
+          <div></div>
+          <span class="trn-status-badge trn-status-${meta.status || "draft"}">
+            ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || "Draft"}
+          </span>
+        </div>
+        <div class="trn-detail-title-row">
+          <div>
+            <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
+            ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
+          </div>
+        </div>
+        <div class="trn-tabs" id="trn-tabs">
+          <button class="trn-tab ${_activeUserTab === "info" ? "active" : ""}" data-tab="info">Info</button>
+          <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
+          <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
+        </div>
+        <div id="trn-tab-body" class="trn-tab-body"></div>
+      </div>
+    `;
+
+    document.getElementById("trn-exit-preview-btn")?.addEventListener("click", () => _openTournamentView(tid));
+
+    container.querySelectorAll(".trn-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        const tabName = tab.dataset.tab;
+        _activeUserTab = tabName;
+        _renderTab(tid, tabName, t, false);
+      });
+    });
+
+    const defaultTab = _activeUserTab;
+    _renderTab(tid, defaultTab, t, false);
   }
 
   async function _changeStatus(tid, newStatus) {
@@ -1475,31 +1566,19 @@ const DLRTournament = (() => {
 
     body.innerHTML = `
       <div class="trn-standings-toolbar">
-        <input type="text" id="trn-st-search" placeholder="Search team or league" class="trn-st-search" />
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
+        <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
           <select id="trn-st-year" class="trn-filter-select" style="min-width:0">
             ${availableYears.map(y => `<option value="${y}" ${y === _standingsYear ? "selected" : ""}>${y}</option>`).join("")}
           </select>
-          ${hasConf ? `<select id="trn-st-conf" class="trn-filter-select" style="min-width:0">
-            <option value="">All Conferences</option>
-            ${conferences.map(conf => "<option>" + _esc(conf) + "</option>").join("")}
+          ${hasConf ? `<select id="trn-st-group" class="trn-filter-select" style="min-width:0">
+            <option value="flat">All Conferences</option>
+            ${conferences.map(conf => `<option value="conf_${_esc(conf)}">${_esc(conf)}</option>`).join("")}
+          </select>` : hasDiv ? `<select id="trn-st-group" class="trn-filter-select" style="min-width:0">
+            <option value="flat">All Divisions</option>
+            ${divisions.map(d => `<option value="div_${_esc(d)}">${_esc(d)}</option>`).join("")}
           </select>` : ""}
-          ${hasDiv ? `<select id="trn-st-div" class="trn-filter-select" style="min-width:0">
-            <option value="">All Divisions</option>
-            ${divisions.map(d => "<option>" + _esc(d) + "</option>").join("")}
-          </select>` : ""}
-          ${hasGender ? `<select id="trn-st-gender" class="trn-filter-select" style="min-width:0">
-            <option value="">All Genders</option>
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
-          </select>` : ""}
-          <select id="trn-st-group" class="trn-filter-select" style="min-width:0">
-            <option value="flat">Flat List</option>
-            ${hasConf   ? '<option value="conf">By Conference</option>'  : ""}
-            ${hasDiv    ? '<option value="div">By Division</option>'     : ""}
-            ${hasGender ? '<option value="gender">By Gender</option>'    : ""}
-          </select>
         </div>
+        <input type="text" id="trn-st-search" placeholder="Search team or league…" class="trn-st-search" />
       </div>
       <div class="trn-standings-meta">
         Last synced: ${_esc(lastSyncedStr)}
@@ -1513,16 +1592,21 @@ const DLRTournament = (() => {
     `;
 
     const refilter = () => {
-      const q      = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
-      const conf   = document.getElementById("trn-st-conf")?.value   || "";
-      const div    = document.getElementById("trn-st-div")?.value    || "";
-      const gender = document.getElementById("trn-st-gender")?.value || "";
-      const grp    = document.getElementById("trn-st-group")?.value  || "flat";
+      const q    = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
+      const grpVal = document.getElementById("trn-st-group")?.value || "flat";
       let rows = allRows;
-      if (q)      rows = rows.filter(r => r.teamName.toLowerCase().includes(q) || r.leagueName.toLowerCase().includes(q));
-      if (conf)   rows = rows.filter(r => r.conference === conf);
-      if (div)    rows = rows.filter(r => r.division   === div);
-      if (gender) rows = rows.filter(r => r.gender     === gender);
+      if (q) rows = rows.filter(r => r.teamName.toLowerCase().includes(q) || r.leagueName.toLowerCase().includes(q));
+      // Parse grouped conference/division filter
+      let grp = "flat";
+      if (grpVal.startsWith("conf_")) {
+        const confName = grpVal.slice(5);
+        rows = rows.filter(r => r.conference === confName);
+        grp = "conf";
+      } else if (grpVal.startsWith("div_")) {
+        const divName = grpVal.slice(4);
+        rows = rows.filter(r => r.division === divName);
+        grp = "div";
+      }
       rows = _sortRows(rows, _standingsSort.col, _standingsSort.dir);
       const wrap = document.getElementById("trn-standings-wrap");
       if (wrap) wrap.innerHTML = _buildStandingsTable(rows, hasConf, hasDiv, grp, extraCols);
@@ -1533,11 +1617,8 @@ const DLRTournament = (() => {
       _standingsYear = parseInt(this.value);
       _renderStandingsTab(tid, t, body, isAdmin);
     });
-    document.getElementById("trn-st-search")?.addEventListener("input",  refilter);
-    document.getElementById("trn-st-conf")?.addEventListener("change",   refilter);
-    document.getElementById("trn-st-div")?.addEventListener("change",    refilter);
-    document.getElementById("trn-st-gender")?.addEventListener("change", refilter);
-    document.getElementById("trn-st-group")?.addEventListener("change",  refilter);
+    document.getElementById("trn-st-search")?.addEventListener("input", refilter);
+    document.getElementById("trn-st-group")?.addEventListener("change", refilter);
     _wireStandingSortHeaders(allRows, hasConf, hasDiv);
   }
 
