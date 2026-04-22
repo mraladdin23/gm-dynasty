@@ -1262,10 +1262,12 @@
 }
 /* Main tab select — wider than the year filter */
 .trn-tab-select--main {
+  display: block !important;   /* override the default display:none */
   flex: 1;
   min-width: 160px;
   font-size: .88rem;
   padding: 6px 10px;
+  margin-bottom: 0;            /* remove the bottom margin from base rule */
 }
 
 /* ── "You" badge ─────────────────────────────────────── */
