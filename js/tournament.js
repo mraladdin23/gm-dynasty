@@ -151,9 +151,7 @@ const DLRTournament = (() => {
       t.roles?.[_currentUsername]?.role === "sub_admin"
     );
 
-    // Tab counts (only show badge if > 0)
-    const mineBadge  = myEntries.length    ? `<span class="trn-tab-count">${myEntries.length}</span>`    : "";
-    const adminBadge = adminEntries.length ? `<span class="trn-tab-count">${adminEntries.length}</span>` : "";
+    // Tab counts inline in select options — badges not needed
 
     container.innerHTML = `
       <div class="trn-container">
@@ -165,16 +163,12 @@ const DLRTournament = (() => {
           <button class="btn-primary btn-sm" id="trn-create-btn">+ New Tournament</button>
         </div>
 
-        <div class="trn-landing-tabs">
- 	  <button class="trn-landing-tab ${_landingTab === "all"      ? "active" : ""}" data-landing="all">
-            All Tournaments
-          </button>
-          <button class="trn-landing-tab ${_landingTab === "mine"     ? "active" : ""}" data-landing="mine">
-            My Tournaments ${mineBadge}
-          </button>
-          <button class="trn-landing-tab ${_landingTab === "managing" ? "active" : ""}" data-landing="managing">
-            Managing ${adminBadge}
-          </button>
+        <div class="trn-filter-row">
+          <select class="trn-filter-select" id="trn-landing-select">
+            <option value="all"      ${_landingTab === "all"      ? "selected" : ""}>All Tournaments</option>
+            <option value="mine"     ${_landingTab === "mine"     ? "selected" : ""}>My Tournaments${myEntries.length     ? ` (${myEntries.length})`    : ""}</option>
+            <option value="managing" ${_landingTab === "managing" ? "selected" : ""}>Managing${adminEntries.length ? ` (${adminEntries.length})` : ""}</option>
+          </select>
         </div>
 
         <div id="trn-landing-body"></div>
@@ -183,13 +177,9 @@ const DLRTournament = (() => {
 
     document.getElementById("trn-create-btn")?.addEventListener("click", () => _openCreateModal());
 
-    container.querySelectorAll(".trn-landing-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        container.querySelectorAll(".trn-landing-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        _landingTab = tab.dataset.landing;
-        _renderLandingBody(allEntries, myEntries, adminEntries);
-      });
+    document.getElementById("trn-landing-select")?.addEventListener("change", function() {
+      _landingTab = this.value;
+      _renderLandingBody(allEntries, myEntries, adminEntries);
     });
 
     _renderLandingBody(allEntries, myEntries, adminEntries);
