@@ -92,8 +92,9 @@ const DLRTournament = (() => {
       const isAdmin    = t.roles?.[_currentUsername]?.role === "admin";
       const isSubAdmin = t.roles?.[_currentUsername]?.role === "sub_admin";
       const isDiscovered = t.meta.discoveredBy?.[_currentUsername];
-      const notDraft   = t.meta.status !== "draft";
-      if (isAdmin || isSubAdmin || isDiscovered || notDraft) {
+      const notDraft      = t.meta.status !== "draft";
+      const hasStandings  = t.standingsCache && Object.keys(t.standingsCache).length > 0;
+      if (isAdmin || isSubAdmin || isDiscovered || notDraft || hasStandings) {
         _tournaments[tid] = t;
       }
     }
@@ -1517,19 +1518,21 @@ const DLRTournament = (() => {
       ? allEntries.filter(([, lc]) => lc.year === _standingsYear)
       : allEntries;
 
-    // Build participant gender lookup — index by all name fields (case-insensitive)
-    // Standings use sleeperUsername as teamName, so we must index that too
+    // Build participant lookup maps — keyed by sleeperUsername, displayName, teamName (all lowercase+trimmed)
+    // displayName is what we want to SHOW in standings.
+    // sleeperUsername matches what Sleeper stores as the roster owner's display_name (teamName in cache).
     const participants = t.participants || {};
-    const genderByName = {};
+    const displayNameByKey = {}; // key → participant displayName
+    const genderByKey      = {}; // key → participant gender
     Object.values(participants).forEach(p => {
-      if (p.gender) {
-        const g = p.gender;
-        if (p.displayName)    genderByName[p.displayName.trim().toLowerCase()]    = g;
-        if (p.teamName)       genderByName[p.teamName.trim().toLowerCase()]       = g;
-        if (p.sleeperUsername) genderByName[p.sleeperUsername.trim().toLowerCase()] = g;
-      }
+      const keys = [p.sleeperUsername, p.displayName, p.teamName]
+        .filter(Boolean).map(s => s.trim().toLowerCase());
+      keys.forEach(k => {
+        if (p.displayName) displayNameByKey[k] = p.displayName;
+        if (p.gender)      genderByKey[k]      = p.gender;
+      });
     });
-    const hasGender = Object.keys(genderByName).length > 0;
+    const hasGender = Object.keys(genderByKey).length > 0;
 
     // Build flat rows
     let allRows = [];
@@ -1537,20 +1540,24 @@ const DLRTournament = (() => {
     for (const [cacheKey, lc] of entries) {
       const ranked = _rankTeams(lc.teams || [], rankBy);
       ranked.forEach(team => {
+        const _tnKey = (team.teamName || "").trim().toLowerCase();
         allRows.push({
-          rank:       team.computedRank,
-          teamName:   team.teamName  || "Unknown",
-          leagueName: lc.leagueName || cacheKey,
-          conference: lc.conference || "",
-          division:   lc.division   || "",
-          wins:       team.wins     || 0,
-          losses:     team.losses   || 0,
-          ties:       team.ties     || 0,
-          pf:         team.pf       || 0,
-          pa:         team.pa       || 0,
-          gender:     genderByName[(team.teamName || "").trim().toLowerCase()] || "",
+          rank:        team.computedRank,
+          // Show participant displayName if matched; fall back to what Sleeper returned
+          teamName:    displayNameByKey[_tnKey] || team.teamName || "Unknown",
+          // Keep original API name for search/matching
+          rawTeamName: team.teamName || "Unknown",
+          leagueName:  lc.leagueName || cacheKey,
+          conference:  lc.conference || "",
+          division:    lc.division   || "",
+          wins:        team.wins     || 0,
+          losses:      team.losses   || 0,
+          ties:        team.ties     || 0,
+          pf:          team.pf       || 0,
+          pa:          team.pa       || 0,
+          gender:      genderByKey[_tnKey] || "",
           cacheKey,
-          platform:   lc.platform   || ""
+          platform:    lc.platform   || ""
         });
       });
       if ((lc.lastSynced||0) > lastSynced) lastSynced = lc.lastSynced;
@@ -1598,7 +1605,10 @@ const DLRTournament = (() => {
       const q    = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
       const grpVal = document.getElementById("trn-st-group")?.value || "flat";
       let rows = allRows;
-      if (q) rows = rows.filter(r => r.teamName.toLowerCase().includes(q) || r.leagueName.toLowerCase().includes(q));
+      if (q) rows = rows.filter(r =>
+        r.teamName.toLowerCase().includes(q) ||
+        (r.rawTeamName||"").toLowerCase().includes(q) ||
+        r.leagueName.toLowerCase().includes(q));
       // Parse grouped conference/division filter
       let grp = "flat";
       if (grpVal.startsWith("conf_")) {
@@ -2794,6 +2804,21 @@ const DLRTournament = (() => {
       const leagueCount = Object.entries(leagues).reduce((sum, [, v]) =>
         sum + (isBatch(v) ? Object.keys(v.leagues || {}).length : 1), 0);
 
+      // Build a slim participant map for the public page:
+      // key = sleeperUsername (lowercase) → { displayName, gender }
+      // Only include non-sensitive fields needed for standings display.
+      const participantMap = {};
+      Object.values(t.participants || {}).forEach(p => {
+        const keys = [p.sleeperUsername, p.displayName, p.teamName]
+          .filter(Boolean).map(s => s.trim().toLowerCase());
+        keys.forEach(k => {
+          participantMap[k] = {
+            displayName: p.displayName || null,
+            gender:      p.gender      || null
+          };
+        });
+      });
+
       const summary = {
         name:              meta.name    || "",
         tagline:           meta.tagline || "",
@@ -2805,7 +2830,8 @@ const DLRTournament = (() => {
         leagueCount,
         registrationCount: Object.keys(regs).length,
         registrationForm:  meta.registrationForm || { fields: [], optionalFields: [], customQuestions: [] },
-        standingsCache:    t.standingsCache || {}
+        standingsCache:    t.standingsCache || {},
+        participantMap
       };
 
       await GMD.child("publicTournaments/" + tid).set(summary);
