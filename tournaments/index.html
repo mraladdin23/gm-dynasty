@@ -213,7 +213,13 @@
       const snap = await pubRef().once("value");
       const all  = snap.val() || {};
       const entries = Object.entries(all)
-        .filter(([, t]) => t?.status !== "draft")
+        .filter(([, t]) => {
+          if (!t) return false;
+          // Always show non-draft tournaments
+          if (t.status !== "draft") return true;
+          // Show draft tournaments only if they have prior standings data
+          return t.standingsCache && Object.keys(t.standingsCache).length > 0;
+        })
         .sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
 
       const loading = document.getElementById("pub-loading");
@@ -250,30 +256,43 @@
     }
 
     function renderCard(tid, t) {
-      const status = t.status || "draft";
+      const status    = t.status || "draft";
+      const isDraft   = status === "draft";
+      const hasHistory = t.standingsCache && Object.keys(t.standingsCache).length > 0;
+      // Get available years from standingsCache
+      const years = isDraft && hasHistory
+        ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a)
+        : [];
+      const yearStr = years.length ? years.join(", ") : null;
+
       return `
         <div class="trn-card">
           <div class="trn-card-header">
             <div class="trn-card-name">${esc(t.name || "Untitled Tournament")}</div>
-            <span class="trn-status-badge trn-status-${status}">
-              ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
-            </span>
+            ${isDraft && hasHistory
+              ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 View History</span>`
+              : `<span class="trn-status-badge trn-status-${status}">${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}</span>`
+            }
           </div>
           <div class="trn-card-meta">
             <span>🏟 ${t.leagueCount || 0} league${(t.leagueCount || 0) !== 1 ? "s" : ""}</span>
-            <span>👥 ${t.registrationCount || 0} registered</span>
+            ${!isDraft ? `<span>👥 ${t.registrationCount || 0} registered</span>` : ""}
+            ${yearStr ? `<span>📅 ${esc(yearStr)}</span>` : ""}
           </div>
           ${t.tagline ? `<div class="trn-card-tagline">${esc(t.tagline)}</div>` : ""}
           <div class="trn-card-actions">
-            <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">View</button>
+            <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">
+              ${isDraft && hasHistory ? "View History" : "View"}
+            </button>
           </div>
         </div>`;
     }
 
     // ── Single tournament view ───────────────────────────────
-    let _currentTid = null;
-    let _currentT   = null;
-    let _activeTab  = "info";
+    let _currentTid  = null;
+    let _currentT    = null;
+    let _activeTab   = "info";
+    let _selectedYear = null;  // null = all years / most recent
 
     async function loadTournament(tid) {
       const loading = document.getElementById("pub-loading");
@@ -285,17 +304,36 @@
       const t    = snap.val();
       if (!t) { showError("Tournament not found."); return; }
 
-      _currentTid = tid;
-      _currentT   = t;
+      _currentTid   = tid;
+      _currentT     = t;
       loading.style.display = "none";
       content.style.display = "";
 
+      const isDraft      = (t.status || "draft") === "draft";
       const hasStandings = t.standingsCache && Object.keys(t.standingsCache).length > 0;
       const regOpen      = ["registration_open", "active"].includes(t.status);
 
+      // Build sorted year list from standingsCache
+      const years = hasStandings
+        ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a)
+        : [];
+      // Default to most recent year
+      if (years.length && (_selectedYear === null || !years.includes(_selectedYear))) {
+        _selectedYear = years[0];
+      }
+
+      // For draft tournaments showing history, default to Standings tab
+      if (isDraft && hasStandings && _activeTab === "info") _activeTab = "standings";
+
       content.innerHTML = `
-        <div style="margin-bottom:var(--space-4)">
+        <div style="margin-bottom:var(--space-4);display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
           <button id="pub-back-btn" class="btn-ghost btn-sm">← All Tournaments</button>
+          ${years.length > 1 ? `
+            <select id="pub-year-select" class="trn-filter-select" style="min-width:0;font-size:.85rem">
+              <option value="">All Years</option>
+              ${years.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
+            </select>
+          ` : years.length === 1 ? `<span style="font-size:.85rem;color:var(--color-text-dim);font-weight:600">${years[0]}</span>` : ""}
         </div>
 
         <div class="trn-detail-title-row" style="margin-bottom:var(--space-4)">
@@ -303,13 +341,14 @@
             <h1 class="trn-detail-name">${esc(t.name || "Tournament")}</h1>
             ${t.tagline ? `<p class="trn-detail-tagline">${esc(t.tagline)}</p>` : ""}
           </div>
-          <span class="trn-status-badge trn-status-${t.status || "draft"}">
-            ${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}
-          </span>
+          ${isDraft && hasStandings
+            ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
+            : `<span class="trn-status-badge trn-status-${t.status || "draft"}">${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}</span>`
+          }
         </div>
 
         <div class="trn-tabs" id="pub-tabs">
-          <button class="trn-tab ${_activeTab === "info"       ? "active" : ""}" data-pub-tab="info">Info</button>
+          ${!isDraft ? `<button class="trn-tab ${_activeTab === "info" ? "active" : ""}" data-pub-tab="info">Info</button>` : ""}
           ${hasStandings ? `<button class="trn-tab ${_activeTab === "standings" ? "active" : ""}" data-pub-tab="standings">Standings</button>` : ""}
           ${regOpen      ? `<button class="trn-tab ${_activeTab === "register"  ? "active" : ""}" data-pub-tab="register">Register</button>` : ""}
         </div>
@@ -319,7 +358,14 @@
 
       document.getElementById("pub-back-btn")?.addEventListener("click", () => {
         window.history.pushState({}, "", window.location.pathname);
+        _selectedYear = null;
+        _activeTab    = "info";
         loadDirectory();
+      });
+
+      document.getElementById("pub-year-select")?.addEventListener("change", function() {
+        _selectedYear = this.value ? parseInt(this.value) : null;
+        if (_activeTab === "standings") renderTab("standings");
       });
 
       document.querySelectorAll("[data-pub-tab]").forEach(tab => {
@@ -375,13 +421,19 @@
       const t       = _currentT;
       const cache   = t.standingsCache || {};
       const rankBy  = t.rankBy || "record";
-      const entries = Object.entries(cache);
+
+      // Filter by selected year (null = all years)
+      const entries = Object.entries(cache).filter(([, lc]) =>
+        !_selectedYear || lc.year === _selectedYear
+      );
+
       if (!entries.length) {
-        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No standings yet</div></div>`;
+        const yr = _selectedYear || "";
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No standings data${yr ? " for " + yr : ""}</div></div>`;
         return;
       }
 
-      // Build rows (same logic as tournament.js)
+      // Build rows
       let allRows = [];
       let lastSynced = 0;
       for (const [leagueId, lc] of entries) {
@@ -390,7 +442,7 @@
           if (b.wins !== a.wins) return b.wins - a.wins;
           return b.pf - a.pf;
         });
-        teams.forEach((team, i) => {
+        teams.forEach(team => {
           allRows.push({
             overallRank: 0,
             teamName:   team.teamName  || "Unknown",
