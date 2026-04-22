@@ -656,140 +656,28 @@
   .trn-q-type { width: 100%; }
 }
 
-/* ── Batch upload ─────────────────────────────────────────── */
-.trn-batch-block {
-  border: 1px solid var(--color-border);
+/* ── Missing info banner ──────────────────────────────────── */
+.trn-missing-info-banner {
+  background: rgba(234,179,8,.12);
+  border: 1px solid rgba(234,179,8,.35);
   border-radius: var(--radius-lg);
-  margin-bottom: var(--space-3);
-  overflow: hidden;
-}
-
-.trn-batch-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: var(--space-3) var(--space-4);
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  font-size: .85rem;
+  margin-bottom: var(--space-4);
 }
 
-.trn-batch-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.trn-batch-year  { font-weight: 700; font-size: .95rem; }
-.trn-batch-count { font-size: .8rem; color: var(--color-text-dim); }
-
-.trn-batch-tag {
-  display: inline-flex;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: .7rem;
-  font-weight: 600;
-  background: rgba(99,102,241,.18);
-  color: #a78bfa;
-}
-
-.trn-batch-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
-
-.trn-batch-leagues { padding: var(--space-2) var(--space-4); }
-
-.trn-batch-league-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  border-bottom: 1px solid var(--color-border);
-  font-size: .83rem;
-}
-.trn-batch-league-row:last-child { border-bottom: none; }
-
-.trn-batch-league-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trn-batch-league-id   { font-size: .72rem; flex-shrink: 0; }
-
-.trn-batch-conf-tag {
-  display: inline-flex;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: .7rem;
-  font-weight: 600;
-  background: rgba(34,197,94,.15);
-  color: #4ade80;
-  flex-shrink: 0;
-}
-
-.trn-batch-preview {
-  margin-top: var(--space-3);
-  padding: var(--space-3);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: .82rem;
-}
-
-.trn-batch-preview-title {
-  font-weight: 600;
-  margin-bottom: var(--space-2);
+.trn-missing-fields {
+  font-size: .78rem;
   color: var(--color-text-dim);
+  margin-top: var(--space-1);
 }
 
-.trn-batch-preview-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 2px 0;
+/* ── Missing field highlight on form ─────────────────────── */
+.trn-field--missing input,
+.trn-field--missing textarea {
+  border-color: rgba(234,179,8,.6) !important;
 }
 
-/* ── Conference edit rows ─────────────────────────────────── */
-.trn-conf-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border);
-}
-.trn-conf-row:last-of-type { border-bottom: none; }
-.trn-conf-league-name { flex: 1; font-size: .85rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trn-conf-input { width: 130px; flex-shrink: 0; }
-
-/* ── Participant rows ──────────────────────────────────────── */
-.trn-participant--linked { border-left-color: var(--color-green, #22c55e); }
-
-.trn-dlr-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: .7rem;
-  font-weight: 600;
-  background: rgba(34,197,94,.15);
-  color: #4ade80;
-  margin-left: var(--space-2);
-}
-
-.trn-unlinked-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: .7rem;
-  font-weight: 600;
-  background: rgba(156,163,175,.15);
-  color: var(--color-text-dim);
-  margin-left: var(--space-2);
-}
-
-.trn-auto-on { color: var(--color-primary) !important; }
-
-/* ── Mobile adjustments ───────────────────────────────────── */
-@media (max-width: 600px) {
-  .trn-batch-header { flex-direction: column; align-items: flex-start; }
-  .trn-batch-actions { width: 100%; justify-content: flex-end; }
-  .trn-conf-input { width: 100px; }
+.trn-field--missing label {
+  color: #facc15;
 }
