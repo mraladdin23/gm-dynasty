@@ -398,10 +398,7 @@ const DLRTournament = (() => {
             <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
             ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
           </div>
-          <div style="display:flex;gap:var(--space-2);align-items:center">
-            ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
-            ${canAdmin ? `<button class="btn-ghost btn-sm" id="trn-preview-toggle" title="Toggle user/admin view">👁 Preview as User</button>` : ""}
-          </div>
+          ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
         </div>
 
         <!-- Tab bar -->
@@ -433,10 +430,6 @@ const DLRTournament = (() => {
 
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
-    document.getElementById("trn-preview-toggle")?.addEventListener("click", () => {
-      // Re-open same tournament but pretending canAdmin = false
-      _openTournamentViewAs(tid, false);
-    });
 
     // Tab wire-up
     container.querySelectorAll(".trn-tab").forEach(tab => {
@@ -464,66 +457,6 @@ const DLRTournament = (() => {
         showToast(`Your registration for ${meta.name || "this tournament"} is missing: ${labels}`, "info", 6000);
       }
     }
-  }
-
-  // ── Preview mode ───────────────────────────────────────
-  // Lets admin see the user-facing view without a second account
-  async function _openTournamentViewAs(tid, asAdmin) {
-    const container = document.getElementById("view-tournament");
-    if (!container) return;
-    const snap = await _tRef(tid).once("value");
-    const t = snap.val();
-    if (!t) return;
-    _tournaments[tid] = t;
-    const meta = t.meta || {};
-
-    const regOpen = ["registration_open","active"].includes(meta.status);
-    const hasStandings = !!(t.standingsCache && Object.keys(t.standingsCache).length);
-
-    container.innerHTML = `
-      <div class="trn-detail-container">
-        <div class="trn-detail-topbar">
-          <button class="btn-ghost btn-sm" id="trn-preview-back-btn">← Back to Manage</button>
-          <span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">👁 User Preview</span>
-        </div>
-        <div class="trn-detail-title-row">
-          <div>
-            <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
-            ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
-          </div>
-          <span class="trn-status-badge trn-status-${meta.status||"draft"}">
-            ${STATUS_ICONS[meta.status]||""} ${STATUS_LABELS[meta.status]||""}
-          </span>
-        </div>
-        <div class="trn-tabs" id="trn-tabs">
-          <button class="trn-tab active" data-tab="info">Info</button>
-          ${hasStandings ? `<button class="trn-tab" data-tab="standings">Standings</button>` : ""}
-          ${regOpen      ? `<button class="trn-tab" data-tab="register">Register</button>`  : ""}
-        </div>
-        <div id="trn-tab-body" class="trn-tab-body"></div>
-      </div>`;
-
-    document.getElementById("trn-preview-back-btn")?.addEventListener("click", () => {
-      _activeAdminTab = "overview";
-      _openTournamentView(tid);
-    });
-
-    container.querySelectorAll(".trn-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        const body = document.getElementById("trn-tab-body");
-        if (!body) return;
-        const name = tab.dataset.tab;
-        if (name === "info")      _renderInfoTab(t, body);
-        else if (name === "standings") _renderStandingsTab(tid, t, body, false);
-        else if (name === "register")  _renderRegisterTab(tid, t, body);
-      });
-    });
-
-    // Render info tab by default
-    const body = document.getElementById("trn-tab-body");
-    if (body) _renderInfoTab(t, body);
   }
 
   // ── Tab router ─────────────────────────────────────────
@@ -623,17 +556,6 @@ const DLRTournament = (() => {
           </div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
           <div class="trn-detail-row"><span>Created</span><span>${meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : "—"}</span></div>
-          <div class="trn-detail-row">
-            <span>Playoffs Start Week</span>
-            <span>
-              <select id="trn-playoff-week-select" style="font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                <option value="">Not set</option>
-                ${Array.from({length:18},(_,i)=>i+1).map(w =>
-                  `<option value="${w}" ${meta.playoffStartWeek === w ? "selected" : ""}>Week ${w}</option>`
-                ).join("")}
-              </select>
-            </span>
-          </div>
         </div>
       </div>
 
@@ -660,14 +582,6 @@ const DLRTournament = (() => {
         showToast("Ranking method saved ✓");
         _tournaments[tid].meta.rankBy = this.value;
       } catch(e) { showToast("Failed to save ranking method", "error"); }
-    });
-    document.getElementById("trn-playoff-week-select")?.addEventListener("change", async function() {
-      const week = this.value ? parseInt(this.value) : null;
-      try {
-        await _tMetaRef(tid).update({ playoffStartWeek: week });
-        showToast("Playoff start week saved ✓");
-        _tournaments[tid].meta.playoffStartWeek = week;
-      } catch(e) { showToast("Failed to save", "error"); }
     });
   }
 
@@ -1476,18 +1390,25 @@ const DLRTournament = (() => {
     });
   }
 
-  let _standingsYear = null; // null = most recent year
+  let _standingsYear = null;
 
   function _renderStandingsTab(tid, t, body, isAdmin) {
     const cache  = t.standingsCache || {};
     const meta   = t.meta || {};
     const rankBy = meta.rankBy || "record";
-    const allEntries = Object.entries(cache);
+
+    // Deduplicate: new year_leagueId keys may coexist with old flat leagueId keys.
+    // If any new-format keys exist, discard the old flat ones to avoid doubled rows.
+    const allEntriesRaw = Object.entries(cache);
+    const hasNewKeys    = allEntriesRaw.some(([k]) => /^\d{4}_/.test(k));
+    const allEntries    = hasNewKeys
+      ? allEntriesRaw.filter(([k]) => /^\d{4}_/.test(k))
+      : allEntriesRaw;
 
     if (!allEntries.length) {
       body.innerHTML = `
         <div class="trn-empty">
-          <div class="trn-empty-icon">📊</div>
+          <div class="trn-empty-icon">&#x1F4CA;</div>
           <div class="trn-empty-title">No standings data yet</div>
           <div class="trn-empty-sub">${isAdmin
             ? "Go to the Leagues tab and click Sync Standings."
@@ -1496,17 +1417,25 @@ const DLRTournament = (() => {
       return;
     }
 
-    // Get all available years from cache
-    const availableYears = [...new Set(allEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a, b) => b - a);
-    // Default to most recent year
+    // Available years
+    const availableYears = [...new Set(allEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a,b) => b-a);
     if (!_standingsYear || !availableYears.includes(_standingsYear)) {
       _standingsYear = availableYears[0] || null;
     }
-
-    // Filter entries to selected year
     const entries = _standingsYear
       ? allEntries.filter(([, lc]) => lc.year === _standingsYear)
       : allEntries;
+
+    // Build participant gender lookup
+    const participants = t.participants || {};
+    const genderByName = {};
+    Object.values(participants).forEach(p => {
+      if (p.gender) {
+        if (p.displayName) genderByName[p.displayName.toLowerCase()] = p.gender;
+        if (p.teamName)    genderByName[p.teamName.toLowerCase()]    = p.gender;
+      }
+    });
+    const hasGender = Object.keys(genderByName).length > 0;
 
     // Build flat rows
     let allRows = [];
@@ -1525,6 +1454,7 @@ const DLRTournament = (() => {
           ties:       team.ties     || 0,
           pf:         team.pf       || 0,
           pa:         team.pa       || 0,
+          gender:     genderByName[(team.teamName || "").toLowerCase()] || "",
           cacheKey,
           platform:   lc.platform   || ""
         });
@@ -1532,15 +1462,16 @@ const DLRTournament = (() => {
       if ((lc.lastSynced||0) > lastSynced) lastSynced = lc.lastSynced;
     }
 
-    // Compute overall rank
+    // Overall rank
     allRows = _rankTeams(allRows, rankBy).map((r, i) => ({ ...r, overallRank: i + 1 }));
     allRows = _sortRows(allRows, _standingsSort.col, _standingsSort.dir);
 
-    const conferences = [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort();
-    const divisions   = [...new Set(allRows.map(r => r.division).filter(Boolean))].sort();
-    const hasConf     = conferences.length > 0;
-    const hasDiv      = divisions.length > 0;
+    const conferences   = [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort();
+    const divisions     = [...new Set(allRows.map(r => r.division).filter(Boolean))].sort();
+    const hasConf       = conferences.length > 0;
+    const hasDiv        = divisions.length > 0;
     const lastSyncedStr = lastSynced ? new Date(lastSynced).toLocaleString() : "Never";
+    const extraCols     = hasGender ? [{ key: "gender", label: "Gender" }] : [];
 
     body.innerHTML = `
       <div class="trn-standings-toolbar">
@@ -1551,16 +1482,22 @@ const DLRTournament = (() => {
           </select>
           ${hasConf ? `<select id="trn-st-conf" class="trn-filter-select" style="min-width:0">
             <option value="">All Conferences</option>
-            ${conferences.map(c => "<option>" + _esc(c) + "</option>").join("")}
+            ${conferences.map(conf => "<option>" + _esc(conf) + "</option>").join("")}
           </select>` : ""}
           ${hasDiv ? `<select id="trn-st-div" class="trn-filter-select" style="min-width:0">
             <option value="">All Divisions</option>
             ${divisions.map(d => "<option>" + _esc(d) + "</option>").join("")}
           </select>` : ""}
+          ${hasGender ? `<select id="trn-st-gender" class="trn-filter-select" style="min-width:0">
+            <option value="">All Genders</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+          </select>` : ""}
           <select id="trn-st-group" class="trn-filter-select" style="min-width:0">
             <option value="flat">Flat List</option>
-            ${hasConf ? '<option value="conf">By Conference</option>' : ""}
-            ${hasDiv  ? '<option value="div">By Division</option>'   : ""}
+            ${hasConf   ? '<option value="conf">By Conference</option>'  : ""}
+            ${hasDiv    ? '<option value="div">By Division</option>'     : ""}
+            ${hasGender ? '<option value="gender">By Gender</option>'    : ""}
           </select>
         </div>
       </div>
@@ -1571,26 +1508,27 @@ const DLRTournament = (() => {
         </span>
       </div>
       <div id="trn-standings-wrap">
-        ${_buildStandingsTable(allRows, hasConf, hasDiv, "flat")}
+        ${_buildStandingsTable(allRows, hasConf, hasDiv, "flat", extraCols)}
       </div>
     `;
 
     const refilter = () => {
-      const q    = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
-      const conf = document.getElementById("trn-st-conf")?.value  || "";
-      const div  = document.getElementById("trn-st-div")?.value   || "";
-      const grp  = document.getElementById("trn-st-group")?.value || "flat";
+      const q      = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
+      const conf   = document.getElementById("trn-st-conf")?.value   || "";
+      const div    = document.getElementById("trn-st-div")?.value    || "";
+      const gender = document.getElementById("trn-st-gender")?.value || "";
+      const grp    = document.getElementById("trn-st-group")?.value  || "flat";
       let rows = allRows;
-      if (q)    rows = rows.filter(r => r.teamName.toLowerCase().includes(q) || r.leagueName.toLowerCase().includes(q));
-      if (conf) rows = rows.filter(r => r.conference === conf);
-      if (div)  rows = rows.filter(r => r.division   === div);
+      if (q)      rows = rows.filter(r => r.teamName.toLowerCase().includes(q) || r.leagueName.toLowerCase().includes(q));
+      if (conf)   rows = rows.filter(r => r.conference === conf);
+      if (div)    rows = rows.filter(r => r.division   === div);
+      if (gender) rows = rows.filter(r => r.gender     === gender);
       rows = _sortRows(rows, _standingsSort.col, _standingsSort.dir);
       const wrap = document.getElementById("trn-standings-wrap");
-      if (wrap) wrap.innerHTML = _buildStandingsTable(rows, hasConf, hasDiv, grp);
+      if (wrap) wrap.innerHTML = _buildStandingsTable(rows, hasConf, hasDiv, grp, extraCols);
       _wireStandingSortHeaders(allRows, hasConf, hasDiv);
     };
 
-    // Year change re-renders the whole tab
     document.getElementById("trn-st-year")?.addEventListener("change", function() {
       _standingsYear = parseInt(this.value);
       _renderStandingsTab(tid, t, body, isAdmin);
@@ -1598,6 +1536,7 @@ const DLRTournament = (() => {
     document.getElementById("trn-st-search")?.addEventListener("input",  refilter);
     document.getElementById("trn-st-conf")?.addEventListener("change",   refilter);
     document.getElementById("trn-st-div")?.addEventListener("change",    refilter);
+    document.getElementById("trn-st-gender")?.addEventListener("change", refilter);
     document.getElementById("trn-st-group")?.addEventListener("change",  refilter);
     _wireStandingSortHeaders(allRows, hasConf, hasDiv);
   }
@@ -1622,42 +1561,45 @@ const DLRTournament = (() => {
     });
   }
 
-  function _buildStandingsTable(rows, hasConf, hasDiv, groupMode) {
-    if (!rows.length) return "<div class=\"trn-empty-inline\">No teams match your filters.</div>";
+  function _buildStandingsTable(rows, hasConf, hasDiv, groupMode, extraCols) {
+    const extra = extraCols || [];
+    if (!rows.length) return '<div class="empty-state">No teams match your filters.</div>';
 
     const si = (col) => {
-      const active = _standingsSort.col === col;
-      const icon   = active ? (_standingsSort.dir === "asc" ? "↑" : "↓") : "⇅";
-      return "<span class=\"trn-st-sort-icon" + (active ? " trn-st-sort-icon--active" : "") + "\">" + icon + "</span>";
+      if (_standingsSort.col !== col) return '<span style="margin-left:3px;font-size:.65rem;opacity:.4">⇅</span>';
+      return '<span style="margin-left:3px;font-size:.65rem">' + (_standingsSort.dir === "asc" ? "↑" : "↓") + "</span>";
     };
 
+    const thStyle = "cursor:pointer;user-select:none";
     const thead = "<thead><tr>" +
-      '<th class="trn-st-th trn-st-th--num" data-sort-col="overallRank">Rank ' + si("overallRank") + "</th>" +
-      '<th class="trn-st-th" data-sort-col="teamName">Team ' + si("teamName") + "</th>" +
-      '<th class="trn-st-th" data-sort-col="leagueName">League ' + si("leagueName") + "</th>" +
-      (hasConf ? '<th class="trn-st-th" data-sort-col="conference">Conf ' + si("conference") + "</th>" : "") +
-      (hasDiv  ? '<th class="trn-st-th" data-sort-col="division">Div '  + si("division")   + "</th>" : "") +
-      '<th class="trn-st-th trn-st-th--num" data-sort-col="wins">W '   + si("wins")   + "</th>" +
-      '<th class="trn-st-th trn-st-th--num" data-sort-col="losses">L ' + si("losses") + "</th>" +
-      '<th class="trn-st-th trn-st-th--num" data-sort-col="pf">PF '    + si("pf")     + "</th>" +
-      '<th class="trn-st-th trn-st-th--num" data-sort-col="pa">PA '    + si("pa")     + "</th>" +
+      '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + '">#' + si("overallRank") + "</th>" +
+      '<th data-sort-col="teamName" style="' + thStyle + '">Team' + si("teamName") + "</th>" +
+      '<th data-sort-col="leagueName" style="' + thStyle + ';color:var(--color-text-dim)">League' + si("leagueName") + "</th>" +
+      (hasConf ? '<th data-sort-col="conference" style="' + thStyle + '">Conf' + si("conference") + "</th>" : "") +
+      (hasDiv  ? '<th data-sort-col="division" style="'   + thStyle + '">Div'  + si("division")   + "</th>" : "") +
+      extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thStyle + '">' + col.label + si(col.key) + "</th>").join("") +
+      '<th class="standings-win"  data-sort-col="wins"   style="' + thStyle + '">W'  + si("wins")   + "</th>" +
+      '<th class="standings-loss" data-sort-col="losses" style="' + thStyle + '">L'  + si("losses") + "</th>" +
+      '<th class="standings-num"  data-sort-col="pf"     style="' + thStyle + '">PF' + si("pf")     + "</th>" +
+      '<th class="standings-num dim" data-sort-col="pa"  style="' + thStyle + '">PA' + si("pa")     + "</th>" +
       "</tr></thead>";
 
     const rowHtml = (r) =>
-      "<tr class=\"trn-st-row\">" +
-      "<td class=\"trn-st-td trn-st-td--num trn-st-rank\">" + r.overallRank + "</td>" +
-      "<td class=\"trn-st-td trn-st-td--name\">" + _esc(r.teamName) + "</td>" +
-      "<td class=\"trn-st-td trn-st-td--league\">" + _esc(r.leagueName) + "</td>" +
-      (hasConf ? "<td class=\"trn-st-td\">" + _esc(r.conference) + "</td>" : "") +
-      (hasDiv  ? "<td class=\"trn-st-td\">" + _esc(r.division)   + "</td>" : "") +
-      "<td class=\"trn-st-td trn-st-td--num\">" + r.wins + "</td>" +
-      "<td class=\"trn-st-td trn-st-td--num\">" + r.losses + "</td>" +
-      "<td class=\"trn-st-td trn-st-td--num\">" + r.pf.toFixed(2) + "</td>" +
-      "<td class=\"trn-st-td trn-st-td--num\">" + r.pa.toFixed(2) + "</td>" +
+      "<tr>" +
+      '<td class="standings-rank">' + r.overallRank + "</td>" +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span>" + _esc(r.teamName) + "</span></td>" +
+      '<td style="color:var(--color-text-dim);font-size:.78rem">' + _esc(r.leagueName) + "</td>" +
+      (hasConf ? "<td>" + _esc(r.conference) + "</td>" : "") +
+      (hasDiv  ? "<td>" + _esc(r.division)   + "</td>" : "") +
+      extra.map(col => "<td>" + _esc(r[col.key] || "—") + "</td>").join("") +
+      '<td class="standings-win">'  + r.wins + "</td>" +
+      '<td class="standings-loss">' + r.losses + "</td>" +
+      '<td class="standings-num">'  + r.pf.toFixed(2) + "</td>" +
+      '<td class="standings-num dim">' + r.pa.toFixed(2) + "</td>" +
       "</tr>";
 
     const tableWrap = (innerRows) =>
-      '<div class="trn-standings-table-wrap"><table class="trn-standings-table">' +
+      '<div class="standings-table-wrap"><table class="standings-table">' +
       thead + "<tbody>" + innerRows.map(rowHtml).join("") + "</tbody></table></div>";
 
     if (groupMode === "conf" && hasConf) {
@@ -1672,6 +1614,14 @@ const DLRTournament = (() => {
       rows.forEach(r => { const k = r.division || "No Division"; (grouped[k] = grouped[k]||[]).push(r); });
       return Object.entries(grouped).map(([g, gr]) =>
         '<div class="trn-st-group-label">' + _esc(g) + "</div>" + tableWrap(gr)
+      ).join("");
+    }
+    if (groupMode === "gender") {
+      const order = ["Male", "Female", ""];
+      const grouped = {};
+      rows.forEach(r => { const k = r.gender || ""; (grouped[k] = grouped[k]||[]).push(r); });
+      return order.filter(k => grouped[k]).map(k =>
+        '<div class="trn-st-group-label">' + _esc(k || "Not specified") + "</div>" + tableWrap(grouped[k])
       ).join("");
     }
     return tableWrap(rows);
@@ -1711,14 +1661,15 @@ const DLRTournament = (() => {
     const yahoos   = toSync.filter(l => l.platform === "yahoo");
     const cacheUpdates = {};
 
-    // Cache key: year_leagueId — prevents cross-year collisions for same league ID
-    const cacheKey = (l) => l.year + "_" + l.leagueId;
+    // Cache key: year_leagueId prevents cross-year collision for same leagueId
+    const ck = (l) => l.year + "_" + l.leagueId;
+    const playoffWeek = t.meta?.playoffStartWeek || null;
 
     // Sleeper — parallel
     await Promise.allSettled(sleepers.map(async (l) => {
       try {
-        const data = await _fetchSleeperStandings(l.leagueId);
-        if (data) cacheUpdates[cacheKey(l)] = { ...l, ...data, lastSynced: Date.now() };
+        const data = await _fetchSleeperStandings(l.leagueId, playoffWeek);
+        if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
       done++; setP("Syncing " + done + "/" + total + "...");
     }));
@@ -1728,7 +1679,7 @@ const DLRTournament = (() => {
       await Promise.allSettled(mfls.slice(i, i + 3).map(async (l) => {
         try {
           const data = await _fetchMFLStandings(l.leagueId, l.year);
-          if (data) cacheUpdates[cacheKey(l)] = { ...l, ...data, lastSynced: Date.now() };
+          if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
         } catch(e) { console.warn("[Standings] MFL", l.leagueId, e.message); }
         done++; setP("Syncing " + done + "/" + total + "...");
       }));
@@ -1745,7 +1696,7 @@ const DLRTournament = (() => {
         await Promise.allSettled(yahoos.slice(i, i + 2).map(async (l) => {
           try {
             const data = await _fetchYahooStandings(l.leagueId, yahooToken);
-            if (data) cacheUpdates[cacheKey(l)] = { ...l, ...data, lastSynced: Date.now() };
+            if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
           } catch(e) { console.warn("[Standings] Yahoo", l.leagueId, e.message); }
           done++; setP("Syncing " + done + "/" + total + "...");
         }));
@@ -1776,7 +1727,7 @@ const DLRTournament = (() => {
 
   // ── Platform fetchers ──────────────────────────────────
 
-  async function _fetchSleeperStandings(leagueId) {
+  async function _fetchSleeperStandings(leagueId, playoffStartWeek) {
     const [rU, rR] = await Promise.all([
       fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users"),
       fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters")
@@ -1786,6 +1737,65 @@ const DLRTournament = (() => {
     const rosters = await rR.json();
     const uMap = {};
     (users || []).forEach(u => { uMap[u.user_id] = u.display_name || u.username || u.user_id; });
+
+    // If playoffStartWeek is set, recompute W/L from matchup results
+    // so we only count regular season weeks (weeks 1 through playoffStartWeek-1)
+    if (playoffStartWeek && playoffStartWeek > 1) {
+      const lastRegWeek = playoffStartWeek - 1;
+      // Fetch all regular season weeks in parallel
+      const weekFetches = [];
+      for (let w = 1; w <= lastRegWeek; w++) {
+        weekFetches.push(
+          fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + w)
+            .then(r => r.ok ? r.json() : [])
+            .catch(() => [])
+        );
+      }
+      const allWeeks = await Promise.all(weekFetches);
+
+      // Build W/L/PF/PA from matchup results
+      const stats = {}; // rosterId -> { wins, losses, ties, pf, pa }
+      allWeeks.forEach(weekMatchups => {
+        if (!Array.isArray(weekMatchups)) return;
+        // Group by matchup_id
+        const byMatchup = {};
+        weekMatchups.forEach(m => {
+          if (!m.matchup_id) return;
+          (byMatchup[m.matchup_id] = byMatchup[m.matchup_id] || []).push(m);
+        });
+        Object.values(byMatchup).forEach(pair => {
+          if (pair.length !== 2) return;
+          const [a, b] = pair;
+          const apts = a.points || 0;
+          const bpts = b.points || 0;
+          if (!stats[a.roster_id]) stats[a.roster_id] = { wins:0, losses:0, ties:0, pf:0, pa:0 };
+          if (!stats[b.roster_id]) stats[b.roster_id] = { wins:0, losses:0, ties:0, pf:0, pa:0 };
+          stats[a.roster_id].pf += apts;
+          stats[a.roster_id].pa += bpts;
+          stats[b.roster_id].pf += bpts;
+          stats[b.roster_id].pa += apts;
+          if (apts > bpts) { stats[a.roster_id].wins++; stats[b.roster_id].losses++; }
+          else if (bpts > apts) { stats[b.roster_id].wins++; stats[a.roster_id].losses++; }
+          else { stats[a.roster_id].ties++; stats[b.roster_id].ties++; }
+        });
+      });
+
+      const teams = (rosters || []).map(r => {
+        const s = stats[r.roster_id] || { wins:0, losses:0, ties:0, pf:0, pa:0 };
+        return {
+          teamId:   String(r.roster_id),
+          teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
+          wins:     s.wins,
+          losses:   s.losses,
+          ties:     s.ties,
+          pf:       parseFloat(s.pf.toFixed(2)),
+          pa:       parseFloat(s.pa.toFixed(2))
+        };
+      });
+      return { teams };
+    }
+
+    // No playoff week set — use roster settings (full season)
     const teams = (rosters || []).map(r => ({
       teamId:   String(r.roster_id),
       teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
