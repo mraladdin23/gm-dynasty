@@ -420,10 +420,13 @@ const DLRTournament = (() => {
             <button class="trn-tab ${_activeAdminTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
             <button class="trn-tab ${_activeAdminTab === "info_edit"  ? "active" : ""}" data-tab="info_edit">Info / Rules</button>
           ` : `
-            <button class="trn-tab ${_activeUserTab === "info"      ? "active" : ""}" data-tab="info">Info</button>
-            <button class="trn-tab ${_activeUserTab === "standings"  ? "active" : ""}" data-tab="standings">Standings</button>
-            <button class="trn-tab ${_activeUserTab === "rules"      ? "active" : ""}" data-tab="rules">Rules</button>
+            <button class="trn-tab ${_activeUserTab === "info"       ? "active" : ""}" data-tab="info">Info</button>
             <button class="trn-tab ${_activeUserTab === "register"   ? "active" : ""}" data-tab="register">Register</button>
+            <button class="trn-tab ${_activeUserTab === "rules"      ? "active" : ""}" data-tab="rules">Rules</button>
+            <button class="trn-tab ${_activeUserTab === "standings"  ? "active" : ""}" data-tab="standings">Standings</button>
+            <button class="trn-tab ${_activeUserTab === "draft"      ? "active" : ""}" data-tab="draft">Draft</button>
+            <button class="trn-tab ${_activeUserTab === "matchups"   ? "active" : ""}" data-tab="matchups">Matchups</button>
+            <button class="trn-tab ${_activeUserTab === "rosters"    ? "active" : ""}" data-tab="rosters">Rosters</button>
           `}
         </div>
         <!-- Tab select (mobile) -->
@@ -439,9 +442,12 @@ const DLRTournament = (() => {
             <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>Info / Rules</option>
           ` : `
             <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
-            <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
-            <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
             <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
+            <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
+            <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+            <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>Draft</option>
+            <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>Matchups</option>
+            <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>Rosters</option>
           `}
         </select>
 
@@ -513,9 +519,12 @@ const DLRTournament = (() => {
     } else {
       switch (tab) {
         case "info":       return _renderInfoTab(t, body);
-        case "standings":  return _renderStandingsTab(tid, t, body, false);
-        case "rules":      return _renderRulesTab(t, body);
         case "register":   return _renderRegisterTab(tid, t, body);
+        case "rules":      return _renderRulesTab(t, body);
+        case "standings":  return _renderStandingsTab(tid, t, body, false);
+        case "draft":      return _renderAnalyticsDraft(tid, t, body);
+        case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
+        case "rosters":    return _renderAnalyticsRosters(tid, t, body);
         default:           return _renderInfoTab(t, body);
       }
     }
@@ -832,15 +841,21 @@ const DLRTournament = (() => {
         </div>
         <div class="trn-tabs" id="trn-tabs">
           <button class="trn-tab ${_activeUserTab === "info"      ? "active" : ""}" data-tab="info">Info</button>
-          <button class="trn-tab ${_activeUserTab === "standings"  ? "active" : ""}" data-tab="standings">Standings</button>
-          <button class="trn-tab ${_activeUserTab === "rules"      ? "active" : ""}" data-tab="rules">Rules</button>
-          <button class="trn-tab ${_activeUserTab === "register"   ? "active" : ""}" data-tab="register">Register</button>
+          <button class="trn-tab ${_activeUserTab === "register"  ? "active" : ""}" data-tab="register">Register</button>
+          <button class="trn-tab ${_activeUserTab === "rules"     ? "active" : ""}" data-tab="rules">Rules</button>
+          <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
+          <button class="trn-tab ${_activeUserTab === "draft"     ? "active" : ""}" data-tab="draft">Draft</button>
+          <button class="trn-tab ${_activeUserTab === "matchups"  ? "active" : ""}" data-tab="matchups">Matchups</button>
+          <button class="trn-tab ${_activeUserTab === "rosters"   ? "active" : ""}" data-tab="rosters">Rosters</button>
         </div>
         <select class="trn-tab-select" id="trn-tab-select">
           <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
-          <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
-          <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
           <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
+          <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
+          <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+          <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>Draft</option>
+          <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>Matchups</option>
+          <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>Rosters</option>
         </select>
         <div id="trn-tab-body" class="trn-tab-body"></div>
       </div>
@@ -1657,7 +1672,8 @@ const DLRTournament = (() => {
   // { leagueName, platform, year, batchId, conference, division,
   //   teams:[{teamId,teamName,wins,losses,ties,pf,pa}], lastSynced }
 
-  function _tStandingsRef(tid) { return GMD.child("tournaments/" + tid + "/standingsCache"); }
+  function _tStandingsRef(tid)  { return GMD.child("tournaments/" + tid + "/standingsCache"); }
+  function _tAnalyticsRef(tid) { return GMD.child("tournaments/" + tid + "/analyticsCache"); }
 
   let _standingsSort = { col: "overallRank", dir: "asc" };
 
@@ -1877,7 +1893,6 @@ const DLRTournament = (() => {
     const thead = "<thead><tr>" +
       '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + '">#' + si("overallRank") + "</th>" +
       '<th data-sort-col="teamName" style="' + thStyle + '">Team' + si("teamName") + "</th>" +
-      '<th data-sort-col="leagueName" style="' + thStyle + ';color:var(--color-text-dim)">League' + si("leagueName") + "</th>" +
       (hasConf ? '<th data-sort-col="conference" style="' + thStyle + '">Conf' + si("conference") + "</th>" : "") +
       (hasDiv  ? '<th data-sort-col="division" style="'   + thStyle + '">Div'  + si("division")   + "</th>" : "") +
       extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thStyle + '">' + col.label + si(col.key) + "</th>").join("") +
@@ -1897,8 +1912,7 @@ const DLRTournament = (() => {
     const rowHtml = (r) =>
       "<tr>" +
       '<td class="standings-rank">' + r.overallRank + "</td>" +
-      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span>" + _esc(r.teamName) + genderBadge(r.gender) + "</span></td>" +
-      '<td style="color:var(--color-text-dim);font-size:.78rem">' + _esc(r.leagueName) + "</td>" +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + "</span><span class=\"trn-st-league\">" + _esc(r.leagueName) + "</span></span></span></td>" +
       (hasConf ? "<td>" + _esc(r.conference) + "</td>" : "") +
       (hasDiv  ? "<td>" + _esc(r.division)   + "</td>" : "") +
       extra.map(col => {
@@ -2844,6 +2858,957 @@ const DLRTournament = (() => {
         showToast("Delete failed", "error");
       }
     });
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  ANALYTICS — Draft, Matchups, Rosters
+  //  Visible to all authenticated tournament viewers.
+  //  Firebase cache: gmd/tournaments/{tid}/analyticsCache/
+  // ═══════════════════════════════════════════════════════
+
+  const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af", OL:"#9ca3af" };
+  const PREFERRED_POS_ORDER = ["QB","RB","WR","TE","FLEX","K","DEF","DB","LB","DL","OL"];
+
+  // ── Normalize picks from any platform into a common shape ──
+  // { overall, round, pick, teamId, teamName, playerId, name, position, cost }
+  function _normalizePicks(rawPicks, platform, teamMap) {
+    if (!rawPicks || !rawPicks.length) return [];
+    const tName = (id) => teamMap[String(id)] || String(id);
+
+    if (platform === "sleeper") {
+      return rawPicks.map(p => {
+        const name = p.metadata
+          ? `${p.metadata.first_name || ""} ${p.metadata.last_name || ""}`.trim()
+          : (p.player_id || "Unknown");
+        const pos  = (p.metadata?.position || "?").toUpperCase();
+        // Resolve via DLRPlayers if available
+        let resolvedName = name, resolvedPos = pos;
+        if (typeof DLRPlayers !== "undefined") {
+          const dp = DLRPlayers.get(p.player_id);
+          if (dp?.first_name) {
+            resolvedName = `${dp.first_name} ${dp.last_name}`.trim();
+            resolvedPos  = (dp.position || pos).toUpperCase();
+          }
+        }
+        const teams = p.metadata?.teams || 12;
+        return {
+          overall:  (p.round - 1) * (teams) + (p.draft_slot || 1),
+          round:    p.round,
+          pick:     p.draft_slot || 1,
+          teamId:   String(p.roster_id || ""),
+          teamName: tName(p.roster_id),
+          playerId: p.player_id || "",
+          name:     resolvedName || "Unknown",
+          position: resolvedPos,
+          cost:     null
+        };
+      }).filter(p => p.teamId && p.teamId !== "undefined");
+    }
+
+    if (platform === "mfl") {
+      return rawPicks.map((p, i) => ({
+        overall:  parseInt(p.overall || i + 1),
+        round:    parseInt(p.round   || 1),
+        pick:     parseInt(p.pick    || 1),
+        teamId:   String(p.teamId   || ""),
+        teamName: tName(p.teamId),
+        playerId: String(p.playerId || ""),
+        name:     p.name     || "Unknown",
+        position: (p.position || "?").toUpperCase(),
+        cost:     p.cost != null ? parseInt(p.cost) : null
+      })).filter(p => p.teamId);
+    }
+
+    if (platform === "yahoo") {
+      return rawPicks.map((p, i) => {
+        let name = p.name || "", pos = (p.position || "?").toUpperCase();
+        if (typeof DLRPlayers !== "undefined" && p.playerId) {
+          const map = DLRPlayers.getByYahooId(String(p.playerId));
+          const dp  = map?.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+          if (dp?.first_name) {
+            name = `${dp.first_name} ${dp.last_name}`.trim();
+            pos  = (dp.position || pos).toUpperCase();
+          } else if (map?.name) {
+            name = map.name;
+            pos  = (map.position || pos).toUpperCase();
+          }
+        }
+        return {
+          overall:  parseInt(p.pick   || i + 1),
+          round:    parseInt(p.round  || 1),
+          pick:     parseInt(p.pick   || 1),
+          teamId:   String(p.teamId  || ""),
+          teamName: tName(p.teamId),
+          playerId: String(p.playerId || ""),
+          name:     name || "Unknown",
+          position: pos,
+          cost:     p.cost != null ? parseInt(p.cost) : null
+        };
+      }).filter(p => p.teamId);
+    }
+    return [];
+  }
+
+  // ── Compute tournament-wide ADP from all picks ────────────────────────────
+  // Returns Map: playerId → { name, position, picks[], adp, adpRound }
+  function _computeADP(allPicks) {
+    const byPlayer = {};
+    allPicks.forEach(p => {
+      if (!p.playerId) return;
+      if (!byPlayer[p.playerId]) byPlayer[p.playerId] = { name: p.name, position: p.position, overalls: [] };
+      byPlayer[p.playerId].overalls.push(p.overall);
+      // keep the best resolved name (prefer non-"Unknown")
+      if (p.name && p.name !== "Unknown") byPlayer[p.playerId].name = p.name;
+    });
+    return Object.entries(byPlayer).map(([pid, d]) => {
+      const sorted = [...d.overalls].sort((a, b) => a - b);
+      const adp    = sorted.reduce((s, v) => s + v, 0) / sorted.length;
+      return { playerId: pid, name: d.name, position: d.position, count: sorted.length, adp, picks: sorted };
+    }).sort((a, b) => a.adp - b.adp);
+  }
+
+  // ── Build participant→teamId mapping from standingsCache ─────────────────
+  // Returns { displayName: participantDisplayName } keyed by sanitized Sleeper username / teamName
+  function _buildParticipantTeamMap(t) {
+    const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const participants = t.participants || {};
+    const byKey = {}; // sanitizedKey → { displayName, twitterHandle }
+    Object.values(participants).forEach(p => {
+      const keys = [p.sleeperUsername, p.displayName, p.teamName]
+        .filter(Boolean).map(_sk).filter(Boolean);
+      keys.forEach(k => { byKey[k] = { displayName: p.displayName || p.teamName || k, twitterHandle: p.twitterHandle || "" }; });
+    });
+    return byKey;
+  }
+
+  // ── ANALYTICS: Draft tab ───────────────────────────────────────────────────
+  let _draftCache    = null;  // { picks, adp, byLeague, fetchedAt, tid }
+  let _draftLeague   = "all"; // current league filter
+  let _draftView     = "adp"; // "adp" | "board" | "card"
+  let _draftCardTeam = null;
+
+  async function _renderAnalyticsDraft(tid, t, body) {
+    await DLRPlayers.load().catch(() => {});
+
+    body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading draft data…</div>`;
+
+    // Use cached data if still fresh for this tournament
+    if (_draftCache && _draftCache.tid === tid && (Date.now() - _draftCache.fetchedAt) < 300000) {
+      _renderDraftView(tid, t, body, _draftCache);
+      return;
+    }
+
+    try {
+      // Check Firebase cache first
+      const snap = await _tAnalyticsRef(tid).child("drafts").once("value");
+      const cached = snap.val() || {};
+
+      const batches   = t.leagues || {};
+      const isBatch   = (v) => v && typeof v === "object" && v.leagues !== undefined;
+      const toFetch   = [];
+
+      for (const [, batch] of Object.entries(batches)) {
+        if (!isBatch(batch)) continue;
+        for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
+          const ck       = `${batch.year}_${leagueId}`;
+          const existing = cached[ck];
+          // Use cache if < 24h old and has picks
+          if (existing?.picks?.length && (Date.now() - (existing.fetchedAt || 0)) < 86400000) continue;
+          toFetch.push({ leagueId, platform: batch.platform, year: batch.year, leagueName: l.name || leagueId, cacheKey: ck });
+        }
+      }
+
+      const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
+      const mflCreds   = _getMFLCreds();
+
+      // Fetch missing leagues in batches of 3
+      const results = {};
+      for (let i = 0; i < toFetch.length; i += 3) {
+        const batch = toFetch.slice(i, i + 3);
+        await Promise.allSettled(batch.map(async l => {
+          try {
+            const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                leagueId:   l.leagueId,
+                platform:   l.platform,
+                year:       l.year,
+                yahooToken: l.platform === "yahoo" ? yahooToken : undefined,
+                mflCookie:  l.platform === "mfl"   ? mflCreds?.cookie : undefined
+              })
+            });
+            if (!r.ok) return;
+            const data = await r.json();
+            if (data.picks) {
+              results[l.cacheKey] = { ...l, picks: data.picks, fetchedAt: Date.now() };
+            }
+          } catch(e) { console.warn("[Draft] fetch error", l.leagueId, e.message); }
+        }));
+        if (i + 3 < toFetch.length) await new Promise(r => setTimeout(r, 200));
+      }
+
+      // Merge with cached, persist new to Firebase
+      const allCached = { ...cached, ...results };
+      if (Object.keys(results).length) {
+        await _tAnalyticsRef(tid).child("drafts").update(results).catch(() => {});
+      }
+
+      // Build team name map from standingsCache
+      const standings = t.standingsCache || {};
+      const teamMap   = {};
+      Object.values(standings).forEach(lc => {
+        (lc.teams || []).forEach(tm => { teamMap[String(tm.teamId)] = tm.teamName; });
+      });
+
+      // Normalize all picks
+      const byLeague = {};
+      let   allPicks = [];
+      for (const [ck, lc] of Object.entries(allCached)) {
+        if (!lc.picks?.length) continue;
+        const normalized = _normalizePicks(lc.picks, lc.platform, teamMap);
+        // Override teamName from participant map
+        const pMap = _buildParticipantTeamMap(t);
+        const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+        normalized.forEach(p => {
+          const key = _sk(p.teamName || "");
+          if (pMap[key]) p.teamName = pMap[key].displayName;
+        });
+        byLeague[ck] = { ...lc, normalizedPicks: normalized };
+        allPicks = allPicks.concat(normalized);
+      }
+
+      const adp = _computeADP(allPicks);
+      _draftCache = { picks: allPicks, adp, byLeague, fetchedAt: Date.now(), tid };
+      _renderDraftView(tid, t, body, _draftCache);
+    } catch(e) {
+      body.innerHTML = `<div class="trn-empty">Failed to load draft data: ${_esc(e.message)}</div>`;
+    }
+  }
+
+  function _getMFLCreds() {
+    // Try to get stored MFL credentials from localStorage (set during profile MFL login)
+    try {
+      const cookie = localStorage.getItem("dlr_mfl_cookie");
+      return cookie ? { cookie } : null;
+    } catch(e) { return null; }
+  }
+
+  function _renderDraftView(tid, t, body, cache) {
+    const { picks, adp, byLeague } = cache;
+    const leagues = Object.values(byLeague).filter(l => l.normalizedPicks?.length);
+
+    // Build unique team list from all picks
+    const teamSet = {};
+    picks.forEach(p => { if (p.teamId) teamSet[p.teamId] = p.teamName || p.teamId; });
+    const teams = Object.entries(teamSet).sort((a, b) => a[1].localeCompare(b[1]));
+
+    const leagueOpts = leagues.map(l => `<option value="${_esc(l.cacheKey)}">${_esc(l.leagueName)}</option>`).join("");
+
+    body.innerHTML = `
+      <div class="trn-az-toolbar">
+        <div class="trn-az-view-pills">
+          <button class="trn-az-pill ${_draftView === "adp" ? "active" : ""}" data-view="adp">📊 ADP List</button>
+          <button class="trn-az-pill ${_draftView === "board" ? "active" : ""}" data-view="board">📋 Draft Board</button>
+          <button class="trn-az-pill ${_draftView === "card" ? "active" : ""}" data-view="card">🃏 Share Card</button>
+        </div>
+        <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+          ${_draftView === "board" ? `
+            <select id="trn-draft-league-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+              <option value="all">All Leagues</option>
+              ${leagueOpts}
+            </select>` : ""}
+          ${_draftView === "card" ? `
+            <select id="trn-draft-card-team" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+              <option value="">— Select team —</option>
+              ${teams.map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(name)}</option>`).join("")}
+            </select>` : ""}
+          <button class="btn-secondary btn-sm" id="trn-draft-refresh-btn">↺ Refresh</button>
+        </div>
+      </div>
+      <div id="trn-draft-content"></div>
+    `;
+
+    body.querySelectorAll(".trn-az-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _draftView = btn.dataset.view;
+        _renderDraftView(tid, t, body, cache);
+      });
+    });
+    document.getElementById("trn-draft-refresh-btn")?.addEventListener("click", () => {
+      _draftCache = null;
+      _renderAnalyticsDraft(tid, t, body);
+    });
+    document.getElementById("trn-draft-league-sel")?.addEventListener("change", function() {
+      _draftLeague = this.value;
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache);
+    });
+    document.getElementById("trn-draft-card-team")?.addEventListener("change", function() {
+      _draftCardTeam = this.value || null;
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache);
+    });
+
+    _renderDraftContent(document.getElementById("trn-draft-content"), cache);
+  }
+
+  function _renderDraftContent(el, cache) {
+    if (!el) return;
+    const { picks, adp, byLeague } = cache;
+
+    if (_draftView === "adp") {
+      _renderDraftADP(el, adp);
+    } else if (_draftView === "board") {
+      const filtered = _draftLeague === "all"
+        ? picks
+        : (byLeague[_draftLeague]?.normalizedPicks || []);
+      _renderDraftBoard(el, filtered, _draftLeague !== "all" ? byLeague[_draftLeague]?.leagueName : "All Leagues");
+    } else if (_draftView === "card") {
+      _renderDraftCard(el, picks);
+    }
+  }
+
+  function _renderDraftADP(el, adp) {
+    if (!adp.length) { el.innerHTML = `<div class="trn-empty">No draft data available yet.</div>`; return; }
+    const groups = { QB:[], RB:[], WR:[], TE:[], K:[], DEF:[], Other:[] };
+    adp.forEach(p => {
+      const pos = p.position || "?";
+      const key = groups[pos] ? pos : "Other";
+      groups[key].push(p);
+    });
+    const posOrder = ["QB","RB","WR","TE","K","DEF","Other"];
+
+    el.innerHTML = `
+      <div class="trn-az-meta">${adp.length} players drafted across ${Object.keys(_draftCache?.byLeague || {}).length} leagues</div>
+      <div class="trn-az-adp-wrap">
+        ${posOrder.map(pos => {
+          const players = groups[pos];
+          if (!players.length) return "";
+          const col = POS_COLOR[pos] || "#9ca3af";
+          return `
+            <div class="trn-az-pos-section">
+              <div class="trn-az-pos-header" style="color:${col}">${pos}</div>
+              <div class="trn-az-adp-list">
+                ${players.map((p, i) => `
+                  <div class="trn-az-adp-row">
+                    <span class="trn-az-adp-rank">${i + 1}.</span>
+                    <span class="trn-az-adp-pos" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
+                    <span class="trn-az-adp-name">${_esc(p.name)}</span>
+                    <span class="trn-az-adp-adp">ADP ${p.adp.toFixed(1)}</span>
+                    <span class="trn-az-adp-count dim">${p.count}×</span>
+                  </div>`).join("")}
+              </div>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  function _renderDraftBoard(el, picks, leagueName) {
+    if (!picks.length) { el.innerHTML = `<div class="trn-empty">No picks available for this selection.</div>`; return; }
+
+    const rounds = Math.max(...picks.map(p => p.round), 1);
+    const teams  = [...new Set(picks.map(p => p.teamId))];
+    // Build pick map: "round-slot" → pick
+    const pickMap = {};
+    picks.forEach(p => { pickMap[`${p.round}-${p.pick}`] = p; });
+    // Get slot order from round 1 picks sorted by pick number
+    const r1picks = picks.filter(p => p.round === 1).sort((a, b) => a.pick - b.pick);
+    const slotOrder = r1picks.map(p => p.teamId);
+    // Add any teams missing from round 1
+    teams.forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
+    // Get team name for header
+    const nameOf = (tid) => {
+      const p = picks.find(pk => pk.teamId === tid);
+      return p?.teamName || tid;
+    };
+
+    el.innerHTML = `
+      <div class="trn-az-meta">${_esc(leagueName || "Draft Board")} · ${rounds} rounds · ${slotOrder.length} teams</div>
+      <div class="trn-draft-board-wrap">
+        <table class="trn-draft-board">
+          <thead><tr>
+            <th class="trn-db-round-col">Rd</th>
+            ${slotOrder.map(tid => `<th class="trn-db-team-col">${_esc(nameOf(tid).slice(0, 12))}</th>`).join("")}
+          </tr></thead>
+          <tbody>
+            ${Array.from({ length: rounds }, (_, ri) => {
+              const round = ri + 1;
+              // snake: even rounds reverse slot order
+              const isSnake  = picks.some(p => p.round === 2 && p.pick === slotOrder.length);
+              const rowSlots = (isSnake && round % 2 === 0) ? [...slotOrder].reverse() : slotOrder;
+              return `<tr>
+                <td class="trn-db-round-col">${round}</td>
+                ${rowSlots.map((tid, si) => {
+                  // Find pick for this team in this round
+                  const teamPicks = picks.filter(p => p.round === round && p.teamId === tid);
+                  const pk = teamPicks[0];
+                  if (!pk) return `<td class="trn-db-cell trn-db-cell--empty">—</td>`;
+                  const col = POS_COLOR[pk.position] || "#9ca3af";
+                  return `<td class="trn-db-cell" title="${_esc(pk.name)} (${pk.position}) #${pk.overall}">
+                    <div class="trn-db-pick">
+                      <span class="trn-db-pos" style="background:${col}22;color:${col}">${pk.position}</span>
+                      <span class="trn-db-name">${_esc((pk.name || "").split(" ").pop() || pk.name)}</span>
+                    </div>
+                  </td>`;
+                }).join("")}
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function _renderDraftCard(el, allPicks) {
+    if (!_draftCardTeam) {
+      el.innerHTML = `<div class="trn-empty" style="padding:var(--space-6)">Select a team above to generate their shareable draft card.</div>`;
+      return;
+    }
+    const myPicks = allPicks.filter(p => p.teamId === _draftCardTeam).sort((a, b) => a.overall - b.overall);
+    if (!myPicks.length) { el.innerHTML = `<div class="trn-empty">No picks found for this team.</div>`; return; }
+
+    const teamName = myPicks[0].teamName || _draftCardTeam;
+    const posGroups = {};
+    myPicks.forEach(p => {
+      const pos = p.position || "?";
+      if (!posGroups[pos]) posGroups[pos] = [];
+      posGroups[pos].push(p);
+    });
+
+    el.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
+        <button class="btn-primary btn-sm" id="trn-card-download-btn">⬇ Download Card</button>
+      </div>
+      <div id="trn-share-card" class="trn-share-card">
+        <div class="trn-share-card-header">
+          <div class="trn-share-card-tournament">${_esc(_draftCache?.byLeague ? Object.values(_draftCache.byLeague)[0]?.leagueName || "Tournament Draft" : "Tournament Draft")}</div>
+          <div class="trn-share-card-team">${_esc(teamName)}</div>
+          <div class="trn-share-card-sub">${myPicks.length} picks · ADP ${(myPicks.reduce((s, p) => s + p.overall, 0) / myPicks.length).toFixed(1)} avg</div>
+        </div>
+        <div class="trn-share-card-body">
+          ${PREFERRED_POS_ORDER.map(pos => {
+            const grp = posGroups[pos];
+            if (!grp?.length) return "";
+            const col = POS_COLOR[pos] || "#9ca3af";
+            return `
+              <div class="trn-share-card-group">
+                <div class="trn-share-card-pos" style="color:${col}">${pos}</div>
+                ${grp.map(p => `
+                  <div class="trn-share-card-pick">
+                    <span class="trn-share-card-overall">#${p.overall}</span>
+                    <span class="trn-share-card-player">${_esc(p.name)}</span>
+                  </div>`).join("")}
+              </div>`;
+          }).join("")}
+        </div>
+        <div class="trn-share-card-footer">dynastylockerroom.com</div>
+      </div>`;
+
+    document.getElementById("trn-card-download-btn")?.addEventListener("click", () => _downloadDraftCard());
+  }
+
+  async function _downloadDraftCard() {
+    const card = document.getElementById("trn-share-card");
+    if (!card) return;
+    try {
+      // Load html2canvas from CDN if not present
+      if (typeof html2canvas === "undefined") {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+      const canvas = await html2canvas(card, { scale: 2, backgroundColor: null, useCORS: true });
+      const link   = document.createElement("a");
+      link.download = `draft-card-${(_draftCardTeam || "team").replace(/\s+/g, "-")}.png`;
+      link.href    = canvas.toDataURL("image/png");
+      link.click();
+    } catch(e) {
+      showToast("Download failed: " + e.message, "error");
+    }
+  }
+
+  // ── ANALYTICS: Matchups tab (+ AI Recap section) ──────────────────────────
+  let _matchupsWeek  = null;
+  let _matchupsCache = {};   // { [year_week]: { matchups[], fetchedAt } }
+  let _recapCache    = {};   // { [year_week]: { content, savedAt } }
+
+  async function _renderAnalyticsMatchups(tid, t, body) {
+    const meta         = t.meta || {};
+    const playoffWeek  = meta.playoffStartWeek || null;
+    const standingsCache = t.standingsCache || {};
+    const year         = _standingsYear || new Date().getFullYear();
+    const isAdmin      = t.roles?.[_currentUsername]?.role === "admin" ||
+                         t.roles?.[_currentUsername]?.role === "sub_admin";
+
+    // Gather all Sleeper league IDs for this year (matchups are Sleeper-only for now)
+    const batches  = t.leagues || {};
+    const isBatch  = (v) => v && typeof v === "object" && v.leagues !== undefined;
+    const sleeperLeagues = [];
+    for (const [, batch] of Object.entries(batches)) {
+      if (!isBatch(batch) || batch.platform !== "sleeper" || batch.year !== year) continue;
+      for (const [lid] of Object.entries(batch.leagues || {})) sleeperLeagues.push(lid);
+    }
+
+    if (!sleeperLeagues.length) {
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏈</div><div class="trn-empty-title">No Sleeper leagues for ${year}</div><div class="trn-empty-sub">Matchup highlights require Sleeper leagues synced for this year.</div></div>`;
+      return;
+    }
+
+    // Figure out available weeks from standingsCache
+    const maxRegWeek = playoffWeek ? playoffWeek - 1 : 17;
+    // Find highest synced week from standingsCache
+    let latestWeek = 1;
+    Object.values(standingsCache).forEach(lc => {
+      if (lc.year !== year) return;
+      (lc.teams || []).forEach(tm => {
+        const played = (tm.wins || 0) + (tm.losses || 0) + (tm.ties || 0);
+        if (played > latestWeek) latestWeek = played;
+      });
+    });
+    latestWeek = Math.min(latestWeek, maxRegWeek);
+    if (!_matchupsWeek || _matchupsWeek > maxRegWeek) _matchupsWeek = latestWeek || 1;
+
+    const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
+
+    body.innerHTML = `
+      <div class="trn-az-toolbar">
+        <div style="display:flex;align-items:center;gap:var(--space-3)">
+          <label style="font-size:.85rem;color:var(--color-text-dim)">Week</label>
+          <select id="trn-mu-week-sel" style="font-size:.85rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+            ${weeks.map(w => `<option value="${w}" ${w === _matchupsWeek ? "selected" : ""}>Week ${w}${w === latestWeek ? " (latest)" : ""}</option>`).join("")}
+          </select>
+        </div>
+        <button class="btn-secondary btn-sm" id="trn-mu-refresh-btn">↺ Refresh</button>
+      </div>
+      <div id="trn-mu-content">
+        <div class="trn-az-loading"><div class="spinner"></div> Loading matchups…</div>
+      </div>`;
+
+    document.getElementById("trn-mu-week-sel")?.addEventListener("change", function() {
+      _matchupsWeek = parseInt(this.value);
+      _loadAndRenderMatchups(tid, t, sleeperLeagues, year, isAdmin, document.getElementById("trn-mu-content"));
+    });
+    document.getElementById("trn-mu-refresh-btn")?.addEventListener("click", () => {
+      const ck = `${year}_${_matchupsWeek}`;
+      delete _matchupsCache[ck];
+      _loadAndRenderMatchups(tid, t, sleeperLeagues, year, isAdmin, document.getElementById("trn-mu-content"));
+    });
+
+    await _loadAndRenderMatchups(tid, t, sleeperLeagues, year, isAdmin, document.getElementById("trn-mu-content"));
+  }
+
+  async function _loadAndRenderMatchups(tid, t, leagueIds, year, isAdmin, el) {
+    if (!el) return;
+    const ck = `${year}_${_matchupsWeek}`;
+
+    // Check memory cache
+    if (_matchupsCache[ck] && (Date.now() - _matchupsCache[ck].fetchedAt) < 300000) {
+      _renderMatchupsContent(tid, t, el, _matchupsCache[ck].matchups, year, isAdmin);
+      return;
+    }
+
+    // Check Firebase cache
+    try {
+      const snap = await _tAnalyticsRef(tid).child(`weeklyHighlights/${ck}`).once("value");
+      const fbCached = snap.val();
+      if (fbCached?.matchups?.length && (Date.now() - (fbCached.fetchedAt || 0)) < 3600000) {
+        _matchupsCache[ck] = fbCached;
+        _renderMatchupsContent(tid, t, el, fbCached.matchups, year, isAdmin);
+        return;
+      }
+    } catch(e) {}
+
+    el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching week ${_matchupsWeek} matchups…</div>`;
+
+    // Fetch from Sleeper in parallel (batches of 5)
+    const allMatchups = [];
+    const standingsCache = t.standingsCache || {};
+    const teamMap = {};
+    Object.values(standingsCache).forEach(lc => {
+      (lc.teams || []).forEach(tm => { teamMap[String(tm.teamId)] = tm.teamName; });
+    });
+    const pMap = _buildParticipantTeamMap(t);
+    const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+
+    for (let i = 0; i < leagueIds.length; i += 5) {
+      const batch = leagueIds.slice(i, i + 5);
+      await Promise.allSettled(batch.map(async lid => {
+        try {
+          const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${_matchupsWeek}`);
+          if (!r.ok) return;
+          const data = await r.json();
+          if (!Array.isArray(data)) return;
+          // Group by matchup_id
+          const byMid = {};
+          data.forEach(m => {
+            if (!m.matchup_id) return;
+            (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m);
+          });
+          Object.values(byMid).forEach(pair => {
+            if (pair.length !== 2) return;
+            const [a, b] = pair;
+            const apts = a.points || 0, bpts = b.points || 0;
+            if (apts === 0 && bpts === 0) return;
+            let aName = teamMap[String(a.roster_id)] || `Team ${a.roster_id}`;
+            let bName = teamMap[String(b.roster_id)] || `Team ${b.roster_id}`;
+            const aKey = _sk(aName), bKey = _sk(bName);
+            if (pMap[aKey]) aName = pMap[aKey].displayName;
+            if (pMap[bKey]) bName = pMap[bKey].displayName;
+            const diff = Math.abs(apts - bpts);
+            allMatchups.push({
+              leagueId: lid, week: _matchupsWeek,
+              home: { rosterId: String(a.roster_id), name: aName, score: apts },
+              away: { rosterId: String(b.roster_id), name: bName, score: bpts },
+              diff, combined: apts + bpts,
+              winner: apts > bpts ? aName : bName
+            });
+          });
+        } catch(e) {}
+      }));
+      if (i + 5 < leagueIds.length) await new Promise(r => setTimeout(r, 100));
+    }
+
+    if (!allMatchups.length) {
+      el.innerHTML = `<div class="trn-empty">No matchup data for Week ${_matchupsWeek} yet.</div>`;
+      return;
+    }
+
+    const payload = { matchups: allMatchups, fetchedAt: Date.now() };
+    _matchupsCache[ck] = payload;
+    await _tAnalyticsRef(tid).child(`weeklyHighlights/${ck}`).set(payload).catch(() => {});
+    _renderMatchupsContent(tid, t, el, allMatchups, year, isAdmin);
+  }
+
+  async function _renderMatchupsContent(tid, t, el, matchups, year, isAdmin) {
+    const sorted    = [...matchups].sort((a, b) => a.diff - b.diff);
+    const closest   = sorted.slice(0, 5);
+    const blowouts  = [...matchups].sort((a, b) => b.diff - a.diff).slice(0, 5);
+    const highest   = [...matchups].sort((a, b) => b.combined - a.combined).slice(0, 3);
+    const ck        = `${year}_${_matchupsWeek}`;
+
+    // Lazy-load recap from Firebase if not in memory cache
+    if (!_recapCache[ck]) {
+      try {
+        const snap = await _tAnalyticsRef(tid).child(`recap/${ck}`).once("value");
+        const fbRecap = snap.val();
+        if (fbRecap?.content) _recapCache[ck] = fbRecap;
+      } catch(e) {}
+    }
+    const recapData = _recapCache[ck] || null;
+
+    const matchupRow = (m, highlight) => {
+      const aWon = m.home.score > m.away.score;
+      return `
+        <div class="trn-mu-row">
+          <div class="trn-mu-team ${aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.home.name)}</div>
+          <div class="trn-mu-scores">
+            <span class="trn-mu-score ${aWon ? "trn-mu-score--win" : ""}">${m.home.score.toFixed(2)}</span>
+            <span class="trn-mu-sep">–</span>
+            <span class="trn-mu-score ${!aWon ? "trn-mu-score--win" : ""}">${m.away.score.toFixed(2)}</span>
+          </div>
+          <div class="trn-mu-team ${!aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.away.name)}</div>
+          ${highlight ? `<span class="trn-mu-tag">${_esc(highlight)}</span>` : `<span class="trn-mu-diff">Δ${m.diff.toFixed(2)}</span>`}
+        </div>`;
+    };
+
+    el.innerHTML = `
+      <div class="trn-az-meta">Week ${_matchupsWeek} · ${matchups.length} matchups across ${new Set(matchups.map(m => m.leagueId)).size} leagues</div>
+
+      <div class="trn-az-section-title">🔥 Closest Games</div>
+      <div class="trn-mu-list">
+        ${closest.map(m => matchupRow(m, m.diff < 2 ? "🔥 < 2 pts" : null)).join("")}
+      </div>
+
+      <div class="trn-az-section-title" style="margin-top:var(--space-5)">💥 Biggest Blowouts</div>
+      <div class="trn-mu-list">
+        ${blowouts.map(m => matchupRow(m, null)).join("")}
+      </div>
+
+      <div class="trn-az-section-title" style="margin-top:var(--space-5)">📈 Highest Scoring</div>
+      <div class="trn-mu-list">
+        ${highest.map(m => matchupRow(m, `${m.combined.toFixed(1)} combined`)).join("")}
+      </div>
+
+      <!-- Recap section -->
+      <div class="trn-recap-section" id="trn-recap-section">
+        <div class="trn-az-section-title" style="margin-top:var(--space-6)">📝 Weekly Recap</div>
+        ${recapData
+          ? `<div class="trn-recap-content">${_renderRecapMarkdown(recapData.content)}</div>
+             <div class="trn-recap-meta">
+               Saved ${new Date(recapData.savedAt).toLocaleString()}
+               ${isAdmin ? `<button class="btn-ghost btn-sm" id="trn-recap-edit-btn" style="margin-left:var(--space-3)">✏ Edit</button>` : ""}
+             </div>`
+          : isAdmin
+            ? `<div class="trn-recap-placeholder">
+                 <p style="font-size:.87rem;color:var(--color-text-dim)">
+                   Write a recap or generate one with AI — copy the prompt below, paste it into
+                   <a href="https://claude.ai" target="_blank" rel="noopener" style="color:var(--color-accent)">claude.ai</a>,
+                   then paste the result back here.
+                 </p>
+                 <button class="btn-secondary btn-sm" id="trn-recap-prompt-btn">📋 Copy AI Prompt</button>
+               </div>`
+            : `<div style="font-size:.85rem;color:var(--color-text-dim);padding:var(--space-3) 0">No recap posted yet.</div>`
+        }
+        ${isAdmin ? `<div id="trn-recap-editor" class="trn-recap-editor hidden"></div>` : ""}
+      </div>`;
+
+    if (isAdmin) {
+      document.getElementById("trn-recap-prompt-btn")?.addEventListener("click", () => {
+        const prompt = _buildRecapPrompt(t, matchups, year);
+        navigator.clipboard?.writeText(prompt).then(() => showToast("Prompt copied — paste into claude.ai ✓"))
+          .catch(() => { showToast("Copy failed — see console", "error"); console.log(prompt); });
+        // Also reveal the paste-in editor
+        _showRecapEditor(tid, t, matchups, year);
+      });
+      document.getElementById("trn-recap-edit-btn")?.addEventListener("click", () => {
+        _showRecapEditor(tid, t, matchups, year, recapData?.content || "");
+      });
+    }
+  }
+
+  function _buildRecapPrompt(t, matchups, year) {
+    const sorted   = [...matchups].sort((a, b) => a.diff - b.diff);
+    const closest  = sorted.slice(0, 5).map(m =>
+      `  • ${m.home.name} ${m.home.score.toFixed(2)} – ${m.away.score.toFixed(2)} ${m.away.name} (margin: ${m.diff.toFixed(2)})`
+    );
+    const blowouts = [...matchups].sort((a, b) => b.diff - a.diff).slice(0, 5).map(m =>
+      `  • ${m.winner} won ${Math.max(m.home.score, m.away.score).toFixed(2)} – ${Math.min(m.home.score, m.away.score).toFixed(2)}`
+    );
+    const highest  = [...matchups].sort((a, b) => b.combined - a.combined).slice(0, 3).map(m =>
+      `  • ${m.home.name} ${m.home.score.toFixed(2)} vs ${m.away.name} ${m.away.score.toFixed(2)} (combined: ${m.combined.toFixed(1)})`
+    );
+    const avgScore = (matchups.flatMap(m => [m.home.score, m.away.score]).reduce((a,b) => a+b, 0) / (matchups.length * 2)).toFixed(2);
+
+    return `You are a fun, witty fantasy football analyst writing a brief weekly recap for a large multi-league tournament called "${t.meta?.name || "the tournament"}".
+
+Week ${_matchupsWeek} (${year}) Summary:
+- ${matchups.length} total matchups across ${new Set(matchups.map(m => m.leagueId)).size} leagues
+- Average score: ${avgScore} pts
+
+Closest games:
+${closest.join("\n")}
+
+Biggest blowouts:
+${blowouts.join("\n")}
+
+Highest scoring matchups:
+${highest.join("\n")}
+
+Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Mention the closest game, the biggest blowout, and the top scorer. Keep it punchy and fun — like an ESPN segment. Use **bold** for team names and key scores. Keep total length under 300 words.`;
+  }
+
+  function _showRecapEditor(tid, t, matchups, year, existingText = "") {
+    const editorEl = document.getElementById("trn-recap-editor");
+    if (!editorEl) return;
+    editorEl.classList.remove("hidden");
+    editorEl.innerHTML = `
+      <div style="margin-top:var(--space-4)">
+        <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:var(--space-2)">Paste recap here:</label>
+        <textarea id="trn-recap-textarea" rows="10"
+          placeholder="Paste the AI-generated recap here, or write your own…"
+          style="width:100%;resize:vertical;font-size:.875rem;font-family:inherit">${_esc(existingText)}</textarea>
+        <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+          <button class="btn-primary btn-sm" id="trn-recap-save-btn">Save Recap</button>
+          <button class="btn-ghost btn-sm" id="trn-recap-cancel-btn">Cancel</button>
+        </div>
+      </div>`;
+
+    document.getElementById("trn-recap-cancel-btn")?.addEventListener("click", () => {
+      editorEl.classList.add("hidden");
+    });
+    document.getElementById("trn-recap-save-btn")?.addEventListener("click", async () => {
+      const content = document.getElementById("trn-recap-textarea")?.value.trim();
+      if (!content) { showToast("Recap is empty", "error"); return; }
+      const ck      = `${year}_${_matchupsWeek}`;
+      const payload = { content, savedAt: Date.now(), savedBy: _currentUsername };
+      try {
+        await _tAnalyticsRef(tid).child(`recap/${ck}`).set(payload);
+        _recapCache[ck] = payload;
+        showToast("Recap saved ✓");
+        // Re-render the matchups tab to show the saved recap
+        const body = document.getElementById("trn-tab-body");
+        if (body) _renderAnalyticsMatchups(tid, t, body);
+      } catch(e) { showToast("Failed to save: " + e.message, "error"); }
+    });
+  }
+
+  function _renderRecapMarkdown(text) {
+    // Minimal markdown: **bold**, *italic*, newlines, ## headings
+    return String(text || "")
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/^## (.+)$/gm, "<h4>$1</h4>")
+      .replace(/^### (.+)$/gm, "<h5>$1</h5>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/\n{2,}/g, "</p><p>")
+      .replace(/\n/g, "<br>")
+      .replace(/^/, "<p>").replace(/$/, "</p>");
+  }
+
+  // ── ANALYTICS: Rosters tab ─────────────────────────────────────────────────
+  let _rostersCache = null; // { rows[], fetchedAt, tid }
+
+  async function _renderAnalyticsRosters(tid, t, body) {
+    await DLRPlayers.load().catch(() => {});
+
+    body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading rosters…</div>`;
+
+    if (_rostersCache && _rostersCache.tid === tid && (Date.now() - _rostersCache.fetchedAt) < 300000) {
+      _renderRostersView(body, _rostersCache.rows, t);
+      return;
+    }
+
+    try {
+      const meta         = t.meta || {};
+      const rankBy       = meta.rankBy || "record";
+      const standingsCache = t.standingsCache || {};
+      const year         = _standingsYear || new Date().getFullYear();
+
+      // Get top 10 teams from standings (already ranked)
+      const allRows = [];
+      for (const [ck, lc] of Object.entries(standingsCache)) {
+        if (lc.year !== year) continue;
+        (lc.teams || []).forEach(tm => {
+          allRows.push({ ...tm, leagueId: lc.leagueId || ck.split("_").slice(1).join("_"), platform: lc.platform, year: lc.year, leagueName: lc.leagueName });
+        });
+      }
+      const ranked = _rankTeams(allRows, rankBy);
+      const top10  = ranked.slice(0, 10);
+
+      if (!top10.length) {
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏆</div><div class="trn-empty-title">No standings data yet</div><div class="trn-empty-sub">Sync standings first to see top rosters.</div></div>`;
+        return;
+      }
+
+      // Fetch rosters for top 10 teams — Sleeper only for now (others need auth)
+      const pMap       = _buildParticipantTeamMap(t);
+      const _sk        = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+      const rosterRows = [];
+
+      // Group top10 by leagueId so we fetch each league once
+      const byLeague = {};
+      top10.forEach((tm, rank) => {
+        const lid = tm.leagueId;
+        if (!byLeague[lid]) byLeague[lid] = [];
+        byLeague[lid].push({ ...tm, overallRank: rank + 1 });
+      });
+
+      await Promise.allSettled(Object.entries(byLeague).map(async ([lid, teams]) => {
+        try {
+          if (teams[0].platform !== "sleeper") {
+            // Non-Sleeper: show standings row only, no roster details
+            teams.forEach(tm => rosterRows.push({ ...tm, players: null }));
+            return;
+          }
+          const [rosters, users] = await Promise.all([
+            fetch(`https://api.sleeper.app/v1/league/${lid}/rosters`).then(r => r.ok ? r.json() : []),
+            fetch(`https://api.sleeper.app/v1/league/${lid}/users`).then(r => r.ok ? r.json() : [])
+          ]);
+          const userMap = {};
+          (users || []).forEach(u => { userMap[u.user_id] = u; });
+
+          teams.forEach(tm => {
+            const roster = (rosters || []).find(r => String(r.roster_id) === String(tm.teamId));
+            if (!roster) { rosterRows.push({ ...tm, players: null }); return; }
+            // Resolve player objects
+            const playerIds = [...(roster.starters || []), ...(roster.players || []).filter(pid => !(roster.starters || []).includes(pid))];
+            const players = playerIds.map(pid => {
+              const p = DLRPlayers.get(pid);
+              return p?.first_name ? {
+                id:       pid,
+                name:     `${p.first_name} ${p.last_name}`.trim(),
+                position: (p.position || "?").toUpperCase(),
+                team:     p.team || "FA",
+                isStarter: (roster.starters || []).includes(pid)
+              } : { id: pid, name: `Player ${pid}`, position: "?", team: "?", isStarter: false };
+            }).filter(p => p.position !== "?");
+            // Override team name from participant map
+            const key = _sk(tm.teamName || "");
+            const displayName = pMap[key]?.displayName || tm.teamName;
+            rosterRows.push({ ...tm, teamName: displayName, players });
+          });
+        } catch(e) { teams.forEach(tm => rosterRows.push({ ...tm, players: null })); }
+      }));
+
+      rosterRows.sort((a, b) => a.overallRank - b.overallRank);
+      _rostersCache = { rows: rosterRows, fetchedAt: Date.now(), tid };
+      _renderRostersView(body, rosterRows, t);
+    } catch(e) {
+      body.innerHTML = `<div class="trn-empty">Failed to load rosters: ${_esc(e.message)}</div>`;
+    }
+  }
+
+  function _renderRostersView(body, rows, t) {
+    const year = _standingsYear || new Date().getFullYear();
+    body.innerHTML = `
+      <div class="trn-az-meta">Top ${rows.length} teams · ${year} season</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
+        <button class="btn-secondary btn-sm" id="trn-rosters-refresh-btn">↺ Refresh</button>
+      </div>
+      <div id="trn-rosters-list">
+        ${rows.map(row => _renderRosterCard(row)).join("")}
+      </div>`;
+
+    document.getElementById("trn-rosters-refresh-btn")?.addEventListener("click", () => {
+      _rostersCache = null;
+      _renderAnalyticsRosters(body.closest("[id]")?.id ? _activeTournamentId : _activeTournamentId, t, body);
+    });
+  }
+
+  function _renderRosterCard(row) {
+    const medals = ["🥇","🥈","🥉"];
+    const medal  = medals[row.overallRank - 1] || `#${row.overallRank}`;
+
+    if (!row.players) {
+      // No roster data (non-Sleeper or fetch failed) — show standings row only
+      return `
+        <div class="trn-roster-card trn-roster-card--slim">
+          <div class="trn-roster-card-header">
+            <span class="trn-roster-rank">${medal}</span>
+            <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}</span>
+            <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
+            <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
+            <span class="trn-platform-badge trn-platform-${row.platform || "unknown"}">${(row.platform || "?").toUpperCase()}</span>
+          </div>
+          <div style="padding:var(--space-2) var(--space-4);font-size:.78rem;color:var(--color-text-dim)">Roster details require Sleeper authentication.</div>
+        </div>`;
+    }
+
+    // Group by position
+    const groups = {};
+    row.players.forEach(p => {
+      if (!groups[p.position]) groups[p.position] = [];
+      groups[p.position].push(p);
+    });
+
+    const posOrder = ["QB","RB","WR","TE","K","DEF","DB","LB","DL","OL"];
+    const starter  = row.players.filter(p => p.isStarter);
+    const bench    = row.players.filter(p => !p.isStarter);
+
+    return `
+      <div class="trn-roster-card">
+        <div class="trn-roster-card-header">
+          <span class="trn-roster-rank">${medal}</span>
+          <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}</span>
+          <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
+          <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
+        </div>
+        <div class="trn-roster-players">
+          ${posOrder.map(pos => {
+            const grp = groups[pos];
+            if (!grp?.length) return "";
+            const col = POS_COLOR[pos] || "#9ca3af";
+            return grp.map(p => `
+              <div class="trn-roster-player ${p.isStarter ? "" : "trn-roster-player--bench"}">
+                <span class="trn-roster-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
+                <span class="trn-roster-player-name">${_esc(p.name)}</span>
+                <span class="trn-roster-nfl-team dim">${_esc(p.team)}</span>
+                ${!p.isStarter ? `<span class="trn-roster-bench-tag">BN</span>` : ""}
+              </div>`).join("");
+          }).join("")}
+        </div>
+      </div>`;
   }
 
   // ── User: Info tab ─────────────────────────────────────
