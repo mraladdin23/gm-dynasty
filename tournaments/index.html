@@ -445,6 +445,8 @@
 
       // Build participant lookup from publicTournaments data
       const pMap = t.participantMap || {};
+      // Sanitize keys the same way as _writePublicSummary in tournament.js
+      const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
 
       // Build rows
       let allRows = [];
@@ -456,7 +458,7 @@
           return b.pf - a.pf;
         });
         teams.forEach(team => {
-          const key = (team.teamName || "").trim().toLowerCase();
+          const key = _sk(team.teamName || "");
           const p   = pMap[key] || {};
           allRows.push({
             overallRank: 0,

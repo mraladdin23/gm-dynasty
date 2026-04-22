@@ -402,7 +402,7 @@ const DLRTournament = (() => {
           ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
         </div>
 
-        <!-- Tab bar -->
+        <!-- Tab bar (desktop) -->
         <div class="trn-tabs" id="trn-tabs">
           ${canAdmin ? `
             <button class="trn-tab ${_activeAdminTab === "overview"      ? "active" : ""}" data-tab="overview">Overview</button>
@@ -424,6 +424,22 @@ const DLRTournament = (() => {
             <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
           `}
         </div>
+        <!-- Tab select (mobile) -->
+        <select class="trn-tab-select" id="trn-tab-select">
+          ${canAdmin ? `
+            <option value="overview"      ${_activeAdminTab === "overview"      ? "selected" : ""}>Overview</option>
+            <option value="leagues"       ${_activeAdminTab === "leagues"       ? "selected" : ""}>Leagues</option>
+            <option value="roles"         ${_activeAdminTab === "roles"         ? "selected" : ""}>Roles</option>
+            <option value="registration"  ${_activeAdminTab === "registration"  ? "selected" : ""}>Registration Form</option>
+            <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>Registrants</option>
+            <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>Participants</option>
+            <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>Standings</option>
+          ` : `
+            <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
+            <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+            <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
+          `}
+        </select>
 
         <div id="trn-tab-body" class="trn-tab-body"></div>
       </div>
@@ -432,7 +448,7 @@ const DLRTournament = (() => {
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
 
-    // Tab wire-up
+    // Tab wire-up (buttons)
     container.querySelectorAll(".trn-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
@@ -440,8 +456,21 @@ const DLRTournament = (() => {
         const tabName = tab.dataset.tab;
         if (canAdmin) _activeAdminTab = tabName;
         else _activeUserTab = tabName;
+        const sel = document.getElementById("trn-tab-select");
+        if (sel) sel.value = tabName;
         _renderTab(tid, tabName, t, canAdmin);
       });
+    });
+
+    // Tab wire-up (select — mobile)
+    document.getElementById("trn-tab-select")?.addEventListener("change", function() {
+      const tabName = this.value;
+      container.querySelectorAll(".trn-tab").forEach(tb => {
+        tb.classList.toggle("active", tb.dataset.tab === tabName);
+      });
+      if (canAdmin) _activeAdminTab = tabName;
+      else _activeUserTab = tabName;
+      _renderTab(tid, tabName, t, canAdmin);
     });
 
     // Render default tab
@@ -657,6 +686,11 @@ const DLRTournament = (() => {
           <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
           <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
         </div>
+        <select class="trn-tab-select" id="trn-tab-select">
+          <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
+          <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+          <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
+        </select>
         <div id="trn-tab-body" class="trn-tab-body"></div>
       </div>
     `;
@@ -669,8 +703,19 @@ const DLRTournament = (() => {
         tab.classList.add("active");
         const tabName = tab.dataset.tab;
         _activeUserTab = tabName;
+        const sel = document.getElementById("trn-tab-select");
+        if (sel) sel.value = tabName;
         _renderTab(tid, tabName, t, false);
       });
+    });
+
+    document.getElementById("trn-tab-select")?.addEventListener("change", function() {
+      const tabName = this.value;
+      container.querySelectorAll(".trn-tab").forEach(tb => {
+        tb.classList.toggle("active", tb.dataset.tab === tabName);
+      });
+      _activeUserTab = tabName;
+      _renderTab(tid, tabName, t, false);
     });
 
     const defaultTab = _activeUserTab;
@@ -1518,15 +1563,16 @@ const DLRTournament = (() => {
       ? allEntries.filter(([, lc]) => lc.year === _standingsYear)
       : allEntries;
 
-    // Build participant lookup maps — keyed by sleeperUsername, displayName, teamName (all lowercase+trimmed)
-    // displayName is what we want to SHOW in standings.
-    // sleeperUsername matches what Sleeper stores as the roster owner's display_name (teamName in cache).
+    // Build participant lookup — keyed by sleeperUsername/displayName/teamName.
+    // Keys are sanitized (trimmed, lowercased, Firebase-illegal chars replaced with _)
+    // so they match the participantMap keys written by _writePublicSummary.
+    const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
     const participants = t.participants || {};
-    const displayNameByKey = {}; // key → participant displayName
-    const genderByKey      = {}; // key → participant gender
+    const displayNameByKey = {}; // sanitized key → participant displayName
+    const genderByKey      = {}; // sanitized key → participant gender
     Object.values(participants).forEach(p => {
       const keys = [p.sleeperUsername, p.displayName, p.teamName]
-        .filter(Boolean).map(s => s.trim().toLowerCase());
+        .filter(Boolean).map(_sk).filter(Boolean);
       keys.forEach(k => {
         if (p.displayName) displayNameByKey[k] = p.displayName;
         if (p.gender)      genderByKey[k]      = p.gender;
@@ -1540,7 +1586,7 @@ const DLRTournament = (() => {
     for (const [cacheKey, lc] of entries) {
       const ranked = _rankTeams(lc.teams || [], rankBy);
       ranked.forEach(team => {
-        const _tnKey = (team.teamName || "").trim().toLowerCase();
+        const _tnKey = _sk(team.teamName || "");
         allRows.push({
           rank:        team.computedRank,
           // Show participant displayName if matched; fall back to what Sleeper returned
@@ -2804,13 +2850,13 @@ const DLRTournament = (() => {
       const leagueCount = Object.entries(leagues).reduce((sum, [, v]) =>
         sum + (isBatch(v) ? Object.keys(v.leagues || {}).length : 1), 0);
 
-      // Build a slim participant map for the public page:
-      // key = sleeperUsername (lowercase) → { displayName, gender }
-      // Only include non-sensitive fields needed for standings display.
+      // Build a slim participant map for the public page.
+      // Firebase keys cannot contain . # $ / [ ] — sanitize every key.
+      const _psk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
       const participantMap = {};
       Object.values(t.participants || {}).forEach(p => {
         const keys = [p.sleeperUsername, p.displayName, p.teamName]
-          .filter(Boolean).map(s => s.trim().toLowerCase());
+          .filter(Boolean).map(_psk).filter(Boolean);
         keys.forEach(k => {
           participantMap[k] = {
             displayName: p.displayName || null,
