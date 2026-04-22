@@ -248,7 +248,6 @@ const DLRTournament = (() => {
           </span>
         </div>
         <div class="trn-card-meta">
-          <span>📅 ${meta.season || "—"}</span>
           <span>🏟 ${leagueCount} league${leagueCount !== 1 ? "s" : ""}</span>
           <span>👥 ${regCount} registered</span>
         </div>
@@ -272,10 +271,6 @@ const DLRTournament = (() => {
         <div class="form-group">
           <label>Tournament Name <span class="required">*</span></label>
           <input type="text" id="trn-new-name" placeholder="e.g. Scott Fish Bowl 2025" maxlength="80" />
-        </div>
-        <div class="form-group">
-          <label>Season / Year</label>
-          <input type="text" id="trn-new-season" placeholder="2025" maxlength="10" />
         </div>
         <div class="form-group">
           <label>Tagline</label>
@@ -303,7 +298,6 @@ const DLRTournament = (() => {
 
   async function _doCreate() {
     const name     = document.getElementById("trn-new-name")?.value.trim();
-    const season   = document.getElementById("trn-new-season")?.value.trim();
     const tagline  = document.getElementById("trn-new-tagline")?.value.trim();
     const regType  = document.getElementById("trn-new-reg-type")?.value || "open";
     const errEl    = document.getElementById("trn-create-error");
@@ -322,7 +316,6 @@ const DLRTournament = (() => {
       const tournament = {
         meta: {
           name,
-          season:      season || String(new Date().getFullYear()),
           tagline:     tagline || "",
           status:      "draft",
           regType,
@@ -518,7 +511,6 @@ const DLRTournament = (() => {
       <div class="trn-section-card">
         <div class="trn-section-card-title">Tournament Details</div>
         <div class="trn-detail-rows">
-          <div class="trn-detail-row"><span>Season</span><span>${_esc(meta.season || "—")}</span></div>
           <div class="trn-detail-row"><span>Registration</span><span>${meta.regType === "invite" ? "Invite Only" : "Open"}</span></div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
           <div class="trn-detail-row"><span>Created</span><span>${meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : "—"}</span></div>
@@ -1297,10 +1289,6 @@ const DLRTournament = (() => {
           <input type="text" id="trn-edit-name" value="${_esc(meta.name || "")}" maxlength="80" />
         </div>
         <div class="form-group">
-          <label>Season</label>
-          <input type="text" id="trn-edit-season" value="${_esc(meta.season || "")}" maxlength="10" />
-        </div>
-        <div class="form-group">
           <label>Tagline</label>
           <input type="text" id="trn-edit-tagline" value="${_esc(meta.tagline || "")}" maxlength="120" />
         </div>
@@ -1320,7 +1308,6 @@ const DLRTournament = (() => {
     document.getElementById("trn-modal-confirm")?.addEventListener("click", async () => {
       const updates = {
         name:    document.getElementById("trn-edit-name")?.value.trim()    || meta.name,
-        season:  document.getElementById("trn-edit-season")?.value.trim()  || meta.season,
         tagline: document.getElementById("trn-edit-tagline")?.value.trim() || ""
       };
       try {
@@ -1364,7 +1351,6 @@ const DLRTournament = (() => {
       </div>
 
       <div class="trn-info-stats">
-        <div class="trn-stat-card"><div class="trn-stat-value">${meta.season || "—"}</div><div class="trn-stat-label">Season</div></div>
         <div class="trn-stat-card"><div class="trn-stat-value">${leagueCount}</div><div class="trn-stat-label">Leagues</div></div>
         <div class="trn-stat-card"><div class="trn-stat-value">${meta.regType === "invite" ? "Invite" : "Open"}</div><div class="trn-stat-label">Registration</div></div>
       </div>
