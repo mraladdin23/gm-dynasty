@@ -1230,10 +1230,24 @@ const DLRTournament = (() => {
       }
 
       if (!count) { showToast("No valid rows found", "error"); return; }
+
+      // Save to Firebase
       await _tParticipantsRef(tid).update(updates);
+
+      // Refresh local cache immediately so the tab re-renders with saved data
+      const freshSnap = await _tRef(tid).once("value");
+      _tournaments[tid] = freshSnap.val();
+      const tabBody = document.getElementById("trn-tab-body");
+      if (tabBody && _activeAdminTab === "participants") {
+        _renderParticipantsTab(tid, _tournaments[tid], tabBody);
+      }
+
       showToast(count + " participant" + (count !== 1 ? "s" : "") + " imported — matching DLR accounts...");
       _matchParticipantsToDLR(tid, updates);
-    } catch(err) { showToast("Import failed: " + err.message, "error"); }
+    } catch(err) {
+      console.error("[Tournament] Import error:", err);
+      showToast("Import failed: " + err.message, "error");
+    }
   }
 
   async function _matchParticipantsToDLR(tid, participantsMap) {
@@ -1243,29 +1257,43 @@ const DLRTournament = (() => {
       const bySleeperUsername = {};
       const byMflEmail        = {};
       const byYahooUsername   = {};
+
       for (const [username, u] of Object.entries(users)) {
-        const s = u?.platforms?.sleeper?.username?.toLowerCase();
-        const m = u?.platforms?.mfl?.mflEmail?.toLowerCase();
-        const y = u?.platforms?.yahoo?.username?.toLowerCase();
+        // Sleeper: try all known field names the profile might store the handle under
+        const sleeper = u?.platforms?.sleeper;
+        const s = (sleeper?.sleeperUsername || sleeper?.username || sleeper?.displayName || "").toLowerCase();
+        // MFL: email address
+        const m = (u?.platforms?.mfl?.mflEmail || "").toLowerCase();
+        // Yahoo: username
+        const y = (u?.platforms?.yahoo?.username || u?.platforms?.yahoo?.yahooUsername || "").toLowerCase();
         if (s) bySleeperUsername[s] = username;
         if (m) byMflEmail[m]        = username;
         if (y) byYahooUsername[y]   = username;
       }
+
+      console.log("[Tournament] DLR index built — Sleeper:", Object.keys(bySleeperUsername).length,
+        "MFL:", Object.keys(byMflEmail).length, "Yahoo:", Object.keys(byYahooUsername).length);
+
       const matchUpdates = {};
       for (const [pid, p] of Object.entries(participantsMap)) {
         let matched = null;
         if (p.sleeperUsername) matched = bySleeperUsername[p.sleeperUsername.toLowerCase()];
         if (!matched && p.mflEmail)      matched = byMflEmail[p.mflEmail.toLowerCase()];
         if (!matched && p.yahooUsername) matched = byYahooUsername[p.yahooUsername.toLowerCase()];
+
+        console.log("[Tournament] Participant", p.displayName,
+          "sleeperUsername:", p.sleeperUsername, "-> matched:", matched);
+
         if (matched) {
           matchUpdates[pid + "/dlrLinked"]   = true;
           matchUpdates[pid + "/dlrUsername"] = matched;
         }
       }
+
       if (Object.keys(matchUpdates).length) {
         await _tParticipantsRef(tid).update(matchUpdates);
         const mc = Object.keys(matchUpdates).length / 2;
-        showToast(mc + " participant" + (mc !== 1 ? "s" : "") + " matched to DLR accounts");
+        showToast(mc + " participant" + (mc !== 1 ? "s" : "") + " matched to DLR accounts ✓");
         const snap = await _tRef(tid).once("value");
         _tournaments[tid] = snap.val();
         const body = document.getElementById("trn-tab-body");
@@ -1273,7 +1301,10 @@ const DLRTournament = (() => {
       } else {
         showToast("Import complete — no DLR matches found");
       }
-    } catch(err) { console.warn("[Tournament] DLR match error:", err.message); }
+    } catch(err) {
+      console.error("[Tournament] DLR match error:", err);
+      showToast("Match failed: " + err.message, "error");
+    }
   }
 
   function _exportParticipantsCSV(t) {
