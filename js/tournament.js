@@ -410,12 +410,13 @@ const DLRTournament = (() => {
     // Keep _standingsYear in sync
     _standingsYear = _tournamentYear;
 
-    const yearSel = availableYrs.length > 1 ? `
+    // Year selector only shown in user/view mode
+    const yearSel = (!showAdminNav && availableYrs.length > 1) ? `
       <div class="trn-year-selector">
         <select id="trn-global-year" class="trn-filter-select">
           ${availableYrs.map(y => `<option value="${y}" ${y === _tournamentYear ? "selected" : ""}>${y}</option>`).join("")}
         </select>
-      </div>` : (availableYrs.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${availableYrs[0]}</span></div>` : "");
+      </div>` : (!showAdminNav && availableYrs.length === 1) ? `<div class="trn-year-selector"><span class="trn-year-label">${availableYrs[0]}</span></div>` : "";
 
     // Build tab options based on mode
     const adminOpts = `
@@ -425,10 +426,6 @@ const DLRTournament = (() => {
       <option value="registration"  ${_activeAdminTab === "registration"  ? "selected" : ""}>📝 Registration Form</option>
       <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>📋 Registrants${Object.keys(t.registrations||{}).length ? " (" + Object.keys(t.registrations).length + ")" : ""}</option>
       <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>👥 Participants${Object.keys(t.participants||{}).length ? " (" + Object.keys(t.participants).length + ")" : ""}</option>
-      <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>🏆 Standings</option>
-      <option value="draft"         ${_activeAdminTab === "draft"         ? "selected" : ""}>📋 Draft</option>
-      <option value="matchups"      ${_activeAdminTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
-      <option value="rosters"       ${_activeAdminTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
       <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>`;
 
     const userOpts = `
@@ -1841,17 +1838,18 @@ const DLRTournament = (() => {
       return '<span style="margin-left:3px;font-size:.65rem">' + (_standingsSort.dir === "asc" ? "↑" : "↓") + "</span>";
     };
 
-    const thStyle = "cursor:pointer;user-select:none;white-space:nowrap";
+    const thBase = "cursor:pointer;user-select:none;white-space:nowrap";
+    // Explicit widths on th cells — table-layout:fixed uses first row widths
     const thead = "<thead><tr>" +
-      '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + '">#' + si("overallRank") + "</th>" +
-      '<th data-sort-col="teamName" style="' + thStyle + '">Team' + si("teamName") + "</th>" +
-      (hasConf ? '<th data-sort-col="conference" style="' + thStyle + '">Conf' + si("conference") + "</th>" : "") +
-      (hasDiv  ? '<th data-sort-col="division"   style="' + thStyle + '">Div'  + si("division")   + "</th>" : "") +
-      extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thStyle + '">' + col.label + si(col.key) + "</th>").join("") +
-      '<th class="standings-win"  data-sort-col="wins"   style="' + thStyle + '">W'  + si("wins")   + "</th>" +
-      '<th class="standings-loss" data-sort-col="losses" style="' + thStyle + '">L'  + si("losses") + "</th>" +
-      '<th class="standings-num"  data-sort-col="pf"     style="' + thStyle + '">PF' + si("pf")     + "</th>" +
-      '<th class="standings-num dim" data-sort-col="pa"  style="' + thStyle + '">PA' + si("pa")     + "</th>" +
+      '<th class="standings-rank" data-sort-col="overallRank" style="' + thBase + ';width:32px">#' + si("overallRank") + "</th>" +
+      '<th data-sort-col="teamName" style="' + thBase + '">Team' + si("teamName") + "</th>" +
+      (hasConf ? '<th data-sort-col="conference" style="' + thBase + ';width:52px">Conf' + si("conference") + "</th>" : "") +
+      (hasDiv  ? '<th data-sort-col="division"   style="' + thBase + ';width:52px">Div'  + si("division")   + "</th>" : "") +
+      extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thBase + '">' + col.label + si(col.key) + "</th>").join("") +
+      '<th class="standings-win"  data-sort-col="wins"   style="' + thBase + ';width:36px">W'  + si("wins")   + "</th>" +
+      '<th class="standings-loss" data-sort-col="losses" style="' + thBase + ';width:36px">L'  + si("losses") + "</th>" +
+      '<th class="standings-num"  data-sort-col="pf"     style="' + thBase + ';width:64px">PF' + si("pf")     + "</th>" +
+      '<th class="standings-num dim" data-sort-col="pa"  style="' + thBase + ';width:64px">PA' + si("pa")     + "</th>" +
       "</tr></thead>";
 
     const genderBadge = (g) => {
@@ -3202,47 +3200,58 @@ const DLRTournament = (() => {
     if (!picks.length) { el.innerHTML = `<div class="trn-empty">No picks available for this selection.</div>`; return; }
 
     const rounds = Math.max(...picks.map(p => p.round), 1);
-    const teams  = [...new Set(picks.map(p => p.teamId))];
-    // Build pick map: "round-slot" → pick
-    const pickMap = {};
-    picks.forEach(p => { pickMap[`${p.round}-${p.pick}`] = p; });
-    // Get slot order from round 1 picks sorted by pick number
-    const r1picks = picks.filter(p => p.round === 1).sort((a, b) => a.pick - b.pick);
+
+    // Build a teamId→picks-by-round lookup — works for all platforms
+    // regardless of how `pick` (slot within round) is encoded
+    const byTeamRound = {}; // teamId → { [round]: pick }
+    picks.forEach(p => {
+      if (!byTeamRound[p.teamId]) byTeamRound[p.teamId] = {};
+      // If multiple picks for same team/round (shouldn't happen), keep lowest overall
+      const existing = byTeamRound[p.teamId][p.round];
+      if (!existing || p.overall < existing.overall) {
+        byTeamRound[p.teamId][p.round] = p;
+      }
+    });
+
+    // Determine column order from round 1 sorted by overall pick number
+    const r1picks = picks.filter(p => p.round === 1).sort((a, b) => a.overall - b.overall);
     const slotOrder = r1picks.map(p => p.teamId);
-    // Add any teams missing from round 1
-    teams.forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
-    // Get team name for header
+    // Add any teams that didn't pick in round 1
+    Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
+
     const nameOf = (tid) => {
       const p = picks.find(pk => pk.teamId === tid);
       return p?.teamName || tid;
     };
 
+    // Detect snake: in round 2 the first overall pick should belong to the
+    // team that picked LAST in round 1 (i.e. slotOrder reversed)
+    const r2picks = picks.filter(p => p.round === 2).sort((a, b) => a.overall - b.overall);
+    const isSnake = r2picks.length > 0 && r2picks[0]?.teamId === slotOrder[slotOrder.length - 1];
+
     el.innerHTML = `
-      <div class="trn-az-meta">${_esc(leagueName || "Draft Board")} · ${rounds} rounds · ${slotOrder.length} teams</div>
+      <div class="trn-az-meta">${_esc(leagueName || "Draft Board")} · ${rounds} rounds · ${slotOrder.length} teams · ${isSnake ? "snake" : "linear"}</div>
       <div class="trn-draft-board-wrap">
         <table class="trn-draft-board">
           <thead><tr>
             <th class="trn-db-round-col">Rd</th>
-            ${slotOrder.map(tid => `<th class="trn-db-team-col">${_esc(nameOf(tid).slice(0, 12))}</th>`).join("")}
+            ${slotOrder.map(tid => `<th class="trn-db-team-col">${_esc(nameOf(tid).slice(0, 14))}</th>`).join("")}
           </tr></thead>
           <tbody>
             ${Array.from({ length: rounds }, (_, ri) => {
-              const round = ri + 1;
-              // snake: even rounds reverse slot order
-              const isSnake  = picks.some(p => p.round === 2 && p.pick === slotOrder.length);
+              const round    = ri + 1;
               const rowSlots = (isSnake && round % 2 === 0) ? [...slotOrder].reverse() : slotOrder;
               return `<tr>
                 <td class="trn-db-round-col">${round}</td>
-                ${rowSlots.map((tid, si) => {
-                  // Find pick for this team in this round
-                  const teamPicks = picks.filter(p => p.round === round && p.teamId === tid);
-                  const pk = teamPicks[0];
+                ${rowSlots.map(tid => {
+                  const pk = byTeamRound[tid]?.[round];
                   if (!pk) return `<td class="trn-db-cell trn-db-cell--empty">—</td>`;
                   const col = POS_COLOR[pk.position] || "#9ca3af";
+                  const lastName = (pk.name || "").split(" ").slice(-1)[0] || pk.name || "?";
                   return `<td class="trn-db-cell" title="${_esc(pk.name)} (${pk.position}) #${pk.overall}">
                     <div class="trn-db-pick">
                       <span class="trn-db-pos" style="background:${col}22;color:${col}">${pk.position}</span>
-                      <span class="trn-db-name">${_esc((pk.name || "").split(" ").pop() || pk.name)}</span>
+                      <span class="trn-db-name">${_esc(lastName)}</span>
                     </div>
                   </td>`;
                 }).join("")}
@@ -3388,6 +3397,8 @@ const DLRTournament = (() => {
     document.getElementById("trn-mu-refresh-btn")?.addEventListener("click", () => {
       const ck = `${year}_${_matchupsWeek}`;
       delete _matchupsCache[ck];
+      // Also clear Firebase cache so fresh data is fetched from Sleeper
+      _tAnalyticsRef(tid).child(`weeklyHighlights/${ck}`).remove().catch(() => {});
       _loadAndRenderMatchups(tid, t, sleeperLeagues, year, isAdmin, document.getElementById("trn-mu-content"));
     });
 
