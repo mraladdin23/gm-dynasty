@@ -430,12 +430,13 @@ const DLRTournament = (() => {
 
     const userOpts = `
       <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
-      <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>📬 Register</option>
       <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>📋 Rules</option>
       <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
       <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>📋 Draft</option>
       <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>🏈 Matchups</option>
       <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>🗂 Rosters</option>`;
+    const regOpen = ["registration_open","active"].includes(meta.status);
+    const regBtnHtml = (!showAdminNav && regOpen) ? `<button class="btn-primary btn-sm trn-reg-pill" id="trn-register-pill-btn">📬 Register</button>` : "";
 
     container.innerHTML = `
       <div class="trn-detail-container">
@@ -457,7 +458,10 @@ const DLRTournament = (() => {
             <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
             ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
           </div>
-          ${canAdmin && !_viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
+          <div style="display:flex;gap:var(--space-2);align-items:center;flex-shrink:0">
+            ${regBtnHtml}
+            ${canAdmin && !_viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
+          </div>
         </div>
 
         <!-- Global year + tab nav row -->
@@ -474,6 +478,10 @@ const DLRTournament = (() => {
 
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
+    document.getElementById("trn-register-pill-btn")?.addEventListener("click", () => {
+      // Open register as a full-page overlay rather than switching tabs
+      _openRegisterPage(tid, t);
+    });
     document.getElementById("trn-switch-view-btn")?.addEventListener("click", () => {
       _viewingAsUser = true;
       _activeUserTab = "info";
@@ -493,6 +501,7 @@ const DLRTournament = (() => {
       _matchupsCache = {};
       _recapCache    = {};
       _rostersCache  = null;
+      _matchupsWeek  = null; // reset week so it defaults to latest for the new year
       // Re-render current tab with new year
       const curTab = showAdminNav ? _activeAdminTab : _activeUserTab;
       _renderTab(tid, curTab, t, showAdminNav);
@@ -3038,19 +3047,59 @@ const DLRTournament = (() => {
         (lc.teams || []).forEach(tm => { teamMap[String(tm.teamId)] = tm.teamName; });
       });
 
-      // Normalize all picks
+      // Worker picks are already in normalized shape: { overall, round, pick, teamId, playerId, name, position }
+      // Just resolve teamNames from standingsCache and participant map, and
+      // improve player names via DLRPlayers where possible.
+      const pMap = _buildParticipantTeamMap(t);
+      const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
       const byLeague = {};
       let   allPicks = [];
+
       for (const [ck, lc] of Object.entries(allCached)) {
         if (!lc.picks?.length) continue;
-        const normalized = _normalizePicks(lc.picks, lc.platform, teamMap);
-        // Override teamName from participant map
-        const pMap = _buildParticipantTeamMap(t);
-        const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
-        normalized.forEach(p => {
-          const key = _sk(p.teamName || "");
-          if (pMap[key]) p.teamName = pMap[key].displayName;
-        });
+        const platform = lc.platform || "sleeper";
+
+        const normalized = lc.picks.map(p => {
+          // Resolve teamName: standingsCache → participant map → raw
+          let teamName = teamMap[String(p.teamId)] || p.teamName || String(p.teamId);
+          const key = _sk(teamName);
+          if (pMap[key]) teamName = pMap[key].displayName;
+
+          // Resolve player name/pos via DLRPlayers for Sleeper (has playerId)
+          let name = p.name || "Unknown";
+          let pos  = (p.position || "?").toUpperCase();
+          if (platform === "sleeper" && p.playerId && typeof DLRPlayers !== "undefined") {
+            const dp = DLRPlayers.get(p.playerId);
+            if (dp?.first_name) {
+              name = `${dp.first_name} ${dp.last_name}`.trim();
+              pos  = (dp.position || pos).toUpperCase();
+            }
+          } else if (platform === "yahoo" && p.playerId && typeof DLRPlayers !== "undefined") {
+            const map = DLRPlayers.getByYahooId(String(p.playerId));
+            const dp  = map?.sleeper_id ? DLRPlayers.get(map.sleeper_id) : null;
+            if (dp?.first_name) {
+              name = `${dp.first_name} ${dp.last_name}`.trim();
+              pos  = (dp.position || pos).toUpperCase();
+            } else if (map?.name) {
+              name = map.name;
+              pos  = (map.position || pos).toUpperCase();
+            }
+          }
+
+          return {
+            overall:  parseInt(p.overall || 1),
+            round:    parseInt(p.round   || 1),
+            pick:     parseInt(p.pick    || 1),
+            teamId:   String(p.teamId   || ""),
+            teamName,
+            playerId: String(p.playerId || ""),
+            name,
+            position: pos,
+            cost:     p.cost != null ? parseInt(p.cost) : null
+          };
+        }).filter(p => p.teamId && p.teamId !== "undefined" && p.teamId !== "null");
+
+        console.log(`[Draft] ${ck}: ${normalized.length} picks, platform=${platform}, sample:`, normalized[0]);
         byLeague[ck] = { ...lc, normalizedPicks: normalized };
         allPicks = allPicks.concat(normalized);
       }
@@ -3409,22 +3458,15 @@ const DLRTournament = (() => {
     if (!el) return;
     const ck = `${year}_${_matchupsWeek}`;
 
-    // Check memory cache
+    // Check memory cache (scores always present here since we built it this session)
     if (_matchupsCache[ck] && (Date.now() - _matchupsCache[ck].fetchedAt) < 300000) {
       _renderMatchupsContent(tid, t, el, _matchupsCache[ck].matchups, year, isAdmin);
       return;
     }
 
-    // Check Firebase cache
-    try {
-      const snap = await _tAnalyticsRef(tid).child(`weeklyHighlights/${ck}`).once("value");
-      const fbCached = snap.val();
-      if (fbCached?.matchups?.length && (Date.now() - (fbCached.fetchedAt || 0)) < 3600000) {
-        _matchupsCache[ck] = fbCached;
-        _renderMatchupsContent(tid, t, el, fbCached.matchups, year, isAdmin);
-        return;
-      }
-    } catch(e) {}
+    // Skip Firebase cache entirely for matchups — stale data may have wrong/missing
+    // diff and combined values. Always fetch fresh from Sleeper (fast, public API).
+    // Firebase is only used to store for the recap feature, not as a read cache.
 
     el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching week ${_matchupsWeek} matchups…</div>`;
 
@@ -3974,6 +4016,35 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
         <div class="trn-info-bio trn-rules-full">${htmlContent}</div>
       </div>
     `;
+  }
+
+  // ── Register page overlay (opened via pill button) ───────
+  function _openRegisterPage(tid, t) {
+    const container = document.getElementById("view-tournament");
+    if (!container) return;
+    const meta = t.meta || {};
+
+    // Save current scroll position, show overlay
+    const overlay = document.createElement("div");
+    overlay.id = "trn-register-overlay";
+    overlay.className = "trn-register-overlay";
+    overlay.innerHTML = `
+      <div class="trn-register-page">
+        <div class="trn-register-page-header">
+          <button class="btn-ghost btn-sm" id="trn-reg-back-btn">← Back to ${_esc(meta.name || "Tournament")}</button>
+          <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${_esc(meta.name || "Tournament")}</h2>
+        </div>
+        <div id="trn-register-page-body"></div>
+      </div>`;
+    container.appendChild(overlay);
+
+    document.getElementById("trn-reg-back-btn")?.addEventListener("click", () => {
+      overlay.remove();
+    });
+
+    // Render the registration form into the page body
+    const body = document.getElementById("trn-register-page-body");
+    if (body) _renderRegisterTab(tid, t, body);
   }
 
   // ── User: Register tab ─────────────────────────────────
