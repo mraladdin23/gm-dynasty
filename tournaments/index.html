@@ -327,13 +327,8 @@
       if (isDraft && hasStandings && _activeTab === "info") _activeTab = "standings";
 
       content.innerHTML = `
-        <div style="margin-bottom:var(--space-4);display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+        <div style="margin-bottom:var(--space-4)">
           <button id="pub-back-btn" class="btn-ghost btn-sm">← All Tournaments</button>
-          ${years.length > 0 ? `
-            <select id="pub-year-select" class="trn-filter-select" style="min-width:0;font-size:.85rem">
-              ${years.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
-            </select>
-          ` : ""}
         </div>
 
         <div class="trn-detail-title-row" style="margin-bottom:var(--space-4)">
@@ -366,11 +361,6 @@
         _selectedYear = null;
         _activeTab    = "info";
         loadDirectory();
-      });
-
-      document.getElementById("pub-year-select")?.addEventListener("change", function() {
-        _selectedYear = this.value ? parseInt(this.value) : null;
-        if (_activeTab === "standings") renderTab("standings");
       });
 
       document.querySelectorAll("[data-pub-tab]").forEach(tab => {
@@ -437,14 +427,19 @@
       const cache   = t.standingsCache || {};
       const rankBy  = t.rankBy || "record";
 
-      // Filter by selected year (null = all years)
+      // All available years
+      const allYears = [...new Set(Object.values(cache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a);
+      if (allYears.length && (_selectedYear === null || !allYears.includes(_selectedYear))) {
+        _selectedYear = allYears[0];
+      }
+
+      // Filter by selected year
       const entries = Object.entries(cache).filter(([, lc]) =>
         !_selectedYear || lc.year === _selectedYear
       );
 
       if (!entries.length) {
-        const yr = _selectedYear || "";
-        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No standings data${yr ? " for " + yr : ""}</div></div>`;
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No standings data${_selectedYear ? " for " + _selectedYear : ""}</div></div>`;
         return;
       }
 
@@ -484,10 +479,11 @@
       const hasConf     = conferences.length > 0;
       const lastStr     = lastSynced ? new Date(lastSynced).toLocaleString() : "Unknown";
 
-      sortAndRenderStandings(body, allRows, hasConf, lastStr);
+      sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears);
     }
 
-    function sortAndRenderStandings(body, allRows, hasConf, lastStr) {
+    function sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears) {
+      allYears = allYears || [];
       const mult = _stSort.dir === "asc" ? 1 : -1;
       const sorted = [...allRows].sort((a, b) => {
         const col = _stSort.col;
@@ -505,6 +501,9 @@
 
       body.innerHTML = `
         <div class="trn-standings-toolbar">
+          ${allYears.length > 1 ? `<select id="pub-st-year" class="trn-filter-select" style="margin-bottom:var(--space-2);display:block;width:auto">
+            ${allYears.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
+          </select>` : ""}
           <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
         </div>
         <div class="trn-standings-meta">
@@ -538,6 +537,12 @@
           </table>
         </div>`;
 
+      // Year select (if rendered inside toolbar)
+      document.getElementById("pub-st-year")?.addEventListener("change", function() {
+        _selectedYear = this.value ? parseInt(this.value) : null;
+        renderStandingsTab(body);
+      });
+
       // Search
       document.getElementById("pub-st-search")?.addEventListener("input", function() {
         const q = this.value.toLowerCase();
@@ -553,7 +558,7 @@
           const col = th.dataset.col;
           if (_stSort.col === col) _stSort.dir = _stSort.dir === "asc" ? "desc" : "asc";
           else { _stSort.col = col; _stSort.dir = "asc"; }
-          sortAndRenderStandings(body, allRows, hasConf, lastStr);
+          sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears);
         });
       });
     }
