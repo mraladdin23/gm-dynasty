@@ -1841,18 +1841,17 @@ const DLRTournament = (() => {
       return '<span style="margin-left:3px;font-size:.65rem">' + (_standingsSort.dir === "asc" ? "↑" : "↓") + "</span>";
     };
 
-    const thStyle = "cursor:pointer;user-select:none";
-    const w = (px) => "width:" + px + "px;min-width:" + px + "px;max-width:" + px + "px;";
+    const thStyle = "cursor:pointer;user-select:none;white-space:nowrap";
     const thead = "<thead><tr>" +
-      '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + ";width:28px" + '">#' + si("overallRank") + "</th>" +
+      '<th class="standings-rank" data-sort-col="overallRank" style="' + thStyle + '">#' + si("overallRank") + "</th>" +
       '<th data-sort-col="teamName" style="' + thStyle + '">Team' + si("teamName") + "</th>" +
-      (hasConf ? '<th data-sort-col="conference" style="' + thStyle + ";width:48px" + '">Conf' + si("conference") + "</th>" : "") +
-      (hasDiv  ? '<th data-sort-col="division"   style="' + thStyle + ";width:48px" + '">Div'  + si("division")   + "</th>" : "") +
+      (hasConf ? '<th data-sort-col="conference" style="' + thStyle + '">Conf' + si("conference") + "</th>" : "") +
+      (hasDiv  ? '<th data-sort-col="division"   style="' + thStyle + '">Div'  + si("division")   + "</th>" : "") +
       extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thStyle + '">' + col.label + si(col.key) + "</th>").join("") +
-      '<th class="standings-win"  data-sort-col="wins"   style="' + thStyle + ";width:30px" + '">W'  + si("wins")   + "</th>" +
-      '<th class="standings-loss" data-sort-col="losses" style="' + thStyle + ";width:30px" + '">L'  + si("losses") + "</th>" +
-      '<th class="standings-num"  data-sort-col="pf"     style="' + thStyle + ";width:58px" + '">PF' + si("pf")     + "</th>" +
-      '<th class="standings-num dim" data-sort-col="pa"  style="' + thStyle + ";width:58px" + '">PA' + si("pa")     + "</th>" +
+      '<th class="standings-win"  data-sort-col="wins"   style="' + thStyle + '">W'  + si("wins")   + "</th>" +
+      '<th class="standings-loss" data-sort-col="losses" style="' + thStyle + '">L'  + si("losses") + "</th>" +
+      '<th class="standings-num"  data-sort-col="pf"     style="' + thStyle + '">PF' + si("pf")     + "</th>" +
+      '<th class="standings-num dim" data-sort-col="pa"  style="' + thStyle + '">PA' + si("pa")     + "</th>" +
       "</tr></thead>";
 
     const genderBadge = (g) => {
@@ -3063,8 +3062,13 @@ const DLRTournament = (() => {
           <div class="trn-empty">
             <div class="trn-empty-icon">📋</div>
             <div class="trn-empty-title">No draft data yet</div>
-            <div class="trn-empty-sub">Draft data will appear once leagues have completed their startup drafts and the worker has fetched them.</div>
+            <div class="trn-empty-sub">Draft data will appear once leagues have completed their startup drafts. Click Refresh to try again.</div>
+            <button class="btn-secondary btn-sm" id="trn-draft-empty-refresh" style="margin-top:var(--space-4)">↺ Refresh</button>
           </div>`;
+        document.getElementById("trn-draft-empty-refresh")?.addEventListener("click", () => {
+          _draftCache = null;
+          _renderAnalyticsDraft(tid, t, body);
+        });
         return;
       }
       const adp = _computeADP(allPicks);
@@ -3473,10 +3477,19 @@ const DLRTournament = (() => {
   }
 
   async function _renderMatchupsContent(tid, t, el, matchups, year, isAdmin) {
-    const sorted    = [...matchups].sort((a, b) => a.diff - b.diff);
+    // Recompute diff/combined from raw scores — these may be missing when
+    // loaded from Firebase cache where undefined fields are stripped
+    const enriched = matchups.map(m => ({
+      ...m,
+      diff:     Math.abs((m.home?.score || 0) - (m.away?.score || 0)),
+      combined: (m.home?.score || 0) + (m.away?.score || 0),
+      winner:   m.winner || ((m.home?.score || 0) >= (m.away?.score || 0) ? m.home?.name : m.away?.name)
+    })).filter(m => m.home?.score > 0 || m.away?.score > 0);
+
+    const sorted    = [...enriched].sort((a, b) => a.diff - b.diff);
     const closest   = sorted.slice(0, 5);
-    const blowouts  = [...matchups].sort((a, b) => b.diff - a.diff).slice(0, 5);
-    const highest   = [...matchups].sort((a, b) => b.combined - a.combined).slice(0, 3);
+    const blowouts  = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
+    const highest   = [...enriched].sort((a, b) => b.combined - a.combined).slice(0, 3);
     const ck        = `${year}_${_matchupsWeek}`;
 
     // Lazy-load recap from Firebase if not in memory cache
@@ -3508,7 +3521,7 @@ const DLRTournament = (() => {
     };
 
     el.innerHTML = `
-      <div class="trn-az-meta">Week ${_matchupsWeek} · ${matchups.length} matchups across ${new Set(matchups.map(m => m.leagueId)).size} leagues</div>
+      <div class="trn-az-meta">Week ${_matchupsWeek} · ${enriched.length} matchups across ${new Set(enriched.map(m => m.leagueId)).size} leagues</div>
 
       <div class="trn-az-section-title">🔥 Closest Games</div>
       <div class="trn-mu-list">
@@ -3550,14 +3563,14 @@ const DLRTournament = (() => {
 
     if (isAdmin) {
       document.getElementById("trn-recap-prompt-btn")?.addEventListener("click", () => {
-        const prompt = _buildRecapPrompt(t, matchups, year);
+        const prompt = _buildRecapPrompt(t, enriched, year);
         navigator.clipboard?.writeText(prompt).then(() => showToast("Prompt copied — paste into claude.ai ✓"))
           .catch(() => { showToast("Copy failed — see console", "error"); console.log(prompt); });
         // Also reveal the paste-in editor
-        _showRecapEditor(tid, t, matchups, year);
+        _showRecapEditor(tid, t, enriched, year);
       });
       document.getElementById("trn-recap-edit-btn")?.addEventListener("click", () => {
-        _showRecapEditor(tid, t, matchups, year, recapData?.content || "");
+        _showRecapEditor(tid, t, enriched, year, recapData?.content || "");
       });
     }
   }
