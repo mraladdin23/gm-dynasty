@@ -320,6 +320,15 @@ export default {
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
+      // ── Tournament: fetch draft picks for one league ──────────────────────────
+      if (path === "/tournament/draft" && req.method === "POST") {
+        const { leagueId, platform, year, yahooToken, mflCookie } = await req.json();
+        if (!leagueId || !platform) {
+          return new Response(JSON.stringify({ error: "Missing leagueId or platform" }), { status: 400, headers: corsHeaders() });
+        }
+        return tournamentDraft(leagueId, platform, year, yahooToken, mflCookie);
+      }
+
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders() });
@@ -1013,6 +1022,233 @@ function mflHeaders(extra = {}) {
     "User-Agent": "DynastyLockerRoom/1.0 (dynastylockerroom.com)",
     ...extra
   };
+}
+
+// ── Tournament: draft picks fetcher ──────────────────────────────────────────
+// Fetches and normalizes draft picks for a single league.
+// Returns { picks: [{ overall, round, pick, teamId, playerId, name, position, cost }] }
+async function tournamentDraft(leagueId, platform, year, yahooToken, mflCookie) {
+  const season = year || new Date().getFullYear();
+
+  // ── Sleeper ────────────────────────────────────────────────────────────────
+  if (platform === "sleeper") {
+    try {
+      const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+      if (!draftsRes.ok) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
+      const drafts = await draftsRes.json();
+      if (!drafts?.length) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
+
+      // Prefer completed startup/snake draft; fall back to any complete draft
+      const sorted = [...drafts].sort((a, b) => {
+        const rank = t => (t === "snake" || t === "startup") ? 0 : 1;
+        return rank(a.type) - rank(b.type) || (a.start_time || 0) - (b.start_time || 0);
+      });
+      const draft = sorted.find(d => d.status === "complete") || sorted[0];
+      if (!draft) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
+
+      const picksRes = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
+      if (!picksRes.ok) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
+      const rawPicks = await picksRes.json();
+      const teams = draft.settings?.teams || 12;
+
+      const picks = (rawPicks || []).map(p => ({
+        overall:  (p.round - 1) * teams + (p.draft_slot || 1),
+        round:    p.round,
+        pick:     p.draft_slot || 1,
+        teamId:   String(p.roster_id || ""),
+        playerId: p.player_id || "",
+        name:     p.metadata ? `${p.metadata.first_name || ""} ${p.metadata.last_name || ""}`.trim() : "",
+        position: (p.metadata?.position || "?").toUpperCase(),
+        cost:     null
+      })).filter(p => p.teamId && p.teamId !== "undefined");
+
+      return new Response(JSON.stringify({ picks }), { headers: corsHeaders() });
+    } catch(e) {
+      return new Response(JSON.stringify({ picks: [], error: e.message }), { headers: corsHeaders() });
+    }
+  }
+
+  // ── MFL ─────────────────────────────────────────────────────────────────────
+  if (platform === "mfl") {
+    try {
+      const cookieHdr = mflCookie ? `MFL_USER_ID=${mflCookie}` : "";
+      const headers   = mflHeaders(cookieHdr ? { Cookie: cookieHdr } : {});
+
+      // Fetch draft results and league (for franchise names)
+      const [draftRes, leagueRes] = await Promise.all([
+        fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=draftResults&L=${leagueId}&JSON=1`, { headers }),
+        fetch(`https://api.myfantasyleague.com/${season}/export?TYPE=league&L=${leagueId}&JSON=1`, { headers })
+      ]);
+
+      const draftData  = draftRes.ok  ? await draftRes.json().catch(() => null)  : null;
+      const leagueData = leagueRes.ok ? await leagueRes.json().catch(() => null) : null;
+
+      // Build franchise name map
+      const nameMap = {};
+      const frArr   = leagueData?.league?.franchises?.franchise || [];
+      (Array.isArray(frArr) ? frArr : [frArr]).forEach(f => { if (f.id) nameMap[f.id] = f.name || f.id; });
+
+      // MFL draftResults shape: draftResults.draftUnit (array or object) → each unit has draftPick[]
+      const units = draftData?.draftResults?.draftUnit;
+      const unitArr = Array.isArray(units) ? units : (units ? [units] : []);
+      const picks = [];
+
+      unitArr.forEach(unit => {
+        const rawPicks = unit.draftPick;
+        const pickArr  = Array.isArray(rawPicks) ? rawPicks : (rawPicks ? [rawPicks] : []);
+        pickArr.forEach((p, i) => {
+          const round   = parseInt(p.round  || 1);
+          const pick    = parseInt(p.pick   || i + 1);
+          const teamId  = String(p.franchise || p.franchiseId || "");
+          const overall = parseInt(p.overall || ((round - 1) * Object.keys(nameMap).length + pick));
+          picks.push({
+            overall,
+            round,
+            pick,
+            teamId,
+            teamName: nameMap[teamId] || teamId,
+            playerId: String(p.player || ""),
+            name:     p.playerName  || p.name || "",
+            position: (p.position   || "?").toUpperCase(),
+            cost:     p.price != null ? parseInt(p.price) : null
+          });
+        });
+      });
+
+      return new Response(JSON.stringify({ picks }), { headers: corsHeaders() });
+    } catch(e) {
+      return new Response(JSON.stringify({ picks: [], error: e.message }), { headers: corsHeaders() });
+    }
+  }
+
+  // ── Yahoo ────────────────────────────────────────────────────────────────────
+  if (platform === "yahoo") {
+    if (!yahooToken) return new Response(JSON.stringify({ picks: [], error: "Yahoo token required" }), { headers: corsHeaders() });
+    try {
+      const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
+      const authHdr = { Authorization: `Bearer ${yahooToken}`, Accept: "application/json" };
+      const leagueKey = leagueId.includes(".l.") ? leagueId : leagueId;
+
+      // Reuse the existing Yahoo draft parser from yahooLeagueBundle
+      // by fetching just the draftresults endpoint
+      const r = await fetch(`${base}/league/${leagueKey}/draftresults?format=json`, { headers: authHdr });
+      if (!r.ok) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
+      const draftData = await r.json().catch(() => null);
+
+      // ── Parse using the same multi-shape logic as yahooLeagueBundle ──────────
+      function yahooPlayerId(pk) {
+        if (!pk) return null;
+        const parts = String(pk).split(".");
+        return parts[parts.length - 1] || String(pk);
+      }
+
+      let draftArr = [];
+      if (draftData?.draft_results !== undefined) {
+        const dr = draftData.draft_results;
+        if (Array.isArray(dr)) draftArr = dr;
+        else if (dr && typeof dr === "object") {
+          const count = parseInt(dr.count) || Object.keys(dr).filter(k => k !== "count").length;
+          for (let i = 0; i < count; i++) { if (dr[String(i)]) draftArr.push(dr[String(i)]); }
+        }
+      }
+      if (!draftArr.length) {
+        const dLeague  = draftData?.fantasy_content?.league;
+        const dLeague1 = Array.isArray(dLeague) ? dLeague[1] : dLeague?.[1];
+        const dResults = dLeague1?.draft_results;
+        let dContainer;
+        if (Array.isArray(dResults)) dContainer = dResults[0];
+        else if (dResults && typeof dResults === "object") dContainer = dResults;
+        if (dContainer) {
+          const draftRaw = dContainer.draft_result;
+          if (Array.isArray(draftRaw)) {
+            draftArr = draftRaw.map(e => e?.draft_result || e).filter(Boolean);
+          } else if (draftRaw && typeof draftRaw === "object") {
+            const count = parseInt(draftRaw.count) || Object.keys(draftRaw).filter(k => k !== "count").length;
+            for (let i = 0; i < count; i++) {
+              const entry = draftRaw[String(i)];
+              if (entry) draftArr.push(entry.draft_result || entry);
+            }
+          } else {
+            const numericKeys = Object.keys(dContainer).filter(k => !isNaN(k));
+            numericKeys.forEach(k => {
+              const entry = dContainer[k];
+              if (entry) draftArr.push(entry.draft_result || entry);
+            });
+          }
+        }
+      }
+
+      const picks = draftArr.map((p, i) => {
+        if (!p) return null;
+        const rawPid = p.player_key || p.player_id;
+        const rawTid = p.team_key   || p.team_id;
+        return {
+          overall:  parseInt(p.pick  || i + 1),
+          round:    parseInt(p.round || 1),
+          pick:     parseInt(p.pick  || i + 1),
+          teamId:   String(rawTid || "").split(".").pop(),
+          playerId: yahooPlayerId(rawPid),
+          name:     p.player_name || p.name || "",
+          position: (p.position   || "?").toUpperCase(),
+          cost:     p.cost != null ? parseInt(p.cost) : null
+        };
+      }).filter(Boolean);
+
+      return new Response(JSON.stringify({ picks }), { headers: corsHeaders() });
+    } catch(e) {
+      return new Response(JSON.stringify({ picks: [], error: e.message }), { headers: corsHeaders() });
+    }
+  }
+
+  return new Response(JSON.stringify({ picks: [], error: "Unsupported platform: " + platform }), { headers: corsHeaders() });
+}
+
+// ── Tournament: AI recap generator ────────────────────────────────────────────
+// Calls Claude API with a structured weekly summary and returns markdown recap.
+async function tournamentRecap(body, env) {
+  const { tournamentName, week, year, totalMatchups, closestGames, biggestBlowouts, highestScorer, avgScore } = body;
+
+  if (!env.ANTHROPIC_API_KEY) {
+    return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }), { status: 500, headers: corsHeaders() });
+  }
+
+  const prompt = `You are a fun, witty fantasy football analyst writing a brief weekly recap for a large multi-league tournament called "${tournamentName || "the tournament"}".
+
+Week ${week || "?"} Summary Data:
+- ${totalMatchups || 0} total matchups across leagues
+- Average score: ${avgScore || "N/A"} pts
+- Closest games: ${(closestGames || []).join("; ") || "N/A"}
+- Biggest blowouts: ${(biggestBlowouts || []).join("; ") || "N/A"}
+- Highest scorer: ${highestScorer || "N/A"}
+
+Write a 3-4 paragraph weekly recap in an engaging, sports-analyst style. Mention the closest game, the biggest blowout, and the top scorer. Keep it punchy and fun — like an ESPN segment. Use **bold** for team names and scores. Keep total length under 300 words.`;
+
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type":      "application/json",
+        "x-api-key":         env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model:      "claude-haiku-4-5-20251001",
+        max_tokens: 600,
+        messages:   [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!r.ok) {
+      const errText = await r.text();
+      return new Response(JSON.stringify({ error: "Claude API error", detail: errText.slice(0, 300) }), { status: 500, headers: corsHeaders() });
+    }
+
+    const data   = await r.json();
+    const recap  = data?.content?.[0]?.text || "";
+    return new Response(JSON.stringify({ recap }), { headers: corsHeaders() });
+  } catch(e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders() });
+  }
 }
 
 function corsHeaders() {

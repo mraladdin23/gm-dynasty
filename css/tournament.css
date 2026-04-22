@@ -298,10 +298,11 @@
   width: 100%;
   border-collapse: collapse;
   font-size: .85rem;
+  table-layout: fixed;
 }
 
 .standings-table thead th {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-2);
   text-align: left;
   font-size: .72rem;
   font-weight: 700;
@@ -310,6 +311,7 @@
   color: var(--color-text-dim);
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .standings-table tbody tr {
@@ -320,15 +322,21 @@
 .standings-table tbody tr:hover { background: rgba(255,255,255,.03); }
 
 .standings-table tbody td {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-2);
   vertical-align: middle;
+  overflow: hidden;
 }
 
-.standings-rank  { width: 36px; text-align: center; font-weight: 700; color: var(--color-text-dim); }
-.standings-win   { text-align: center; color: var(--color-green); font-weight: 600; }
-.standings-loss  { text-align: center; color: var(--color-red, #ef4444); font-weight: 600; }
-.standings-num   { text-align: right; font-variant-numeric: tabular-nums; }
+/* Fixed widths for numeric cols — keeps table narrow on mobile */
+.standings-rank  { width: 28px; text-align: center; font-weight: 700; color: var(--color-text-dim); }
+.standings-win   { width: 30px; text-align: center; color: var(--color-green); font-weight: 600; }
+.standings-loss  { width: 30px; text-align: center; color: var(--color-red, #ef4444); font-weight: 600; }
+.standings-num   { width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
 .standings-num.dim { color: var(--color-text-dim); }
+
+/* Team name cell: takes all remaining width */
+.standings-table th:nth-child(2),
+.standings-table td:nth-child(2) { width: auto; min-width: 0; }
 
 .standings-team-cell {
   display: inline-flex;
@@ -1228,4 +1236,75 @@
   color: var(--color-text);
   padding: var(--space-3);
   box-sizing: border-box;
+}
+
+/* ── P3b: Nav row (year + tab select) ───────────────── */
+.trn-nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-2);
+  flex-wrap: wrap;
+}
+.trn-year-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.trn-year-label {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+/* Main tab select — wider than the year filter */
+.trn-tab-select--main {
+  flex: 1;
+  min-width: 160px;
+  font-size: .88rem;
+  padding: 6px 10px;
+}
+
+/* ── "You" badge ─────────────────────────────────────── */
+.trn-you-badge {
+  display: inline-block;
+  font-size: .6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 1px 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: #fff;
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+
+/* ── Analytics rows: "me" highlight ─────────────────── */
+.trn-az-row--me {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent) !important;
+  border-radius: var(--radius-sm);
+}
+.trn-mu-row--me {
+  border-color: var(--color-accent) !important;
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+.trn-roster-card--me .trn-roster-card-header {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface-alt, var(--color-border)));
+}
+
+/* ── Card actions: two buttons side by side ──────────── */
+.trn-card-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .trn-nav-row { gap: var(--space-2); }
+  .trn-tab-select--main { font-size: .82rem; }
 }
