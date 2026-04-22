@@ -352,6 +352,11 @@
           ${hasStandings ? `<button class="trn-tab ${_activeTab === "standings" ? "active" : ""}" data-pub-tab="standings">Standings</button>` : ""}
           ${regOpen      ? `<button class="trn-tab ${_activeTab === "register"  ? "active" : ""}" data-pub-tab="register">Register</button>` : ""}
         </div>
+        <select class="trn-tab-select" id="pub-tab-select">
+          ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>Info</option>` : ""}
+          ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>Standings</option>` : ""}
+          ${regOpen      ? `<option value="register" ${_activeTab === "register" ? "selected" : ""}>Register</option>` : ""}
+        </select>
 
         <div id="pub-tab-body" class="trn-tab-body"></div>
       `;
@@ -373,8 +378,18 @@
           document.querySelectorAll("[data-pub-tab]").forEach(t => t.classList.remove("active"));
           tab.classList.add("active");
           _activeTab = tab.dataset.pubTab;
+          const sel = document.getElementById("pub-tab-select");
+          if (sel) sel.value = _activeTab;
           renderTab(_activeTab);
         });
+      });
+
+      document.getElementById("pub-tab-select")?.addEventListener("change", function() {
+        _activeTab = this.value;
+        document.querySelectorAll("[data-pub-tab]").forEach(t => {
+          t.classList.toggle("active", t.dataset.pubTab === _activeTab);
+        });
+        renderTab(_activeTab);
       });
 
       renderTab(_activeTab);
@@ -482,41 +497,42 @@
       });
 
       const si = (col) => {
-        const active = _stSort.col === col;
-        return `<span class="trn-st-sort-icon${active ? " trn-st-sort-icon--active" : ""}">${active ? (_stSort.dir === "asc" ? "↑" : "↓") : "⇅"}</span>`;
+        if (_stSort.col !== col) return '<span style="margin-left:3px;font-size:.65rem;opacity:.4">⇅</span>';
+        return '<span style="margin-left:3px;font-size:.65rem">' + (_stSort.dir === "asc" ? "↑" : "↓") + "</span>";
       };
 
+      const thStyle = "cursor:pointer;user-select:none";
+
       body.innerHTML = `
-        <div style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+        <div class="trn-standings-toolbar">
+          <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
+        </div>
+        <div class="trn-standings-meta">
           Last synced: ${esc(lastStr)} &middot; ${allRows.length} teams
         </div>
-        <div style="margin-bottom:var(--space-3)">
-          <input type="text" id="pub-st-search" placeholder="Search team or league"
-            style="width:100%;padding:8px 12px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);color:var(--color-text);font-size:.85rem" />
-        </div>
-        <div class="trn-standings-table-wrap">
-          <table class="trn-standings-table" id="pub-st-table">
+        <div class="standings-table-wrap">
+          <table class="standings-table" id="pub-st-table">
             <thead><tr>
-              <th class="trn-st-th trn-st-th--num" data-col="overallRank">Rank ${si("overallRank")}</th>
-              <th class="trn-st-th" data-col="teamName">Team ${si("teamName")}</th>
-              <th class="trn-st-th" data-col="leagueName">League ${si("leagueName")}</th>
-              ${hasConf ? `<th class="trn-st-th" data-col="conference">Conf ${si("conference")}</th>` : ""}
-              <th class="trn-st-th trn-st-th--num" data-col="wins">W ${si("wins")}</th>
-              <th class="trn-st-th trn-st-th--num" data-col="losses">L ${si("losses")}</th>
-              <th class="trn-st-th trn-st-th--num" data-col="pf">PF ${si("pf")}</th>
-              <th class="trn-st-th trn-st-th--num" data-col="pa">PA ${si("pa")}</th>
+              <th class="standings-rank" data-col="overallRank" style="${thStyle}">#${si("overallRank")}</th>
+              <th data-col="teamName" style="${thStyle}">Team${si("teamName")}</th>
+              <th data-col="leagueName" style="${thStyle};color:var(--color-text-dim)">League${si("leagueName")}</th>
+              ${hasConf ? `<th data-col="conference" style="${thStyle}">Conf${si("conference")}</th>` : ""}
+              <th class="standings-win"  data-col="wins"   style="${thStyle}">W${si("wins")}</th>
+              <th class="standings-loss" data-col="losses" style="${thStyle}">L${si("losses")}</th>
+              <th class="standings-num"  data-col="pf"     style="${thStyle}">PF${si("pf")}</th>
+              <th class="standings-num dim" data-col="pa"  style="${thStyle}">PA${si("pa")}</th>
             </tr></thead>
             <tbody id="pub-st-tbody">
               ${sorted.map(r => `
-                <tr class="trn-st-row" data-name="${esc(r.teamName.toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
-                  <td class="trn-st-td trn-st-td--num trn-st-rank">${r.overallRank}</td>
-                  <td class="trn-st-td trn-st-td--name">${esc(r.teamName)}</td>
-                  <td class="trn-st-td trn-st-td--league">${esc(r.leagueName)}</td>
-                  ${hasConf ? `<td class="trn-st-td">${esc(r.conference)}</td>` : ""}
-                  <td class="trn-st-td trn-st-td--num">${r.wins}</td>
-                  <td class="trn-st-td trn-st-td--num">${r.losses}</td>
-                  <td class="trn-st-td trn-st-td--num">${r.pf.toFixed(2)}</td>
-                  <td class="trn-st-td trn-st-td--num">${r.pa.toFixed(2)}</td>
+                <tr data-name="${esc(r.teamName.toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
+                  <td class="standings-rank">${r.overallRank}</td>
+                  <td><span class="standings-team-cell"><span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>${esc(r.teamName)}</span></td>
+                  <td style="color:var(--color-text-dim);font-size:.78rem">${esc(r.leagueName)}</td>
+                  ${hasConf ? `<td>${esc(r.conference)}</td>` : ""}
+                  <td class="standings-win">${r.wins}</td>
+                  <td class="standings-loss">${r.losses}</td>
+                  <td class="standings-num">${r.pf.toFixed(2)}</td>
+                  <td class="standings-num dim">${r.pa.toFixed(2)}</td>
                 </tr>`).join("")}
             </tbody>
           </table>
