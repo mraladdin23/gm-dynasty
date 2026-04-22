@@ -151,6 +151,7 @@
 
   <!-- ── Firebase SDK ── -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <script src="../firebase/config.js"></script>
 
@@ -188,9 +189,9 @@
     });
 
     // ── Load and render ─────────────────────────────────────
-    const db      = firebase.database();
-    const pubRef  = () => db.ref("gmd/publicTournaments");
-    const tRef    = (tid) => db.ref("gmd/publicTournaments/" + tid);
+    const _pubDb   = firebase.database();
+    const pubRef  = () => _pubDb.ref("gmd/publicTournaments");
+    const tRef    = (tid) => _pubDb.ref("gmd/publicTournaments/" + tid);
 
     function esc(s) {
       return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -328,12 +329,11 @@
       content.innerHTML = `
         <div style="margin-bottom:var(--space-4);display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
           <button id="pub-back-btn" class="btn-ghost btn-sm">← All Tournaments</button>
-          ${years.length > 1 ? `
+          ${years.length > 0 ? `
             <select id="pub-year-select" class="trn-filter-select" style="min-width:0;font-size:.85rem">
-              <option value="">All Years</option>
               ${years.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
             </select>
-          ` : years.length === 1 ? `<span style="font-size:.85rem;color:var(--color-text-dim);font-weight:600">${years[0]}</span>` : ""}
+          ` : ""}
         </div>
 
         <div class="trn-detail-title-row" style="margin-bottom:var(--space-4)">
@@ -635,11 +635,11 @@
 
       try {
         const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-        await db.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
+        await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
 
         // Also update public registrationCount
         const newCount = (_currentT.registrationCount || 0) + 1;
-        await db.ref("gmd/publicTournaments/" + _currentTid + "/registrationCount").set(newCount);
+        await _pubDb.ref("gmd/publicTournaments/" + _currentTid + "/registrationCount").set(newCount);
         _currentT.registrationCount = newCount;
 
         const body = document.getElementById("pub-tab-body");
