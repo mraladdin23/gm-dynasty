@@ -2972,6 +2972,8 @@ const DLRTournament = (() => {
   let _draftLeague   = "all"; // current league filter
   let _draftView     = "adp"; // "adp" | "board" | "card"
   let _draftCardTeam = null;
+  let _draftPosFilter = "all"; // position filter for ADP view
+  let _draftSearch    = "";    // team search for board/card
 
   async function _renderAnalyticsDraft(tid, t, body) {
     await DLRPlayers.load().catch(() => {});
@@ -3055,8 +3057,11 @@ const DLRTournament = (() => {
       const byLeague = {};
       let   allPicks = [];
 
+      const activeYear = _tournamentYear || new Date().getFullYear();
       for (const [ck, lc] of Object.entries(allCached)) {
         if (!lc.picks?.length) continue;
+        // Only include picks for the currently selected year
+        if (lc.year && parseInt(lc.year) !== parseInt(activeYear)) continue;
         const platform = lc.platform || "sleeper";
 
         const normalized = lc.picks.map(p => {
@@ -3145,21 +3150,41 @@ const DLRTournament = (() => {
 
     const leagueOpts = leagues.map(l => `<option value="${_esc(l.cacheKey)}">${_esc(l.leagueName)}</option>`).join("");
 
+    // Auto-select current user's team for card view
+    if (_draftView === "card" && !_draftCardTeam) {
+      const myKeys = _findMyKeys(t);
+      if (myKeys.size) {
+        const myTeam = teams.find(([, name]) => _isMyTeam(name, myKeys));
+        if (myTeam) _draftCardTeam = myTeam[0];
+      }
+    }
+
+    const selStyle = "font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)";
+    const POS_LIST = ["QB","RB","WR","TE","K","DEF"];
+
     body.innerHTML = `
       <div class="trn-az-toolbar">
         <div class="trn-az-view-pills">
-          <button class="trn-az-pill ${_draftView === "adp" ? "active" : ""}" data-view="adp">📊 ADP List</button>
-          <button class="trn-az-pill ${_draftView === "board" ? "active" : ""}" data-view="board">📋 Draft Board</button>
-          <button class="trn-az-pill ${_draftView === "card" ? "active" : ""}" data-view="card">🃏 Share Card</button>
+          <button class="trn-az-pill ${_draftView === "adp"   ? "active" : ""}" data-view="adp">📊 ADP</button>
+          <button class="trn-az-pill ${_draftView === "board" ? "active" : ""}" data-view="board">📋 Board</button>
+          <button class="trn-az-pill ${_draftView === "card"  ? "active" : ""}" data-view="card">🃏 Card</button>
         </div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+          ${_draftView === "adp" ? `
+            <select id="trn-draft-pos-filter" style="${selStyle}">
+              <option value="all" ${_draftPosFilter === "all" ? "selected" : ""}>All Positions</option>
+              ${POS_LIST.map(p => `<option value="${p}" ${_draftPosFilter === p ? "selected" : ""}>${p}</option>`).join("")}
+            </select>` : ""}
           ${_draftView === "board" ? `
-            <select id="trn-draft-league-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+            <select id="trn-draft-league-sel" style="${selStyle}">
               <option value="all">All Leagues</option>
               ${leagueOpts}
             </select>` : ""}
           ${_draftView === "card" ? `
-            <select id="trn-draft-card-team" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+            <input type="text" id="trn-draft-team-search" placeholder="Search team…"
+              value="${_esc(_draftSearch)}"
+              style="${selStyle};min-width:120px" />
+            <select id="trn-draft-card-team" style="${selStyle}">
               <option value="">— Select team —</option>
               ${teams.map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(name)}</option>`).join("")}
             </select>` : ""}
@@ -3172,16 +3197,33 @@ const DLRTournament = (() => {
     body.querySelectorAll(".trn-az-pill").forEach(btn => {
       btn.addEventListener("click", () => {
         _draftView = btn.dataset.view;
+        _draftSearch = "";
         _renderDraftView(tid, t, body, cache);
       });
     });
     document.getElementById("trn-draft-refresh-btn")?.addEventListener("click", () => {
       _draftCache = null;
+      _draftPosFilter = "all";
+      _draftSearch = "";
       _renderAnalyticsDraft(tid, t, body);
     });
     document.getElementById("trn-draft-league-sel")?.addEventListener("change", function() {
       _draftLeague = this.value;
       _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
+    });
+    document.getElementById("trn-draft-pos-filter")?.addEventListener("change", function() {
+      _draftPosFilter = this.value;
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
+    });
+    // Team search: filter the card-team select options live
+    document.getElementById("trn-draft-team-search")?.addEventListener("input", function() {
+      _draftSearch = this.value.toLowerCase();
+      const sel = document.getElementById("trn-draft-card-team");
+      if (!sel) return;
+      // Rebuild options filtered by search
+      sel.innerHTML = `<option value="">— Select team —</option>` +
+        teams.filter(([, name]) => !_draftSearch || name.toLowerCase().includes(_draftSearch))
+          .map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(name)}</option>`).join("");
     });
     document.getElementById("trn-draft-card-team")?.addEventListener("change", function() {
       _draftCardTeam = this.value || null;
@@ -3210,13 +3252,19 @@ const DLRTournament = (() => {
   function _renderDraftADP(el, adp, t) {
     if (!adp.length) { el.innerHTML = `<div class="trn-empty">No draft data available yet.</div>`; return; }
     const myKeys  = _findMyKeys(t || {});
+    // Apply position filter
+    const filtered = (_draftPosFilter && _draftPosFilter !== "all")
+      ? adp.filter(p => p.position === _draftPosFilter)
+      : adp;
     const groups = { QB:[], RB:[], WR:[], TE:[], K:[], DEF:[], Other:[] };
-    adp.forEach(p => {
+    filtered.forEach(p => {
       const pos = p.position || "?";
       const key = groups[pos] ? pos : "Other";
       groups[key].push(p);
     });
-    const posOrder = ["QB","RB","WR","TE","K","DEF","Other"];
+    const posOrder = _draftPosFilter !== "all"
+      ? [_draftPosFilter, "Other"]
+      : ["QB","RB","WR","TE","K","DEF","Other"];
 
     el.innerHTML = `
       <div class="trn-az-meta">${adp.length} players drafted across ${Object.keys(_draftCache?.byLeague || {}).length} leagues</div>
@@ -3473,8 +3521,10 @@ const DLRTournament = (() => {
     // Fetch from Sleeper in parallel (batches of 5)
     const allMatchups = [];
     const standingsCache = t.standingsCache || {};
+    // Only build teamMap from the CURRENT year — different years may reuse roster_ids
     const teamMap = {};
     Object.values(standingsCache).forEach(lc => {
+      if (lc.year && parseInt(lc.year) !== parseInt(year)) return;
       (lc.teams || []).forEach(tm => { teamMap[String(tm.teamId)] = tm.teamName; });
     });
     const pMap = _buildParticipantTeamMap(t);
@@ -3494,22 +3544,26 @@ const DLRTournament = (() => {
             if (!m.matchup_id) return;
             (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m);
           });
+          console.log(`[Matchups] ${lid} week ${_matchupsWeek}: ${data.length} entries, ${Object.keys(byMid).length} matchups`);
           Object.values(byMid).forEach(pair => {
             if (pair.length !== 2) return;
             const [a, b] = pair;
-            const apts = a.points || 0, bpts = b.points || 0;
+            // Use points field directly — Sleeper returns it as a float (e.g. 127.46)
+            const apts = parseFloat(a.points) || 0;
+            const bpts = parseFloat(b.points) || 0;
+            // Only skip if BOTH are exactly 0 (unplayed or bye)
             if (apts === 0 && bpts === 0) return;
             let aName = teamMap[String(a.roster_id)] || `Team ${a.roster_id}`;
             let bName = teamMap[String(b.roster_id)] || `Team ${b.roster_id}`;
             const aKey = _sk(aName), bKey = _sk(bName);
             if (pMap[aKey]) aName = pMap[aKey].displayName;
             if (pMap[bKey]) bName = pMap[bKey].displayName;
-            const diff = Math.abs(apts - bpts);
+            const diff = parseFloat((Math.abs(apts - bpts)).toFixed(2));
             allMatchups.push({
               leagueId: lid, week: _matchupsWeek,
-              home: { rosterId: String(a.roster_id), name: aName, score: apts },
-              away: { rosterId: String(b.roster_id), name: bName, score: bpts },
-              diff, combined: apts + bpts,
+              home: { rosterId: String(a.roster_id), name: aName, score: parseFloat(apts.toFixed(2)) },
+              away: { rosterId: String(b.roster_id), name: bName, score: parseFloat(bpts.toFixed(2)) },
+              diff, combined: parseFloat((apts + bpts).toFixed(2)),
               winner: apts > bpts ? aName : bName
             });
           });
@@ -3539,6 +3593,8 @@ const DLRTournament = (() => {
       winner:   m.winner || ((m.home?.score || 0) >= (m.away?.score || 0) ? m.home?.name : m.away?.name)
     })).filter(m => m.home?.score > 0 || m.away?.score > 0);
 
+    console.log(`[Matchups] rendering ${enriched.length} matchups. Top scorer:`,
+      enriched.length ? [...enriched].sort((a,b) => b.combined - a.combined)[0] : "none");
     const sorted    = [...enriched].sort((a, b) => a.diff - b.diff);
     const closest   = sorted.slice(0, 5);
     const blowouts  = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
