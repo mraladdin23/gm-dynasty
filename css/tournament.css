@@ -636,11 +636,33 @@
 /* ── Mobile ──────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .trn-container,
-  .trn-detail-container { padding: var(--space-3); }
+  .trn-detail-container {
+    padding: var(--space-3);
+    /* Prevent cards from overflowing the viewport */
+    box-sizing: border-box;
+    width: 100%;
+    overflow-x: hidden;
+  }
 
   .trn-overview-grid { grid-template-columns: repeat(2, 1fr); }
 
-  .trn-cards-grid { grid-template-columns: 1fr; }
+  .trn-cards-grid {
+    grid-template-columns: 1fr;
+    /* Ensure cards don't exceed screen width */
+    width: 100%;
+  }
+
+  .trn-card {
+    /* Prevent card content from forcing width beyond viewport */
+    min-width: 0;
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  .trn-card-header {
+    /* Wrap if status badge pushes name too wide */
+    flex-wrap: wrap;
+  }
 
   .trn-detail-title-row { flex-direction: column; gap: var(--space-2); }
 
@@ -654,4 +676,18 @@
 
   .trn-custom-question-row { flex-direction: column; align-items: stretch; }
   .trn-q-type { width: 100%; }
+}
+
+/* ── Preview as User banner ──────────────────────────────── */
+.trn-preview-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(99,102,241,.15);
+  border-bottom: 1px solid rgba(99,102,241,.3);
+  font-size: .82rem;
+  color: #a78bfa;
+  font-weight: 500;
 }
