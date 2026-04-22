@@ -336,10 +336,13 @@
             <h1 class="trn-detail-name">${esc(t.name || "Tournament")}</h1>
             ${t.tagline ? `<p class="trn-detail-tagline">${esc(t.tagline)}</p>` : ""}
           </div>
-          ${isDraft && hasStandings
-            ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
-            : `<span class="trn-status-badge trn-status-${t.status || "draft"}">${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}</span>`
-          }
+          <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+            ${regOpen ? `<button class="btn-primary btn-sm trn-reg-pill" id="pub-register-pill">📬 Register</button>` : ""}
+            ${isDraft && hasStandings
+              ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
+              : `<span class="trn-status-badge trn-status-${t.status || "draft"}">${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}</span>`
+            }
+          </div>
         </div>
 
         <div class="trn-nav-row">
@@ -352,7 +355,6 @@
           <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
             ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
             ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
-            ${regOpen      ? `<option value="register" ${_activeTab === "register" ? "selected" : ""}>📬 Register</option>` : ""}
           </select>
         </div>
 
@@ -364,6 +366,28 @@
         _selectedYear = null;
         _activeTab    = "info";
         loadDirectory();
+      });
+
+      // Register pill — opens inline register form overlay
+      document.getElementById("pub-register-pill")?.addEventListener("click", () => {
+        const content = document.getElementById("pub-content");
+        const existing = document.getElementById("pub-register-overlay");
+        if (existing) { existing.remove(); return; }
+        const overlay = document.createElement("div");
+        overlay.id = "pub-register-overlay";
+        overlay.className = "trn-register-overlay";
+        overlay.innerHTML = `
+          <div class="trn-register-page">
+            <div class="trn-register-page-header">
+              <button class="btn-ghost btn-sm" id="pub-reg-back">← Back to ${esc(t.name || "Tournament")}</button>
+              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")}</h2>
+            </div>
+            <div id="pub-register-page-body"></div>
+          </div>`;
+        content.appendChild(overlay);
+        document.getElementById("pub-reg-back")?.addEventListener("click", () => overlay.remove());
+        const body = document.getElementById("pub-register-page-body");
+        if (body) renderRegisterTab(body);
       });
 
       // Year selector (global — controls all tabs)
