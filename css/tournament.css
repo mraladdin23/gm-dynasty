@@ -1334,3 +1334,34 @@
   background: #000;
   color: #fff;
 }
+
+/* ── Register pill + overlay page ───────────────────── */
+.trn-reg-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.trn-register-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg);
+  z-index: 300;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.trn-register-page {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) 120px;
+}
+
+.trn-register-page-header {
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  .trn-register-page { padding: var(--space-4) var(--space-3) 100px; }
+}
