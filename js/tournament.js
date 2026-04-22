@@ -25,22 +25,33 @@ const DLRTournament = (() => {
     completed:         "✅"
   };
 
-  // Standard registration fields (always shown, always required)
-  const STD_FIELDS = ["displayName", "email", "sleeperUsername"];
+  // Standard registration fields — always on form, always required
+  const STD_FIELDS = ["displayName", "email"];
   const STD_FIELD_LABELS = {
-    displayName:     "Display Name",
-    email:           "Email Address",
-    sleeperUsername: "Sleeper Username"
+    displayName: "Display Name",
+    email:       "Email Address"
   };
-  // Optional toggle fields (admin enables per tournament)
-  const OPT_FIELDS = ["teamName", "twitterHandle", "yahooUsername", "favoriteNflTeam", "gender"];
+  // Optional platform fields — used for DLR identity matching
+  const PLATFORM_FIELDS = ["sleeperUsername", "mflEmail", "yahooUsername"];
+  const PLATFORM_FIELD_LABELS = {
+    sleeperUsername: "Sleeper Username",
+    mflEmail:        "MFL Email Address",
+    yahooUsername:   "Yahoo Username"
+  };
+  // Optional extra fields
+  const OPT_FIELDS = ["teamName", "twitterHandle", "gender"];
   const OPT_FIELD_LABELS = {
     teamName:        "Team Name",
     twitterHandle:   "Twitter/X Handle",
-    yahooUsername:   "Yahoo Username",
-    favoriteNflTeam: "Favorite NFL Team",
-    gender:          "Gender"
+    gender:          "Gender (Male / Female)"
   };
+  // All optional fields in display order
+  const ALL_OPT_FIELDS = [...PLATFORM_FIELDS, ...OPT_FIELDS];
+  const ALL_OPT_LABELS = { ...PLATFORM_FIELD_LABELS, ...OPT_FIELD_LABELS };
+  // Helper: get label for any field key
+  function _fieldLabel(f) {
+    return STD_FIELD_LABELS[f] || ALL_OPT_LABELS[f] || _camelToLabel(f);
+  }
 
   // ── State ──────────────────────────────────────────────
   let _currentUsername = null;
@@ -432,6 +443,17 @@ const DLRTournament = (() => {
     // Render default tab
     const defaultTab = canAdmin ? _activeAdminTab : _activeUserTab;
     _renderTab(tid, defaultTab, t, canAdmin);
+
+    // For non-admin users: toast if they are a linked participant with missing fields
+    if (!canAdmin) {
+      const form    = t.meta?.registrationForm || {};
+      const opts    = form.optionalFields || [];
+      const missing = _getMissingFields(t, opts);
+      if (missing.length) {
+        const labels = missing.map(f => _fieldLabel(f)).join(", ");
+        showToast(`Your registration for ${meta.name || "this tournament"} is missing: ${labels}`, "info", 6000);
+      }
+    }
   }
 
   // ── Tab router ─────────────────────────────────────────
@@ -997,9 +1019,12 @@ const DLRTournament = (() => {
       <div class="trn-section-card" style="margin-top:var(--space-4)">
         <div class="trn-section-card-title">CSV Import Format</div>
         <div style="font-size:.8rem;color:var(--color-text-dim);line-height:1.7">
-          Required header row. Columns: <code>displayName, email, sleeperUsername, mflEmail, yahooUsername, teamName, years</code><br>
-          Match logic: Sleeper by username &middot; MFL by email &middot; Yahoo by username<br>
-          years column: pipe-separated e.g. <code>2023|2024</code>
+          Requires a header row. Columns should match your registration form:<br>
+          <strong>Required:</strong> <code>displayName, email</code><br>
+          <strong>Platform (for DLR matching):</strong> <code>sleeperUsername, mflEmail, yahooUsername</code><br>
+          <strong>Optional (if enabled on your form):</strong> <code>teamName, twitterHandle, gender</code><br>
+          <strong>History:</strong> <code>years</code> — pipe-separated e.g. <code>2023|2024</code><br>
+          Missing fields are imported as blank — no rows are rejected.
         </div>
       </div>
     `;
@@ -1140,27 +1165,50 @@ const DLRTournament = (() => {
     } catch(err) { showToast("Failed to update", "error"); }
   }
 
+  // Build the expected CSV columns for this tournament's registration form
+  function _getParticipantCsvColumns(t) {
+    const opts = t?.meta?.registrationForm?.optionalFields || [];
+    // Always include: standard fields + platform fields + enabled optional fields + years
+    const cols = [...STD_FIELDS, ...PLATFORM_FIELDS, ...opts, "years"];
+    // Deduplicate (in case a platform field is also in opts)
+    return [...new Set(cols)];
+  }
+
   async function _importParticipantsCSV(tid, file) {
+    const t = _tournaments[tid] || {};
     try {
       const text  = await file.text();
       const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
       if (lines.length < 2) { showToast("CSV has no data rows", "error"); return; }
-      const headers = _parseCSVRow(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, ""));
+
+      const fileHeaders = _parseCSVRow(lines[0]).map(h =>
+        h.toLowerCase().replace(/[\s_]/g, "").replace(/address$/, "")
+      );
       const updates = {};
       let count = 0;
+
       for (let i = 1; i < lines.length; i++) {
         const vals = _parseCSVRow(lines[i]);
         if (!vals.length) continue;
         const row = {};
-        headers.forEach((h, idx) => { if (vals[idx] !== undefined) row[h] = vals[idx]; });
+        fileHeaders.forEach((h, idx) => { if (vals[idx] !== undefined) row[h] = vals[idx]; });
+
+        // Map normalized header keys to canonical field names
+        const get = (...keys) => {
+          for (const k of keys) { const v = row[k]; if (v && v.trim()) return v.trim(); }
+          return null;
+        };
+
         const pid   = _genId();
         const entry = {
-          displayName:     row.displayname     || row.display_name || "",
-          email:           row.email           || "",
-          sleeperUsername: row.sleeperusername || row.sleeper      || "",
-          mflEmail:        row.mflemail        || row.mfl          || "",
-          yahooUsername:   row.yahoousername   || row.yahoo        || "",
-          teamName:        row.teamname        || row.team_name    || "",
+          displayName:     get("displayname", "display") || "",
+          email:           get("email", "emailaddress")  || "",
+          sleeperUsername: get("sleeperusername", "sleeper") || null,
+          mflEmail:        get("mflemail", "mfl")            || null,
+          yahooUsername:   get("yahoousername", "yahoo")     || null,
+          teamName:        get("teamname", "team")           || null,
+          twitterHandle:   get("twitterhandle", "twitter", "x") || null,
+          gender:          get("gender") || null,
           years:           row.years ? row.years.split("|").map(y => y.trim()).filter(Boolean) : [],
           autoRegister:    false,
           dlrLinked:       false,
@@ -1168,10 +1216,19 @@ const DLRTournament = (() => {
           source:          "csv_import",
           importedAt:      Date.now()
         };
+
+        // Also capture any custom columns from the file that map to custom question fields
+        fileHeaders.forEach((h, idx) => {
+          if (h.startsWith("custom") && vals[idx]) entry[h] = vals[idx].trim();
+        });
+
+        // Treat empty strings as null
         Object.keys(entry).forEach(k => { if (entry[k] === "") entry[k] = null; });
+
         updates[pid] = entry;
         count++;
       }
+
       if (!count) { showToast("No valid rows found", "error"); return; }
       await _tParticipantsRef(tid).update(updates);
       showToast(count + " participant" + (count !== 1 ? "s" : "") + " imported — matching DLR accounts...");
@@ -1411,7 +1468,18 @@ const DLRTournament = (() => {
       </div>
 
       <div class="trn-section-card">
-        <div class="trn-section-card-title">Optional Fields</div>
+        <div class="trn-section-card-title">Platform Fields</div>
+        <div class="trn-field-hint">Used for DLR identity matching. Enable the platforms relevant to your tournament.</div>
+        ${PLATFORM_FIELDS.map(f => `
+          <label class="trn-field-toggle">
+            <input type="checkbox" data-opt-field="${f}" ${optFields.includes(f) ? "checked" : ""} />
+            ${PLATFORM_FIELD_LABELS[f]}
+          </label>
+        `).join("")}
+      </div>
+
+      <div class="trn-section-card">
+        <div class="trn-section-card-title">Extra Fields</div>
         ${OPT_FIELDS.map(f => `
           <label class="trn-field-toggle">
             <input type="checkbox" data-opt-field="${f}" ${optFields.includes(f) ? "checked" : ""} />
@@ -1863,12 +1931,11 @@ const DLRTournament = (() => {
 
   // ── User: Register tab ─────────────────────────────────
   function _renderRegisterTab(tid, t, body) {
-    const meta   = t.meta || {};
-    const form   = meta.registrationForm || {};
-    const fields = form.fields         || STD_FIELDS;
-    const opts   = form.optionalFields || [];
-    const custom = form.customQuestions || [];
-    const allFlds = [...fields, ...opts];
+    const meta    = t.meta || {};
+    const form    = meta.registrationForm || {};
+    const opts    = form.optionalFields || [];
+    const custom  = form.customQuestions || [];
+    const allFlds = [...STD_FIELDS, ...opts];
 
     if (meta.status === "draft") {
       body.innerHTML = `<div class="trn-empty">Registration is not open yet.</div>`;
@@ -1879,15 +1946,40 @@ const DLRTournament = (() => {
       return;
     }
 
+    // Check if this user is a linked participant with missing fields
+    const missingFields = _getMissingFields(t, opts);
+
+    // Pre-fill values from known DLR profile data where possible
+    const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+    const prefill = {
+      displayName:     profile?.displayName || "",
+      email:           profile?.email       || "",
+      sleeperUsername: profile?.platforms?.sleeper?.username || "",
+      mflEmail:        profile?.platforms?.mfl?.mflEmail     || "",
+      yahooUsername:   profile?.platforms?.yahoo?.username   || ""
+    };
+
     body.innerHTML = `
+      ${missingFields.length ? `
+        <div class="trn-missing-info-banner">
+          ⚠️ Your registration is incomplete. Please fill in the highlighted fields below.
+          <div class="trn-missing-fields">${missingFields.map(f => _fieldLabel(f)).join(", ")}</div>
+        </div>
+      ` : ""}
+
       <div class="trn-section-card">
         <div class="trn-section-card-title">Register for ${_esc(meta.name || "Tournament")}</div>
-        ${allFlds.map(f => `
-          <div class="form-group">
-            <label>${_esc(STD_FIELD_LABELS[f] || OPT_FIELD_LABELS[f] || _camelToLabel(f))}</label>
-            <input type="text" id="trn-reg-${f}" placeholder="${_esc(STD_FIELD_LABELS[f] || f)}" />
-          </div>
-        `).join("")}
+        ${allFlds.map(f => {
+          const isRequired = STD_FIELDS.includes(f);
+          const isMissing  = missingFields.includes(f);
+          return `
+          <div class="form-group ${isMissing ? "trn-field--missing" : ""}">
+            <label>${_esc(_fieldLabel(f))}${isRequired ? ' <span class="required">*</span>' : ""}</label>
+            <input type="text" id="trn-reg-${f}"
+              placeholder="${_esc(_fieldLabel(f))}"
+              value="${_esc(prefill[f] || "")}" />
+          </div>`;
+        }).join("")}
         ${custom.map((q, i) => `
           <div class="form-group">
             <label>${_esc(q.question)}${q.required ? ' <span class="required">*</span>' : ""}</label>
@@ -1897,6 +1989,13 @@ const DLRTournament = (() => {
             }
           </div>
         `).join("")}
+        <div class="form-group">
+          <label class="trn-field-toggle" style="margin:0">
+            <input type="checkbox" id="trn-reg-auto" />
+            Register me for all future years of this tournament automatically
+          </label>
+          <span class="field-hint">You will still appear in the admin queue each year for confirmation.</span>
+        </div>
         <div id="trn-reg-error" class="auth-error hidden"></div>
         <div class="trn-form-actions">
           <button class="btn-primary" id="trn-submit-reg-btn">Submit Registration</button>
@@ -1909,23 +2008,40 @@ const DLRTournament = (() => {
     );
   }
 
-  async function _submitRegistration(tid, t, fields, custom) {
-    const errEl = document.getElementById("trn-reg-error");
-    const entry = { status: "pending", submittedAt: Date.now() };
+  // Returns fields that are on the form but missing from the user's linked participant record
+  function _getMissingFields(t, enabledOpts) {
+    const participants = t.participants || {};
+    const myRecord = Object.values(participants).find(p =>
+      p.dlrLinked && p.dlrUsername === _currentUsername
+    );
+    if (!myRecord) return [];
+    const allFormFields = [...STD_FIELDS, ...enabledOpts];
+    return allFormFields.filter(f => !myRecord[f]);
+  }
 
-    // Collect standard + optional fields
+  async function _submitRegistration(tid, t, fields, custom) {
+    const errEl  = document.getElementById("trn-reg-error");
+    const entry  = { status: "pending", submittedAt: Date.now() };
+    let hasError = false;
+
+    // Collect all form fields — only STD_FIELDS are truly required
     for (const f of fields) {
       const val = document.getElementById(`trn-reg-${f}`)?.value.trim();
       if (!val && STD_FIELDS.includes(f)) {
-        errEl.textContent = `${STD_FIELD_LABELS[f]} is required.`;
+        errEl.textContent = `${_fieldLabel(f)} is required.`;
         errEl.classList.remove("hidden");
-        return;
+        hasError = true;
+        break;
       }
       if (val) entry[f] = val;
+      // Store blank optional fields as null so missing-info detection works
+      else if (!STD_FIELDS.includes(f)) entry[f] = null;
     }
+    if (hasError) return;
 
     // Collect custom questions
-    custom.forEach((q, i) => {
+    for (let i = 0; i < custom.length; i++) {
+      const q   = custom[i];
       const val = document.getElementById(`trn-reg-custom-${i}`)?.value.trim();
       if (q.required && !val) {
         errEl.textContent = `"${q.question}" is required.`;
@@ -1933,7 +2049,12 @@ const DLRTournament = (() => {
         return;
       }
       if (val) entry[`custom_${i}`] = val;
-    });
+    }
+
+    // Auto-register preference
+    const autoRegister = document.getElementById("trn-reg-auto")?.checked || false;
+    entry.autoRegister = autoRegister;
+    entry.dlrUsername  = _currentUsername || null;
 
     const btn = document.getElementById("trn-submit-reg-btn");
     if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
@@ -1941,6 +2062,18 @@ const DLRTournament = (() => {
     try {
       const rid = _genId();
       await _tRegsRef(tid).child(rid).set(entry);
+
+      // If auto-register, also save preference on the participant record if one exists
+      if (autoRegister) {
+        const participants = t.participants || {};
+        const myPid = Object.keys(participants).find(pid =>
+          participants[pid].dlrLinked && participants[pid].dlrUsername === _currentUsername
+        );
+        if (myPid) {
+          await _tParticipantsRef(tid).child(myPid).update({ autoRegister: true });
+        }
+      }
+
       const body = document.getElementById("trn-tab-body");
       if (body) {
         body.innerHTML = `
@@ -1949,6 +2082,7 @@ const DLRTournament = (() => {
             <h3>Registration Submitted!</h3>
             <p>Your registration for <strong>${_esc(t.meta?.name || "this tournament")}</strong> is pending review.
             You'll receive a league invite link once approved.</p>
+            ${autoRegister ? `<p style="font-size:.85rem;color:var(--color-text-dim)">You've opted in to auto-register for future years of this tournament.</p>` : ""}
           </div>`;
       }
     } catch(err) {
