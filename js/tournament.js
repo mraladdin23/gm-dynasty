@@ -418,10 +418,12 @@ const DLRTournament = (() => {
               ${Object.keys(t.participants || {}).length ? `<span class="trn-tab-count">${Object.keys(t.participants).length}</span>` : ""}
             </button>
             <button class="trn-tab ${_activeAdminTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
+            <button class="trn-tab ${_activeAdminTab === "info_edit"  ? "active" : ""}" data-tab="info_edit">Info / Rules</button>
           ` : `
-            <button class="trn-tab ${_activeUserTab === "info" ? "active" : ""}" data-tab="info">Info</button>
-            <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
-            <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
+            <button class="trn-tab ${_activeUserTab === "info"      ? "active" : ""}" data-tab="info">Info</button>
+            <button class="trn-tab ${_activeUserTab === "standings"  ? "active" : ""}" data-tab="standings">Standings</button>
+            <button class="trn-tab ${_activeUserTab === "rules"      ? "active" : ""}" data-tab="rules">Rules</button>
+            <button class="trn-tab ${_activeUserTab === "register"   ? "active" : ""}" data-tab="register">Register</button>
           `}
         </div>
         <!-- Tab select (mobile) -->
@@ -434,9 +436,11 @@ const DLRTournament = (() => {
             <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>Registrants</option>
             <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>Participants</option>
             <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>Standings</option>
+            <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>Info / Rules</option>
           ` : `
             <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
             <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+            <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
             <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
           `}
         </select>
@@ -501,18 +505,127 @@ const DLRTournament = (() => {
         case "roles":         return _renderRolesTab(tid, t, body);
         case "registration":  return _renderRegistrationFormTab(tid, t, body);
         case "registrations": return _renderRegistrantsTab(tid, t, body);
-        case "participants":   return _renderParticipantsTab(tid, t, body);
-        case "standings":      return _renderStandingsTab(tid, t, body, true);
-        default:               return _renderAdminOverview(tid, t, body);
+        case "participants":  return _renderParticipantsTab(tid, t, body);
+        case "standings":     return _renderStandingsTab(tid, t, body, true);
+        case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
+        default:              return _renderAdminOverview(tid, t, body);
       }
     } else {
       switch (tab) {
         case "info":       return _renderInfoTab(t, body);
         case "standings":  return _renderStandingsTab(tid, t, body, false);
+        case "rules":      return _renderRulesTab(t, body);
         case "register":   return _renderRegisterTab(tid, t, body);
         default:           return _renderInfoTab(t, body);
       }
     }
+  }
+
+  // ── Admin: Info / Rules editor ────────────────────────
+  function _renderAdminInfoEdit(tid, t, body) {
+    const meta  = t.meta  || {};
+    const rules = t.rules || {};
+    const social = meta.socialLinks || {};
+
+    body.innerHTML = `
+      <!-- Bio / About section -->
+      <div class="trn-section-card">
+        <div class="trn-section-card-title">Tournament Bio &amp; About</div>
+        <div class="form-group">
+          <label>Bio / Description</label>
+          <textarea id="trn-bio-input" rows="6" placeholder="Write about the tournament — history, format, prizes…"
+            style="width:100%;resize:vertical;font-size:.875rem">${_esc(meta.bio || "")}</textarea>
+          <span class="field-hint">Supports line breaks. URLs are auto-linked for participants.</span>
+        </div>
+        <div class="form-group">
+          <label>Donation / Entry Fee Link</label>
+          <input type="url" id="trn-donation-input" value="${_esc(meta.donationLink || "")}"
+            placeholder="https://paypal.me/…" />
+          <span class="field-hint">Shown as a button on the Info tab.</span>
+        </div>
+        <div class="trn-section-card-title" style="margin-top:var(--space-4)">Social Links</div>
+        ${["twitter","discord","reddit","instagram","youtube","website"].map(key => `
+          <div class="form-group" style="margin-bottom:var(--space-3)">
+            <label style="text-transform:capitalize">${key}</label>
+            <input type="url" class="trn-social-input" data-social-key="${key}"
+              value="${_esc((social[key] || ""))}"
+              placeholder="${key === "twitter" ? "https://x.com/…" : key === "discord" ? "https://discord.gg/…" : "https://…"}" />
+          </div>`).join("")}
+        <div class="trn-form-actions">
+          <button class="btn-primary" id="trn-save-info-btn">Save Info</button>
+        </div>
+      </div>
+
+      <!-- Rules section -->
+      <div class="trn-section-card">
+        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Tournament Rules</span>
+          ${rules.version ? `<span class="trn-rules-version-badge">v${_esc(String(rules.version))}</span>` : ""}
+        </div>
+        <div class="form-group">
+          <label>Rules Document</label>
+          <textarea id="trn-rules-input" rows="14" placeholder="Enter the full rules for your tournament…&#10;&#10;Use blank lines to separate sections. URLs are auto-linked."
+            style="width:100%;resize:vertical;font-family:inherit;font-size:.875rem">${_esc(rules.content || "")}</textarea>
+          <span class="field-hint">Plain text — line breaks preserved. URLs become clickable links for participants.</span>
+        </div>
+        ${rules.updatedAt ? `
+          <div style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Last updated: ${new Date(rules.updatedAt).toLocaleString()}
+            ${rules.updatedBy ? ` by @${_esc(rules.updatedBy)}` : ""}
+          </div>
+        ` : ""}
+        <div class="trn-form-actions">
+          <button class="btn-primary" id="trn-save-rules-btn">Publish Rules</button>
+        </div>
+      </div>
+    `;
+
+    // Save info handler
+    document.getElementById("trn-save-info-btn")?.addEventListener("click", async () => {
+      const bio      = document.getElementById("trn-bio-input")?.value || "";
+      const donation = document.getElementById("trn-donation-input")?.value.trim() || "";
+      const newSocial = {};
+      body.querySelectorAll(".trn-social-input").forEach(inp => {
+        const val = inp.value.trim();
+        if (val) newSocial[inp.dataset.socialKey] = val;
+      });
+      try {
+        await _tMetaRef(tid).update({
+          bio,
+          donationLink: donation || null,
+          socialLinks:  newSocial
+        });
+        if (_tournaments[tid]?.meta) {
+          _tournaments[tid].meta.bio          = bio;
+          _tournaments[tid].meta.donationLink = donation || null;
+          _tournaments[tid].meta.socialLinks  = newSocial;
+        }
+        _writePublicSummary(tid, _tournaments[tid]);
+        showToast("Info saved ✓");
+      } catch(e) { showToast("Failed to save info", "error"); }
+    });
+
+    // Save rules handler
+    document.getElementById("trn-save-rules-btn")?.addEventListener("click", async () => {
+      const content = document.getElementById("trn-rules-input")?.value || "";
+      const prevVersion = parseInt(rules.version || 0);
+      const newRules = {
+        content,
+        version:   prevVersion + 1,
+        updatedAt: Date.now(),
+        updatedBy: _currentUsername
+      };
+      try {
+        await GMD.child("tournaments/" + tid + "/rules").set(newRules);
+        if (_tournaments[tid]) _tournaments[tid].rules = newRules;
+        _writePublicSummary(tid, _tournaments[tid]);
+        showToast("Rules published (v" + newRules.version + ") ✓");
+        // Refresh tab to show updated version badge
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        _renderAdminInfoEdit(tid, _tournaments[tid], body);
+      } catch(e) { showToast("Failed to publish rules", "error"); }
+    });
   }
 
   // ── Admin: Overview tab ────────────────────────────────
@@ -593,6 +706,24 @@ const DLRTournament = (() => {
                 style="width:70px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
             </span>
           </div>
+          <div class="trn-detail-row">
+            <span>Median Wins</span>
+            <span>
+              <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
+                <input type="checkbox" id="trn-median-wins-toggle" ${meta.medianWins ? "checked" : ""} />
+                <span style="font-size:.82rem">Credit +1W to any team that beats the weekly median score (Sleeper only)</span>
+              </label>
+            </span>
+          </div>
+          <div class="trn-detail-row">
+            <span>Twitter Column</span>
+            <span>
+              <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
+                <input type="checkbox" id="trn-show-twitter-toggle" ${meta.showTwitter ? "checked" : ""} />
+                <span style="font-size:.82rem">Show Twitter/X handle column in standings</span>
+              </label>
+            </span>
+          </div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
           <div class="trn-detail-row"><span>Created</span><span>${meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : "—"}</span></div>
         </div>
@@ -651,6 +782,24 @@ const DLRTournament = (() => {
     playoffWeekInput?.addEventListener("blur", _savePlayoffWeek);
     playoffWeekInput?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); _savePlayoffWeek(); } });
 
+    // Median wins toggle
+    document.getElementById("trn-median-wins-toggle")?.addEventListener("change", async function() {
+      try {
+        await _tMetaRef(tid).update({ medianWins: this.checked });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.medianWins = this.checked;
+        showToast(this.checked ? "Median wins enabled ✓" : "Median wins disabled ✓");
+      } catch(e) { showToast("Failed to save", "error"); }
+    });
+
+    // Show Twitter column toggle
+    document.getElementById("trn-show-twitter-toggle")?.addEventListener("change", async function() {
+      try {
+        await _tMetaRef(tid).update({ showTwitter: this.checked });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.showTwitter = this.checked;
+        showToast(this.checked ? "Twitter column enabled ✓" : "Twitter column hidden ✓");
+      } catch(e) { showToast("Failed to save", "error"); }
+    });
+
     // Preview as User — temporarily renders the user view for this tournament
     document.getElementById("trn-preview-user-btn")?.addEventListener("click", () => {
       _openTournamentViewAsUser(tid, t);
@@ -682,13 +831,15 @@ const DLRTournament = (() => {
           </div>
         </div>
         <div class="trn-tabs" id="trn-tabs">
-          <button class="trn-tab ${_activeUserTab === "info" ? "active" : ""}" data-tab="info">Info</button>
-          <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
-          <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
+          <button class="trn-tab ${_activeUserTab === "info"      ? "active" : ""}" data-tab="info">Info</button>
+          <button class="trn-tab ${_activeUserTab === "standings"  ? "active" : ""}" data-tab="standings">Standings</button>
+          <button class="trn-tab ${_activeUserTab === "rules"      ? "active" : ""}" data-tab="rules">Rules</button>
+          <button class="trn-tab ${_activeUserTab === "register"   ? "active" : ""}" data-tab="register">Register</button>
         </div>
         <select class="trn-tab-select" id="trn-tab-select">
           <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
           <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+          <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>Rules</option>
           <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
         </select>
         <div id="trn-tab-body" class="trn-tab-body"></div>
@@ -1579,6 +1730,13 @@ const DLRTournament = (() => {
       });
     });
     const hasGender = Object.keys(genderByKey).length > 0;
+    const twitterByKey = {}; // sanitized key → participant twitterHandle
+    Object.values(participants).forEach(p => {
+      if (!p.twitterHandle) return;
+      const keys = [p.sleeperUsername, p.displayName, p.teamName]
+        .filter(Boolean).map(_sk).filter(Boolean);
+      keys.forEach(k => { twitterByKey[k] = p.twitterHandle; });
+    });
 
     // Build flat rows
     let allRows = [];
@@ -1601,9 +1759,10 @@ const DLRTournament = (() => {
           ties:        team.ties     || 0,
           pf:          team.pf       || 0,
           pa:          team.pa       || 0,
-          gender:      genderByKey[_tnKey] || "",
+          gender:        genderByKey[_tnKey]   || "",
+          twitterHandle: twitterByKey[_tnKey]  || "",
           cacheKey,
-          platform:    lc.platform   || ""
+          platform:      lc.platform            || ""
         });
       });
       if ((lc.lastSynced||0) > lastSynced) lastSynced = lc.lastSynced;
@@ -1618,7 +1777,11 @@ const DLRTournament = (() => {
     const hasConf       = conferences.length > 0;
     const hasDiv        = divisions.length > 0;
     const lastSyncedStr = lastSynced ? new Date(lastSynced).toLocaleString() : "Never";
-    const extraCols     = []; // gender is shown as inline badge on team name, not a column
+    // gender is shown as inline badge on team name, not a column
+    // twitterHandle column is opt-in via meta.showTwitter
+    const extraCols = (meta.showTwitter && Object.keys(twitterByKey).length > 0)
+      ? [{ key: "twitterHandle", label: "Twitter/X" }]
+      : [];
 
     body.innerHTML = `
       <div class="trn-standings-toolbar">
@@ -1738,7 +1901,15 @@ const DLRTournament = (() => {
       '<td style="color:var(--color-text-dim);font-size:.78rem">' + _esc(r.leagueName) + "</td>" +
       (hasConf ? "<td>" + _esc(r.conference) + "</td>" : "") +
       (hasDiv  ? "<td>" + _esc(r.division)   + "</td>" : "") +
-      extra.map(col => "<td>" + _esc(r[col.key] || "—") + "</td>").join("") +
+      extra.map(col => {
+        if (col.key === "twitterHandle") {
+          const h = r.twitterHandle || "";
+          if (!h) return "<td>—</td>";
+          const handle = h.startsWith("@") ? h : "@" + h;
+          return '<td><a href="https://x.com/' + _esc(h.replace(/^@/, "")) + '" target="_blank" rel="noopener" style="color:var(--color-accent);text-decoration:none">' + _esc(handle) + "</a></td>";
+        }
+        return "<td>" + _esc(r[col.key] || "—") + "</td>";
+      }).join("") +
       '<td class="standings-win">'  + r.wins + "</td>" +
       '<td class="standings-loss">' + r.losses + "</td>" +
       '<td class="standings-num">'  + r.pf.toFixed(2) + "</td>" +
@@ -1813,10 +1984,25 @@ const DLRTournament = (() => {
     const playoffWeek = t.meta?.playoffStartWeek || null;
 
     // Sleeper — parallel
+    const medianWins = !!(t.meta?.medianWins);
     await Promise.allSettled(sleepers.map(async (l) => {
       try {
         const data = await _fetchSleeperStandings(l.leagueId, playoffWeek);
-        if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
+        if (data) {
+          let { teams, weeklyScores } = data;
+          if (medianWins && weeklyScores) {
+            const delta = _computeMedianWins(weeklyScores);
+            teams = teams.map(tm => {
+              const d = delta[tm.teamId] || { medWins: 0, medLosses: 0 };
+              return {
+                ...tm,
+                wins:   tm.wins   + d.medWins,
+                losses: tm.losses + d.medLosses
+              };
+            });
+          }
+          cacheUpdates[ck(l)] = { ...l, teams, lastSynced: Date.now() };
+        }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
       done++; setP("Syncing " + done + "/" + total + "...");
     }));
@@ -1939,10 +2125,29 @@ const DLRTournament = (() => {
           pa:       parseFloat(s.pa.toFixed(2))
         };
       });
-      return { teams };
+      // Median wins: pass weeklyScores to allow caller to apply them
+      return { teams, weeklyScores: allWeeks };
     }
 
-    // No playoff week set — use roster settings (full season)
+    // No playoff week set — fetch all weeks to compute median wins later
+    // First determine the current/completed week range from rosters
+    const maxWeek = Math.max(...(rosters || []).map(r =>
+      (r.settings?.wins || 0) + (r.settings?.losses || 0) + (r.settings?.ties || 0)
+    ), 0);
+
+    let weeklyScores = null;
+    if (maxWeek > 0) {
+      const wFetches = [];
+      for (let w = 1; w <= maxWeek; w++) {
+        wFetches.push(
+          fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + w)
+            .then(r => r.ok ? r.json() : [])
+            .catch(() => [])
+        );
+      }
+      weeklyScores = await Promise.all(wFetches);
+    }
+
     const teams = (rosters || []).map(r => ({
       teamId:   String(r.roster_id),
       teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
@@ -1952,7 +2157,39 @@ const DLRTournament = (() => {
       pf:       parseFloat(((r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100).toFixed(2)),
       pa:       parseFloat(((r.settings?.fpts_against || 0) + (r.settings?.fpts_against_decimal || 0) / 100).toFixed(2))
     }));
-    return { teams };
+    return { teams, weeklyScores };
+  }
+
+  // ── Compute median wins from weekly matchup arrays ──────
+  // For each week, find the median score. Every team that scored above the median
+  // gets +1 win credited; every team at or below gets +1 loss.
+  // Returns a Map: rosterId (string) → { medWins, medLosses }
+  function _computeMedianWins(weeklyScores) {
+    const delta = {}; // rosterId → { medWins, medLosses }
+    if (!Array.isArray(weeklyScores)) return delta;
+
+    for (const weekMatchups of weeklyScores) {
+      if (!Array.isArray(weekMatchups) || !weekMatchups.length) continue;
+      // Collect all scores that actually played (matchup_id > 0, points > 0 or explicitly 0)
+      const playing = weekMatchups.filter(m => m.matchup_id);
+      if (!playing.length) continue;
+      const scores = playing.map(m => m.points || 0).sort((a, b) => a - b);
+      const mid = Math.floor(scores.length / 2);
+      const median = scores.length % 2 === 0
+        ? (scores[mid - 1] + scores[mid]) / 2
+        : scores[mid];
+
+      playing.forEach(m => {
+        const rid = String(m.roster_id);
+        if (!delta[rid]) delta[rid] = { medWins: 0, medLosses: 0 };
+        if ((m.points || 0) > median) {
+          delta[rid].medWins++;
+        } else {
+          delta[rid].medLosses++;
+        }
+      });
+    }
+    return delta;
   }
 
   async function _fetchMFLStandings(leagueId, year) {
@@ -2613,26 +2850,144 @@ const DLRTournament = (() => {
   function _renderInfoTab(t, body) {
     const meta = t.meta || {};
     const leagueCount = Object.keys(t.leagues || {}).length;
+    const regCount    = Object.keys(t.registrations || {}).length;
+    const social      = meta.socialLinks || {};
+    const rules       = t.rules          || null;
+
+    // Status banner (active/playoffs/completed get a colored banner)
+    const bannerColors = {
+      active:    "var(--color-green)",
+      playoffs:  "var(--color-accent)",
+      completed: "var(--color-text-dim)"
+    };
+    const bannerColor = bannerColors[meta.status] || null;
+    const statusBanner = bannerColor ? `
+      <div class="trn-info-status-banner" style="border-color:${bannerColor};color:${bannerColor}">
+        ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || ""}
+      </div>` : "";
+
+    // Bio: newlines → <br>, URLs autolinked
+    const rawBio = meta.bio || "";
+    const linkedBio = rawBio
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/
+/g, "<br>")
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+
+    // Social links
+    const socialIcons = { twitter: "𝕏", discord: "💬", reddit: "🤖", website: "🌐", instagram: "📸", youtube: "▶" };
+    const socialHtml = Object.entries(social)
+      .filter(([, url]) => url)
+      .map(([key, url]) => {
+        const icon  = socialIcons[key] || "🔗";
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        return `<a href="${_esc(url)}" target="_blank" rel="noopener" class="trn-social-link">${icon} ${label}</a>`;
+      }).join("");
+
+    // Rules excerpt (first 3 lines preview)
+    const rulesPreview = rules?.content
+      ? rules.content.split("\n").slice(0, 3).map(l => _esc(l)).join("<br>") + (rules.content.split("\n").length > 3 ? "<br><em>…</em>" : "")
+      : null;
 
     body.innerHTML = `
+      ${statusBanner}
+
       <div class="trn-info-hero">
         <h3 class="trn-info-name">${_esc(meta.name || "Tournament")}</h3>
         ${meta.tagline ? `<p class="trn-info-tagline">${_esc(meta.tagline)}</p>` : ""}
-        <span class="trn-status-badge trn-status-${meta.status || "draft"}">
-          ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || ""}
-        </span>
       </div>
 
       <div class="trn-info-stats">
-        <div class="trn-stat-card"><div class="trn-stat-value">${leagueCount}</div><div class="trn-stat-label">Leagues</div></div>
-        <div class="trn-stat-card"><div class="trn-stat-value">${meta.regType === "invite" ? "Invite" : "Open"}</div><div class="trn-stat-label">Registration</div></div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${leagueCount}</div>
+          <div class="trn-stat-label">Leagues</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${regCount}</div>
+          <div class="trn-stat-label">Registered</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${meta.regType === "invite" ? "Invite" : "Open"}</div>
+          <div class="trn-stat-label">Registration</div>
+        </div>
       </div>
 
+      ${rawBio ? `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">About This Tournament</div>
+          <div class="trn-info-bio">${linkedBio}</div>
+        </div>
+      ` : ""}
+
+      ${meta.donationLink ? `
+        <div class="trn-section-card trn-info-donation">
+          <div class="trn-section-card-title">Support the Tournament</div>
+          <a href="${_esc(meta.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">
+            💰 Donate / Entry Fee
+          </a>
+        </div>
+      ` : ""}
+
+      ${socialHtml ? `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">Follow Us</div>
+          <div class="trn-social-links">${socialHtml}</div>
+        </div>
+      ` : ""}
+
+      ${rulesPreview ? `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>Rules</span>
+            ${rules?.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">v${_esc(String(rules.version))}</span>` : ""}
+          </div>
+          <div class="trn-info-bio trn-rules-preview">${rulesPreview}</div>
+          <button class="btn-secondary btn-sm" id="trn-view-rules-btn" style="margin-top:var(--space-3)">View Full Rules</button>
+        </div>
+      ` : ""}
+    `;
+
+    document.getElementById("trn-view-rules-btn")?.addEventListener("click", () => {
+      // Switch to rules tab if available
+      const rulesTab = document.querySelector('.trn-tab[data-tab="rules"]');
+      if (rulesTab) {
+        rulesTab.click();
+      } else {
+        // Inline expand: replace preview card with full rules
+        _renderRulesTab(t, body);
+      }
+    });
+  }
+
+  // ── User: Rules tab ─────────────────────────────────────
+  function _renderRulesTab(t, body) {
+    const rules = t.rules || null;
+    if (!rules?.content) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">📋</div>
+          <div class="trn-empty-title">No rules posted yet</div>
+          <div class="trn-empty-sub">The commissioner hasn't published rules for this tournament.</div>
+        </div>`;
+      return;
+    }
+
+    const htmlContent = rules.content
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/
+/g, "<br>")
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+
+    body.innerHTML = `
       <div class="trn-section-card">
-        <div class="trn-section-card-title">About This Tournament</div>
-        <p style="color:var(--color-text-dim);font-size:.87rem">
-          ${meta.bio || "No description provided by the tournament admin."}
-        </p>
+        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Tournament Rules</span>
+          <div style="display:flex;gap:var(--space-3);align-items:center">
+            ${rules.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">Version ${_esc(String(rules.version))}</span>` : ""}
+            ${rules.updatedAt ? `<span style="font-size:.75rem;color:var(--color-text-dim)">${new Date(rules.updatedAt).toLocaleDateString()}</span>` : ""}
+          </div>
+        </div>
+        <div class="trn-info-bio trn-rules-full">${htmlContent}</div>
       </div>
     `;
   }
@@ -2866,17 +3221,20 @@ const DLRTournament = (() => {
       });
 
       const summary = {
-        name:              meta.name    || "",
-        tagline:           meta.tagline || "",
-        status:            meta.status  || "draft",
-        regType:           meta.regType || "open",
-        rankBy:            meta.rankBy  || "record",
-        bio:               meta.bio     || "",
-        createdAt:         meta.createdAt || 0,
+        name:              meta.name         || "",
+        tagline:           meta.tagline      || "",
+        status:            meta.status       || "draft",
+        regType:           meta.regType      || "open",
+        rankBy:            meta.rankBy       || "record",
+        bio:               meta.bio          || "",
+        donationLink:      meta.donationLink || "",
+        socialLinks:       meta.socialLinks  || {},
+        createdAt:         meta.createdAt    || 0,
         leagueCount,
         registrationCount: Object.keys(regs).length,
         registrationForm:  meta.registrationForm || { fields: [], optionalFields: [], customQuestions: [] },
-        standingsCache:    t.standingsCache || {},
+        standingsCache:    t.standingsCache  || {},
+        rules:             t.rules           || null,
         participantMap
       };
 
