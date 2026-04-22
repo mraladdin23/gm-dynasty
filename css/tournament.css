@@ -298,7 +298,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: .85rem;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .standings-table thead th {
@@ -311,7 +311,6 @@
   color: var(--color-text-dim);
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
-  overflow: hidden;
 }
 
 .standings-table tbody tr {
@@ -324,15 +323,19 @@
 .standings-table tbody td {
   padding: var(--space-2) var(--space-2);
   vertical-align: middle;
-  overflow: hidden;
 }
 
-/* Number cols: don't wrap, let browser size naturally */
-.standings-rank  { white-space: nowrap; text-align: center; font-weight: 700; color: var(--color-text-dim); }
-.standings-win   { white-space: nowrap; text-align: center; color: var(--color-green); font-weight: 600; }
-.standings-loss  { white-space: nowrap; text-align: center; color: var(--color-red, #ef4444); font-weight: 600; }
-.standings-num   { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+/* Rank col: narrow */
+.standings-rank  { width: 32px; text-align: center; font-weight: 700; color: var(--color-text-dim); white-space: nowrap; }
+/* W / L: equal narrow */
+.standings-win   { width: 36px; text-align: center; color: var(--color-green); font-weight: 600; white-space: nowrap; }
+.standings-loss  { width: 36px; text-align: center; color: var(--color-red, #ef4444); font-weight: 600; white-space: nowrap; }
+/* PF / PA: enough for "123.45" */
+.standings-num   { width: 64px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .standings-num.dim { color: var(--color-text-dim); }
+/* Team col: gets all remaining space, never clips */
+.standings-table th:nth-child(2),
+.standings-table td:nth-child(2) { width: auto; }
 
 .standings-team-cell {
   display: inline-flex;
@@ -1208,22 +1211,21 @@
 }
 
 /* ── Standings: league name stacked under team name ─── */
-.standings-table td { overflow: hidden; max-width: 0; }
-.standings-table td:first-child,
-.standings-table td.standings-rank,
-.standings-table td.standings-win,
-.standings-table td.standings-loss,
-.standings-table td.standings-num { max-width: none; overflow: visible; white-space: nowrap; }
-.standings-team-cell { align-items: flex-start !important; max-width: 100%; }
-.trn-st-name-wrap    { display: flex; flex-direction: column; min-width: 0; max-width: 100%; overflow: hidden; }
-.trn-st-name         { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.trn-st-league       { font-size: .68rem; color: var(--color-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.standings-team-cell { align-items: flex-start !important; width: 100%; min-width: 0; }
+.trn-st-name-wrap    { display: flex; flex-direction: column; min-width: 0; width: 100%; }
+.trn-st-name         { font-weight: 600; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trn-st-league       { font-size: .68rem; color: var(--color-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 
 /* Tighten standings numbers on mobile */
 @media (max-width: 640px) {
-  .standings-table { font-size: .75rem; }
-  .standings-table tbody td { padding: 4px 3px; }
-  .standings-table thead th { padding: 4px 3px; }
+  .standings-table          { font-size: .75rem; }
+  .standings-table tbody td { padding: 3px 2px; }
+  .standings-table thead th { padding: 3px 2px; }
+  .standings-win,
+  .standings-loss           { width: 28px; }
+  .standings-num            { width: 52px; }
+  .standings-rank           { width: 24px; }
+  .trn-st-name              { font-size: .78rem; }
 }
 
 /* Recap editor */
