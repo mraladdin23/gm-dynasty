@@ -2870,8 +2870,7 @@ const DLRTournament = (() => {
     const rawBio = meta.bio || "";
     const linkedBio = rawBio
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-      .replace(/
-/g, "<br>")
+      .replace(/\n/g, "<br>")
       .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
 
     // Social links
@@ -2974,8 +2973,7 @@ const DLRTournament = (() => {
 
     const htmlContent = rules.content
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-      .replace(/
-/g, "<br>")
+      .replace(/\n/g, "<br>")
       .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
 
     body.innerHTML = `
