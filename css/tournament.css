@@ -853,3 +853,91 @@
   color: #a78bfa;
   font-weight: 500;
 }
+
+/* ── F5-T1 / F5-P2 additions ─────────────────────────────── */
+
+/* Standings Twitter link */
+.standings-table td a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.standings-table td a:hover { text-decoration: underline; }
+
+/* Info tab: status banner */
+.trn-info-status-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1.5px solid;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  font-size: .85rem;
+  font-weight: 600;
+  margin-bottom: var(--space-4);
+}
+
+/* Info tab: bio / rules rich text area */
+.trn-info-bio {
+  font-size: .875rem;
+  color: var(--color-text);
+  line-height: 1.7;
+}
+.trn-info-bio br + br { display: block; content: ""; margin-top: .5em; }
+
+.trn-rules-preview {
+  max-height: 6em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent);
+  mask-image: linear-gradient(to bottom, black 60%, transparent);
+}
+
+.trn-rules-full { max-height: none; -webkit-mask-image: none; mask-image: none; }
+
+/* Social links row */
+.trn-social-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.trn-social-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: .82rem;
+  color: var(--color-text);
+  text-decoration: none;
+  background: var(--color-surface);
+  transition: border-color .15s, color .15s;
+}
+.trn-social-link:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Donation button */
+.trn-donation-btn {
+  display: inline-block;
+  margin-top: var(--space-2);
+  text-decoration: none;
+}
+
+/* Info donation card */
+.trn-info-donation { text-align: center; }
+
+/* Rules version badge */
+.trn-rules-version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt, var(--color-surface));
+  border: 1px solid var(--color-border);
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+

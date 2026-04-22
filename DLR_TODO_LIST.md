@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 22, 2026 — F5-P1 complete, F5-P2 standings complete, active bugs tracked as F5-T1 through F5-T4*
+*Updated: April 22, 2026 — F5-T2, F5-T3, F5-T4 complete. F5-T1 and F5-P2 remaining items are next.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -71,46 +71,29 @@ Reference design/mockup to be provided by Mike.
 
 **Phase 1 — Foundation ✅ COMPLETE**
 
-**Phase 2 — Core Views (Standings ✅, remaining items below)**
+**Phase 2 — Core Views (Standings ✅, T2 ✅, T3 ✅, T4 ✅, remaining items below)**
 
 ### F5-T1 — Standings column settings + median wins
 **What:** Admin settings (on Overview tab or new Settings tab) to:
-1. Select which extra columns appear in standings (Twitter handle, gender, custom fields).
-   Currently these appear automatically if data exists — should be opt-in instead.
-2. Toggle median wins on/off (`meta.medianWins`). When enabled, any team scoring above
+1. Toggle median wins on/off (`meta.medianWins`). When enabled, any team scoring above
    the weekly median score gets +1 win. Sleeper only: fetch weekly scores per league,
    compute median, add to W/L before caching.
+2. Twitter handle column in standings (opt-in toggle) — data is already captured in
+   participant records, just needs a settings toggle and render path.
 **Files:** `tournament.js`
+**Note:** Gender is now a badge inline on team name (not a column). Twitter handle
+column deferred to a later session per earlier discussion.
 
-### F5-T2 — Participant list fixes
-**What:**
-1. Twitter handle not showing in participant list — add display + make it a clickable
-   link to `https://x.com/{handle}` (strip leading @ if present).
-2. DLR match for Sleeper uses `platforms.sleeper.username` but the display name shown
-   in standings comes from Sleeper's `/users` endpoint as `display_name`. Match should
-   use `platforms.sleeper.sleeperUsername` (or `displayName` field — check which is stored)
-   so standings show the correct name instead of the raw Sleeper handle.
-**Files:** `tournament.js`
-
-### F5-T3 — Standings / UI fixes (active bugs)
-**What:**
-1. Playoff start week setting not visible in admin Overview — DOM ID or render issue
-2. "Preview as User" button missing after recent deploys
-3. Filter UI: remove flat list / conference / division / gender dropdowns from standings toolbar.
-   Keep only year dropdown (move above search with padding). Conference/division grouping can
-   stay in the "group by" select if needed but gender filter should be removed from toolbar.
-4. Mobile: tournament cards stretch past screen width and are not clickable — CSS overflow issue
+### F5-P2 remaining — Info page + Rules tab rich text
+**What:** Phase 2 has two remaining items not yet built:
+1. **Tournament Info tab** — rich text bio section (admin can write tournament history,
+   embed links), donation link field, social links, status banner
+2. **Rules tab** — admin authors a custom rules document (rich text), versioned, users
+   see latest version. Tiebreaker config (PF vs H2H).
 **Files:** `tournament.js`, `tournament.css`
-
-### F5-T4 — Public page fixes
-**What:** Changes to `tournament.js` are not reflected in `tournaments/index.html` because
-the public page has its own copy of the standings render logic. Need to:
-1. Fix Firebase auth error (`firebase.auth is not a function`) — `firebase-auth-compat.js` was
-   added but may not have deployed
-2. Fix duplicate `db` variable collision with `config.js`
-3. Sync standings CSS, year filter, and other render improvements to public page
-4. Fix mobile card overflow
-**Files:** `tournaments/index.html`, `tournament.css`
+**Note:** Rich text editor library choice (Quill, TipTap, or plain textarea) needs
+to be decided before building. Recommend starting with plain `<textarea>` with
+newline-to-`<br>` rendering, then upgrading later.
 
 **Phase 3 — Analytics & Weekly Views**
 - Consolidated draft board + ADP, weekly matchup summary, top rosters, AI-assisted recap
@@ -147,23 +130,17 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files |
 |---|-----|-------------|--------|-------|
-| 1 | Y5 | Yahoo Bundle Stability | Medium | `worker.js`, `yahoo.js` |
-| 2 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
-| 3 | X2 | Cross-Platform League Link | High | `profile.js`, `firebase-db.js`, `leaguegroups.js` |
-| 4 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 5 | F2 | Custom Playoff Tracker | High | New module + several files |
-| 6 | ~~F5-P1~~ | ~~Tournament Mode Phase 1~~ | ✅ DONE | — |
-| 7 | F5-T3 | Standings UI fixes (playoff week, preview, mobile, filters) | Low | `tournament.js`, `tournament.css` |
-| 8 | F5-T2 | Participant: Twitter handle + Sleeper display name fix | Low | `tournament.js` |
-| 9 | F5-T4 | Public page fixes | Medium | `tournaments/index.html`, `tournament.css` |
-| 10 | F5-T1 | Standings column settings + median wins | Medium | `tournament.js` |
-| 11 | F5-P2 | Tournament Phase 2 remaining (bio/rules rich text, info page) | High | `tournament.js`, `tournament.css` |
-| 12 | F5-P3 | Tournament Phase 3 (Analytics) | Very High | `tournament.js`, `firebase-db.js` |
-| 13 | F5-P4 | Tournament Phase 4 (Playoffs) | Very High | `tournament.js`, `firebase-db.js` |
-| 14 | F5-P5 | Tournament Phase 5 (Advanced) | Very High | `tournament.js`, `firebase-db.js`, worker |
-| 11 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 12 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 13 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 1 | F5-T1 | Median wins toggle + standings column settings | Medium | `tournament.js` |
+| 2 | F5-P2b | Info page + Rules tab rich text | Medium | `tournament.js`, `tournament.css` |
+| 3 | F5-P3 | Tournament Phase 3 (Analytics) | Very High | `tournament.js`, `firebase-db.js` |
+| 4 | F5-P4 | Tournament Phase 4 (Playoffs) | Very High | `tournament.js`, `firebase-db.js` |
+| 5 | F5-P5 | Tournament Phase 5 (Advanced) | Very High | `tournament.js`, `firebase-db.js`, worker |
+| 6 | F8 | Hallway: H2H Records in Common Leagues | Medium | `hallway.js` |
+| 7 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 8 | F2 | Custom Playoff Tracker | High | New module + several files |
+| 9 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 10 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 11 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -179,7 +156,10 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
   year dropdown, ranking methods, playoff start week with Sleeper regular-season-only W/L recompute,
   gender column + filter, CSS match to locker.css, admin preview-as-user toggle, public page standings
 - **Y5 CLOSED:** Yahoo bundle instability — batching + per-league Sync button declared best achievable
-
+- **F5-T3 COMPLETE:** Standings/UI fixes — playoff start week field added to admin Overview (saves on blur/Enter); "Preview as User" button restored in admin tools section; standings toolbar cleaned up (year above search, conference/division as single grouped select, gender filter removed from toolbar); mobile card overflow fixed; tab bar replaced with `<select>` dropdown on mobile (≤640px); `#view-tournament.active` scroll override added to `tournament.css` matching `#view-hallway` pattern
+- **F5-T2 COMPLETE:** Twitter handle shown as clickable `𝕏 @handle` link in participant list rows and detail modal (leading @ stripped); Sleeper DLR identity matching broadened to try `sleeperUsername`, `username`, `displayName`, `display_name` fields; participant detail modal shows Twitter as clickable link
+- **F5-T4 COMPLETE:** Public page (`tournaments/index.html`) fully synced with internal app — standings table uses same CSS classes (`standings-table`, `standings-rank`, `standings-team-cell`, `st-av`); tab bar has mobile `<select>` dropdown; year select moved into standings toolbar above search; last synced info dimmed and small; gender badges (blue M / pink F) shown inline on team names on both internal and public pages
+- **F5 Display Name + Gender Badges COMPLETE:** Internal standings now show participant `displayName` from the participants list instead of the raw Sleeper `display_name`; gender badge (🔵 M / 🩷 F) appears inline in team name cell on both internal and public standings; `_writePublicSummary` now includes a `participantMap` (sanitized keys → `{displayName, gender}`) so the public page has the data without needing auth; Firebase key sanitization (`_sk`) strips illegal chars (`.#$/[]`) from all participant map keys — fixes the "nora/maeve/aelish strafford" write error; draft tournaments with standings data now visible in internal "All Tournaments" list
 - Yahoo Draft tab: endpoint fixed, multi-shape parser (Shapes 1–5), grid/list/auction views, 25/page pagination, DEF fallback
 - Yahoo Keeper detection: `players;status=K` cross-reference, `isKeeper` on picks, K badge in list+grid, KEEPER badge in toggle bar
 - Yahoo League type detection: `leagueTypeConfirmed` flag prevents re-fetch spam
@@ -319,6 +299,18 @@ console.log("Reset", key, "— click Sync to re-detect");
 ```js
 await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
 console.log("Bundles cleared");
+```
+
+### Check tournament participantMap for a given tournament (verify gender/displayName sync)
+```js
+const TID = "YOUR_TOURNAMENT_ID"; // ← replace
+const snap = await firebase.database().ref(`gmd/publicTournaments/${TID}/participantMap`).get();
+const map = snap.val() || {};
+const entries = Object.entries(map);
+console.log(`participantMap: ${entries.length} keys`);
+entries.slice(0, 10).forEach(([k, v]) =>
+  console.log(`  "${k}" → displayName:"${v.displayName}" gender:"${v.gender}"`)
+);
 ```
 
 ---
