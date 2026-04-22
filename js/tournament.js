@@ -415,8 +415,10 @@ const DLRTournament = (() => {
               Participants
               ${Object.keys(t.participants || {}).length ? `<span class="trn-tab-count">${Object.keys(t.participants).length}</span>` : ""}
             </button>
+            <button class="trn-tab ${_activeAdminTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
           ` : `
             <button class="trn-tab ${_activeUserTab === "info" ? "active" : ""}" data-tab="info">Info</button>
+            <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
             <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
           `}
         </div>
@@ -469,13 +471,15 @@ const DLRTournament = (() => {
         case "registration":  return _renderRegistrationFormTab(tid, t, body);
         case "registrations": return _renderRegistrantsTab(tid, t, body);
         case "participants":   return _renderParticipantsTab(tid, t, body);
-        default:              return _renderAdminOverview(tid, t, body);
+        case "standings":      return _renderStandingsTab(tid, t, body, true);
+        default:               return _renderAdminOverview(tid, t, body);
       }
     } else {
       switch (tab) {
-        case "info":     return _renderInfoTab(t, body);
-        case "register": return _renderRegisterTab(tid, t, body);
-        default:         return _renderInfoTab(t, body);
+        case "info":       return _renderInfoTab(t, body);
+        case "standings":  return _renderStandingsTab(tid, t, body, false);
+        case "register":   return _renderRegisterTab(tid, t, body);
+        default:           return _renderInfoTab(t, body);
       }
     }
   }
@@ -540,6 +544,15 @@ const DLRTournament = (() => {
         <div class="trn-section-card-title">Tournament Details</div>
         <div class="trn-detail-rows">
           <div class="trn-detail-row"><span>Registration</span><span>${meta.regType === "invite" ? "Invite Only" : "Open"}</span></div>
+          <div class="trn-detail-row">
+            <span>Standings Ranking</span>
+            <span>
+              <select id="trn-rankby-select" style="font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                <option value="record" ${(meta.rankBy || "record") === "record" ? "selected" : ""}>Record then PF</option>
+                <option value="pf"     ${meta.rankBy === "pf" ? "selected" : ""}>Points For only</option>
+              </select>
+            </span>
+          </div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
           <div class="trn-detail-row"><span>Created</span><span>${meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : "—"}</span></div>
         </div>
@@ -561,6 +574,13 @@ const DLRTournament = (() => {
     );
     document.getElementById("trn-goto-regs-btn")?.addEventListener("click", () => {
       document.querySelector('.trn-tab[data-tab="registrations"]')?.click();
+    });
+    document.getElementById("trn-rankby-select")?.addEventListener("change", async function() {
+      try {
+        await _tMetaRef(tid).update({ rankBy: this.value });
+        showToast("Ranking method saved ✓");
+        _tournaments[tid].meta.rankBy = this.value;
+      } catch(e) { showToast("Failed to save ranking method", "error"); }
     });
   }
 
@@ -605,7 +625,10 @@ const DLRTournament = (() => {
       <div class="trn-section-card">
         <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
           <span>League Batches (${totalLeagues} total leagues)</span>
-          <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
+          <div style="display:flex;gap:var(--space-2)">
+            <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
+            <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
+          </div>
         </div>
 
         ${realBatches.length ? realBatches.sort((a, b) => (b[1].year || 0) - (a[1].year || 0)).map(([bid, batch]) => `
@@ -615,6 +638,15 @@ const DLRTournament = (() => {
                 <span class="trn-platform-badge trn-platform-${batch.platform || "unknown"}">${(batch.platform || "?").toUpperCase()}</span>
                 <span class="trn-batch-year">${batch.year || "—"}</span>
                 <span class="trn-batch-count">${Object.keys(batch.leagues || {}).length} leagues</span>
+              ${(() => {
+                const sc = t.standingsCache || {};
+                const ids = Object.keys(batch.leagues || {});
+                const nSynced = ids.filter(id => sc[id]?.lastSynced).length;
+                const maxSync = ids.reduce((m, id) => Math.max(m, sc[id]?.lastSynced||0), 0);
+                return nSynced
+                  ? `<span class="trn-batch-sync-tag">✓ ${nSynced}/${ids.length} synced · ${new Date(maxSync).toLocaleDateString()}</span>`
+                  : `<span class="trn-batch-sync-tag trn-batch-sync-tag--pending">Not synced</span>`;
+              })()}
                 ${batch.hasConferences ? `<span class="trn-batch-tag">Conferences</span>` : ""}
               </div>
               <div class="trn-batch-actions">
@@ -655,6 +687,7 @@ const DLRTournament = (() => {
     `;
 
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
+    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
     body.querySelectorAll("[data-edit-batch]").forEach(btn =>
       btn.addEventListener("click", () => _openEditConferencesModal(tid, btn.dataset.editBatch, batches[btn.dataset.editBatch]))
     );
@@ -1327,6 +1360,378 @@ const DLRTournament = (() => {
     a.click();
     URL.revokeObjectURL(url);
     showToast("CSV exported");
+  }
+
+  // ── Standings ──────────────────────────────────────────
+  // Firebase: gmd/tournaments/{tid}/standingsCache/{leagueId}
+  // { leagueName, platform, year, batchId, conference, division,
+  //   teams:[{teamId,teamName,wins,losses,ties,pf,pa}], lastSynced }
+
+  function _tStandingsRef(tid) { return GMD.child("tournaments/" + tid + "/standingsCache"); }
+
+  let _standingsSort = { col: "overallRank", dir: "asc" };
+
+  function _rankTeams(teams, rankBy) {
+    return [...teams].sort((a, b) => {
+      if (rankBy === "pf") return b.pf - a.pf;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return b.pf - a.pf;
+    }).map((t, i) => ({ ...t, computedRank: i + 1 }));
+  }
+
+  function _sortRows(rows, col, dir) {
+    const mult = dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (["teamName","leagueName","conference","division"].includes(col))
+        return mult * String(a[col]||"").localeCompare(String(b[col]||""));
+      return mult * ((Number(a[col])||0) - (Number(b[col])||0));
+    });
+  }
+
+  function _renderStandingsTab(tid, t, body, isAdmin) {
+    const cache  = t.standingsCache || {};
+    const meta   = t.meta || {};
+    const rankBy = meta.rankBy || "record";
+    const entries = Object.entries(cache);
+
+    if (!entries.length) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">📊</div>
+          <div class="trn-empty-title">No standings data yet</div>
+          <div class="trn-empty-sub">${isAdmin
+            ? "Go to the Leagues tab and click Sync Standings."
+            : "The commissioner has not synced standings yet."}</div>
+        </div>`;
+      return;
+    }
+
+    // Build flat rows
+    let allRows = [];
+    let lastSynced = 0;
+    for (const [leagueId, lc] of entries) {
+      const ranked = _rankTeams(lc.teams || [], rankBy);
+      ranked.forEach(team => {
+        allRows.push({
+          rank:       team.computedRank,
+          teamName:   team.teamName  || "Unknown",
+          leagueName: lc.leagueName || leagueId,
+          conference: lc.conference || "",
+          division:   lc.division   || "",
+          wins:       team.wins     || 0,
+          losses:     team.losses   || 0,
+          ties:       team.ties     || 0,
+          pf:         team.pf       || 0,
+          pa:         team.pa       || 0,
+          leagueId,
+          platform:   lc.platform   || ""
+        });
+      });
+      if ((lc.lastSynced||0) > lastSynced) lastSynced = lc.lastSynced;
+    }
+
+    // Compute overall rank
+    allRows = _rankTeams(allRows, rankBy).map((r, i) => ({ ...r, overallRank: i + 1 }));
+    allRows = _sortRows(allRows, _standingsSort.col, _standingsSort.dir);
+
+    const conferences = [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort();
+    const divisions   = [...new Set(allRows.map(r => r.division).filter(Boolean))].sort();
+    const hasConf     = conferences.length > 0;
+    const hasDiv      = divisions.length > 0;
+    const lastSyncedStr = lastSynced ? new Date(lastSynced).toLocaleString() : "Never";
+
+    body.innerHTML = `
+      <div class="trn-standings-toolbar">
+        <input type="text" id="trn-st-search" placeholder="Search team or league" class="trn-st-search" />
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+          ${hasConf ? `<select id="trn-st-conf" class="trn-filter-select" style="min-width:0">
+            <option value="">All Conferences</option>
+            ${conferences.map(c => "<option>" + _esc(c) + "</option>").join("")}
+          </select>` : ""}
+          ${hasDiv ? `<select id="trn-st-div" class="trn-filter-select" style="min-width:0">
+            <option value="">All Divisions</option>
+            ${divisions.map(d => "<option>" + _esc(d) + "</option>").join("")}
+          </select>` : ""}
+          <select id="trn-st-group" class="trn-filter-select" style="min-width:0">
+            <option value="flat">Flat List</option>
+            ${hasConf ? '<option value="conf">By Conference</option>' : ""}
+            ${hasDiv  ? '<option value="div">By Division</option>'   : ""}
+          </select>
+        </div>
+      </div>
+      <div class="trn-standings-meta">
+        Last synced: ${_esc(lastSyncedStr)}
+        <span style="color:var(--color-text-dim);margin-left:var(--space-3)">
+          ${allRows.length} teams &middot; ${entries.length} leagues
+        </span>
+      </div>
+      <div id="trn-standings-wrap">
+        ${_buildStandingsTable(allRows, hasConf, hasDiv, "flat")}
+      </div>
+    `;
+
+    const refilter = () => {
+      const q    = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
+      const conf = document.getElementById("trn-st-conf")?.value  || "";
+      const div  = document.getElementById("trn-st-div")?.value   || "";
+      const grp  = document.getElementById("trn-st-group")?.value || "flat";
+      let rows = allRows;
+      if (q)    rows = rows.filter(r => r.teamName.toLowerCase().includes(q) || r.leagueName.toLowerCase().includes(q));
+      if (conf) rows = rows.filter(r => r.conference === conf);
+      if (div)  rows = rows.filter(r => r.division   === div);
+      rows = _sortRows(rows, _standingsSort.col, _standingsSort.dir);
+      const wrap = document.getElementById("trn-standings-wrap");
+      if (wrap) wrap.innerHTML = _buildStandingsTable(rows, hasConf, hasDiv, grp);
+      _wireStandingSortHeaders(allRows, hasConf, hasDiv);
+    };
+
+    document.getElementById("trn-st-search")?.addEventListener("input",  refilter);
+    document.getElementById("trn-st-conf")?.addEventListener("change",   refilter);
+    document.getElementById("trn-st-div")?.addEventListener("change",    refilter);
+    document.getElementById("trn-st-group")?.addEventListener("change",  refilter);
+    _wireStandingSortHeaders(allRows, hasConf, hasDiv);
+  }
+
+  function _wireStandingSortHeaders(allRows, hasConf, hasDiv) {
+    document.querySelectorAll("[data-sort-col]").forEach(th => {
+      th.classList.toggle("trn-st-sorted", _standingsSort.col === th.dataset.sortCol);
+      // clone to remove old listeners
+      const fresh = th.cloneNode(true);
+      th.parentNode?.replaceChild(fresh, th);
+      fresh.addEventListener("click", () => {
+        const col = fresh.dataset.sortCol;
+        if (_standingsSort.col === col) {
+          _standingsSort.dir = _standingsSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          _standingsSort.col = col;
+          _standingsSort.dir = "asc";
+        }
+        // Re-trigger filter (search field may be set)
+        document.getElementById("trn-st-search")?.dispatchEvent(new Event("input"));
+      });
+    });
+  }
+
+  function _buildStandingsTable(rows, hasConf, hasDiv, groupMode) {
+    if (!rows.length) return "<div class=\"trn-empty-inline\">No teams match your filters.</div>";
+
+    const si = (col) => {
+      const active = _standingsSort.col === col;
+      const icon   = active ? (_standingsSort.dir === "asc" ? "↑" : "↓") : "⇅";
+      return "<span class=\"trn-st-sort-icon" + (active ? " trn-st-sort-icon--active" : "") + "\">" + icon + "</span>";
+    };
+
+    const thead = "<thead><tr>" +
+      '<th class="trn-st-th trn-st-th--num" data-sort-col="overallRank">Rank ' + si("overallRank") + "</th>" +
+      '<th class="trn-st-th" data-sort-col="teamName">Team ' + si("teamName") + "</th>" +
+      '<th class="trn-st-th" data-sort-col="leagueName">League ' + si("leagueName") + "</th>" +
+      (hasConf ? '<th class="trn-st-th" data-sort-col="conference">Conf ' + si("conference") + "</th>" : "") +
+      (hasDiv  ? '<th class="trn-st-th" data-sort-col="division">Div '  + si("division")   + "</th>" : "") +
+      '<th class="trn-st-th trn-st-th--num" data-sort-col="wins">W '   + si("wins")   + "</th>" +
+      '<th class="trn-st-th trn-st-th--num" data-sort-col="losses">L ' + si("losses") + "</th>" +
+      '<th class="trn-st-th trn-st-th--num" data-sort-col="pf">PF '    + si("pf")     + "</th>" +
+      '<th class="trn-st-th trn-st-th--num" data-sort-col="pa">PA '    + si("pa")     + "</th>" +
+      "</tr></thead>";
+
+    const rowHtml = (r) =>
+      "<tr class=\"trn-st-row\">" +
+      "<td class=\"trn-st-td trn-st-td--num trn-st-rank\">" + r.overallRank + "</td>" +
+      "<td class=\"trn-st-td trn-st-td--name\">" + _esc(r.teamName) + "</td>" +
+      "<td class=\"trn-st-td trn-st-td--league\">" + _esc(r.leagueName) + "</td>" +
+      (hasConf ? "<td class=\"trn-st-td\">" + _esc(r.conference) + "</td>" : "") +
+      (hasDiv  ? "<td class=\"trn-st-td\">" + _esc(r.division)   + "</td>" : "") +
+      "<td class=\"trn-st-td trn-st-td--num\">" + r.wins + "</td>" +
+      "<td class=\"trn-st-td trn-st-td--num\">" + r.losses + "</td>" +
+      "<td class=\"trn-st-td trn-st-td--num\">" + r.pf.toFixed(2) + "</td>" +
+      "<td class=\"trn-st-td trn-st-td--num\">" + r.pa.toFixed(2) + "</td>" +
+      "</tr>";
+
+    const tableWrap = (innerRows) =>
+      '<div class="trn-standings-table-wrap"><table class="trn-standings-table">' +
+      thead + "<tbody>" + innerRows.map(rowHtml).join("") + "</tbody></table></div>";
+
+    if (groupMode === "conf" && hasConf) {
+      const grouped = {};
+      rows.forEach(r => { const k = r.conference || "No Conference"; (grouped[k] = grouped[k]||[]).push(r); });
+      return Object.entries(grouped).map(([g, gr]) =>
+        '<div class="trn-st-group-label">' + _esc(g) + "</div>" + tableWrap(gr)
+      ).join("");
+    }
+    if (groupMode === "div" && hasDiv) {
+      const grouped = {};
+      rows.forEach(r => { const k = r.division || "No Division"; (grouped[k] = grouped[k]||[]).push(r); });
+      return Object.entries(grouped).map(([g, gr]) =>
+        '<div class="trn-st-group-label">' + _esc(g) + "</div>" + tableWrap(gr)
+      ).join("");
+    }
+    return tableWrap(rows);
+  }
+
+  // ── Sync standings ─────────────────────────────────────
+  async function _syncStandings(tid, t) {
+    const batches = t.leagues || {};
+    const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
+    const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
+
+    if (!realBatches.length) { showToast("No league batches to sync", "info"); return; }
+
+    const toSync = [];
+    for (const [batchId, batch] of realBatches) {
+      for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
+        toSync.push({
+          leagueId,
+          platform:   batch.platform  || "sleeper",
+          year:       batch.year      || new Date().getFullYear(),
+          batchId,
+          conference: l.conference    || null,
+          division:   l.division      || null,
+          leagueName: l.name          || leagueId
+        });
+      }
+    }
+
+    const total = toSync.length;
+    let done = 0;
+    const btn = document.getElementById("trn-sync-standings-btn");
+    const setP = (msg) => { if (btn) { btn.disabled = true; btn.textContent = msg; } };
+    setP("Syncing 0/" + total + "...");
+
+    const sleepers = toSync.filter(l => l.platform === "sleeper");
+    const mfls     = toSync.filter(l => l.platform === "mfl");
+    const yahoos   = toSync.filter(l => l.platform === "yahoo");
+    const cacheUpdates = {};
+
+    // Sleeper — parallel
+    await Promise.allSettled(sleepers.map(async (l) => {
+      try {
+        const data = await _fetchSleeperStandings(l.leagueId);
+        if (data) cacheUpdates[l.leagueId] = { ...l, ...data, lastSynced: Date.now() };
+      } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
+      done++; setP("Syncing " + done + "/" + total + "...");
+    }));
+
+    // MFL — 3 at a time, 300ms gap
+    for (let i = 0; i < mfls.length; i += 3) {
+      await Promise.allSettled(mfls.slice(i, i + 3).map(async (l) => {
+        try {
+          const data = await _fetchMFLStandings(l.leagueId, l.year);
+          if (data) cacheUpdates[l.leagueId] = { ...l, ...data, lastSynced: Date.now() };
+        } catch(e) { console.warn("[Standings] MFL", l.leagueId, e.message); }
+        done++; setP("Syncing " + done + "/" + total + "...");
+      }));
+      if (i + 3 < mfls.length) await new Promise(r => setTimeout(r, 300));
+    }
+
+    // Yahoo — 2 at a time, 600ms gap
+    const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
+    if (yahoos.length && !yahooToken) {
+      showToast("Yahoo standings skipped — connect Yahoo in your profile first", "info");
+      done += yahoos.length;
+    } else {
+      for (let i = 0; i < yahoos.length; i += 2) {
+        await Promise.allSettled(yahoos.slice(i, i + 2).map(async (l) => {
+          try {
+            const data = await _fetchYahooStandings(l.leagueId, yahooToken);
+            if (data) cacheUpdates[l.leagueId] = { ...l, ...data, lastSynced: Date.now() };
+          } catch(e) { console.warn("[Standings] Yahoo", l.leagueId, e.message); }
+          done++; setP("Syncing " + done + "/" + total + "...");
+        }));
+        if (i + 2 < yahoos.length) await new Promise(r => setTimeout(r, 600));
+      }
+    }
+
+    if (!Object.keys(cacheUpdates).length) {
+      if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
+      showToast("No standings data retrieved", "error");
+      return;
+    }
+
+    try {
+      await _tStandingsRef(tid).update(cacheUpdates);
+      const snap = await _tRef(tid).once("value");
+      _tournaments[tid] = snap.val();
+      if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
+      showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
+      const body = document.getElementById("trn-tab-body");
+      if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
+    } catch(err) {
+      if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
+      showToast("Failed to save: " + err.message, "error");
+    }
+  }
+
+  // ── Platform fetchers ──────────────────────────────────
+
+  async function _fetchSleeperStandings(leagueId) {
+    const [rU, rR] = await Promise.all([
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users"),
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters")
+    ]);
+    if (!rU.ok || !rR.ok) return null;
+    const users   = await rU.json();
+    const rosters = await rR.json();
+    const uMap = {};
+    (users || []).forEach(u => { uMap[u.user_id] = u.display_name || u.username || u.user_id; });
+    const teams = (rosters || []).map(r => ({
+      teamId:   String(r.roster_id),
+      teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
+      wins:     r.settings?.wins    || 0,
+      losses:   r.settings?.losses  || 0,
+      ties:     r.settings?.ties    || 0,
+      pf:       parseFloat(((r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100).toFixed(2)),
+      pa:       parseFloat(((r.settings?.fpts_against || 0) + (r.settings?.fpts_against_decimal || 0) / 100).toFixed(2))
+    }));
+    return { teams };
+  }
+
+  async function _fetchMFLStandings(leagueId, year) {
+    const hdr = { "User-Agent": "DynastyLockerRoom/1.0" };
+    const [rS, rL] = await Promise.all([
+      fetch("https://api.myfantasyleague.com/" + year + "/export?TYPE=leagueStandings&L=" + leagueId + "&JSON=1", { headers: hdr }),
+      fetch("https://api.myfantasyleague.com/" + year + "/export?TYPE=league&L=" + leagueId + "&JSON=1", { headers: hdr })
+    ]);
+    if (!rS.ok) return null;
+    const sData = await rS.json().catch(() => null);
+    const lData = rL.ok ? await rL.json().catch(() => null) : null;
+    const nameMap = {};
+    const frArr = lData?.league?.franchises?.franchise || [];
+    (Array.isArray(frArr) ? frArr : [frArr]).forEach(f => { if (f.id) nameMap[f.id] = f.name || f.id; });
+    const stArr = sData?.leagueStandings?.franchise || [];
+    const teams = (Array.isArray(stArr) ? stArr : [stArr]).map(s => ({
+      teamId:   s.id,
+      teamName: nameMap[s.id] || s.id,
+      wins:     parseInt(s.h2hw || s.W  || 0),
+      losses:   parseInt(s.h2hl || s.L  || 0),
+      ties:     parseInt(s.h2ht || s.T  || 0),
+      pf:       parseFloat(s.pf  || s.PF || 0),
+      pa:       parseFloat(s.pa  || s.PA || 0)
+    }));
+    return { teams };
+  }
+
+  async function _fetchYahooStandings(leagueId, accessToken) {
+    if (!accessToken) return null;
+    const leagueKey = leagueId.includes(".l.") ? leagueId : leagueId;
+    const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/yahoo/leagueBundle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ access_token: accessToken, league_key: leagueKey })
+    });
+    if (!r.ok) return null;
+    const bundle = await r.json().catch(() => null);
+    if (!bundle?.standings?.length) return null;
+    const nameMap = {};
+    (bundle.teams || []).forEach(t => { nameMap[String(t.id)] = t.name || t.id; });
+    const teams = (bundle.standings || []).map(s => ({
+      teamId:   String(s.teamId),
+      teamName: nameMap[String(s.teamId)] || ("Team " + s.teamId),
+      wins:     s.wins       || 0,
+      losses:   s.losses     || 0,
+      ties:     s.ties       || 0,
+      pf:       s.ptsFor     || 0,
+      pa:       s.ptsAgainst || 0
+    }));
+    return { teams };
   }
 
   // ── Admin: Roles tab ───────────────────────────────────

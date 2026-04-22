@@ -41,6 +41,15 @@ const AppState = {
       );
     }
 
+    // Restore last active view after refresh
+    const savedView = sessionStorage.getItem("dlr_active_view");
+    if (savedView && savedView !== "locker") {
+      setTimeout(() => {
+        const link = document.querySelector(`.nav-link[data-view="${savedView}"]`);
+        if (link) link.click();
+      }, 50);
+    }
+
     // Tell YahooAPI which user this is so Firebase token reads/writes work
     YahooAPI.setUsername(profile.username);
 
@@ -385,6 +394,7 @@ const DLRNav = {
     document.querySelectorAll(`[data-view="${view}"]`).forEach(l => l.classList.add("active"));
     document.getElementById(`view-${view}`)?.classList.add("active");
     AppState.currentView = view;
+    sessionStorage.setItem("dlr_active_view", view);
     if (view === "hallway")  DLRHallway.init();
     if (view === "trophies") DLRTrophyRoom.init();
     if (view === "tournament" && typeof DLRTournament !== "undefined") {
@@ -431,6 +441,7 @@ document.querySelectorAll(".nav-link").forEach(link => {
     link.classList.add("active");
     document.getElementById(`view-${view}`)?.classList.add("active");
     AppState.currentView = view;
+    sessionStorage.setItem("dlr_active_view", view);
     if (view === "hallway") DLRHallway.init();
     if (view === "trophies") DLRTrophyRoom.init();
     if (view === "tournament" && typeof DLRTournament !== "undefined") {
