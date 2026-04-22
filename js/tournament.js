@@ -401,7 +401,7 @@ const DLRTournament = (() => {
           ${canAdmin ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
         </div>
 
-        <!-- Tab bar -->
+        <!-- Tab bar (desktop) / Tab select (mobile) -->
         <div class="trn-tabs" id="trn-tabs">
           ${canAdmin ? `
             <button class="trn-tab ${_activeAdminTab === "overview"      ? "active" : ""}" data-tab="overview">Overview</button>
@@ -423,6 +423,21 @@ const DLRTournament = (() => {
             <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
           `}
         </div>
+        <select class="trn-tab-select" id="trn-tab-select">
+          ${canAdmin ? `
+            <option value="overview"      ${_activeAdminTab === "overview"      ? "selected" : ""}>Overview</option>
+            <option value="leagues"       ${_activeAdminTab === "leagues"       ? "selected" : ""}>Leagues</option>
+            <option value="roles"         ${_activeAdminTab === "roles"         ? "selected" : ""}>Roles</option>
+            <option value="registration"  ${_activeAdminTab === "registration"  ? "selected" : ""}>Registration Form</option>
+            <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>Registrants</option>
+            <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>Participants</option>
+            <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>Standings</option>
+          ` : `
+            <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
+            <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+            <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
+          `}
+        </select>
 
         <div id="trn-tab-body" class="trn-tab-body"></div>
       </div>
@@ -431,7 +446,7 @@ const DLRTournament = (() => {
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
 
-    // Tab wire-up
+    // Tab wire-up (buttons)
     container.querySelectorAll(".trn-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         container.querySelectorAll(".trn-tab").forEach(t => t.classList.remove("active"));
@@ -439,8 +454,21 @@ const DLRTournament = (() => {
         const tabName = tab.dataset.tab;
         if (canAdmin) _activeAdminTab = tabName;
         else _activeUserTab = tabName;
+        const sel = document.getElementById("trn-tab-select");
+        if (sel) sel.value = tabName;
         _renderTab(tid, tabName, t, canAdmin);
       });
+    });
+
+    // Tab wire-up (select — mobile)
+    document.getElementById("trn-tab-select")?.addEventListener("change", function() {
+      const tabName = this.value;
+      container.querySelectorAll(".trn-tab").forEach(tb => {
+        tb.classList.toggle("active", tb.dataset.tab === tabName);
+      });
+      if (canAdmin) _activeAdminTab = tabName;
+      else _activeUserTab = tabName;
+      _renderTab(tid, tabName, t, canAdmin);
     });
 
     // Render default tab
@@ -656,6 +684,11 @@ const DLRTournament = (() => {
           <button class="trn-tab ${_activeUserTab === "standings" ? "active" : ""}" data-tab="standings">Standings</button>
           <button class="trn-tab ${_activeUserTab === "register" ? "active" : ""}" data-tab="register">Register</button>
         </div>
+        <select class="trn-tab-select" id="trn-tab-select">
+          <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>Info</option>
+          <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>Standings</option>
+          <option value="register"  ${_activeUserTab === "register"  ? "selected" : ""}>Register</option>
+        </select>
         <div id="trn-tab-body" class="trn-tab-body"></div>
       </div>
     `;
@@ -668,8 +701,19 @@ const DLRTournament = (() => {
         tab.classList.add("active");
         const tabName = tab.dataset.tab;
         _activeUserTab = tabName;
+        const sel = document.getElementById("trn-tab-select");
+        if (sel) sel.value = tabName;
         _renderTab(tid, tabName, t, false);
       });
+    });
+
+    document.getElementById("trn-tab-select")?.addEventListener("change", function() {
+      const tabName = this.value;
+      container.querySelectorAll(".trn-tab").forEach(tb => {
+        tb.classList.toggle("active", tb.dataset.tab === tabName);
+      });
+      _activeUserTab = tabName;
+      _renderTab(tid, tabName, t, false);
     });
 
     const defaultTab = _activeUserTab;
@@ -1197,9 +1241,10 @@ const DLRTournament = (() => {
   }
 
   function _renderParticipantRow(tid, pid, p) {
-    const searchText = [p.displayName, p.email, p.sleeperUsername, p.teamName, p.dlrUsername]
+    const searchText = [p.displayName, p.email, p.sleeperUsername, p.teamName, p.dlrUsername, p.twitterHandle]
       .filter(Boolean).join(" ").toLowerCase();
     const yearsStr = Array.isArray(p.years) ? p.years.join(", ") : (p.years || "");
+    const twitterHandle = p.twitterHandle ? p.twitterHandle.replace(/^@/, "") : null;
     return `
       <div class="trn-reg-row trn-participant-row ${p.dlrLinked ? "trn-participant--linked" : ""}"
            data-pid="${_esc(pid)}" data-search="${_esc(searchText)}"
@@ -1214,6 +1259,7 @@ const DLRTournament = (() => {
           <div class="trn-reg-meta">
             ${p.email           ? `${_esc(p.email)} &middot; ` : ""}
             ${p.sleeperUsername ? `Sleeper: ${_esc(p.sleeperUsername)} &middot; ` : ""}
+            ${twitterHandle     ? `<a href="https://x.com/${_esc(twitterHandle)}" target="_blank" rel="noopener" style="color:var(--color-text-dim);text-decoration:none" title="View on X">𝕏 @${_esc(twitterHandle)}</a>${yearsStr ? " &middot; " : ""}` : ""}
             ${yearsStr          ? `Years: ${_esc(yearsStr)}` : ""}
           </div>
         </div>
@@ -1239,10 +1285,15 @@ const DLRTournament = (() => {
         ${[["Display Name",p.displayName],["Team Name",p.teamName],["Email",p.email],
            ["Sleeper Username",p.sleeperUsername],["MFL Email",p.mflEmail],
            ["Yahoo Username",p.yahooUsername],
+           ["Twitter/X", p.twitterHandle ? p.twitterHandle.replace(/^@/, "") : null],
            ["Years", Array.isArray(p.years) ? p.years.join(", ") : p.years]
-          ].filter(([,v]) => v).map(([label,val]) => `
-          <div class="trn-detail-row"><span>${_esc(label)}</span><span>${_esc(String(val))}</span></div>
-        `).join("")}
+          ].filter(([,v]) => v).map(([label,val]) => {
+            const isTwitter = label === "Twitter/X";
+            const display = isTwitter
+              ? `<a href="https://x.com/${_esc(val)}" target="_blank" rel="noopener" style="color:var(--color-gold)">𝕏 @${_esc(val)}</a>`
+              : _esc(String(val));
+            return `<div class="trn-detail-row"><span>${_esc(label)}</span><span>${display}</span></div>`;
+          }).join("")}
         <div class="trn-detail-row" style="margin-top:var(--space-3)">
           <span>Auto-register future years</span>
           <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
@@ -1385,14 +1436,20 @@ const DLRTournament = (() => {
       const byYahooUsername   = {};
 
       for (const [username, u] of Object.entries(users)) {
-        // Sleeper: try all known field names the profile might store the handle under
+        // Sleeper: try every field name the profile might store the handle under,
+        // including the display_name that Sleeper returns from /users endpoint
         const sleeper = u?.platforms?.sleeper;
-        const s = (sleeper?.sleeperUsername || sleeper?.username || sleeper?.displayName || "").toLowerCase();
+        const sleeperCandidates = [
+          sleeper?.sleeperUsername,
+          sleeper?.username,
+          sleeper?.displayName,
+          sleeper?.display_name
+        ].filter(Boolean).map(s => s.toLowerCase());
+        sleeperCandidates.forEach(s => { if (s) bySleeperUsername[s] = username; });
         // MFL: email address
         const m = (u?.platforms?.mfl?.mflEmail || "").toLowerCase();
         // Yahoo: username
         const y = (u?.platforms?.yahoo?.username || u?.platforms?.yahoo?.yahooUsername || "").toLowerCase();
-        if (s) bySleeperUsername[s] = username;
         if (m) byMflEmail[m]        = username;
         if (y) byYahooUsername[y]   = username;
       }
@@ -1403,7 +1460,11 @@ const DLRTournament = (() => {
       const matchUpdates = {};
       for (const [pid, p] of Object.entries(participantsMap)) {
         let matched = null;
-        if (p.sleeperUsername) matched = bySleeperUsername[p.sleeperUsername.toLowerCase()];
+        // Try sleeperUsername as stored (may be display_name or raw username)
+        if (p.sleeperUsername) {
+          const key = p.sleeperUsername.toLowerCase();
+          matched = bySleeperUsername[key];
+        }
         if (!matched && p.mflEmail)      matched = byMflEmail[p.mflEmail.toLowerCase()];
         if (!matched && p.yahooUsername) matched = byYahooUsername[p.yahooUsername.toLowerCase()];
 
