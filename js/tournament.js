@@ -125,8 +125,12 @@ const DLRTournament = (() => {
     }
   }
 
+  // ── Landing view tab state ─────────────────────────────
+  let _landingTab = "all"; // "mine" | "all" | "managing"
+
   // ── Main render ────────────────────────────────────────
-  async function _renderView() {
+  async function _renderView(tab) {
+    if (tab) _landingTab = tab;
     const container = document.getElementById("view-tournament");
     if (!container) return;
     container.innerHTML = `<div class="trn-loading"><div class="spinner"></div> Loading tournaments…</div>`;
@@ -138,13 +142,18 @@ const DLRTournament = (() => {
       return;
     }
 
-    const myTournaments = Object.entries(_tournaments).filter(([, t]) =>
-      t.meta?.discoveredBy?.[_currentUsername] ||
-      t.roles?.[_currentUsername]
+    const allEntries   = Object.entries(_tournaments);
+    const myEntries    = allEntries.filter(([, t]) =>
+      t.meta?.discoveredBy?.[_currentUsername] || t.roles?.[_currentUsername]
     );
-    const adminTournaments = Object.entries(_tournaments).filter(([, t]) =>
-      t.roles?.[_currentUsername]?.role === "admin"
+    const adminEntries = allEntries.filter(([, t]) =>
+      t.roles?.[_currentUsername]?.role === "admin" ||
+      t.roles?.[_currentUsername]?.role === "sub_admin"
     );
+
+    // Tab counts (only show badge if > 0)
+    const mineBadge  = myEntries.length    ? `<span class="trn-tab-count">${myEntries.length}</span>`    : "";
+    const adminBadge = adminEntries.length ? `<span class="trn-tab-count">${adminEntries.length}</span>` : "";
 
     container.innerHTML = `
       <div class="trn-container">
@@ -156,42 +165,81 @@ const DLRTournament = (() => {
           <button class="btn-primary btn-sm" id="trn-create-btn">+ New Tournament</button>
         </div>
 
-        ${myTournaments.length ? `
-          <div class="trn-section">
-            <div class="trn-section-title">My Tournaments</div>
-            <div class="trn-cards-grid" id="trn-my-grid">
-              ${myTournaments.map(([tid, t]) => _renderTournamentCard(tid, t)).join("")}
-            </div>
-          </div>
-        ` : ""}
+        <div class="trn-landing-tabs">
+ 	  <button class="trn-landing-tab ${_landingTab === "all"      ? "active" : ""}" data-landing="all">
+            All Tournaments
+          </button>
+          <button class="trn-landing-tab ${_landingTab === "mine"     ? "active" : ""}" data-landing="mine">
+            My Tournaments ${mineBadge}
+          </button>
+          <button class="trn-landing-tab ${_landingTab === "managing" ? "active" : ""}" data-landing="managing">
+            Managing ${adminBadge}
+          </button>
+        </div>
 
-        ${adminTournaments.length ? `
-          <div class="trn-section">
-            <div class="trn-section-title">🛠 Tournaments I Manage</div>
-            <div class="trn-cards-grid" id="trn-admin-grid">
-              ${adminTournaments.map(([tid, t]) => _renderTournamentCard(tid, t, true)).join("")}
-            </div>
-          </div>
-        ` : ""}
-
-        ${!myTournaments.length && !adminTournaments.length ? `
-          <div class="trn-empty">
-            <div class="trn-empty-icon">🏆</div>
-            <div class="trn-empty-title">No tournaments yet</div>
-            <div class="trn-empty-sub">Create a tournament or sync your leagues to auto-discover one you're part of.</div>
-          </div>
-        ` : ""}
+        <div id="trn-landing-body"></div>
       </div>
     `;
 
     document.getElementById("trn-create-btn")?.addEventListener("click", () => _openCreateModal());
 
-    // Wire card clicks
-    container.querySelectorAll("[data-trn-open]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const tid = btn.dataset.trnOpen;
-        _openTournamentView(tid);
+    container.querySelectorAll(".trn-landing-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        container.querySelectorAll(".trn-landing-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        _landingTab = tab.dataset.landing;
+        _renderLandingBody(allEntries, myEntries, adminEntries);
       });
+    });
+
+    _renderLandingBody(allEntries, myEntries, adminEntries);
+  }
+
+  function _renderLandingBody(allEntries, myEntries, adminEntries) {
+    const body = document.getElementById("trn-landing-body");
+    if (!body) return;
+
+    let entries, emptyIcon, emptyTitle, emptySub;
+
+    if (_landingTab === "mine") {
+      entries   = myEntries;
+      emptyIcon = "🏆";
+      emptyTitle = "No tournaments yet";
+      emptySub  = "Sync your leagues to auto-discover tournaments you're part of, or create one.";
+    } else if (_landingTab === "managing") {
+      entries   = adminEntries;
+      emptyIcon = "🛠";
+      emptyTitle = "You're not managing any tournaments";
+      emptySub  = "Create a new tournament to get started.";
+    } else {
+      entries   = allEntries;
+      emptyIcon = "🏆";
+      emptyTitle = "No tournaments found";
+      emptySub  = "Be the first to create one.";
+    }
+
+    if (!entries.length) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">${emptyIcon}</div>
+          <div class="trn-empty-title">${emptyTitle}</div>
+          <div class="trn-empty-sub">${emptySub}</div>
+        </div>`;
+      return;
+    }
+
+    const isManagingTab = _landingTab === "managing";
+    body.innerHTML = `
+      <div class="trn-cards-grid">
+        ${entries.map(([tid, t]) => {
+          const isAdmin = t.roles?.[_currentUsername]?.role === "admin" ||
+                          t.roles?.[_currentUsername]?.role === "sub_admin";
+          return _renderTournamentCard(tid, t, isManagingTab || isAdmin);
+        }).join("")}
+      </div>`;
+
+    body.querySelectorAll("[data-trn-open]").forEach(btn => {
+      btn.addEventListener("click", () => _openTournamentView(btn.dataset.trnOpen));
     });
   }
 
@@ -378,7 +426,7 @@ const DLRTournament = (() => {
       </div>
     `;
 
-    document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView());
+    document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
     document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
 
     // Tab wire-up
