@@ -1517,16 +1517,13 @@ const DLRTournament = (() => {
       ? allEntries.filter(([, lc]) => lc.year === _standingsYear)
       : allEntries;
 
-    // Build participant gender lookup — index by all name fields (case-insensitive)
-    // Standings use sleeperUsername as teamName, so we must index that too
+    // Build participant gender lookup
     const participants = t.participants || {};
     const genderByName = {};
     Object.values(participants).forEach(p => {
       if (p.gender) {
-        const g = p.gender;
-        if (p.displayName)    genderByName[p.displayName.trim().toLowerCase()]    = g;
-        if (p.teamName)       genderByName[p.teamName.trim().toLowerCase()]       = g;
-        if (p.sleeperUsername) genderByName[p.sleeperUsername.trim().toLowerCase()] = g;
+        if (p.displayName) genderByName[p.displayName.toLowerCase()] = p.gender;
+        if (p.teamName)    genderByName[p.teamName.toLowerCase()]    = p.gender;
       }
     });
     const hasGender = Object.keys(genderByName).length > 0;
@@ -1548,7 +1545,7 @@ const DLRTournament = (() => {
           ties:       team.ties     || 0,
           pf:         team.pf       || 0,
           pa:         team.pa       || 0,
-          gender:     genderByName[(team.teamName || "").trim().toLowerCase()] || "",
+          gender:     genderByName[(team.teamName || "").toLowerCase()] || "",
           cacheKey,
           platform:   lc.platform   || ""
         });
