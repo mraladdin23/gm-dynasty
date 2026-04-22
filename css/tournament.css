@@ -239,54 +239,6 @@
 
 .trn-tab-body { min-height: 200px; }
 
-/* ── Tab select (mobile replacement for tab bar) ─────────── */
-.trn-tab-select {
-  display: none; /* hidden on desktop — shown via media query */
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: .9rem;
-  font-weight: 500;
-  margin-bottom: var(--space-4);
-  cursor: pointer;
-}
-
-.trn-tab-select:focus {
-  outline: none;
-  border-color: var(--color-gold);
-}
-
-/* ── Standings toolbar & meta ────────────────────────────── */
-.trn-standings-toolbar {
-  margin-bottom: var(--space-3);
-}
-
-.trn-st-search {
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: .85rem;
-  box-sizing: border-box;
-}
-
-.trn-st-search:focus {
-  outline: none;
-  border-color: var(--color-gold);
-}
-
-.trn-standings-meta {
-  font-size: .72rem;
-  color: var(--color-text-dim);
-  opacity: .6;
-  margin-bottom: var(--space-3);
-}
-
 /* ── Section card ────────────────────────────────────────── */
 .trn-section-card {
   background: var(--color-surface);
@@ -683,12 +635,17 @@
 
 /* ── Mobile ──────────────────────────────────────────────── */
 @media (max-width: 600px) {
+  /* The app-view is the scroll container on mobile (locker.css sets
+     overflow-y:auto + height:calc(100vh-48px)). Do NOT set overflow
+     on child containers — it creates a nested scroll context that
+     clips content and breaks scrolling. Just constrain width. */
   .trn-container,
   .trn-detail-container {
     padding: var(--space-3);
     box-sizing: border-box;
     width: 100%;
-    overflow-x: hidden;
+    max-width: 100%;
+    /* NO overflow-x: hidden here — causes WebKit scroll clipping */
   }
 
   .trn-overview-grid { grid-template-columns: repeat(2, 1fr); }
@@ -704,14 +661,12 @@
     width: 100%;
   }
 
-  .trn-card-header {
-    flex-wrap: wrap;
-  }
+  .trn-card-header { flex-wrap: wrap; }
 
   .trn-detail-title-row { flex-direction: column; gap: var(--space-2); }
 
   /* Hide scrolling tab bar on mobile — show select instead */
-  .trn-tabs { display: none; }
+  .trn-tabs       { display: none !important; }
   .trn-tab-select { display: block; }
 
   .trn-reg-row { flex-direction: column; align-items: flex-start; }
@@ -724,6 +679,31 @@
 
   .trn-custom-question-row { flex-direction: column; align-items: stretch; }
   .trn-q-type { width: 100%; }
+}
+
+/* ── Gender badges ───────────────────────────────────────── */
+.trn-gender-m {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 700;
+  background: rgba(59,130,246,.18);
+  color: #60a5fa;
+  white-space: nowrap;
+}
+
+.trn-gender-f {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 700;
+  background: rgba(236,72,153,.18);
+  color: #f472b6;
+  white-space: nowrap;
 }
 
 /* ── Preview as User banner ──────────────────────────────── */
