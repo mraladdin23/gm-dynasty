@@ -355,6 +355,7 @@
           <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
             ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
             ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
+            ${t.adp?.length ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
           </select>
         </div>
 
@@ -408,9 +409,10 @@
     function renderTab(tab) {
       const body = document.getElementById("pub-tab-body");
       if (!body) return;
-      if (tab === "info")      renderInfoTab(body);
+      if (tab === "info")           renderInfoTab(body);
       else if (tab === "standings") renderStandingsTab(body);
       else if (tab === "register")  renderRegisterTab(body);
+      else if (tab === "adp")       renderAdpTab(body);
     }
 
     // ── Info tab ────────────────────────────────────────────
@@ -614,6 +616,94 @@
           else { _stSort.col = col; _stSort.dir = "asc"; }
           sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears);
         });
+      });
+    }
+
+    // ── ADP tab ─────────────────────────────────────────────
+    const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af" };
+    let _adpPage    = 1;
+    let _adpPos     = "all";
+    const ADP_PAGE_SIZE = 25;
+
+    function renderAdpTab(body) {
+      const t   = _currentT;
+      const adp = t.adp || [];
+      if (!adp.length) {
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">📊</div><div class="trn-empty-title">No ADP data yet</div><div class="trn-empty-sub">ADP appears once the commissioner has loaded the Draft tab.</div></div>`;
+        return;
+      }
+
+      // Apply position filter
+      const filtered = (_adpPos && _adpPos !== "all")
+        ? adp.filter(p => p.position === _adpPos)
+        : adp;
+
+      // Position filter options — only positions that appear in data
+      const positions = [...new Set(adp.map(p => p.position || "?"))];
+      const posOrder  = ["QB","RB","WR","TE","K","DEF"].filter(p => positions.includes(p));
+      const extras    = positions.filter(p => !posOrder.includes(p) && p !== "?");
+      const allPos    = [...posOrder, ...extras];
+
+      const selStyle = "font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)";
+
+      // 4-col layout: rank | pos | player+nfl stacked | adp+count stacked
+      const COL = "40px 44px 1fr auto";
+      const header = `<div class="draft-auction-header" style="grid-template-columns:${COL}"><span>#</span><span>Pos</span><span>Player</span><span>ADP</span></div>`;
+
+      const totalPages = Math.ceil(filtered.length / ADP_PAGE_SIZE);
+      const page       = Math.max(1, Math.min(_adpPage, totalPages));
+      const pageSlice  = filtered.slice((page - 1) * ADP_PAGE_SIZE, page * ADP_PAGE_SIZE);
+
+      const rows = pageSlice.map((p, i) => {
+        const rank = (page - 1) * ADP_PAGE_SIZE + i + 1;
+        const col  = POS_COLOR[p.position] || "#9ca3af";
+        return `
+          <div class="draft-auction-row" style="grid-template-columns:${COL}">
+            <span class="draft-auction-rank dim">${rank}</span>
+            <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${esc(p.position || "?")}</span>
+            <div>
+              <div class="draft-auction-name">${esc(p.name || "Unknown")}</div>
+            </div>
+            <div style="text-align:right;white-space:nowrap">
+              <div style="font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</div>
+              <div class="dim" style="font-size:.7rem">${p.count}×</div>
+            </div>
+          </div>`;
+      });
+
+      const pagination = totalPages > 1 ? `
+        <div class="draft-pagination">
+          <button class="draft-toggle-btn" id="pub-adp-prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button>
+          <span class="dim" style="font-size:.85rem">Page ${page} of ${totalPages}</span>
+          <button class="draft-toggle-btn" id="pub-adp-next" ${page >= totalPages ? "disabled" : ""}>Next ›</button>
+        </div>` : "";
+
+      body.innerHTML = `
+        <div class="trn-az-toolbar" style="margin-bottom:var(--space-3)">
+          <select id="pub-adp-pos" style="${selStyle}">
+            <option value="all" ${_adpPos === "all" ? "selected" : ""}>All Positions</option>
+            ${allPos.map(p => `<option value="${esc(p)}" ${_adpPos === p ? "selected" : ""}>${esc(p)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="trn-az-meta">${adp.length} players drafted · ${filtered.length} shown</div>
+        <div class="draft-auction-list">
+          ${header}
+          ${rows.join("")}
+        </div>
+        ${pagination}`;
+
+      body.querySelector("#pub-adp-pos")?.addEventListener("change", function() {
+        _adpPos  = this.value;
+        _adpPage = 1;
+        renderAdpTab(body);
+      });
+      body.querySelector("#pub-adp-prev")?.addEventListener("click", () => {
+        _adpPage = Math.max(1, _adpPage - 1);
+        renderAdpTab(body);
+      });
+      body.querySelector("#pub-adp-next")?.addEventListener("click", () => {
+        _adpPage = Math.min(totalPages, _adpPage + 1);
+        renderAdpTab(body);
       });
     }
 
