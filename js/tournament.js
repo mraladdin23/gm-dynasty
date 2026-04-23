@@ -3162,6 +3162,8 @@ const DLRTournament = (() => {
       const adp = _computeADP(allPicks);
       _draftCache = { picks: allPicks, adp, byLeague, fetchedAt: Date.now(), tid };
       _renderDraftView(tid, t, body, _draftCache);
+      // Sync ADP to public node in the background — non-blocking
+      _writePublicADP(tid).catch(() => {});
     } catch(e) {
       body.innerHTML = `<div class="trn-empty">Failed to load draft data: ${_esc(e.message)}</div>`;
     }
@@ -3308,14 +3310,16 @@ const DLRTournament = (() => {
       ? adp.filter(p => p.position === _draftPosFilter)
       : adp;
 
+    // Collect available positions for filter dropdown
+    const allPositions = [...new Set(adp.map(p => p.position || "?"))].sort();
+    const posOrder     = ["QB","RB","WR","TE","K","DEF"].filter(p => allPositions.includes(p));
+    const extras       = allPositions.filter(p => !posOrder.includes(p));
+
     const totalLeagues = Object.keys(_draftCache?.byLeague || {}).length;
 
-    // 4 columns: rank | pos badge | player+nfl stacked | adp · count
-    // Override to 4 cols matching draft-auction-row default structure exactly.
-    const COL = "40px 44px 1fr auto";
     const header = `
-      <div class="draft-auction-header" style="grid-template-columns:${COL}">
-        <span>#</span><span>Pos</span><span>Player</span><span>ADP</span>
+      <div class="draft-auction-header" style="grid-template-columns:48px 44px 1fr 60px 48px 52px">
+        <span>#</span><span>Pos</span><span>Player</span><span>NFL</span><span>ADP</span><span>Drafted</span>
       </div>`;
 
     const rows = filtered.map((p, i) => {
@@ -3327,22 +3331,20 @@ const DLRTournament = (() => {
       const rawPick = _draftCache?.picks?.find(pk => pk.playerId === p.playerId);
       const nfl     = rawPick?.nflTeam || "FA";
       return `
-        <div class="draft-auction-row" style="grid-template-columns:${COL}" ${clickAttr}>
+        <div class="draft-auction-row" ${clickAttr}>
           <span class="draft-auction-rank dim">${i + 1}</span>
           <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${_esc(p.position || "?")}</span>
           <div>
             <div class="draft-auction-name">${_esc(p.name || "Unknown")}</div>
-            <div class="dim" style="font-size:.7rem">${_esc(nfl)}</div>
           </div>
-          <div style="text-align:right;white-space:nowrap">
-            <div style="font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</div>
-            <div class="dim" style="font-size:.7rem">${p.count}×</div>
-          </div>
+          <span class="dim" style="font-size:.75rem">${_esc(nfl)}</span>
+          <span style="font-size:.82rem;color:var(--color-text-dim);text-align:right;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+          <span class="dim" style="font-size:.78rem;text-align:right">${p.count}×</span>
         </div>`;
     });
 
-    // Paginate at 25 rows
-    const PAGE_SIZE  = 25;
+    // Paginate at 50 rows
+    const PAGE_SIZE  = 50;
     const totalPages = Math.ceil(rows.length / PAGE_SIZE);
     const page       = Math.max(1, Math.min(_draftListPage, totalPages));
     const pageRows   = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -3416,33 +3418,23 @@ const DLRTournament = (() => {
       Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
     }
 
-    // Snake detection: use draft_type if available, else heuristic.
-    // "third_round_reversal" is a Sleeper variant: odd rounds go left→right,
-    // even rounds right→left EXCEPT round 3 which also goes left→right (reset).
+    // Snake detection: use draft_type if available, else heuristic
     const isSnake = draftType
-      ? (draftType === "snake" || draftType === "startup" || draftType === "third_round_reversal")
+      ? (draftType === "snake" || draftType === "startup")
       : (() => {
           const r2picks = picks.filter(p => p.round === 2).sort((a, b) => a.overall - b.overall);
           return r2picks.length > 0 && r2picks[0]?.teamId === slotOrder[slotOrder.length - 1];
         })();
-    const is3RR = draftType === "third_round_reversal";
 
     const nameOf = (tid) => picks.find(pk => pk.teamId === tid)?.teamName || tid;
 
-    const draftTypeLabel = is3RR ? "↩ 3rd-round reversal"
-      : isSnake ? "🐍 snake" : "📋 linear";
-    const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${draftTypeLabel}`;
+    const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${isSnake ? "🐍 snake" : "📋 linear"}`;
 
     // ── Grid mode ────────────────────────────────────────────────────────────
     if (_draftBoardMode === "grid") {
       let boardHTML = "";
       for (let round = 1; round <= rounds; round++) {
-        // 3rd-round reversal: round 1 = L→R, round 2 = R→L, round 3 = L→R (reset),
-        // then continues snake from round 4 onward (round 4 R→L, round 5 L→R, …)
-        const reversed = is3RR
-          ? (round === 2 || (round > 3 && round % 2 === 0))
-          : (isSnake && round % 2 === 0);
-        const rowSlots = reversed ? [...slotOrder].reverse() : slotOrder;
+        const rowSlots = (isSnake && round % 2 === 0) ? [...slotOrder].reverse() : slotOrder;
         boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
         rowSlots.forEach((tid, display) => {
           const overallNum = (round - 1) * slotOrder.length + display + 1;
@@ -3461,19 +3453,19 @@ const DLRTournament = (() => {
                 title="${_esc(pName)} · ${pos} · ${nfl}">
                 <div class="draft-pick-num">${overallNum}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(pName)}</div>
+                  <div class="draft-pick-name">${_esc(pName.split(" ").slice(-1)[0])}</div>
                   <div class="draft-pick-meta">
                     <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
                     <span class="draft-pick-nfl">${nfl}</span>
                   </div>
                 </div>
-                <div class="draft-pick-team">${_esc(nameOf(tid))}</div>
+                <div class="draft-pick-team">${_esc(nameOf(tid).slice(0, 12))}</div>
               </div>`;
           } else {
             boardHTML += `
               <div class="draft-pick draft-pick--empty">
                 <div class="draft-pick-num">${overallNum}</div>
-                <div class="draft-pick-owner dim">${_esc(nameOf(tid))}</div>
+                <div class="draft-pick-owner dim">${_esc(nameOf(tid).slice(0, 12))}</div>
               </div>`;
           }
         });
@@ -3487,34 +3479,30 @@ const DLRTournament = (() => {
 
     // ── List mode ────────────────────────────────────────────────────────────
     const sorted = [...picks].sort((a, b) => a.overall - b.overall);
-    const PAGE_SIZE  = 25;
+    const PAGE_SIZE  = 50;
     const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
     const page       = Math.max(1, Math.min(_draftListPage, totalPages));
     const pageRows   = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-    // 3 columns: pick# | pos badge | player+nfl+team stacked
-    // NFL team and fantasy team name go under player name (same pattern as league detail).
-    const COL = "40px 44px 1fr";
-    const header = `<div class="draft-auction-header" style="grid-template-columns:${COL}">
-      <span>Pick</span><span>Pos</span><span>Player</span>
+    const header = `<div class="draft-auction-header" style="grid-template-columns:48px 44px 1fr 52px 1fr">
+      <span>Pick</span><span>Pos</span><span>Player</span><span>NFL</span><span>Team</span>
     </div>`;
 
     const rows = pageRows.map(p => {
-      const col       = POS_COLOR[p.position] || "#9ca3af";
-      const pickLabel = (isSnake || is3RR)
-        ? p.overall
-        : `${p.round}.${String(p.pick).padStart(2,"0")}`;
+      const col      = POS_COLOR[p.position] || "#9ca3af";
+      const pickLabel = isSnake ? p.overall : `${p.round}.${String(p.pick).padStart(2,"0")}`;
       const clickAttr = p.playerId
         ? `onclick="DLRPlayerCard.show('${_esc(p.playerId)}','${_esc(p.name)}')" style="cursor:pointer"`
         : "";
       return `
-        <div class="draft-auction-row" style="grid-template-columns:${COL}" ${clickAttr}>
+        <div class="draft-auction-row" ${clickAttr}>
           <span class="draft-auction-rank dim">${pickLabel}</span>
           <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${_esc(p.position || "?")}</span>
           <div>
             <div class="draft-auction-name">${_esc(p.name || "Unknown")}</div>
-            <div class="dim" style="font-size:.7rem">${_esc(p.nflTeam || "FA")} · ${_esc(p.teamName || "")}</div>
           </div>
+          <span class="dim" style="font-size:.75rem">${_esc(p.nflTeam || "FA")}</span>
+          <span class="draft-auction-team dim">${_esc(p.teamName || "")}</span>
         </div>`;
     });
 
@@ -4501,6 +4489,58 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
   // Written to gmd/publicTournaments/{tid} — readable without auth.
   // Contains only non-sensitive data: meta, standings cache, league/reg counts.
   // Called after: standings sync, meta updates, new registrations, status changes.
+
+  // ── Write ADP snapshot to public node ─────────────────────────────────────
+  // Called after draft cache is built. Writes a slim array to
+  // gmd/publicTournaments/{tid}/adp so the public page can render it
+  // without requiring auth. Shape: [{name, position, adp, count}, ...]
+  // playerIds and raw picks are intentionally omitted.
+  async function _writePublicADP(tid) {
+    try {
+      const snap = await _tAnalyticsRef(tid).child("drafts").once("value");
+      const cached = snap.val() || {};
+      if (!Object.keys(cached).length) return;
+
+      // Collect all picks across all cached leagues for the active year
+      const activeYear = _tournamentYear || new Date().getFullYear();
+      const allPicks = [];
+      for (const [, lc] of Object.entries(cached)) {
+        if (!lc.picks?.length) continue;
+        if (lc.year && parseInt(lc.year) !== parseInt(activeYear)) continue;
+        lc.picks.forEach(p => {
+          if (p.playerId) allPicks.push({
+            playerId: p.playerId,
+            name:     p.name     || "Unknown",
+            position: (p.position || "?").toUpperCase(),
+            overall:  parseInt(p.overall || 1)
+          });
+        });
+      }
+      if (!allPicks.length) return;
+
+      // Compute ADP — same logic as _computeADP
+      const byPlayer = {};
+      allPicks.forEach(p => {
+        if (!byPlayer[p.playerId]) byPlayer[p.playerId] = { name: p.name, position: p.position, overalls: [] };
+        byPlayer[p.playerId].overalls.push(p.overall);
+        if (p.name && p.name !== "Unknown") byPlayer[p.playerId].name = p.name;
+      });
+      const adp = Object.values(byPlayer).map(d => {
+        const sorted = [...d.overalls].sort((a, b) => a - b);
+        return {
+          name:     d.name,
+          position: d.position,
+          adp:      parseFloat((sorted.reduce((s, v) => s + v, 0) / sorted.length).toFixed(1)),
+          count:    sorted.length
+        };
+      }).sort((a, b) => a.adp - b.adp);
+
+      await GMD.child("publicTournaments/" + tid + "/adp").set(adp);
+      console.log(`[Tournament] Public ADP written: ${adp.length} players`);
+    } catch(err) {
+      console.warn("[Tournament] _writePublicADP failed:", err.message);
+    }
+  }
 
   async function _writePublicSummary(tid, t) {
     try {
