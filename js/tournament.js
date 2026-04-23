@@ -3042,11 +3042,18 @@ const DLRTournament = (() => {
         await _tAnalyticsRef(tid).child("drafts").update(results).catch(() => {});
       }
 
-      // Build team name map from standingsCache
+      // Build team name map from standingsCache — keyed as "{leagueId}:{teamId}" to
+      // prevent roster_id collisions across leagues (each league reuses IDs 1–12).
       const standings = t.standingsCache || {};
       const teamMap   = {};
       Object.values(standings).forEach(lc => {
-        (lc.teams || []).forEach(tm => { teamMap[String(tm.teamId)] = tm.teamName; });
+        const lcLeagueId = String(lc.leagueId || lc.league_id || "");
+        (lc.teams || []).forEach(tm => {
+          const qualKey = lcLeagueId ? `${lcLeagueId}:${tm.teamId}` : String(tm.teamId);
+          teamMap[qualKey] = tm.teamName;
+          // Also store bare key as fallback for legacy data without leagueId
+          if (lcLeagueId) teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
+        });
       });
 
       // Worker picks are already in normalized shape: { overall, round, pick, teamId, playerId, name, position }
@@ -3062,11 +3069,14 @@ const DLRTournament = (() => {
         if (!lc.picks?.length) continue;
         // Only include picks for the currently selected year
         if (lc.year && parseInt(lc.year) !== parseInt(activeYear)) continue;
-        const platform = lc.platform || "sleeper";
+        const platform   = lc.platform || "sleeper";
+        // leagueId embedded in cacheKey is "{year}_{leagueId}" — extract it
+        const lcLeagueId = String(lc.leagueId || ck.replace(/^\d+_/, "") || "");
 
         const normalized = lc.picks.map(p => {
-          // Resolve teamName: standingsCache → participant map → raw
-          let teamName = teamMap[String(p.teamId)] || p.teamName || String(p.teamId);
+          // Resolve teamName: qualified key first, then bare key, then raw pick name
+          const qualKey = lcLeagueId ? `${lcLeagueId}:${p.teamId}` : String(p.teamId);
+          let teamName = teamMap[qualKey] || teamMap[String(p.teamId)] || p.teamName || String(p.teamId);
           const key = _sk(teamName);
           if (pMap[key]) teamName = pMap[key].displayName;
 
@@ -3091,16 +3101,21 @@ const DLRTournament = (() => {
             }
           }
 
+          // Use qualified teamId "{leagueId}:{bareId}" so board columns don't collide
+          // across leagues. Store the bare original for display purposes if needed.
+          const bareTeamId  = String(p.teamId || "");
+          const qualTeamId  = lcLeagueId && bareTeamId ? `${lcLeagueId}:${bareTeamId}` : bareTeamId;
           return {
             overall:  parseInt(p.overall || 1),
             round:    parseInt(p.round   || 1),
             pick:     parseInt(p.pick    || 1),
-            teamId:   String(p.teamId   || ""),
+            teamId:   qualTeamId,
             teamName,
             playerId: String(p.playerId || ""),
             name,
             position: pos,
-            cost:     p.cost != null ? parseInt(p.cost) : null
+            cost:     p.cost != null ? parseInt(p.cost) : null,
+            leagueId: lcLeagueId   // carry for downstream use
           };
         }).filter(p => p.teamId && p.teamId !== "undefined" && p.teamId !== "null");
 
@@ -3521,11 +3536,18 @@ const DLRTournament = (() => {
     // Fetch from Sleeper in parallel (batches of 5)
     const allMatchups = [];
     const standingsCache = t.standingsCache || {};
-    // Only build teamMap from the CURRENT year — different years may reuse roster_ids
+    // Key teamMap as "{leagueId}:{teamId}" — leagues reuse roster_ids 1-12 so a
+    // bare key lets later leagues overwrite earlier ones (B2 fix).
+    // Still filter to current year only; also keep bare-key fallback for legacy data.
     const teamMap = {};
     Object.values(standingsCache).forEach(lc => {
       if (lc.year && parseInt(lc.year) !== parseInt(year)) return;
-      (lc.teams || []).forEach(tm => { teamMap[String(tm.teamId)] = tm.teamName; });
+      const lcLeagueId = String(lc.leagueId || lc.league_id || "");
+      (lc.teams || []).forEach(tm => {
+        const qualKey = lcLeagueId ? `${lcLeagueId}:${tm.teamId}` : String(tm.teamId);
+        teamMap[qualKey] = tm.teamName;
+        if (lcLeagueId) teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
+      });
     });
     const pMap = _buildParticipantTeamMap(t);
     const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
@@ -3553,8 +3575,9 @@ const DLRTournament = (() => {
             const bpts = parseFloat(b.points) || 0;
             // Only skip if BOTH are exactly 0 (unplayed or bye)
             if (apts === 0 && bpts === 0) return;
-            let aName = teamMap[String(a.roster_id)] || `Team ${a.roster_id}`;
-            let bName = teamMap[String(b.roster_id)] || `Team ${b.roster_id}`;
+            // Try qualified key first (prevents roster_id collision across leagues)
+            let aName = teamMap[`${lid}:${a.roster_id}`] || teamMap[String(a.roster_id)] || `Team ${a.roster_id}`;
+            let bName = teamMap[`${lid}:${b.roster_id}`] || teamMap[String(b.roster_id)] || `Team ${b.roster_id}`;
             const aKey = _sk(aName), bKey = _sk(bName);
             if (pMap[aKey]) aName = pMap[aKey].displayName;
             if (pMap[bKey]) bName = pMap[bKey].displayName;
@@ -3593,12 +3616,15 @@ const DLRTournament = (() => {
       winner:   m.winner || ((m.home?.score || 0) >= (m.away?.score || 0) ? m.home?.name : m.away?.name)
     })).filter(m => m.home?.score > 0 || m.away?.score > 0);
 
-    console.log(`[Matchups] rendering ${enriched.length} matchups. Top scorer:`,
-      enriched.length ? [...enriched].sort((a,b) => b.combined - a.combined)[0] : "none");
     const sorted    = [...enriched].sort((a, b) => a.diff - b.diff);
     const closest   = sorted.slice(0, 5);
     const blowouts  = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
     const highest   = [...enriched].sort((a, b) => b.combined - a.combined).slice(0, 3);
+    // B2 debug: confirm top-3 from each sort bucket
+    console.log(`[Matchups] ${enriched.length} matchups across ${new Set(enriched.map(m=>m.leagueId)).size} leagues`);
+    console.log("[Matchups] Closest top-3:",   closest.slice(0,3).map(m=>`${m.home.name} vs ${m.away.name} Δ${m.diff}`));
+    console.log("[Matchups] Blowouts top-3:",  blowouts.slice(0,3).map(m=>`${m.home.name} vs ${m.away.name} Δ${m.diff}`));
+    console.log("[Matchups] Highest top-3:",   highest.slice(0,3).map(m=>`${m.home.name} vs ${m.away.name} comb=${m.combined}`));
     const ck        = `${year}_${_matchupsWeek}`;
 
     // Lazy-load recap from Firebase if not in memory cache
