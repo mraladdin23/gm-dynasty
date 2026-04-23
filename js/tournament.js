@@ -2968,12 +2968,14 @@ const DLRTournament = (() => {
   }
 
   // ── ANALYTICS: Draft tab ───────────────────────────────────────────────────
-  let _draftCache    = null;  // { picks, adp, byLeague, fetchedAt, tid }
-  let _draftLeague   = "all"; // current league filter
-  let _draftView     = "adp"; // "adp" | "board" | "card"
-  let _draftCardTeam = null;
+  let _draftCache     = null;  // { picks, adp, byLeague, fetchedAt, tid }
+  let _draftLeague    = "all"; // current league filter
+  let _draftView      = "adp"; // "adp" | "board" | "card"
+  let _draftCardTeam  = null;
   let _draftPosFilter = "all"; // position filter for ADP view
   let _draftSearch    = "";    // team search for board/card
+  let _draftListPage  = 1;     // pagination for board list view
+  let _draftBoardMode = "grid"; // "grid" | "list" for board view
 
   async function _renderAnalyticsDraft(tid, t, body) {
     await DLRPlayers.load().catch(() => {});
@@ -3029,7 +3031,13 @@ const DLRTournament = (() => {
             if (!r.ok) return;
             const data = await r.json();
             if (data.picks) {
-              results[l.cacheKey] = { ...l, picks: data.picks, fetchedAt: Date.now() };
+              results[l.cacheKey] = {
+                ...l,
+                picks:             data.picks,
+                slot_to_roster_id: data.slot_to_roster_id || null,
+                draft_type:        data.draft_type        || null,
+                fetchedAt:         Date.now()
+              };
             }
           } catch(e) { console.warn("[Draft] fetch error", l.leagueId, e.message); }
         }));
@@ -3101,6 +3109,13 @@ const DLRTournament = (() => {
             }
           }
 
+          // Resolve NFL team: prefer DLRPlayers lookup, fall back to raw pick field
+          let nflTeam = p.nflTeam || "FA";
+          if (platform === "sleeper" && p.playerId && typeof DLRPlayers !== "undefined") {
+            const dp2 = DLRPlayers.get(p.playerId);
+            if (dp2?.team) nflTeam = dp2.team;
+          }
+
           // Use qualified teamId "{leagueId}:{bareId}" so board columns don't collide
           // across leagues. Store the bare original for display purposes if needed.
           const bareTeamId  = String(p.teamId || "");
@@ -3114,13 +3129,19 @@ const DLRTournament = (() => {
             playerId: String(p.playerId || ""),
             name,
             position: pos,
+            nflTeam,
             cost:     p.cost != null ? parseInt(p.cost) : null,
             leagueId: lcLeagueId   // carry for downstream use
           };
         }).filter(p => p.teamId && p.teamId !== "undefined" && p.teamId !== "null");
 
         console.log(`[Draft] ${ck}: ${normalized.length} picks, platform=${platform}, sample:`, normalized[0]);
-        byLeague[ck] = { ...lc, normalizedPicks: normalized };
+        byLeague[ck] = {
+          ...lc,
+          normalizedPicks:   normalized,
+          slot_to_roster_id: lc.slot_to_roster_id || null,
+          draft_type:        lc.draft_type        || null
+        };
         allPicks = allPicks.concat(normalized);
       }
 
@@ -3192,9 +3213,13 @@ const DLRTournament = (() => {
             </select>` : ""}
           ${_draftView === "board" ? `
             <select id="trn-draft-league-sel" style="${selStyle}">
-              <option value="all">All Leagues</option>
+              <option value="all" ${_draftLeague === "all" ? "selected" : ""}>All Leagues</option>
               ${leagueOpts}
-            </select>` : ""}
+            </select>
+            <div class="draft-layout-toggle">
+              <button class="draft-toggle-btn ${_draftBoardMode === "grid" ? "draft-toggle-btn--active" : ""}" id="trn-board-grid-btn" title="Grid view">⊞</button>
+              <button class="draft-toggle-btn ${_draftBoardMode === "list" ? "draft-toggle-btn--active" : ""}" id="trn-board-list-btn" title="List view">☰</button>
+            </div>` : ""}
           ${_draftView === "card" ? `
             <input type="text" id="trn-draft-team-search" placeholder="Search team…"
               value="${_esc(_draftSearch)}"
@@ -3213,8 +3238,18 @@ const DLRTournament = (() => {
       btn.addEventListener("click", () => {
         _draftView = btn.dataset.view;
         _draftSearch = "";
+        _draftListPage = 1;
         _renderDraftView(tid, t, body, cache);
       });
+    });
+    document.getElementById("trn-board-grid-btn")?.addEventListener("click", () => {
+      _draftBoardMode = "grid";
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
+    });
+    document.getElementById("trn-board-list-btn")?.addEventListener("click", () => {
+      _draftBoardMode = "list";
+      _draftListPage = 1;
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
     document.getElementById("trn-draft-refresh-btn")?.addEventListener("click", () => {
       _draftCache = null;
@@ -3224,10 +3259,12 @@ const DLRTournament = (() => {
     });
     document.getElementById("trn-draft-league-sel")?.addEventListener("change", function() {
       _draftLeague = this.value;
+      _draftListPage = 1;
       _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
     document.getElementById("trn-draft-pos-filter")?.addEventListener("change", function() {
       _draftPosFilter = this.value;
+      _draftListPage = 1;
       _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
     // Team search: filter the card-team select options live
@@ -3255,10 +3292,9 @@ const DLRTournament = (() => {
     if (_draftView === "adp") {
       _renderDraftADP(el, adp, t);
     } else if (_draftView === "board") {
-      const filtered = _draftLeague === "all"
-        ? picks
-        : (byLeague[_draftLeague]?.normalizedPicks || []);
-      _renderDraftBoard(el, filtered, _draftLeague !== "all" ? byLeague[_draftLeague]?.leagueName : "All Leagues");
+      const leagueEntry = _draftLeague !== "all" ? byLeague[_draftLeague] : null;
+      const filtered    = leagueEntry ? (leagueEntry.normalizedPicks || []) : picks;
+      _renderDraftBoard(el, filtered, leagueEntry);
     } else if (_draftView === "card") {
       _renderDraftCard(el, picks);
     }
@@ -3266,112 +3302,231 @@ const DLRTournament = (() => {
 
   function _renderDraftADP(el, adp, t) {
     if (!adp.length) { el.innerHTML = `<div class="trn-empty">No draft data available yet.</div>`; return; }
-    const myKeys  = _findMyKeys(t || {});
-    // Apply position filter
+
+    // Flat list sorted by ADP — apply position filter if set
     const filtered = (_draftPosFilter && _draftPosFilter !== "all")
       ? adp.filter(p => p.position === _draftPosFilter)
       : adp;
-    const groups = { QB:[], RB:[], WR:[], TE:[], K:[], DEF:[], Other:[] };
-    filtered.forEach(p => {
-      const pos = p.position || "?";
-      const key = groups[pos] ? pos : "Other";
-      groups[key].push(p);
+
+    // Collect available positions for filter dropdown
+    const allPositions = [...new Set(adp.map(p => p.position || "?"))].sort();
+    const posOrder     = ["QB","RB","WR","TE","K","DEF"].filter(p => allPositions.includes(p));
+    const extras       = allPositions.filter(p => !posOrder.includes(p));
+
+    const totalLeagues = Object.keys(_draftCache?.byLeague || {}).length;
+
+    const header = `
+      <div class="draft-auction-header" style="grid-template-columns:48px 44px 1fr 60px 48px 52px">
+        <span>#</span><span>Pos</span><span>Player</span><span>NFL</span><span>ADP</span><span>Drafted</span>
+      </div>`;
+
+    const rows = filtered.map((p, i) => {
+      const col = POS_COLOR[p.position] || "#9ca3af";
+      const clickAttr = p.playerId
+        ? `onclick="DLRPlayerCard.show('${_esc(p.playerId)}','${_esc(p.name)}')" style="cursor:pointer"`
+        : "";
+      // Pull nflTeam from the first raw pick for this player
+      const rawPick = _draftCache?.picks?.find(pk => pk.playerId === p.playerId);
+      const nfl     = rawPick?.nflTeam || "FA";
+      return `
+        <div class="draft-auction-row" ${clickAttr}>
+          <span class="draft-auction-rank dim">${i + 1}</span>
+          <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${_esc(p.position || "?")}</span>
+          <div>
+            <div class="draft-auction-name">${_esc(p.name || "Unknown")}</div>
+          </div>
+          <span class="dim" style="font-size:.75rem">${_esc(nfl)}</span>
+          <span style="font-size:.82rem;color:var(--color-text-dim);text-align:right;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+          <span class="dim" style="font-size:.78rem;text-align:right">${p.count}×</span>
+        </div>`;
     });
-    const posOrder = _draftPosFilter !== "all"
-      ? [_draftPosFilter, "Other"]
-      : ["QB","RB","WR","TE","K","DEF","Other"];
+
+    // Paginate at 50 rows
+    const PAGE_SIZE  = 50;
+    const totalPages = Math.ceil(rows.length / PAGE_SIZE);
+    const page       = Math.max(1, Math.min(_draftListPage, totalPages));
+    const pageRows   = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const pagination = totalPages > 1 ? `
+      <div class="draft-pagination">
+        <button class="draft-toggle-btn" id="trn-adp-prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button>
+        <span class="dim" style="font-size:.85rem">Page ${page} of ${totalPages}</span>
+        <button class="draft-toggle-btn" id="trn-adp-next" ${page >= totalPages ? "disabled" : ""}>Next ›</button>
+      </div>` : "";
 
     el.innerHTML = `
-      <div class="trn-az-meta">${adp.length} players drafted across ${Object.keys(_draftCache?.byLeague || {}).length} leagues</div>
-      <div class="trn-az-adp-wrap">
-        ${posOrder.map(pos => {
-          const players = groups[pos];
-          if (!players.length) return "";
-          const col = POS_COLOR[pos] || "#9ca3af";
-          return `
-            <div class="trn-az-pos-section">
-              <div class="trn-az-pos-header" style="color:${col}">${pos}</div>
-              <div class="trn-az-adp-list">
-                ${players.map((p, i) => {
-                  const isMe = _isMyTeam(p.draftedBy || "", myKeys);
-                  return `
-                  <div class="trn-az-adp-row ${isMe ? "trn-az-row--me" : ""}">
-                    <span class="trn-az-adp-rank">${i + 1}.</span>
-                    <span class="trn-az-adp-pos" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
-                    <span class="trn-az-adp-name">${_esc(p.name)}</span>
-                    <span class="trn-az-adp-adp">ADP ${p.adp.toFixed(1)}</span>
-                    <span class="trn-az-adp-count dim">${p.count}×</span>
-                  </div>`}).join("")}
-              </div>
-            </div>`;
-        }).join("")}
-      </div>`;
+      <div class="trn-az-meta">${adp.length} players drafted · ${filtered.length} shown · ${totalLeagues} leagues</div>
+      <div class="draft-auction-list">
+        ${header}
+        ${pageRows.join("")}
+      </div>
+      ${pagination}`;
+
+    el.querySelector("#trn-adp-prev")?.addEventListener("click", () => {
+      _draftListPage = Math.max(1, _draftListPage - 1);
+      _renderDraftADP(el, adp, t);
+    });
+    el.querySelector("#trn-adp-next")?.addEventListener("click", () => {
+      _draftListPage = Math.min(totalPages, _draftListPage + 1);
+      _renderDraftADP(el, adp, t);
+    });
   }
 
-  function _renderDraftBoard(el, picks, leagueName) {
+  // _renderDraftBoard: renders the draft board in grid or list mode.
+  // leagueEntry is the byLeague cache entry for a single league (has slot_to_roster_id,
+  // draft_type, normalizedPicks). When "All Leagues" is selected leagueEntry is null
+  // and we fall back to heuristic snake detection from the picks array itself.
+  function _renderDraftBoard(el, picks, leagueEntry) {
     if (!picks.length) { el.innerHTML = `<div class="trn-empty">No picks available for this selection.</div>`; return; }
 
-    const rounds = Math.max(...picks.map(p => p.round), 1);
+    const leagueName = leagueEntry?.leagueName || "All Leagues";
+    const rounds     = Math.max(...picks.map(p => p.round), 1);
 
-    // Build a teamId→picks-by-round lookup — works for all platforms
-    // regardless of how `pick` (slot within round) is encoded
-    const byTeamRound = {}; // teamId → { [round]: pick }
+    // ── Column ordering ──────────────────────────────────────────────────────
+    // Prefer slot_to_roster_id from the cache entry (passed through from worker for
+    // Sleeper leagues). Maps slot number → bare rosterId. Our picks use qualified
+    // teamIds "{leagueId}:{rosterId}", so we need to qualify when matching.
+    const lcLeagueId       = leagueEntry?.leagueId || "";
+    const slotToRosterId   = leagueEntry?.slot_to_roster_id || null;   // {slot: bareRosterId}
+    const draftType        = leagueEntry?.draft_type || null;
+
+    // Build teamId→picks-by-round lookup
+    const byTeamRound = {};
     picks.forEach(p => {
       if (!byTeamRound[p.teamId]) byTeamRound[p.teamId] = {};
-      // If multiple picks for same team/round (shouldn't happen), keep lowest overall
       const existing = byTeamRound[p.teamId][p.round];
-      if (!existing || p.overall < existing.overall) {
-        byTeamRound[p.teamId][p.round] = p;
-      }
+      if (!existing || p.overall < existing.overall) byTeamRound[p.teamId][p.round] = p;
     });
 
-    // Determine column order from round 1 sorted by overall pick number
-    const r1picks = picks.filter(p => p.round === 1).sort((a, b) => a.overall - b.overall);
-    const slotOrder = r1picks.map(p => p.teamId);
-    // Add any teams that didn't pick in round 1
-    Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
+    let slotOrder; // ordered array of teamIds for columns
+    if (slotToRosterId && Object.keys(slotToRosterId).length) {
+      // Use slot_to_roster_id for authoritative column order (same as draft.js)
+      slotOrder = Object.entries(slotToRosterId)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .map(([, bareId]) => {
+          const qual = lcLeagueId ? `${lcLeagueId}:${bareId}` : String(bareId);
+          // Fall back to bare id if qualified key not found in picks
+          return byTeamRound[qual] ? qual : (byTeamRound[String(bareId)] ? String(bareId) : qual);
+        });
+      // Append any teamIds in picks not covered by slotToRosterId
+      Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
+    } else {
+      // Fallback: derive order from round-1 picks sorted by overall
+      const r1picks = picks.filter(p => p.round === 1).sort((a, b) => a.overall - b.overall);
+      slotOrder = r1picks.map(p => p.teamId);
+      Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
+    }
 
-    const nameOf = (tid) => {
-      const p = picks.find(pk => pk.teamId === tid);
-      return p?.teamName || tid;
-    };
+    // Snake detection: use draft_type if available, else heuristic
+    const isSnake = draftType
+      ? (draftType === "snake" || draftType === "startup")
+      : (() => {
+          const r2picks = picks.filter(p => p.round === 2).sort((a, b) => a.overall - b.overall);
+          return r2picks.length > 0 && r2picks[0]?.teamId === slotOrder[slotOrder.length - 1];
+        })();
 
-    // Detect snake: in round 2 the first overall pick should belong to the
-    // team that picked LAST in round 1 (i.e. slotOrder reversed)
-    const r2picks = picks.filter(p => p.round === 2).sort((a, b) => a.overall - b.overall);
-    const isSnake = r2picks.length > 0 && r2picks[0]?.teamId === slotOrder[slotOrder.length - 1];
+    const nameOf = (tid) => picks.find(pk => pk.teamId === tid)?.teamName || tid;
+
+    const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${isSnake ? "🐍 snake" : "📋 linear"}`;
+
+    // ── Grid mode ────────────────────────────────────────────────────────────
+    if (_draftBoardMode === "grid") {
+      let boardHTML = "";
+      for (let round = 1; round <= rounds; round++) {
+        const rowSlots = (isSnake && round % 2 === 0) ? [...slotOrder].reverse() : slotOrder;
+        boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
+        rowSlots.forEach((tid, display) => {
+          const overallNum = (round - 1) * slotOrder.length + display + 1;
+          const pk = byTeamRound[tid]?.[round];
+          if (pk) {
+            const col      = POS_COLOR[pk.position] || "#9ca3af";
+            const pName    = pk.name || "Unknown";
+            const pos      = pk.position || "?";
+            const nfl      = pk.nflTeam  || "FA";
+            const clickFn  = pk.playerId
+              ? `DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pName)}')`
+              : "";
+            boardHTML += `
+              <div class="draft-pick draft-pick--filled"
+                ${clickFn ? `onclick="${clickFn}" style="cursor:pointer"` : ""}
+                title="${_esc(pName)} · ${pos} · ${nfl}">
+                <div class="draft-pick-num">${overallNum}</div>
+                <div class="draft-pick-player">
+                  <div class="draft-pick-name">${_esc(pName.split(" ").slice(-1)[0])}</div>
+                  <div class="draft-pick-meta">
+                    <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
+                    <span class="draft-pick-nfl">${nfl}</span>
+                  </div>
+                </div>
+                <div class="draft-pick-team">${_esc(nameOf(tid).slice(0, 12))}</div>
+              </div>`;
+          } else {
+            boardHTML += `
+              <div class="draft-pick draft-pick--empty">
+                <div class="draft-pick-num">${overallNum}</div>
+                <div class="draft-pick-owner dim">${_esc(nameOf(tid).slice(0, 12))}</div>
+              </div>`;
+          }
+        });
+        boardHTML += `</div></div>`;
+      }
+      el.innerHTML = `
+        <div class="trn-az-meta">${metaLine}</div>
+        <div class="draft-board-scroll"><div class="draft-board">${boardHTML}</div></div>`;
+      return;
+    }
+
+    // ── List mode ────────────────────────────────────────────────────────────
+    const sorted = [...picks].sort((a, b) => a.overall - b.overall);
+    const PAGE_SIZE  = 50;
+    const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+    const page       = Math.max(1, Math.min(_draftListPage, totalPages));
+    const pageRows   = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+    const header = `<div class="draft-auction-header" style="grid-template-columns:48px 44px 1fr 52px 1fr">
+      <span>Pick</span><span>Pos</span><span>Player</span><span>NFL</span><span>Team</span>
+    </div>`;
+
+    const rows = pageRows.map(p => {
+      const col      = POS_COLOR[p.position] || "#9ca3af";
+      const pickLabel = isSnake ? p.overall : `${p.round}.${String(p.pick).padStart(2,"0")}`;
+      const clickAttr = p.playerId
+        ? `onclick="DLRPlayerCard.show('${_esc(p.playerId)}','${_esc(p.name)}')" style="cursor:pointer"`
+        : "";
+      return `
+        <div class="draft-auction-row" ${clickAttr}>
+          <span class="draft-auction-rank dim">${pickLabel}</span>
+          <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${_esc(p.position || "?")}</span>
+          <div>
+            <div class="draft-auction-name">${_esc(p.name || "Unknown")}</div>
+          </div>
+          <span class="dim" style="font-size:.75rem">${_esc(p.nflTeam || "FA")}</span>
+          <span class="draft-auction-team dim">${_esc(p.teamName || "")}</span>
+        </div>`;
+    });
+
+    const pagination = totalPages > 1 ? `
+      <div class="draft-pagination">
+        <button class="draft-toggle-btn" id="trn-board-prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button>
+        <span class="dim" style="font-size:.85rem">Page ${page} of ${totalPages} · ${sorted.length} picks</span>
+        <button class="draft-toggle-btn" id="trn-board-next" ${page >= totalPages ? "disabled" : ""}>Next ›</button>
+      </div>` : "";
 
     el.innerHTML = `
-      <div class="trn-az-meta">${_esc(leagueName || "Draft Board")} · ${rounds} rounds · ${slotOrder.length} teams · ${isSnake ? "snake" : "linear"}</div>
-      <div class="trn-draft-board-wrap">
-        <table class="trn-draft-board">
-          <thead><tr>
-            <th class="trn-db-round-col">Rd</th>
-            ${slotOrder.map(tid => `<th class="trn-db-team-col">${_esc(nameOf(tid).slice(0, 14))}</th>`).join("")}
-          </tr></thead>
-          <tbody>
-            ${Array.from({ length: rounds }, (_, ri) => {
-              const round    = ri + 1;
-              const rowSlots = (isSnake && round % 2 === 0) ? [...slotOrder].reverse() : slotOrder;
-              return `<tr>
-                <td class="trn-db-round-col">${round}</td>
-                ${rowSlots.map(tid => {
-                  const pk = byTeamRound[tid]?.[round];
-                  if (!pk) return `<td class="trn-db-cell trn-db-cell--empty">—</td>`;
-                  const col = POS_COLOR[pk.position] || "#9ca3af";
-                  const lastName = (pk.name || "").split(" ").slice(-1)[0] || pk.name || "?";
-                  return `<td class="trn-db-cell" title="${_esc(pk.name)} (${pk.position}) #${pk.overall}">
-                    <div class="trn-db-pick">
-                      <span class="trn-db-pos" style="background:${col}22;color:${col}">${pk.position}</span>
-                      <span class="trn-db-name">${_esc(lastName)}</span>
-                    </div>
-                  </td>`;
-                }).join("")}
-              </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>`;
+      <div class="trn-az-meta">${metaLine}</div>
+      <div class="draft-auction-list">
+        ${header}
+        ${rows.join("")}
+      </div>
+      ${pagination}`;
+
+    el.querySelector("#trn-board-prev")?.addEventListener("click", () => {
+      _draftListPage = Math.max(1, _draftListPage - 1);
+      _renderDraftBoard(el, picks, leagueEntry);
+    });
+    el.querySelector("#trn-board-next")?.addEventListener("click", () => {
+      _draftListPage = Math.min(totalPages, _draftListPage + 1);
+      _renderDraftBoard(el, picks, leagueEntry);
+    });
   }
 
   function _renderDraftCard(el, allPicks) {

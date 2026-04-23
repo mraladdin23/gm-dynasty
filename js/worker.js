@@ -1059,10 +1059,17 @@ async function tournamentDraft(leagueId, platform, year, yahooToken, mflCookie) 
         playerId: p.player_id || "",
         name:     p.metadata ? `${p.metadata.first_name || ""} ${p.metadata.last_name || ""}`.trim() : "",
         position: (p.metadata?.position || "?").toUpperCase(),
+        nflTeam:  p.metadata?.team || "FA",
         cost:     null
       })).filter(p => p.teamId && p.teamId !== "undefined");
 
-      return new Response(JSON.stringify({ picks }), { headers: corsHeaders() });
+      // Return slot_to_roster_id and draft_type alongside picks so the frontend
+      // can render a proper snake/linear grid with correct column ordering (U1).
+      return new Response(JSON.stringify({
+        picks,
+        slot_to_roster_id: draft.slot_to_roster_id || null,
+        draft_type:        draft.type || "snake"
+      }), { headers: corsHeaders() });
     } catch(e) {
       return new Response(JSON.stringify({ picks: [], error: e.message }), { headers: corsHeaders() });
     }
