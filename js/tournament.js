@@ -4189,8 +4189,8 @@ const DLRTournament = (() => {
           </div>
           <div class="trn-mu-card-line trn-mu-card-line--footer">
             <span class="trn-mu-card-margin">Δ${m.diff.toFixed(2)}</span>
-            ${lname ? `<span class="trn-mu-card-fleague">${_esc(lname)}</span>` : ""}
           </div>
+          ${lname ? `<div class="trn-mu-card-line trn-mu-card-line--league">${_esc(lname)}</div>` : ""}
         </div>`;
     };
     // ── Render sections ────────────────────────────────────────────────────
