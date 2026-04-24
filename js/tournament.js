@@ -4913,6 +4913,27 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const entry  = { status: "pending", submittedAt: Date.now() };
     let hasError = false;
 
+    // ── Duplicate check ────────────────────────────────────
+    // Collect the identity fields entered so far (before full validation)
+    // so we can check against existing registrations early.
+    const checkEmail   = document.getElementById("trn-reg-email")?.value.trim().toLowerCase()        || "";
+    const checkSleeper = document.getElementById("trn-reg-sleeperUsername")?.value.trim().toLowerCase() || "";
+    const checkDlr     = (_currentUsername || "").toLowerCase();
+
+    const existingRegs = Object.values(t.registrations || {});
+    const duplicate = existingRegs.find(r => {
+      if (checkDlr    && r.dlrUsername?.toLowerCase()      === checkDlr)     return true;
+      if (checkEmail  && r.email?.toLowerCase()            === checkEmail)   return true;
+      if (checkSleeper && r.sleeperUsername?.toLowerCase() === checkSleeper) return true;
+      return false;
+    });
+
+    if (duplicate) {
+      errEl.textContent = "You've already registered for this tournament. Contact the admin if you need to update your info.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+
     // Collect all form fields — only STD_FIELDS are truly required
     for (const f of fields) {
       const val = document.getElementById(`trn-reg-${f}`)?.value.trim();
