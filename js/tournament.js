@@ -4098,9 +4098,11 @@ const DLRTournament = (() => {
     _renderMatchupsContent(tid, t, el, allMatchups, year, isAdmin);
   }
 
+  // ── Active section state for matchups dropdown ────────────────────────────
+  let _matchupsSection = "highest"; // "highest" | "closest" | "blowouts"
+
   async function _renderMatchupsContent(tid, t, el, matchups, year, isAdmin) {
-    // Recompute diff/combined from raw scores — these may be missing when
-    // loaded from Firebase cache where undefined fields are stripped
+    // Recompute diff/combined from raw scores
     const enriched = matchups.map(m => ({
       ...m,
       diff:     Math.abs((m.home?.score || 0) - (m.away?.score || 0)),
@@ -4108,29 +4110,28 @@ const DLRTournament = (() => {
       winner:   m.winner || ((m.home?.score || 0) >= (m.away?.score || 0) ? m.home?.name : m.away?.name)
     })).filter(m => m.home?.score > 0 || m.away?.score > 0);
 
-    const sorted   = [...enriched].sort((a, b) => a.diff - b.diff);
-    const closest  = sorted.slice(0, 5);
-    const blowouts = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
+    const closest  = [...enriched].sort((a, b) =>  a.diff - b.diff).slice(0, 5);
+    const blowouts = [...enriched].sort((a, b) =>  b.diff - a.diff).slice(0, 5);
 
-    // Highest Scoring: top 5 individual team scores (not combined)
+    // Build per-team score list and league name map
     const allTeamScores = [];
     const leagueNameMap = {};
     enriched.forEach(m => {
-      // Build leagueName map from t.leagues
       if (!leagueNameMap[m.leagueId]) {
         const lMatch = Object.values(t.leagues || {}).find(l => String(l.leagueId) === String(m.leagueId));
-        leagueNameMap[m.leagueId] = lMatch?.leagueName || lMatch?.name || m.leagueId || "";
+        leagueNameMap[m.leagueId] = lMatch?.leagueName || lMatch?.name || "";
       }
       allTeamScores.push({ name: m.home.name, score: m.home.score, leagueId: m.leagueId });
       allTeamScores.push({ name: m.away.name, score: m.away.score, leagueId: m.leagueId });
     });
     const myKeys = _findMyKeys(t);
     allTeamScores.forEach(ts => { ts.isMe = _isMyTeam(ts.name, myKeys); });
-    const highestScores = [...allTeamScores].sort((a, b) => b.score - a.score).slice(0, 5);
+    const byScore      = [...allTeamScores].sort((a, b) => b.score - a.score);
+    const highestScores = byScore.slice(0, 5);
 
     const ck = `${year}_${_matchupsWeek}`;
 
-    // Lazy-load recap from Firebase if not in memory cache
+    // Lazy-load recap
     if (!_recapCache[ck]) {
       try {
         const snap = await _tAnalyticsRef(tid).child(`recap/${ck}`).once("value");
@@ -4140,60 +4141,73 @@ const DLRTournament = (() => {
     }
     const recapData = _recapCache[ck] || null;
 
-    // ── Card renderer (side-by-side matchup card) ──────────────────────────
+    // ── Ordinal helper ─────────────────────────────────────────────────────
+    const _ord = n => ["1st","2nd","3rd","4th","5th"][n] || `${n+1}th`;
+
+    // ── Highest-scoring card ───────────────────────────────────────────────
+    // Layout: rank badge top-left, team name, score, league name dimmed bottom
+    const highCard = (ts, i) => {
+      const lname = leagueNameMap[ts.leagueId] || "";
+      return `
+        <div class="trn-mu-card trn-mu-card--score ${ts.isMe ? "trn-mu-card--me" : ""}">
+          <div class="trn-mu-card-rank">${_ord(i)}</div>
+          <div class="trn-mu-card-score-pts">${ts.score.toFixed(2)}</div>
+          <div class="trn-mu-card-score-name">${_esc(ts.name)}${ts.isMe ? ' <span class="trn-you-badge">you</span>' : ""}</div>
+          ${lname ? `<div class="trn-mu-card-score-league">${_esc(lname)}</div>` : ""}
+        </div>`;
+    };
+
+    // ── Matchup card ───────────────────────────────────────────────────────
+    // Line 1: winner name + score  Line 2: loser name + score (dimmed)  Line 3: Δ + league
     const matchupCard = (m, tagHtml) => {
       const homeWon = m.home.score > m.away.score;
-      const aMeH   = _isMyTeam(m.home.name, myKeys);
-      const aMeA   = _isMyTeam(m.away.name, myKeys);
-      const lname  = leagueNameMap[m.leagueId] || "";
+      const winTeam  = homeWon ? m.home : m.away;
+      const loseTeam = homeWon ? m.away : m.home;
+      const aMeW = _isMyTeam(winTeam.name,  myKeys);
+      const aMeL = _isMyTeam(loseTeam.name, myKeys);
+      const lname = leagueNameMap[m.leagueId] || "";
       return `
-        <div class="trn-mu-card ${aMeH || aMeA ? "trn-mu-card--me" : ""}">
+        <div class="trn-mu-card ${aMeW || aMeL ? "trn-mu-card--me" : ""}">
           ${tagHtml ? `<div class="trn-mu-card-tag">${tagHtml}</div>` : ""}
-          <div class="trn-mu-card-body">
-            <div class="trn-mu-card-team ${homeWon ? "trn-mu-card-team--winner" : "trn-mu-card-team--loser"}">
-              <span class="trn-mu-card-name">${_esc(m.home.name)}${aMeH ? ' <span class="trn-you-badge">you</span>' : ""}</span>
-              <span class="trn-mu-card-score ${homeWon ? "trn-mu-card-score--win" : ""}">${m.home.score.toFixed(2)}</span>
-            </div>
-            <div class="trn-mu-card-vs">vs</div>
-            <div class="trn-mu-card-team trn-mu-card-team--right ${!homeWon ? "trn-mu-card-team--winner" : "trn-mu-card-team--loser"}">
-              <span class="trn-mu-card-score ${!homeWon ? "trn-mu-card-score--win" : ""}">${m.away.score.toFixed(2)}</span>
-              <span class="trn-mu-card-name">${_esc(m.away.name)}${aMeA ? ' <span class="trn-you-badge">you</span>' : ""}</span>
-            </div>
+          <div class="trn-mu-card-line trn-mu-card-line--win">
+            <span class="trn-mu-card-lname">${_esc(winTeam.name)}${aMeW ? ' <span class="trn-you-badge">you</span>' : ""}</span>
+            <span class="trn-mu-card-lscore trn-mu-card-lscore--win">${winTeam.score.toFixed(2)}</span>
           </div>
-          <div class="trn-mu-card-footer">
+          <div class="trn-mu-card-line trn-mu-card-line--lose">
+            <span class="trn-mu-card-lname">${_esc(loseTeam.name)}${aMeL ? ' <span class="trn-you-badge">you</span>' : ""}</span>
+            <span class="trn-mu-card-lscore">${loseTeam.score.toFixed(2)}</span>
+          </div>
+          <div class="trn-mu-card-line trn-mu-card-line--footer">
             <span class="trn-mu-card-margin">\u0394${m.diff.toFixed(2)}</span>
-            ${lname ? `<span class="trn-mu-card-league">${_esc(lname)}</span>` : ""}
+            ${lname ? `<span class="trn-mu-card-fleague">${_esc(lname)}</span>` : ""}
           </div>
         </div>`;
     };
 
-    // ── Highest scoring row renderer ───────────────────────────────────────
-    const scoreRow = (ts, rank) => `
-      <div class="trn-mu-score-row ${ts.isMe ? "trn-mu-row--me" : ""}">
-        <span class="trn-mu-score-rank">${rank}</span>
-        <span class="trn-mu-score-name">${_esc(ts.name)}${ts.isMe ? ' <span class="trn-you-badge">you</span>' : ""}</span>
-        <span class="trn-mu-score-pts">${ts.score.toFixed(2)}</span>
-        <span class="trn-mu-score-league">${_esc(leagueNameMap[ts.leagueId] || "")}</span>
-      </div>`;
+    // ── Render sections ────────────────────────────────────────────────────
+    const sectionHtml = {
+      highest: `<div class="trn-mu-grid">${highestScores.map((ts, i) => highCard(ts, i)).join("")}</div>`,
+      closest: `<div class="trn-mu-grid">${closest.map(m => matchupCard(m, m.diff < 2 ? "\ud83d\udd25 < 2 pts" : "")).join("")}</div>`,
+      blowouts:`<div class="trn-mu-grid">${blowouts.map(m => matchupCard(m, "")).join("")}</div>`
+    };
 
     el.innerHTML = `
       <div class="trn-az-meta">Week ${_matchupsWeek} \u00b7 ${enriched.length} matchups across ${new Set(enriched.map(m => m.leagueId)).size} leagues</div>
 
-      <div class="trn-az-section-title">\ud83d\udd25 Closest Games</div>
-      <div class="trn-mu-cards">
-        ${closest.map(m => matchupCard(m, m.diff < 2 ? "\ud83d\udd25 < 2 pts" : "")).join("")}
+      <!-- Section selector — always visible, controls which panel shows -->
+      <div class="trn-mu-section-bar">
+        <select class="trn-filter-select trn-mu-section-sel" id="trn-mu-section-sel">
+          <option value="highest" ${_matchupsSection === "highest"  ? "selected" : ""}>\ud83d\udcc8 Highest Scoring</option>
+          <option value="closest" ${_matchupsSection === "closest"  ? "selected" : ""}>\ud83d\udd25 Closest Games</option>
+          <option value="blowouts"${_matchupsSection === "blowouts" ? "selected" : ""}>\ud83d\udca5 Biggest Blowouts</option>
+        </select>
       </div>
 
-      <div class="trn-az-section-title" style="margin-top:var(--space-5)">\ud83d\udca5 Biggest Blowouts</div>
-      <div class="trn-mu-cards">
-        ${blowouts.map(m => matchupCard(m, "")).join("")}
+      <div id="trn-mu-section-panel">
+        ${sectionHtml[_matchupsSection] || sectionHtml.highest}
       </div>
 
-      <div class="trn-az-section-title" style="margin-top:var(--space-5)">\ud83d\udcc8 Highest Scoring</div>
-      <div class="trn-mu-score-list">
-        ${highestScores.map((ts, i) => scoreRow(ts, i + 1)).join("")}
-      </div>
-
+      <!-- Score distribution — always shown below -->
       <div class="trn-az-section-title" style="margin-top:var(--space-5)">\ud83d\udcca Score Distribution</div>
       <div class="trn-mu-hist-wrap">
         <canvas id="trn-mu-hist" class="trn-mu-hist"></canvas>
@@ -4223,12 +4237,18 @@ const DLRTournament = (() => {
         ${isAdmin ? `<div id="trn-recap-editor" class="trn-recap-editor hidden"></div>` : ""}
       </div>`;
 
-    // ── Draw histogram after DOM is ready ─────────────────────────────────
+    // Section selector handler — swap panel content, persist choice
+    document.getElementById("trn-mu-section-sel")?.addEventListener("change", function() {
+      _matchupsSection = this.value;
+      const panel = document.getElementById("trn-mu-section-panel");
+      if (panel) panel.innerHTML = sectionHtml[_matchupsSection] || sectionHtml.highest;
+    });
+
     requestAnimationFrame(() => _drawScoreHistogram(allTeamScores.map(ts => ts.score)));
 
     if (isAdmin) {
       document.getElementById("trn-recap-prompt-btn")?.addEventListener("click", () => {
-        const prompt = _buildRecapPrompt(t, enriched, year);
+        const prompt = _buildRecapPrompt(t, enriched, allTeamScores, year);
         navigator.clipboard?.writeText(prompt).then(() => showToast("Prompt copied \u2014 paste into claude.ai \u2713"))
           .catch(() => { showToast("Copy failed \u2014 see console", "error"); console.log(prompt); });
         _showRecapEditor(tid, t, enriched, year);
@@ -4262,13 +4282,12 @@ const DLRTournament = (() => {
     ctx.scale(DPR, DPR);
 
     // Bin into 10-pt buckets
-    const minV  = Math.floor(Math.min(...scores) / 10) * 10;
-    const maxV  = Math.ceil(Math.max(...scores)  / 10) * 10;
-    const step  = 10;
-    const bins  = [];
-    for (let lo = minV; lo < maxV; lo += step) bins.push({ lo, count: 0 });
+    const minV = Math.floor(Math.min(...scores) / 10) * 10;
+    const maxV = Math.ceil(Math.max(...scores)  / 10) * 10;
+    const bins = [];
+    for (let lo = minV; lo < maxV; lo += 10) bins.push({ lo, count: 0 });
     scores.forEach(s => {
-      const idx = Math.min(Math.floor((s - minV) / step), bins.length - 1);
+      const idx = Math.min(Math.floor((s - minV) / 10), bins.length - 1);
       if (idx >= 0) bins[idx].count++;
     });
     const maxC = Math.max(...bins.map(b => b.count), 1);
@@ -4283,11 +4302,11 @@ const DLRTournament = (() => {
     const PL = 28, PR = 12, PT = 14, PB = 32;
     const CW = W - PL - PR;
     const CH = H - PT - PB;
-    const BW = CW / bins.length;
+    const BW = CW / (bins.length || 1);
 
     ctx.clearRect(0, 0, W, H);
 
-    // Grid
+    // Grid lines
     ctx.strokeStyle = colorGrid; ctx.lineWidth = 0.5;
     [0, .25, .5, .75, 1].forEach(f => {
       const y = PT + CH - f * CH;
@@ -4304,20 +4323,19 @@ const DLRTournament = (() => {
       else ctx.rect(x + 1, PT + CH - bH, BW - 2, bH);
       ctx.fill();
       if (i % 2 === 0) {
-        ctx.fillStyle = colorTxt; ctx.font = `10px sans-serif`; ctx.textAlign = "center";
+        ctx.fillStyle = colorTxt; ctx.font = "10px sans-serif"; ctx.textAlign = "center";
         ctx.fillText(b.lo, x + BW / 2, H - PB + 14);
       }
     });
 
-    // Y labels
+    // Y-axis labels
     ctx.fillStyle = colorTxt; ctx.font = "9px sans-serif"; ctx.textAlign = "right";
     [0, .25, .5, .75, 1].forEach(f => {
-      const y = PT + CH - f * CH;
-      ctx.fillText(Math.round(f * maxC), PL - 3, y + 3);
+      ctx.fillText(Math.round(f * maxC), PL - 3, PT + CH - f * CH + 3);
     });
 
-    // Median line
-    const range = maxV - minV || 1;
+    // Median dashed line
+    const range = (maxV - minV) || 1;
     const medX  = PL + ((median - minV) / range) * CW;
     ctx.strokeStyle = colorMed; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.moveTo(medX, PT); ctx.lineTo(medX, PT + CH); ctx.stroke();
@@ -4339,24 +4357,55 @@ const DLRTournament = (() => {
     }
   }
 
-  function _buildRecapPrompt(t, matchups, year) {
-    const sorted   = [...matchups].sort((a, b) => a.diff - b.diff);
-    const closest  = sorted.slice(0, 5).map(m =>
-      `  • ${m.home.name} ${m.home.score.toFixed(2)} – ${m.away.score.toFixed(2)} ${m.away.name} (margin: ${m.diff.toFixed(2)})`
+  function _buildRecapPrompt(t, matchups, allTeamScores, year) {
+    // Sort buckets
+    const allScores = allTeamScores.map(ts => ts.score);
+    const scoreSorted = [...allScores].sort((a, b) => a - b);
+    const mid    = scoreSorted.length;
+    const median = mid % 2 === 0
+      ? (scoreSorted[mid / 2 - 1] + scoreSorted[mid / 2]) / 2
+      : scoreSorted[Math.floor(mid / 2)];
+    const avg    = allScores.reduce((a, b) => a + b, 0) / allScores.length;
+    const hi     = Math.max(...allScores);
+    const lo     = Math.min(...allScores);
+
+    const closest  = [...matchups].sort((a, b) => a.diff - b.diff).slice(0, 5).map(m =>
+      `  \u2022 ${m.home.name} ${m.home.score.toFixed(2)} \u2013 ${m.away.score.toFixed(2)} ${m.away.name} (margin: ${m.diff.toFixed(2)})`
     );
     const blowouts = [...matchups].sort((a, b) => b.diff - a.diff).slice(0, 5).map(m =>
-      `  • ${m.winner} won ${Math.max(m.home.score, m.away.score).toFixed(2)} – ${Math.min(m.home.score, m.away.score).toFixed(2)}`
+      `  \u2022 ${m.winner} won ${Math.max(m.home.score, m.away.score).toFixed(2)} \u2013 ${Math.min(m.home.score, m.away.score).toFixed(2)} (margin: ${m.diff.toFixed(2)})`
     );
-    const highest  = [...matchups].sort((a, b) => b.combined - a.combined).slice(0, 3).map(m =>
-      `  • ${m.home.name} ${m.home.score.toFixed(2)} vs ${m.away.name} ${m.away.score.toFixed(2)} (combined: ${m.combined.toFixed(1)})`
+    const byScore  = [...allTeamScores].sort((a, b) => b.score - a.score);
+    const topScorers = byScore.slice(0, 5).map((ts, i) =>
+      `  ${["1st","2nd","3rd","4th","5th"][i]}. ${ts.name} \u2014 ${ts.score.toFixed(2)} pts`
     );
-    const avgScore = (matchups.flatMap(m => [m.home.score, m.away.score]).reduce((a,b) => a+b, 0) / (matchups.length * 2)).toFixed(2);
+    const lowScorers = [...byScore].reverse().slice(0, 5).map((ts, i) =>
+      `  ${["1st","2nd","3rd","4th","5th"][i]} lowest. ${ts.name} \u2014 ${ts.score.toFixed(2)} pts`
+    );
+
+    // Rough distribution buckets for the prompt
+    const buckets = {};
+    allScores.forEach(s => {
+      const bucket = `${Math.floor(s / 10) * 10}\u2013${Math.floor(s / 10) * 10 + 9}`;
+      buckets[bucket] = (buckets[bucket] || 0) + 1;
+    });
+    const distLines = Object.entries(buckets)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .map(([range, count]) => `  ${range} pts: ${count} team${count !== 1 ? "s" : ""}`)
+      .join("\n");
 
     return `You are a fun, witty fantasy football analyst writing a brief weekly recap for a large multi-league tournament called "${t.meta?.name || "the tournament"}".
 
 Week ${_matchupsWeek} (${year}) Summary:
 - ${matchups.length} total matchups across ${new Set(matchups.map(m => m.leagueId)).size} leagues
-- Average score: ${avgScore} pts
+- ${allScores.length} individual team scores
+- Average: ${avg.toFixed(2)} pts | Median: ${median.toFixed(2)} pts | High: ${hi.toFixed(2)} | Low: ${lo.toFixed(2)}
+
+Top scorers this week:
+${topScorers.join("\n")}
+
+Lowest scorers this week:
+${lowScorers.join("\n")}
 
 Closest games:
 ${closest.join("\n")}
@@ -4364,10 +4413,10 @@ ${closest.join("\n")}
 Biggest blowouts:
 ${blowouts.join("\n")}
 
-Highest scoring matchups:
-${highest.join("\n")}
+Score distribution:
+${distLines}
 
-Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Mention the closest game, the biggest blowout, and the top scorer. Keep it punchy and fun — like an ESPN segment. Use **bold** for team names and key scores. Keep total length under 300 words.`;
+Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Highlight the top scorer and give them a moment. Mention the closest game (nail-biter drama) and the biggest blowout. Take a gentle jab at the lowest scorer. Reference the score distribution to set the tone for the week \u2014 was it a high-scoring week, low-scoring, or all over the place? Keep it punchy and fun \u2014 like an ESPN segment. Use **bold** for team names and key scores. Keep total length under 350 words.`;
   }
 
   function _showRecapEditor(tid, t, matchups, year, existingText = "") {
