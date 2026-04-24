@@ -1103,18 +1103,6 @@
   border-color: var(--color-accent) !important;
   background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
-.trn-mu-card-tag {
-  font-size: .65rem;
-  font-weight: 700;
-  background: var(--color-accent);
-  color: #fff;
-  padding: 2px var(--space-2);
-  text-align: center;
-  letter-spacing: .03em;
-  white-space: nowrap;
-}
-.trn-mu-card-tag:empty { display: none; }
-
 /* Two team lines + footer line */
 .trn-mu-card-line {
   display: flex;
@@ -1130,6 +1118,8 @@
   border-top: 1px solid var(--color-border);
   padding: 3px var(--space-2) var(--space-2);
   margin-top: auto;
+  justify-content: center; /* margin Δ centered by default */
+  position: relative;      /* league name absolutely right-aligned */
 }
 .trn-mu-card-lname {
   overflow: hidden;
@@ -1145,20 +1135,26 @@
   flex-shrink: 0;
   font-size: .8rem;
 }
-.trn-mu-card-lscore--win { color: var(--color-green); font-weight: 700; }
+.trn-mu-card-lscore--win  { color: var(--color-green); font-weight: 700; }
+.trn-mu-card-lscore--lose { color: var(--color-text-dim); }
 .trn-mu-card-line--lose .trn-mu-card-lscore { color: var(--color-text-dim); }
 .trn-mu-card-margin {
-  font-size: .68rem;
-  color: var(--color-text-dim);
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--color-gold);
+  font-family: var(--font-display, monospace);
+  text-align: center;
 }
 .trn-mu-card-fleague {
-  font-size: .65rem;
+  position: absolute;
+  right: var(--space-2);
+  font-size: .62rem;
   color: var(--color-text-dim);
-  opacity: .6;
+  opacity: .55;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 58%;
+  max-width: 50%;
   text-align: right;
 }
 
@@ -1197,6 +1193,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-top: 1px;
+}
+
+/* Lowest scoring variant — score in red/dim */
+.trn-mu-card-score-pts--low {
+  color: var(--color-red, #ef4444);
 }
 
 /* ── Score histogram ─────────────────────────────────── */
