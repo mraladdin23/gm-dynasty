@@ -192,6 +192,36 @@ const GMDB = (() => {
     return snap.exists() ? snap.val() : {};
   }
 
+  // ── Delete a single league key ─────────────────────────
+  async function deleteLeague(username, leagueKey) {
+    await userRef(username).child(`leagues/${leagueKey}`).remove();
+    // Also remove any leagueMeta for this key
+    await userRef(username).child(`leagueMeta/${leagueKey}`).remove().catch(() => {});
+  }
+
+  // ── Delete all leagues for a platform ─────────────────
+  async function deleteLeaguesByPlatform(username, platform) {
+    const leagues = await getLeagues(username);
+    const keysToDelete = Object.entries(leagues)
+      .filter(([, l]) => l.platform === platform)
+      .map(([k]) => k);
+    if (!keysToDelete.length) return 0;
+
+    // Build a multi-path null update — setting to null deletes in Firebase REST
+    const nullUpdates = {};
+    keysToDelete.forEach(k => {
+      nullUpdates[k] = null;
+    });
+    await userRef(username).child("leagues").update(nullUpdates);
+
+    // Clean up leagueMeta entries too
+    const metaUpdates = {};
+    keysToDelete.forEach(k => { metaUpdates[k] = null; });
+    await userRef(username).child("leagueMeta").update(metaUpdates).catch(() => {});
+
+    return keysToDelete.length;
+  }
+
   /**
    * Recompute + save aggregated career stats from all leagues.
    * Tracks 1st/2nd/3rd finishes separately for scoring.
@@ -502,6 +532,8 @@ const GMDB = (() => {
     saveLeague,
     saveLeagues,
     getLeagues,
+    deleteLeague,
+    deleteLeaguesByPlatform,
     recomputeStats,
     addStickyNote,
     removeStickyNote,

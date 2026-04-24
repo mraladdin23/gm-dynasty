@@ -2344,6 +2344,14 @@ const Profile = (() => {
     document.getElementById("league-label-modal").classList.remove("hidden");
     // Store the current leagueKey so _saveLeagueLabelModal can access it
     document.getElementById("league-label-modal").dataset.leagueKey = leagueKey;
+
+    // Wire delete button — clone to clear any previous listener
+    const delBtn = document.getElementById("label-modal-delete");
+    if (delBtn) {
+      const freshDel = delBtn.cloneNode(true);
+      delBtn.replaceWith(freshDel);
+      freshDel.addEventListener("click", () => _promptDeleteLeague(leagueKey));
+    }
   }
 
   // Build the read-only "Groups & Labels" chips shown to all users at the top of the modal.
@@ -2475,6 +2483,110 @@ const Profile = (() => {
     document.getElementById("league-label-modal").classList.add("hidden");
   }
 
+  // ── Delete a single league from profile ───────────────
+  // Called from the 🗑 Remove button in the league options modal.
+  function _promptDeleteLeague(leagueKey) {
+    const league = _allLeagues[leagueKey];
+    if (!league) return;
+    closeLabelModal();
+
+    const modal   = document.getElementById("delete-league-modal");
+    const msgEl   = document.getElementById("delete-league-message");
+    const confirm = document.getElementById("delete-league-confirm");
+    const cancel  = document.getElementById("delete-league-cancel");
+    const closeBtn= document.getElementById("delete-league-close");
+    if (!modal) return;
+
+    msgEl.textContent = `Remove "${league.leagueName} (${league.season})" from your profile?`;
+    modal.classList.remove("hidden");
+
+    // Clone buttons to clear old listeners
+    const newConfirm = confirm.cloneNode(true);
+    const newCancel  = cancel.cloneNode(true);
+    const newClose   = closeBtn.cloneNode(true);
+    confirm.replaceWith(newConfirm);
+    cancel.replaceWith(newCancel);
+    closeBtn.replaceWith(newClose);
+
+    const closeModal = () => modal.classList.add("hidden");
+
+    newCancel.addEventListener("click", closeModal);
+    newClose.addEventListener("click",  closeModal);
+    newConfirm.addEventListener("click", async () => {
+      newConfirm.disabled = true;
+      newConfirm.textContent = "Removing…";
+      try {
+        await GMDB.deleteLeague(_currentUsername, leagueKey);
+        delete _allLeagues[leagueKey];
+        delete _leagueMeta[leagueKey];
+        await GMDB.recomputeStats(_currentUsername);
+        closeModal();
+        if (_detailLeagueKey === leagueKey) closeLeagueDetail();
+        _renderLeagueFilters();
+        _renderLeagues();
+        showToast("League removed ✓");
+      } catch(err) {
+        newConfirm.disabled = false;
+        newConfirm.textContent = "Remove";
+        showToast("Remove failed: " + err.message, "error");
+      }
+    });
+  }
+
+  // ── Delete all leagues for a platform ─────────────────
+  // Called from 🗑 Remove All buttons in Edit Profile modal.
+  async function _deleteAllPlatformLeagues(platform) {
+    const platformLabel = { sleeper: "Sleeper", mfl: "MFL", yahoo: "Yahoo" }[platform] || platform;
+    const count = Object.values(_allLeagues).filter(l => l.platform === platform).length;
+    if (!count) { showToast(`No ${platformLabel} leagues found.`, "warn"); return; }
+
+    const modal   = document.getElementById("delete-league-modal");
+    const msgEl   = document.getElementById("delete-league-message");
+    const confirm = document.getElementById("delete-league-confirm");
+    const cancel  = document.getElementById("delete-league-cancel");
+    const closeBtn= document.getElementById("delete-league-close");
+    if (!modal) return;
+
+    msgEl.textContent = `Remove all ${count} ${platformLabel} league${count !== 1 ? "s" : ""} from your profile?`;
+    modal.classList.remove("hidden");
+
+    const newConfirm = confirm.cloneNode(true);
+    const newCancel  = cancel.cloneNode(true);
+    const newClose   = closeBtn.cloneNode(true);
+    confirm.replaceWith(newConfirm);
+    cancel.replaceWith(newCancel);
+    closeBtn.replaceWith(newClose);
+
+    const closeModal = () => modal.classList.add("hidden");
+    newCancel.addEventListener("click", closeModal);
+    newClose.addEventListener("click",  closeModal);
+
+    newConfirm.addEventListener("click", async () => {
+      newConfirm.disabled = true;
+      newConfirm.textContent = "Removing…";
+      try {
+        const removed = await GMDB.deleteLeaguesByPlatform(_currentUsername, platform);
+        // Remove from in-memory state
+        Object.keys(_allLeagues).forEach(k => {
+          if (_allLeagues[k].platform === platform) {
+            delete _allLeagues[k];
+            delete _leagueMeta[k];
+          }
+        });
+        await GMDB.recomputeStats(_currentUsername);
+        closeModal();
+        if (_detailLeague?.platform === platform) closeLeagueDetail();
+        _renderLeagueFilters();
+        _renderLeagues();
+        showToast(`${removed} ${platformLabel} league${removed !== 1 ? "s" : ""} removed ✓`);
+      } catch(err) {
+        newConfirm.disabled = false;
+        newConfirm.textContent = "Remove";
+        showToast("Remove failed: " + err.message, "error");
+      }
+    });
+  }
+
   // ── Edit profile modal ─────────────────────────────────
 
   function openEditProfileModal(profile) {
@@ -2503,6 +2615,16 @@ const Profile = (() => {
     }
 
     document.getElementById("edit-profile-modal").classList.remove("hidden");
+
+    // Wire Remove All platform buttons
+    ["sleeper", "mfl", "yahoo"].forEach(platform => {
+      const btn = document.getElementById(`delete-${platform}-leagues-btn`);
+      if (btn) {
+        const fresh = btn.cloneNode(true);
+        btn.replaceWith(fresh);
+        fresh.addEventListener("click", () => _deleteAllPlatformLeagues(platform));
+      }
+    });
   }
 
   function closeEditProfileModal() {
@@ -3194,7 +3316,8 @@ const Profile = (() => {
     toggleFilter,
     clearFilters,
     syncMFLTeams,
-    syncYahooLeague
+    syncYahooLeague,
+    deleteAllPlatformLeagues: _deleteAllPlatformLeagues
   };
 
 })();

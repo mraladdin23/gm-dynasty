@@ -82,6 +82,25 @@
 }
 .btn-ghost:hover { color: var(--color-text-muted); }
 
+/* Danger / destructive action button */
+.btn-danger {
+  background: rgba(239, 68, 68, .15);
+  border: 1px solid rgba(239, 68, 68, .35);
+  color: #f87171;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  font-size: .875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.btn-danger:hover {
+  background: rgba(239, 68, 68, .25);
+  border-color: rgba(239, 68, 68, .55);
+}
+.btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+.btn-danger.btn-sm   { padding: var(--space-1) var(--space-3); font-size: .8rem; }
+
 /* ── Onboarding back button ───────────────────────────── */
 .onboarding-back {
   margin-bottom: var(--space-2);

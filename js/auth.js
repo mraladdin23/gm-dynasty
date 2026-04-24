@@ -171,6 +171,34 @@ const Auth = (() => {
     await _currentUser.updatePassword(newPassword);
   }
 
+  // ── Password reset ─────────────────────────────────────
+  // Looks up the real email stored at gmd/users/{username}/email,
+  // then sends a Firebase password-reset link to that address.
+  // Users never type a synthetic email — they just enter their username.
+  async function sendPasswordReset(username) {
+    if (!username?.trim()) throw new Error("Enter your username.");
+    const key = username.trim().toLowerCase();
+
+    // Look up real email from DB
+    let email;
+    try {
+      const data = await GMDB._restGet(`gmd/users/${key}/email`);
+      email = data;
+    } catch(err) {
+      throw new Error("Could not reach the server. Check your connection and try again.");
+    }
+
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      throw new Error("Username not found. Check the spelling and try again.");
+    }
+
+    try {
+      await auth.sendPasswordResetEmail(email);
+    } catch(err) {
+      throw new Error(_friendlyAuthError(err.code));
+    }
+  }
+
   // ── Error messages ─────────────────────────────────────
   function _friendlyAuthError(code, username) {
     switch (code) {
@@ -201,7 +229,8 @@ const Auth = (() => {
     getCurrentProfile,
     isLoggedIn,
     refreshProfile,
-    changePassword
+    changePassword,
+    sendPasswordReset
   };
 
 })();

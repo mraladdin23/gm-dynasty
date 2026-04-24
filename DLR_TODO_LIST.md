@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 24, 2026 — F5-P3 Analytics mostly complete. Remaining: U4 (Matchups UX), U5 (Rosters), S-series small fixes, then P4 (Custom Playoffs).*
+*Updated: April 24, 2026 — F5-P3 Analytics mostly complete. Remaining: U5 (Rosters), S-series small fixes, then P4 (Custom Playoffs).*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -85,20 +85,6 @@ to match. Interchangeable visual elements — door style, nameplates, decoration
 ---
 
 ## ── F5-P3: Analytics UX Improvements ──────────────────────────────
-
-### F5-P3-U4 — Matchups: card layout + score histogram 🟡
-**What:**
-- Replace row-per-matchup layout with side-by-side matchup cards (two teams, scores,
-  margin, league name dimmed at bottom)
-- "Highest Scoring" section shows top 5 individual team scores (not combined), with
-  team name, score, league name
-- "Closest" and "Biggest Blowout" sections remain but use the card layout
-- Weekly recap section: show only to admin (non-admin sees read-only posted recap or nothing)
-- Add score distribution chart: histogram or scatter plot of all team scores for the
-  selected week across all leagues (shows spread, outliers, median line)
-- League name shown dimmed on each card
-**Files:** `tournament.js`, `tournament.css`
-**Attach:** `tournament.js`, `tournament.css`
 
 ### F5-P3-U5 — Rosters: horizontal position-group card layout 🟡
 **What:** Reorganize the roster card to show players in horizontal position groups
@@ -231,7 +217,7 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files Needed |
 |---|-----|-------------|--------|--------------|
-| 1 | F5-P3-U4 | Matchups: card layout + score histogram | Medium | `tournament.js`, `tournament.css` |
+| 1 | ~~F5-P3-U4~~ | ~~Matchups: card layout + score histogram~~ | ✅ Done | — |
 | 2 | F5-P3-U5 | Rosters: horizontal position-group layout | Small | `tournament.js`, `tournament.css` |
 | 3 | F5-P3-S1–S4 | Small fixes batch (registration, standings, info, years) | Medium | `tournament.js`, `tournament.css`, `tournaments/index.html` |
 | 4 | F5-P3-S6 | Rules: year-specific versioning | Small | `tournament.js` |
@@ -277,6 +263,8 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **Public ADP by year** — `_writePublicADP` writes to `adpByYear/{year}` + flat `/adp`; public site reads year-specific ADP; year selector fetches correct year on demand; auto-refresh during active drafts stops when tournament goes inactive
 - **`_computeADP`** — now returns `min`, `max`, `p25`, `p75` via linear interpolation
 - **`_adpRefreshTimer`** — declared in outer scope in `tournaments/index.html`
+
+- **F5-P3-U4:** Matchups UX overhaul — 5-card horizontal grid, 4 dropdown sections (Highest/Lowest/Closest/Blowouts), matchup cards with winner/loser/Δ/league lines, score histogram with median line and stat legend, improved AI recap prompt with distribution + lowest scorers
 
 ### Earlier completed items
 - **Item 2 (Session A):** Options modal gating — commish-only fields hidden from non-commish users
