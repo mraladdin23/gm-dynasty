@@ -734,15 +734,12 @@ const DLRTournament = (() => {
         <div class="trn-detail-rows">
           <div class="trn-detail-row"><span>Registration</span><span>${meta.regType === "invite" ? "Invite Only" : "Open"}</span></div>
           <div class="trn-detail-row">
-            <span style="display:flex;align-items:center;gap:5px">
-              Standings Ranking
-              <button class="trn-help-btn" title="H2H Record: teams ranked by win-loss record, with Points For as tiebreaker. Points For: teams ranked purely by total points scored.">?</button>
-            </span>
+            <span>Standings Ranking</span>
             <span>
-              <div class="trn-yn-toggle">
-                <button class="trn-yn-btn ${(meta.rankBy || 'record') === 'record' ? 'trn-yn-btn--active' : ''}" id="trn-rankby-h2h">H2H Record</button>
-                <button class="trn-yn-btn ${meta.rankBy === 'pf' ? 'trn-yn-btn--active' : ''}" id="trn-rankby-pf">Points For</button>
-              </div>
+              <select id="trn-rankby-select" style="font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                <option value="record" ${(meta.rankBy || "record") === "record" ? "selected" : ""}>Record then PF</option>
+                <option value="pf"     ${meta.rankBy === "pf" ? "selected" : ""}>Points For only</option>
+              </select>
             </span>
           </div>
           <div class="trn-detail-row">
@@ -755,30 +752,27 @@ const DLRTournament = (() => {
             </span>
           </div>
           <div class="trn-detail-row">
-            <span>Median Wins</span>
+            <span style="display:flex;align-items:center;gap:5px">
+              Median Wins
+              <button class="trn-help-btn" title="Each week, any team that beats the median score of all teams across all leagues gets an extra +1 Win credited. Sleeper leagues only.">?</button>
+            </span>
             <span>
-              <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
-                <input type="checkbox" id="trn-median-wins-toggle" ${meta.medianWins ? "checked" : ""} />
-                <span style="font-size:.82rem">Credit +1W to any team that beats the weekly median score (Sleeper only)</span>
-              </label>
+              <div class="trn-yn-toggle">
+                <button class="trn-yn-btn ${meta.medianWins ? 'trn-yn-btn--active' : ''}" id="trn-median-wins-yes" data-val="true">Yes</button>
+                <button class="trn-yn-btn ${!meta.medianWins ? 'trn-yn-btn--active' : ''}" id="trn-median-wins-no" data-val="false">No</button>
+              </div>
             </span>
           </div>
           <div class="trn-detail-row">
-            <span>3rd-Round Reversal</span>
-            <span>
-              <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
-                <input type="checkbox" id="trn-3rr-toggle" ${meta.thirdRoundReversal ? "checked" : ""} />
-                <span style="font-size:.82rem">Draft uses third-round reversal (rounds 1&3 same direction, round 2 reverses, then continues snake)</span>
-              </label>
+            <span style="display:flex;align-items:center;gap:5px">
+              3rd-Round Reversal
+              <button class="trn-help-btn" title="After rounds 1 and 2 snake normally, round 3 resets — the team with the last pick in round 2 picks first again in round 3, then the draft continues as snake from there.">?</button>
             </span>
-          </div>
-          <div class="trn-detail-row">
-            <span>Twitter Column</span>
             <span>
-              <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
-                <input type="checkbox" id="trn-show-twitter-toggle" ${meta.showTwitter ? "checked" : ""} />
-                <span style="font-size:.82rem">Show Twitter/X handle column in standings</span>
-              </label>
+              <div class="trn-yn-toggle">
+                <button class="trn-yn-btn ${meta.thirdRoundReversal ? 'trn-yn-btn--active' : ''}" id="trn-3rr-yes" data-val="true">Yes</button>
+                <button class="trn-yn-btn ${!meta.thirdRoundReversal ? 'trn-yn-btn--active' : ''}" id="trn-3rr-no" data-val="false">No</button>
+              </div>
             </span>
           </div>
           <div class="trn-detail-row"><span>Created by</span><span>@${_esc(meta.createdBy || "—")}</span></div>
@@ -816,17 +810,13 @@ const DLRTournament = (() => {
     document.getElementById("trn-goto-regs-btn")?.addEventListener("click", () => {
       document.querySelector('.trn-tab[data-tab="registrations"]')?.click();
     });
-    const _saveRankBy = async (val) => {
+    document.getElementById("trn-rankby-select")?.addEventListener("change", async function() {
       try {
-        await _tMetaRef(tid).update({ rankBy: val });
-        if (_tournaments[tid]?.meta) _tournaments[tid].meta.rankBy = val;
-        document.getElementById("trn-rankby-h2h")?.classList.toggle("trn-yn-btn--active", val === "record");
-        document.getElementById("trn-rankby-pf")?.classList.toggle("trn-yn-btn--active",  val === "pf");
+        await _tMetaRef(tid).update({ rankBy: this.value });
         showToast("Ranking method saved ✓");
+        _tournaments[tid].meta.rankBy = this.value;
       } catch(e) { showToast("Failed to save ranking method", "error"); }
-    };
-    document.getElementById("trn-rankby-h2h")?.addEventListener("click", () => _saveRankBy("record"));
-    document.getElementById("trn-rankby-pf")?.addEventListener("click",  () => _saveRankBy("pf"));
+    });
 
     // Playoff start week — save on blur or Enter
     const playoffWeekInput = document.getElementById("trn-playoff-week-input");
@@ -843,32 +833,31 @@ const DLRTournament = (() => {
     playoffWeekInput?.addEventListener("blur", _savePlayoffWeek);
     playoffWeekInput?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); _savePlayoffWeek(); } });
 
-    // Median wins toggle
-    document.getElementById("trn-median-wins-toggle")?.addEventListener("change", async function() {
+    // Median wins Yes/No
+    const _saveMedianWins = async (val) => {
       try {
-        await _tMetaRef(tid).update({ medianWins: this.checked });
-        if (_tournaments[tid]?.meta) _tournaments[tid].meta.medianWins = this.checked;
-        showToast(this.checked ? "Median wins enabled ✓" : "Median wins disabled ✓");
+        await _tMetaRef(tid).update({ medianWins: val });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.medianWins = val;
+        document.getElementById("trn-median-wins-yes")?.classList.toggle("trn-yn-btn--active",  val);
+        document.getElementById("trn-median-wins-no")?.classList.toggle("trn-yn-btn--active",  !val);
+        showToast(val ? "Median wins enabled ✓" : "Median wins disabled ✓");
       } catch(e) { showToast("Failed to save", "error"); }
-    });
+    };
+    document.getElementById("trn-median-wins-yes")?.addEventListener("click", () => _saveMedianWins(true));
+    document.getElementById("trn-median-wins-no")?.addEventListener("click",  () => _saveMedianWins(false));
 
-    // Third-round reversal toggle
-    document.getElementById("trn-3rr-toggle")?.addEventListener("change", async function() {
+    // 3rd-round reversal Yes/No
+    const _save3RR = async (val) => {
       try {
-        await _tMetaRef(tid).update({ thirdRoundReversal: this.checked });
-        if (_tournaments[tid]?.meta) _tournaments[tid].meta.thirdRoundReversal = this.checked;
-        showToast(this.checked ? "3rd-round reversal enabled ✓" : "3rd-round reversal disabled ✓");
+        await _tMetaRef(tid).update({ thirdRoundReversal: val });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.thirdRoundReversal = val;
+        document.getElementById("trn-3rr-yes")?.classList.toggle("trn-yn-btn--active",  val);
+        document.getElementById("trn-3rr-no")?.classList.toggle("trn-yn-btn--active",  !val);
+        showToast(val ? "3rd-round reversal enabled ✓" : "3rd-round reversal disabled ✓");
       } catch(e) { showToast("Failed to save", "error"); }
-    });
-
-    // Show Twitter column toggle
-    document.getElementById("trn-show-twitter-toggle")?.addEventListener("change", async function() {
-      try {
-        await _tMetaRef(tid).update({ showTwitter: this.checked });
-        if (_tournaments[tid]?.meta) _tournaments[tid].meta.showTwitter = this.checked;
-        showToast(this.checked ? "Twitter column enabled ✓" : "Twitter column hidden ✓");
-      } catch(e) { showToast("Failed to save", "error"); }
-    });
+    };
+    document.getElementById("trn-3rr-yes")?.addEventListener("click", () => _save3RR(true));
+    document.getElementById("trn-3rr-no")?.addEventListener("click",  () => _save3RR(false));
 
     // Preview as User — switch to participant view mode
     document.getElementById("trn-preview-user-btn")?.addEventListener("click", () => {
@@ -3513,43 +3502,44 @@ const DLRTournament = (() => {
     const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${draftTypeLabel}`;
 
     // ── Grid mode ────────────────────────────────────────────────────────────
-    // Key insight: columns always display L→R in ascending overall-pick order.
-    // Column 0 of every round = the FIRST pick of that round (smallest overall).
-    // We find each pick by overall number. For empty cells we need the team that
-    // OWNS that slot — computed from slotOrder + round direction.
-    //
-    // Direction per round:
-    //   Linear:  every round L→R  (slotOrder[0] picks first every round)
-    //   Snake:   odd rounds L→R, even rounds R→L
-    //   3RR:     R1 L→R, R2 R→L, R3 L→R (reset), R4 R→L, R5 L→R, …
-    const teamSize = slotOrder.length;
-
-    // Returns the teamId that OWNS overall pick number `overall` based on
-    // slotOrder + draft type. This is used for empty-cell owner labels only.
-    const _ownerOf = (overall) => {
-      const round    = Math.ceil(overall / teamSize);
-      const posInRnd = ((overall - 1) % teamSize); // 0-based position in this round, L→R
-      let reversed = false;
-      if (is3RR)   reversed = (round === 2) || (round > 3 && round % 2 === 0);
-      else if (isSnake) reversed = (round % 2 === 0);
-      const slotIdx  = reversed ? (teamSize - 1 - posInRnd) : posInRnd;
-      return slotOrder[slotIdx] || "";
-    };
-
+    // Each round is displayed left→right in ascending overall pick order.
+    // This correctly handles snake (round 2 starts with last slot) and 3RR
+    // without any direction math — we just sort picks by overall number.
+    // For empty cells (draft in progress), we compute the expected column
+    // from slotOrder + direction rules to show who picks next.
     if (_draftBoardMode === "grid") {
+      const teamSize = slotOrder.length;
+
+      // Precompute the display order of teamIds for each round.
+      // Round 1:  slot 1 → slot N  (L→R)
+      // Snake R2: slot N → slot 1  (R→L, last team picks first)
+      // Snake R3: slot 1 → slot N  (L→R again)
+      // 3RR:  R1 L→R, R2 R→L, R3 L→R (reset to same as R1), R4+ continues snake
+      const _roundOrder = (round) => {
+        if (is3RR) {
+          // R2 is reversed; R3 resets to forward; R4+ continues snake from R3
+          const reversed = (round === 2) || (round > 3 && round % 2 === 0);
+          return reversed ? [...slotOrder].reverse() : [...slotOrder];
+        }
+        if (isSnake) return (round % 2 === 0) ? [...slotOrder].reverse() : [...slotOrder];
+        return [...slotOrder];
+      };
+
       let boardHTML = "";
       for (let round = 1; round <= rounds; round++) {
+        const roundOrder = _roundOrder(round);
         const firstOverall = (round - 1) * teamSize + 1;
         boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
-        for (let col = 0; col < teamSize; col++) {
-          const overallNum = firstOverall + col; // columns always L→R in ascending order
-          // Find the actual pick with this overall number
-          const pk = picks.find(p => p.overall === overallNum);
+        roundOrder.forEach((tid, display) => {
+          const overallNum = firstOverall + display;
+          // Find the pick for this exact overall number (authoritative — handles any draft format)
+          const pk = picks.find(p => p.overall === overallNum) || byTeamRound[tid]?.[round];
           if (pk) {
-            const posColor = POS_COLOR[pk.position] || "#9ca3af";
+            const col      = POS_COLOR[pk.position] || "#9ca3af";
             const pName    = pk.name || "Unknown";
             const pos      = pk.position || "?";
             const nfl      = pk.nflTeam  || "FA";
+            const displayTeam = pk.teamName || nameOf(tid);
             const clickFn  = pk.playerId
               ? `DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pName)}')`
               : "";
@@ -3561,22 +3551,20 @@ const DLRTournament = (() => {
                 <div class="draft-pick-player">
                   <div class="draft-pick-name">${_esc(pName)}</div>
                   <div class="draft-pick-meta">
-                    <span class="draft-pos-badge" style="background:${posColor}22;color:${posColor};border-color:${posColor}55">${pos}</span>
+                    <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
                     <span class="draft-pick-nfl">${nfl}</span>
                   </div>
                 </div>
-                <div class="draft-pick-team">${_esc(pk.teamName || nameOf(pk.teamId))}</div>
+                <div class="draft-pick-team">${_esc(displayTeam)}</div>
               </div>`;
           } else {
-            // Pick not yet made — show the team that owns this slot
-            const ownerTid  = _ownerOf(overallNum);
             boardHTML += `
               <div class="draft-pick draft-pick--empty">
                 <div class="draft-pick-num">${overallNum}</div>
-                <div class="draft-pick-owner dim">${_esc(nameOf(ownerTid))}</div>
+                <div class="draft-pick-owner dim">${_esc(nameOf(tid))}</div>
               </div>`;
           }
-        }
+        });
         boardHTML += `</div></div>`;
       }
       el.innerHTML = `
@@ -3649,18 +3637,59 @@ const DLRTournament = (() => {
     const myPicks = allPicks.filter(p => p.teamId === _draftCardTeam).sort((a, b) => a.overall - b.overall);
     if (!myPicks.length) { el.innerHTML = `<div class="trn-empty">No picks found for this team.</div>`; return; }
 
-    const teamName = myPicks[0].teamName || _draftCardTeam;
+    const teamName   = myPicks[0].teamName || _draftCardTeam;
+    const leagueName = _draftCache?.byLeague
+      ? (Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))?.leagueName
+         || Object.values(_draftCache.byLeague)[0]?.leagueName
+         || "Tournament Draft")
+      : "Tournament Draft";
 
-    // Build ADP lookup for steal/reach detection
+    // ADP lookup for steal/reach badges
     const adpMap = {};
     (_draftCache?.adp || []).forEach(a => { if (a.playerId) adpMap[a.playerId] = a; });
 
-    const posGroups = {};
-    myPicks.forEach(p => {
-      const pos = p.position || "?";
-      if (!posGroups[pos]) posGroups[pos] = [];
-      posGroups[pos].push(p);
-    });
+    // Team count for pick label calculation
+    const leagueEntry = _draftCache?.byLeague
+      ? Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))
+      : null;
+    const teamCount = leagueEntry?.slot_to_roster_id
+      ? Object.keys(leagueEntry.slot_to_roster_id).length
+      : Math.max(...myPicks.map(p => p.pick || 1), 12);
+
+    const _pickLabel = (p) => {
+      const round = p.round || Math.ceil(p.overall / teamCount);
+      const slot  = p.pick  || (p.overall - (round - 1) * teamCount);
+      return `${round}.${String(slot).padStart(2, "0")}`;
+    };
+
+    const _pickRow = (p) => {
+      const adpEntry = adpMap[p.playerId];
+      const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
+      const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
+      const badge    = isSteal
+        ? `<span class="trn-card-badge trn-card-badge--steal">💎 Steal</span>`
+        : isReach
+        ? `<span class="trn-card-badge trn-card-badge--reach">🚀 Reach</span>`
+        : "";
+      const col = POS_COLOR[p.position] || "#9ca3af";
+      return `
+        <div class="trn-share-card-pick">
+          <div class="trn-share-card-pick-num">
+            <span class="trn-share-card-round">${_pickLabel(p)}</span>
+            <span class="trn-share-card-overall">(#${p.overall})</span>
+          </div>
+          <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;font-size:.6rem;flex-shrink:0;padding:1px 4px">${_esc(p.position || "?")}</span>
+          <span class="trn-share-card-player">${_esc(p.name || "Unknown")}</span>
+          ${badge}
+        </div>`;
+    };
+
+    // Two-column split: odd total → left gets the extra pick
+    const total      = myPicks.length;
+    const leftCount  = Math.ceil(total / 2);
+    const leftPicks  = myPicks.slice(0, leftCount);
+    const rightPicks = myPicks.slice(leftCount);
+    const avgPick    = (myPicks.reduce((s, p) => s + p.overall, 0) / total).toFixed(1);
 
     el.innerHTML = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
@@ -3668,42 +3697,23 @@ const DLRTournament = (() => {
       </div>
       <div id="trn-share-card" class="trn-share-card">
         <div class="trn-share-card-header">
-          <div class="trn-share-card-tournament">${_esc(_draftCache?.byLeague ? Object.values(_draftCache.byLeague)[0]?.leagueName || "Tournament Draft" : "Tournament Draft")}</div>
+          <div class="trn-share-card-tournament">${_esc(leagueName)}</div>
           <div class="trn-share-card-team">${_esc(teamName)}</div>
-          <div class="trn-share-card-sub">${myPicks.length} picks · ADP ${(myPicks.reduce((s, p) => s + p.overall, 0) / myPicks.length).toFixed(1)} avg</div>
+          <div class="trn-share-card-sub">${total} picks · avg pick #${avgPick}</div>
         </div>
-        <div class="trn-share-card-body">
-          ${PREFERRED_POS_ORDER.map(pos => {
-            const grp = posGroups[pos];
-            if (!grp?.length) return "";
-            const col = POS_COLOR[pos] || "#9ca3af";
-            return `
-              <div class="trn-share-card-group">
-                <div class="trn-share-card-pos" style="color:${col}">${pos}</div>
-                ${grp.map(p => {
-                  const adpEntry = adpMap[p.playerId];
-                  // Steal = drafted later than 75th pct (great value); Reach = earlier than 25th pct
-                  const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
-                  const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
-                  const badge    = isSteal
-                    ? `<span class="trn-card-badge trn-card-badge--steal">💎 Steal</span>`
-                    : isReach
-                    ? `<span class="trn-card-badge trn-card-badge--reach">🚀 Reach</span>`
-                    : "";
-                  return `
-                  <div class="trn-share-card-pick">
-                    <span class="trn-share-card-overall">#${p.overall}</span>
-                    <span class="trn-share-card-player">${_esc(p.name)}</span>
-                    ${badge}
-                  </div>`;
-                }).join("")}
-              </div>`;
-          }).join("")}
+        <div class="trn-share-card-body--two-col">
+          <div class="trn-share-card-col">${leftPicks.map(_pickRow).join("")}</div>
+          <div class="trn-share-card-col">${rightPicks.map(_pickRow).join("")}</div>
         </div>
         <div class="trn-share-card-footer">dynastylockerroom.com</div>
       </div>`;
 
     document.getElementById("trn-card-download-btn")?.addEventListener("click", () => _downloadDraftCard());
+    // Right-click / long-press also triggers save
+    document.getElementById("trn-share-card")?.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      _downloadDraftCard();
+    });
   }
 
   async function _downloadDraftCard() {
@@ -4867,11 +4877,8 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
         };
       }).sort((a, b) => a.adp - b.adp);
 
-      // Key ADP by year so the public page can show year-specific data
-      await GMD.child(`publicTournaments/${tid}/adpByYear/${activeYear}`).set(adp);
-      // Also update the flat `adp` node for backward compat (falls back to current year)
       await GMD.child("publicTournaments/" + tid + "/adp").set(adp);
-      console.log(`[Tournament] Public ADP written for ${activeYear}: ${adp.length} players`);
+      console.log(`[Tournament] Public ADP written: ${adp.length} players`);
     } catch(err) {
       console.warn("[Tournament] _writePublicADP failed:", err.message);
     }
