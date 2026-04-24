@@ -4108,16 +4108,27 @@ const DLRTournament = (() => {
       winner:   m.winner || ((m.home?.score || 0) >= (m.away?.score || 0) ? m.home?.name : m.away?.name)
     })).filter(m => m.home?.score > 0 || m.away?.score > 0);
 
-    const sorted    = [...enriched].sort((a, b) => a.diff - b.diff);
-    const closest   = sorted.slice(0, 5);
-    const blowouts  = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
-    const highest   = [...enriched].sort((a, b) => b.combined - a.combined).slice(0, 3);
-    // B2 debug: confirm top-3 from each sort bucket
-    console.log(`[Matchups] ${enriched.length} matchups across ${new Set(enriched.map(m=>m.leagueId)).size} leagues`);
-    console.log("[Matchups] Closest top-3:",   closest.slice(0,3).map(m=>`${m.home.name} vs ${m.away.name} Δ${m.diff}`));
-    console.log("[Matchups] Blowouts top-3:",  blowouts.slice(0,3).map(m=>`${m.home.name} vs ${m.away.name} Δ${m.diff}`));
-    console.log("[Matchups] Highest top-3:",   highest.slice(0,3).map(m=>`${m.home.name} vs ${m.away.name} comb=${m.combined}`));
-    const ck        = `${year}_${_matchupsWeek}`;
+    const sorted   = [...enriched].sort((a, b) => a.diff - b.diff);
+    const closest  = sorted.slice(0, 5);
+    const blowouts = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
+
+    // Highest Scoring: top 5 individual team scores (not combined)
+    const allTeamScores = [];
+    const leagueNameMap = {};
+    enriched.forEach(m => {
+      // Build leagueName map from t.leagues
+      if (!leagueNameMap[m.leagueId]) {
+        const lMatch = Object.values(t.leagues || {}).find(l => String(l.leagueId) === String(m.leagueId));
+        leagueNameMap[m.leagueId] = lMatch?.leagueName || lMatch?.name || m.leagueId || "";
+      }
+      allTeamScores.push({ name: m.home.name, score: m.home.score, leagueId: m.leagueId });
+      allTeamScores.push({ name: m.away.name, score: m.away.score, leagueId: m.leagueId });
+    });
+    const myKeys = _findMyKeys(t);
+    allTeamScores.forEach(ts => { ts.isMe = _isMyTeam(ts.name, myKeys); });
+    const highestScores = [...allTeamScores].sort((a, b) => b.score - a.score).slice(0, 5);
+
+    const ck = `${year}_${_matchupsWeek}`;
 
     // Lazy-load recap from Firebase if not in memory cache
     if (!_recapCache[ck]) {
@@ -4129,76 +4140,202 @@ const DLRTournament = (() => {
     }
     const recapData = _recapCache[ck] || null;
 
-    const myKeys      = _findMyKeys(t);
-    const matchupRow  = (m, highlight) => {
-      const aWon  = m.home.score > m.away.score;
-      const aMeH  = _isMyTeam(m.home.name, myKeys);
-      const aMeA  = _isMyTeam(m.away.name, myKeys);
+    // ── Card renderer (side-by-side matchup card) ──────────────────────────
+    const matchupCard = (m, tagHtml) => {
+      const homeWon = m.home.score > m.away.score;
+      const aMeH   = _isMyTeam(m.home.name, myKeys);
+      const aMeA   = _isMyTeam(m.away.name, myKeys);
+      const lname  = leagueNameMap[m.leagueId] || "";
       return `
-        <div class="trn-mu-row ${aMeH || aMeA ? "trn-mu-row--me" : ""}">
-          <div class="trn-mu-team ${aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.home.name)}${aMeH ? ' <span class="trn-you-badge">you</span>' : ""}</div>
-          <div class="trn-mu-scores">
-            <span class="trn-mu-score ${aWon ? "trn-mu-score--win" : ""}">${m.home.score.toFixed(2)}</span>
-            <span class="trn-mu-sep">–</span>
-            <span class="trn-mu-score ${!aWon ? "trn-mu-score--win" : ""}">${m.away.score.toFixed(2)}</span>
+        <div class="trn-mu-card ${aMeH || aMeA ? "trn-mu-card--me" : ""}">
+          ${tagHtml ? `<div class="trn-mu-card-tag">${tagHtml}</div>` : ""}
+          <div class="trn-mu-card-body">
+            <div class="trn-mu-card-team ${homeWon ? "trn-mu-card-team--winner" : "trn-mu-card-team--loser"}">
+              <span class="trn-mu-card-name">${_esc(m.home.name)}${aMeH ? ' <span class="trn-you-badge">you</span>' : ""}</span>
+              <span class="trn-mu-card-score ${homeWon ? "trn-mu-card-score--win" : ""}">${m.home.score.toFixed(2)}</span>
+            </div>
+            <div class="trn-mu-card-vs">vs</div>
+            <div class="trn-mu-card-team trn-mu-card-team--right ${!homeWon ? "trn-mu-card-team--winner" : "trn-mu-card-team--loser"}">
+              <span class="trn-mu-card-score ${!homeWon ? "trn-mu-card-score--win" : ""}">${m.away.score.toFixed(2)}</span>
+              <span class="trn-mu-card-name">${_esc(m.away.name)}${aMeA ? ' <span class="trn-you-badge">you</span>' : ""}</span>
+            </div>
           </div>
-          <div class="trn-mu-team ${!aWon ? "trn-mu-winner" : "trn-mu-loser"}">${_esc(m.away.name)}${aMeA ? ' <span class="trn-you-badge">you</span>' : ""}</div>
-          ${highlight ? `<span class="trn-mu-tag">${_esc(highlight)}</span>` : `<span class="trn-mu-diff">Δ${m.diff.toFixed(2)}</span>`}
+          <div class="trn-mu-card-footer">
+            <span class="trn-mu-card-margin">\u0394${m.diff.toFixed(2)}</span>
+            ${lname ? `<span class="trn-mu-card-league">${_esc(lname)}</span>` : ""}
+          </div>
         </div>`;
     };
 
+    // ── Highest scoring row renderer ───────────────────────────────────────
+    const scoreRow = (ts, rank) => `
+      <div class="trn-mu-score-row ${ts.isMe ? "trn-mu-row--me" : ""}">
+        <span class="trn-mu-score-rank">${rank}</span>
+        <span class="trn-mu-score-name">${_esc(ts.name)}${ts.isMe ? ' <span class="trn-you-badge">you</span>' : ""}</span>
+        <span class="trn-mu-score-pts">${ts.score.toFixed(2)}</span>
+        <span class="trn-mu-score-league">${_esc(leagueNameMap[ts.leagueId] || "")}</span>
+      </div>`;
+
     el.innerHTML = `
-      <div class="trn-az-meta">Week ${_matchupsWeek} · ${enriched.length} matchups across ${new Set(enriched.map(m => m.leagueId)).size} leagues</div>
+      <div class="trn-az-meta">Week ${_matchupsWeek} \u00b7 ${enriched.length} matchups across ${new Set(enriched.map(m => m.leagueId)).size} leagues</div>
 
-      <div class="trn-az-section-title">🔥 Closest Games</div>
-      <div class="trn-mu-list">
-        ${closest.map(m => matchupRow(m, m.diff < 2 ? "🔥 < 2 pts" : null)).join("")}
+      <div class="trn-az-section-title">\ud83d\udd25 Closest Games</div>
+      <div class="trn-mu-cards">
+        ${closest.map(m => matchupCard(m, m.diff < 2 ? "\ud83d\udd25 < 2 pts" : "")).join("")}
       </div>
 
-      <div class="trn-az-section-title" style="margin-top:var(--space-5)">💥 Biggest Blowouts</div>
-      <div class="trn-mu-list">
-        ${blowouts.map(m => matchupRow(m, null)).join("")}
+      <div class="trn-az-section-title" style="margin-top:var(--space-5)">\ud83d\udca5 Biggest Blowouts</div>
+      <div class="trn-mu-cards">
+        ${blowouts.map(m => matchupCard(m, "")).join("")}
       </div>
 
-      <div class="trn-az-section-title" style="margin-top:var(--space-5)">📈 Highest Scoring</div>
-      <div class="trn-mu-list">
-        ${highest.map(m => matchupRow(m, `${m.combined.toFixed(1)} combined`)).join("")}
+      <div class="trn-az-section-title" style="margin-top:var(--space-5)">\ud83d\udcc8 Highest Scoring</div>
+      <div class="trn-mu-score-list">
+        ${highestScores.map((ts, i) => scoreRow(ts, i + 1)).join("")}
+      </div>
+
+      <div class="trn-az-section-title" style="margin-top:var(--space-5)">\ud83d\udcca Score Distribution</div>
+      <div class="trn-mu-hist-wrap">
+        <canvas id="trn-mu-hist" class="trn-mu-hist"></canvas>
+        <div class="trn-mu-hist-legend" id="trn-mu-hist-legend"></div>
       </div>
 
       <!-- Recap section -->
       <div class="trn-recap-section" id="trn-recap-section">
-        <div class="trn-az-section-title" style="margin-top:var(--space-6)">📝 Weekly Recap</div>
+        <div class="trn-az-section-title" style="margin-top:var(--space-6)">\ud83d\udcdd Weekly Recap</div>
         ${recapData
           ? `<div class="trn-recap-content">${_renderRecapMarkdown(recapData.content)}</div>
              <div class="trn-recap-meta">
                Saved ${new Date(recapData.savedAt).toLocaleString()}
-               ${isAdmin ? `<button class="btn-ghost btn-sm" id="trn-recap-edit-btn" style="margin-left:var(--space-3)">✏ Edit</button>` : ""}
+               ${isAdmin ? `<button class="btn-ghost btn-sm" id="trn-recap-edit-btn" style="margin-left:var(--space-3)">\u270f Edit</button>` : ""}
              </div>`
           : isAdmin
             ? `<div class="trn-recap-placeholder">
                  <p style="font-size:.87rem;color:var(--color-text-dim)">
-                   Write a recap or generate one with AI — copy the prompt below, paste it into
+                   Write a recap or generate one with AI \u2014 copy the prompt below, paste it into
                    <a href="https://claude.ai" target="_blank" rel="noopener" style="color:var(--color-accent)">claude.ai</a>,
                    then paste the result back here.
                  </p>
-                 <button class="btn-secondary btn-sm" id="trn-recap-prompt-btn">📋 Copy AI Prompt</button>
+                 <button class="btn-secondary btn-sm" id="trn-recap-prompt-btn">\ud83d\udccb Copy AI Prompt</button>
                </div>`
-            : `<div style="font-size:.85rem;color:var(--color-text-dim);padding:var(--space-3) 0">No recap posted yet.</div>`
+            : ""
         }
         ${isAdmin ? `<div id="trn-recap-editor" class="trn-recap-editor hidden"></div>` : ""}
       </div>`;
 
+    // ── Draw histogram after DOM is ready ─────────────────────────────────
+    requestAnimationFrame(() => _drawScoreHistogram(allTeamScores.map(ts => ts.score)));
+
     if (isAdmin) {
       document.getElementById("trn-recap-prompt-btn")?.addEventListener("click", () => {
         const prompt = _buildRecapPrompt(t, enriched, year);
-        navigator.clipboard?.writeText(prompt).then(() => showToast("Prompt copied — paste into claude.ai ✓"))
-          .catch(() => { showToast("Copy failed — see console", "error"); console.log(prompt); });
-        // Also reveal the paste-in editor
+        navigator.clipboard?.writeText(prompt).then(() => showToast("Prompt copied \u2014 paste into claude.ai \u2713"))
+          .catch(() => { showToast("Copy failed \u2014 see console", "error"); console.log(prompt); });
         _showRecapEditor(tid, t, enriched, year);
       });
       document.getElementById("trn-recap-edit-btn")?.addEventListener("click", () => {
         _showRecapEditor(tid, t, enriched, year, recapData?.content || "");
       });
+    }
+  }
+
+  // ── Score histogram (canvas) ───────────────────────────────────────────────
+  function _drawScoreHistogram(scores) {
+    if (!scores.length) return;
+    const canvas = document.getElementById("trn-mu-hist");
+    if (!canvas) return;
+
+    const style    = getComputedStyle(document.documentElement);
+    const colorBar = style.getPropertyValue("--color-accent").trim()   || "#6c63ff";
+    const colorTxt = style.getPropertyValue("--color-text-dim").trim() || "#888";
+    const colorGrid= style.getPropertyValue("--color-border").trim()   || "#333";
+    const colorMed = style.getPropertyValue("--color-green").trim()    || "#4ade80";
+
+    const DPR = window.devicePixelRatio || 1;
+    const W   = canvas.offsetWidth || 400;
+    const H   = 180;
+    canvas.width  = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width  = W + "px";
+    canvas.style.height = H + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(DPR, DPR);
+
+    // Bin into 10-pt buckets
+    const minV  = Math.floor(Math.min(...scores) / 10) * 10;
+    const maxV  = Math.ceil(Math.max(...scores)  / 10) * 10;
+    const step  = 10;
+    const bins  = [];
+    for (let lo = minV; lo < maxV; lo += step) bins.push({ lo, count: 0 });
+    scores.forEach(s => {
+      const idx = Math.min(Math.floor((s - minV) / step), bins.length - 1);
+      if (idx >= 0) bins[idx].count++;
+    });
+    const maxC = Math.max(...bins.map(b => b.count), 1);
+
+    // Median
+    const sorted = [...scores].sort((a, b) => a - b);
+    const mid    = sorted.length;
+    const median = mid % 2 === 0
+      ? (sorted[mid / 2 - 1] + sorted[mid / 2]) / 2
+      : sorted[Math.floor(mid / 2)];
+
+    const PL = 28, PR = 12, PT = 14, PB = 32;
+    const CW = W - PL - PR;
+    const CH = H - PT - PB;
+    const BW = CW / bins.length;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = colorGrid; ctx.lineWidth = 0.5;
+    [0, .25, .5, .75, 1].forEach(f => {
+      const y = PT + CH - f * CH;
+      ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(PL + CW, y); ctx.stroke();
+    });
+
+    // Bars
+    bins.forEach((b, i) => {
+      const x  = PL + i * BW;
+      const bH = (b.count / maxC) * CH;
+      ctx.fillStyle = colorBar + "cc";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x + 1, PT + CH - bH, BW - 2, bH, 2);
+      else ctx.rect(x + 1, PT + CH - bH, BW - 2, bH);
+      ctx.fill();
+      if (i % 2 === 0) {
+        ctx.fillStyle = colorTxt; ctx.font = `10px sans-serif`; ctx.textAlign = "center";
+        ctx.fillText(b.lo, x + BW / 2, H - PB + 14);
+      }
+    });
+
+    // Y labels
+    ctx.fillStyle = colorTxt; ctx.font = "9px sans-serif"; ctx.textAlign = "right";
+    [0, .25, .5, .75, 1].forEach(f => {
+      const y = PT + CH - f * CH;
+      ctx.fillText(Math.round(f * maxC), PL - 3, y + 3);
+    });
+
+    // Median line
+    const range = maxV - minV || 1;
+    const medX  = PL + ((median - minV) / range) * CW;
+    ctx.strokeStyle = colorMed; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(medX, PT); ctx.lineTo(medX, PT + CH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = colorMed; ctx.font = "10px sans-serif";
+    ctx.textAlign = medX > W / 2 ? "right" : "left";
+    ctx.fillText(`med ${median.toFixed(1)}`, medX + (medX > W / 2 ? -4 : 4), PT + 10);
+
+    // Legend
+    const leg = document.getElementById("trn-mu-hist-legend");
+    if (leg) {
+      const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
+      leg.innerHTML = `
+        <span>\ud83d\udcca ${scores.length} scores</span>
+        <span>Avg: <strong>${avg}</strong></span>
+        <span>Med: <strong>${median.toFixed(2)}</strong></span>
+        <span>Hi: <strong>${Math.max(...scores).toFixed(2)}</strong></span>
+        <span>Lo: <strong>${Math.min(...scores).toFixed(2)}</strong></span>`;
     }
   }
 
