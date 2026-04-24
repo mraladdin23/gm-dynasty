@@ -3445,23 +3445,40 @@ const DLRTournament = (() => {
       Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
     }
 
-    // Snake detection: use draft_type if available, else heuristic
-    const isSnake = draftType
+    // Snake / third-round-reversal / linear detection.
+    // third_round_reversal: rounds 1,3,5,… go L→R; rounds 2,4,6,… go R→L
+    // EXCEPT round 3 "resets" back to L→R (same as round 1 order).
+    const is3RR   = draftType === "third_round_reversal";
+    const isSnake = is3RR || (draftType
       ? (draftType === "snake" || draftType === "startup")
       : (() => {
           const r2picks = picks.filter(p => p.round === 2).sort((a, b) => a.overall - b.overall);
           return r2picks.length > 0 && r2picks[0]?.teamId === slotOrder[slotOrder.length - 1];
-        })();
+        })());
 
     const nameOf = (tid) => picks.find(pk => pk.teamId === tid)?.teamName || tid;
 
-    const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${isSnake ? "🐍 snake" : "📋 linear"}`;
+    const draftTypeLabel = is3RR ? "↩ 3rd-round reversal" : isSnake ? "🐍 snake" : "📋 linear";
+    const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${draftTypeLabel}`;
+
+    // Returns whether a given round is reversed (right→left) for direction-aware draft types.
+    function _isRoundReversed(round) {
+      if (is3RR) {
+        // R1: L→R, R2: R→L, R3: L→R (reset), R4: R→L, R5: L→R, …
+        // i.e. reverse on even rounds EXCEPT round 3 (and 3+2n) "resets"
+        if (round === 1 || round === 3) return false;
+        if (round === 2) return true;
+        // rounds 4+: continue snake from round 4 onward (round 4 reversed, 5 not, …)
+        return (round % 2 === 0);
+      }
+      return isSnake && (round % 2 === 0);
+    }
 
     // ── Grid mode ────────────────────────────────────────────────────────────
     if (_draftBoardMode === "grid") {
       let boardHTML = "";
       for (let round = 1; round <= rounds; round++) {
-        const rowSlots = (isSnake && round % 2 === 0) ? [...slotOrder].reverse() : slotOrder;
+        const rowSlots = _isRoundReversed(round) ? [...slotOrder].reverse() : slotOrder;
         boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
         rowSlots.forEach((tid, display) => {
           const overallNum = (round - 1) * slotOrder.length + display + 1;
@@ -3568,61 +3585,99 @@ const DLRTournament = (() => {
     const myPicks = allPicks.filter(p => p.teamId === _draftCardTeam).sort((a, b) => a.overall - b.overall);
     if (!myPicks.length) { el.innerHTML = `<div class="trn-empty">No picks found for this team.</div>`; return; }
 
-    const teamName = myPicks[0].teamName || _draftCardTeam;
+    const teamName  = myPicks[0].teamName || _draftCardTeam;
+    const leagueName = _draftCache?.byLeague
+      ? (Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))?.leagueName || "Tournament Draft")
+      : "Tournament Draft";
 
-    // Build ADP lookup for steal/reach detection
+    // ADP lookup for steal/reach badges
     const adpMap = {};
     (_draftCache?.adp || []).forEach(a => { if (a.playerId) adpMap[a.playerId] = a; });
 
-    const posGroups = {};
-    myPicks.forEach(p => {
-      const pos = p.position || "?";
-      if (!posGroups[pos]) posGroups[pos] = [];
-      posGroups[pos].push(p);
-    });
+    // Two-column split: odd total → left gets the extra round
+    const total      = myPicks.length;
+    const leftCount  = Math.ceil(total / 2);
+    const leftPicks  = myPicks.slice(0, leftCount);
+    const rightPicks = myPicks.slice(leftCount);
+
+    // Determine round size from leagueEntry for round.pick label formatting
+    const leagueEntry = _draftCache?.byLeague
+      ? Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))
+      : null;
+    const teamCount = leagueEntry?.slot_to_roster_id
+      ? Object.keys(leagueEntry.slot_to_roster_id).length
+      : (new Set(allPicks.map(p => p.teamId)).size || 12);
+
+    const _pickLabel = (p) => {
+      const round = p.round || Math.ceil(p.overall / teamCount);
+      const slot  = p.pick  || (p.overall - (round - 1) * teamCount);
+      return `${round}.${String(slot).padStart(2, "0")}`;
+    };
+
+    const _pickRow = (p) => {
+      const adpEntry = adpMap[p.playerId];
+      const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
+      const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
+      const badge    = isSteal
+        ? `<span class="trn-card-badge trn-card-badge--steal">💎 Steal</span>`
+        : isReach
+        ? `<span class="trn-card-badge trn-card-badge--reach">🚀 Reach</span>`
+        : "";
+      const col = POS_COLOR[p.position] || "#9ca3af";
+      return `
+        <div class="trn-share-card-pick">
+          <div class="trn-share-card-pick-num">
+            <span class="trn-share-card-round">${_pickLabel(p)}</span>
+            <span class="trn-share-card-overall">(#${p.overall})</span>
+          </div>
+          <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;font-size:.6rem;flex-shrink:0">${_esc(p.position || "?")}</span>
+          <span class="trn-share-card-player">${_esc(p.name || "Unknown")}</span>
+          ${badge}
+        </div>`;
+    };
 
     el.innerHTML = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
         <button class="btn-primary btn-sm" id="trn-card-download-btn">⬇ Download Card</button>
       </div>
-      <div id="trn-share-card" class="trn-share-card">
+      <div id="trn-share-card" class="trn-share-card" title="Press and hold to save image">
         <div class="trn-share-card-header">
-          <div class="trn-share-card-tournament">${_esc(_draftCache?.byLeague ? Object.values(_draftCache.byLeague)[0]?.leagueName || "Tournament Draft" : "Tournament Draft")}</div>
+          <div class="trn-share-card-tournament">${_esc(leagueName)}</div>
           <div class="trn-share-card-team">${_esc(teamName)}</div>
-          <div class="trn-share-card-sub">${myPicks.length} picks · ADP ${(myPicks.reduce((s, p) => s + p.overall, 0) / myPicks.length).toFixed(1)} avg</div>
+          <div class="trn-share-card-sub">${total} picks · avg pick #${(myPicks.reduce((s, p) => s + p.overall, 0) / total).toFixed(1)}</div>
         </div>
-        <div class="trn-share-card-body">
-          ${PREFERRED_POS_ORDER.map(pos => {
-            const grp = posGroups[pos];
-            if (!grp?.length) return "";
-            const col = POS_COLOR[pos] || "#9ca3af";
-            return `
-              <div class="trn-share-card-group">
-                <div class="trn-share-card-pos" style="color:${col}">${pos}</div>
-                ${grp.map(p => {
-                  const adpEntry = adpMap[p.playerId];
-                  // Steal = drafted later than 75th pct (great value); Reach = earlier than 25th pct
-                  const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
-                  const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
-                  const badge    = isSteal
-                    ? `<span class="trn-card-badge trn-card-badge--steal">💎 Steal</span>`
-                    : isReach
-                    ? `<span class="trn-card-badge trn-card-badge--reach">🚀 Reach</span>`
-                    : "";
-                  return `
-                  <div class="trn-share-card-pick">
-                    <span class="trn-share-card-overall">#${p.overall}</span>
-                    <span class="trn-share-card-player">${_esc(p.name)}</span>
-                    ${badge}
-                  </div>`;
-                }).join("")}
-              </div>`;
-          }).join("")}
+        <div class="trn-share-card-body trn-share-card-body--two-col">
+          <div class="trn-share-card-col">
+            ${leftPicks.map(_pickRow).join("")}
+          </div>
+          <div class="trn-share-card-col">
+            ${rightPicks.map(_pickRow).join("")}
+          </div>
         </div>
         <div class="trn-share-card-footer">dynastylockerroom.com</div>
       </div>`;
 
     document.getElementById("trn-card-download-btn")?.addEventListener("click", () => _downloadDraftCard());
+
+    // Long-press on card → save as image (mobile + desktop)
+    const card = document.getElementById("trn-share-card");
+    if (card) {
+      let pressTimer = null;
+      const startPress = () => {
+        pressTimer = setTimeout(async () => {
+          pressTimer = null;
+          await _downloadDraftCard();
+        }, 600);
+      };
+      const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+      card.addEventListener("touchstart",  startPress,  { passive: true });
+      card.addEventListener("touchend",    cancelPress);
+      card.addEventListener("touchmove",   cancelPress, { passive: true });
+      card.addEventListener("mousedown",   startPress);
+      card.addEventListener("mouseup",     cancelPress);
+      card.addEventListener("mouseleave",  cancelPress);
+      card.addEventListener("contextmenu", (e) => { e.preventDefault(); _downloadDraftCard(); });
+    }
   }
 
   async function _downloadDraftCard() {
