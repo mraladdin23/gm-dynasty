@@ -4881,8 +4881,12 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
         };
       }).sort((a, b) => a.adp - b.adp);
 
-      await GMD.child("publicTournaments/" + tid + "/adp").set(adp);
-      console.log(`[Tournament] Public ADP written: ${adp.length} players`);
+      // Write year-keyed so public page can show correct year; also keep flat /adp as fallback
+      await Promise.all([
+        GMD.child(`publicTournaments/${tid}/adpByYear/${activeYear}`).set(adp),
+        GMD.child(`publicTournaments/${tid}/adp`).set(adp)
+      ]);
+      console.log(`[Tournament] Public ADP written for ${activeYear}: ${adp.length} players`);
     } catch(err) {
       console.warn("[Tournament] _writePublicADP failed:", err.message);
     }
