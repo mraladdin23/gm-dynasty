@@ -889,6 +889,9 @@
   font-size: .85rem;
   color: var(--color-text-muted);
 }
+.platform-relink-row button + button {
+  margin-left: 8px;
+}
 
 /* Label modal */
 .label-league-name {
