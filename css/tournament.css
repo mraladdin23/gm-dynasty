@@ -1008,6 +1008,7 @@
 
 /* ── ADP List ────────────────────────────────────────── */
 /* ── Share Card ──────────────────────────────────────── */
+/* ── Draft card (two-column horizontal) ──────────────── */
 .trn-share-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -1016,12 +1017,13 @@
   max-width: 100%;
   overflow: hidden;
   box-shadow: 0 4px 24px rgba(0,0,0,.18);
-  user-select: none; /* prevents text selection on long-press */
+  user-select: none;
 }
 .trn-share-card-header {
   background: var(--color-accent, #1e3a5f);
   padding: var(--space-4) var(--space-5);
   color: #fff;
+  border-bottom: 2px solid var(--color-gold, #f0b429);
 }
 .trn-share-card-tournament { font-size: .72rem; opacity: .85; text-transform: uppercase; letter-spacing: .06em; }
 .trn-share-card-team       { font-size: 1.3rem; font-weight: 800; margin: var(--space-1) 0; }
@@ -1029,15 +1031,15 @@
 
 /* Two-column body */
 .trn-share-card-body--two-col {
-  padding: var(--space-3) var(--space-4);
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--space-2) var(--space-5);
+  gap: 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--color-border);
 }
-.trn-share-card-col { display: flex; flex-direction: column; gap: 1px; }
+.trn-share-card-col { display: flex; flex-direction: column; }
 
-/* Each pick row */
+/* Pick row */
 .trn-share-card-pick {
   display: flex;
   align-items: center;
@@ -1046,25 +1048,23 @@
   border-radius: var(--radius-sm);
   min-height: 26px;
 }
-.trn-share-card-pick:hover { background: var(--color-surface-2); }
+.trn-share-card-pick:nth-child(even) { background: var(--color-surface-2, rgba(255,255,255,.03)); }
 
-/* Pick number area: "1.07 (#7)" */
-.trn-share-card-pick-num  { display: flex; align-items: baseline; gap: 3px; flex-shrink: 0; min-width: 76px; }
-.trn-share-card-round     { font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text); }
+/* Pick number area */
+.trn-share-card-pick-num  { display: flex; align-items: baseline; gap: 3px; flex-shrink: 0; min-width: 74px; }
+.trn-share-card-round     { font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .trn-share-card-overall   { font-size: .68rem; color: var(--color-text-dim); white-space: nowrap; }
-
 .trn-share-card-player    { font-size: .82rem; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trn-share-card-footer    { padding: var(--space-2) var(--space-5); background: var(--color-surface-alt, var(--color-border)); font-size: .65rem; color: var(--color-text-dim); text-align: center; }
+.trn-share-card-footer    { padding: var(--space-2) var(--space-5); background: var(--color-bg-2, var(--color-border)); font-size: .65rem; color: var(--color-text-dim); text-align: center; }
 
 /* Steal / reach badges */
 .trn-card-badge {
   display: inline-flex;
   align-items: center;
-  font-size: .58rem;
+  font-size: .6rem;
   font-weight: 700;
   padding: 1px 4px;
   border-radius: var(--radius-sm);
-  letter-spacing: .02em;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -1172,6 +1172,16 @@
   .trn-mu-row > :last-child { display: none; }
   .trn-share-card { width: 100%; }
   .trn-roster-card-header { gap: var(--space-2); }
+  /* Draft card: single column on mobile */
+  .trn-share-card-body--two-col {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: var(--space-2) var(--space-3);
+  }
+  .trn-share-card-pick { min-height: 24px; padding: 2px var(--space-1); }
+  .trn-share-card-pick-num { min-width: 62px; }
+  .trn-share-card-round  { font-size: .72rem; }
+  .trn-share-card-player { font-size: .76rem; }
 }
 
 /* ── Standings: league name stacked under team name ─── */
@@ -1328,4 +1338,31 @@
 
 @media (max-width: 640px) {
   .trn-register-page { padding: var(--space-4) var(--space-3) 100px; }
+}
+
+/* ── Tournament analytics: mobile overrides ─────────── */
+@media (max-width: 640px) {
+  /* ADP table: 5 columns (#, Player, ADP, Min, Max) — drop Range */
+  /* Desktop 7-col: 32px 1fr 36px 52px 40px 76px 40px             */
+  /* Mobile  5-col: 28px 1fr 44px 34px 34px (range hidden)        */
+  .trn-adp-table .draft-auction-header,
+  .trn-adp-table .draft-auction-row {
+    grid-template-columns: 28px 1fr 44px 34px 34px !important;
+    font-size: .75rem !important;
+    padding: var(--space-1) var(--space-2) !important;
+    gap: 4px !important;
+  }
+  /* Hide Range column (6th child) on mobile */
+  .trn-adp-table .draft-auction-header > *:nth-child(6),
+  .trn-adp-table .draft-auction-row    > *:nth-child(6) { display: none !important; }
+  /* Shrink Dft column (3rd child) — not shown on mobile 5-col */
+  .trn-adp-table .draft-auction-header > *:nth-child(3),
+  .trn-adp-table .draft-auction-row    > *:nth-child(3) { display: none !important; }
+
+  /* Draft board: slightly tighter round labels and pick cells */
+  .trn-az-section .draft-round-label { font-size: .68rem; padding: 2px var(--space-2); }
+  .trn-az-section .draft-pick        { padding: 3px 2px; }
+  .trn-az-section .draft-pick-name   { font-size: .54rem; }
+  .trn-az-section .draft-pick-team   { font-size: .48rem; }
+  .trn-az-section .draft-pick-nfl    { display: none; }
 }
