@@ -3342,6 +3342,9 @@ const DLRTournament = (() => {
         <span style="text-align:right">Max</span>
       </div>`;
 
+    // Paginate at 25 rows — declared before rows.map() so it's in scope for rank calc
+    const PAGE_SIZE  = 25;
+
     const rows = filtered.map((p, i) => {
       const col      = POS_COLOR[p.position] || "#9ca3af";
       const clickAttr = p.playerId
@@ -3369,9 +3372,6 @@ const DLRTournament = (() => {
           <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>
         </div>`;
     });
-
-    // Paginate at 25 rows
-    const PAGE_SIZE  = 25;
     const totalPages = Math.ceil(rows.length / PAGE_SIZE);
     const page       = Math.max(1, Math.min(_draftListPage, totalPages));
     const pageRows   = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
