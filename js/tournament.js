@@ -4099,7 +4099,7 @@ const DLRTournament = (() => {
   }
 
   // ── Active section state for matchups dropdown ────────────────────────────
-  let _matchupsSection = "highest"; // "highest" | "closest" | "blowouts"
+  let _matchupsSection = "highest"; // "highest" | "lowest" | "closest" | "blowouts"
 
   async function _renderMatchupsContent(tid, t, el, matchups, year, isAdmin) {
     // Recompute diff/combined from raw scores
@@ -4126,8 +4126,9 @@ const DLRTournament = (() => {
     });
     const myKeys = _findMyKeys(t);
     allTeamScores.forEach(ts => { ts.isMe = _isMyTeam(ts.name, myKeys); });
-    const byScore      = [...allTeamScores].sort((a, b) => b.score - a.score);
+    const byScore       = [...allTeamScores].sort((a, b) => b.score - a.score);
     const highestScores = byScore.slice(0, 5);
+    const lowestScores  = byScore.slice(-5).reverse(); // 5 lowest, worst-first
 
     const ck = `${year}_${_matchupsWeek}`;
 
@@ -4144,23 +4145,26 @@ const DLRTournament = (() => {
     // ── Ordinal helper ─────────────────────────────────────────────────────
     const _ord = n => ["1st","2nd","3rd","4th","5th"][n] || `${n+1}th`;
 
-    // ── Highest-scoring card ───────────────────────────────────────────────
-    // Layout: rank badge top-left, team name, score, league name dimmed bottom
-    const highCard = (ts, i) => {
+    // ── Score card (highest OR lowest) ────────────────────────────────────
+    // rank badge, big score, team name, league name dimmed
+    // low=true → score shown in red/dim; rank reads "1st lowest" etc.
+    const scoreCard = (ts, i, low = false) => {
       const lname = leagueNameMap[ts.leagueId] || "";
       return `
-        <div class="trn-mu-card trn-mu-card--score ${ts.isMe ? "trn-mu-card--me" : ""}">
+        <div class="trn-mu-card trn-mu-card--score ${low ? "trn-mu-card--score-low" : ""} ${ts.isMe ? "trn-mu-card--me" : ""}">
           <div class="trn-mu-card-rank">${_ord(i)}</div>
-          <div class="trn-mu-card-score-pts">${ts.score.toFixed(2)}</div>
+          <div class="trn-mu-card-score-pts ${low ? "trn-mu-card-score-pts--low" : ""}">${ts.score.toFixed(2)}</div>
           <div class="trn-mu-card-score-name">${_esc(ts.name)}${ts.isMe ? ' <span class="trn-you-badge">you</span>' : ""}</div>
           ${lname ? `<div class="trn-mu-card-score-league">${_esc(lname)}</div>` : ""}
         </div>`;
     };
 
     // ── Matchup card ───────────────────────────────────────────────────────
-    // Line 1: winner name + score  Line 2: loser name + score (dimmed)  Line 3: Δ + league
-    const matchupCard = (m, tagHtml) => {
-      const homeWon = m.home.score > m.away.score;
+    // Line 1: winner name (bold) + winning score (green)
+    // Line 2: loser name (dimmed) + losing score (dimmed)
+    // Line 3 footer: Δ margin centered yellow | league name dimmed right
+    const matchupCard = (m) => {
+      const homeWon  = m.home.score > m.away.score;
       const winTeam  = homeWon ? m.home : m.away;
       const loseTeam = homeWon ? m.away : m.home;
       const aMeW = _isMyTeam(winTeam.name,  myKeys);
@@ -4168,27 +4172,26 @@ const DLRTournament = (() => {
       const lname = leagueNameMap[m.leagueId] || "";
       return `
         <div class="trn-mu-card ${aMeW || aMeL ? "trn-mu-card--me" : ""}">
-          ${tagHtml ? `<div class="trn-mu-card-tag">${tagHtml}</div>` : ""}
           <div class="trn-mu-card-line trn-mu-card-line--win">
             <span class="trn-mu-card-lname">${_esc(winTeam.name)}${aMeW ? ' <span class="trn-you-badge">you</span>' : ""}</span>
             <span class="trn-mu-card-lscore trn-mu-card-lscore--win">${winTeam.score.toFixed(2)}</span>
           </div>
           <div class="trn-mu-card-line trn-mu-card-line--lose">
             <span class="trn-mu-card-lname">${_esc(loseTeam.name)}${aMeL ? ' <span class="trn-you-badge">you</span>' : ""}</span>
-            <span class="trn-mu-card-lscore">${loseTeam.score.toFixed(2)}</span>
+            <span class="trn-mu-card-lscore trn-mu-card-lscore--lose">${loseTeam.score.toFixed(2)}</span>
           </div>
           <div class="trn-mu-card-line trn-mu-card-line--footer">
-            <span class="trn-mu-card-margin">\u0394${m.diff.toFixed(2)}</span>
+            <span class="trn-mu-card-margin">Δ${m.diff.toFixed(2)}</span>
             ${lname ? `<span class="trn-mu-card-fleague">${_esc(lname)}</span>` : ""}
           </div>
         </div>`;
     };
-
     // ── Render sections ────────────────────────────────────────────────────
     const sectionHtml = {
-      highest: `<div class="trn-mu-grid">${highestScores.map((ts, i) => highCard(ts, i)).join("")}</div>`,
-      closest: `<div class="trn-mu-grid">${closest.map(m => matchupCard(m, m.diff < 2 ? "\ud83d\udd25 < 2 pts" : "")).join("")}</div>`,
-      blowouts:`<div class="trn-mu-grid">${blowouts.map(m => matchupCard(m, "")).join("")}</div>`
+      highest: `<div class="trn-mu-grid">${highestScores.map((ts, i) => scoreCard(ts, i, false)).join("")}</div>`,
+      lowest:  `<div class="trn-mu-grid">${lowestScores.map((ts, i)  => scoreCard(ts, i, true)).join("")}</div>`,
+      closest: `<div class="trn-mu-grid">${closest.map(m  => matchupCard(m)).join("")}</div>`,
+      blowouts:`<div class="trn-mu-grid">${blowouts.map(m => matchupCard(m)).join("")}</div>`
     };
 
     el.innerHTML = `
@@ -4197,9 +4200,10 @@ const DLRTournament = (() => {
       <!-- Section selector — always visible, controls which panel shows -->
       <div class="trn-mu-section-bar">
         <select class="trn-filter-select trn-mu-section-sel" id="trn-mu-section-sel">
-          <option value="highest" ${_matchupsSection === "highest"  ? "selected" : ""}>\ud83d\udcc8 Highest Scoring</option>
-          <option value="closest" ${_matchupsSection === "closest"  ? "selected" : ""}>\ud83d\udd25 Closest Games</option>
-          <option value="blowouts"${_matchupsSection === "blowouts" ? "selected" : ""}>\ud83d\udca5 Biggest Blowouts</option>
+          <option value="highest" ${_matchupsSection === "highest"  ? "selected" : ""}>📈 Highest Scoring</option>
+          <option value="lowest"  ${_matchupsSection === "lowest"   ? "selected" : ""}>📉 Lowest Scoring</option>
+          <option value="closest" ${_matchupsSection === "closest"  ? "selected" : ""}>🔥 Closest Games</option>
+          <option value="blowouts"${_matchupsSection === "blowouts" ? "selected" : ""}>💥 Biggest Blowouts</option>
         </select>
       </div>
 
