@@ -734,12 +734,15 @@ const DLRTournament = (() => {
         <div class="trn-detail-rows">
           <div class="trn-detail-row"><span>Registration</span><span>${meta.regType === "invite" ? "Invite Only" : "Open"}</span></div>
           <div class="trn-detail-row">
-            <span>Standings Ranking</span>
+            <span style="display:flex;align-items:center;gap:5px">
+              Standings Ranking
+              <button class="trn-help-btn" title="H2H Record: ranked by win-loss record, Points For as tiebreaker. Points For: ranked purely by total points scored.">?</button>
+            </span>
             <span>
-              <select id="trn-rankby-select" style="font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                <option value="record" ${(meta.rankBy || "record") === "record" ? "selected" : ""}>Record then PF</option>
-                <option value="pf"     ${meta.rankBy === "pf" ? "selected" : ""}>Points For only</option>
-              </select>
+              <div class="trn-yn-toggle">
+                <button class="trn-yn-btn ${(meta.rankBy || 'record') === 'record' ? 'trn-yn-btn--active' : ''}" id="trn-rankby-h2h">H2H Record</button>
+                <button class="trn-yn-btn ${meta.rankBy === 'pf' ? 'trn-yn-btn--active' : ''}" id="trn-rankby-pf">Points For</button>
+              </div>
             </span>
           </div>
           <div class="trn-detail-row">
@@ -810,13 +813,17 @@ const DLRTournament = (() => {
     document.getElementById("trn-goto-regs-btn")?.addEventListener("click", () => {
       document.querySelector('.trn-tab[data-tab="registrations"]')?.click();
     });
-    document.getElementById("trn-rankby-select")?.addEventListener("change", async function() {
+    const _saveRankBy = async (val) => {
       try {
-        await _tMetaRef(tid).update({ rankBy: this.value });
+        await _tMetaRef(tid).update({ rankBy: val });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.rankBy = val;
+        document.getElementById("trn-rankby-h2h")?.classList.toggle("trn-yn-btn--active", val === "record");
+        document.getElementById("trn-rankby-pf")?.classList.toggle("trn-yn-btn--active",  val === "pf");
         showToast("Ranking method saved ✓");
-        _tournaments[tid].meta.rankBy = this.value;
       } catch(e) { showToast("Failed to save ranking method", "error"); }
-    });
+    };
+    document.getElementById("trn-rankby-h2h")?.addEventListener("click", () => _saveRankBy("record"));
+    document.getElementById("trn-rankby-pf")?.addEventListener("click",  () => _saveRankBy("pf"));
 
     // Playoff start week — save on blur or Enter
     const playoffWeekInput = document.getElementById("trn-playoff-week-input");
@@ -3532,8 +3539,9 @@ const DLRTournament = (() => {
         boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
         roundOrder.forEach((tid, display) => {
           const overallNum = firstOverall + display;
-          // Find the pick for this exact overall number (authoritative — handles any draft format)
-          const pk = picks.find(p => p.overall === overallNum) || byTeamRound[tid]?.[round];
+          // Find the pick for this exact overall number.
+          // With pick_no from the worker, this is authoritative for snake/3RR/linear.
+          const pk = picks.find(p => p.overall === overallNum);
           if (pk) {
             const col      = POS_COLOR[pk.position] || "#9ca3af";
             const pName    = pk.name || "Unknown";
@@ -4877,8 +4885,11 @@ Write a 3–4 paragraph weekly recap in an engaging, sports-analyst style. Menti
         };
       }).sort((a, b) => a.adp - b.adp);
 
+      // Write year-keyed ADP so public page can show year-specific data
+      await GMD.child(`publicTournaments/${tid}/adpByYear/${activeYear}`).set(adp);
+      // Also keep flat /adp for backward compat
       await GMD.child("publicTournaments/" + tid + "/adp").set(adp);
-      console.log(`[Tournament] Public ADP written: ${adp.length} players`);
+      console.log(`[Tournament] Public ADP written for ${activeYear}: ${adp.length} players`);
     } catch(err) {
       console.warn("[Tournament] _writePublicADP failed:", err.message);
     }

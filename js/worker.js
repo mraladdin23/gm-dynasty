@@ -1052,9 +1052,11 @@ async function tournamentDraft(leagueId, platform, year, yahooToken, mflCookie) 
       const teams = draft.settings?.teams || 12;
 
       const picks = (rawPicks || []).map(p => ({
-        overall:  (p.round - 1) * teams + (p.draft_slot || 1),
+        // pick_no is Sleeper's true sequential overall pick number.
+        // draft_slot is the team's fixed position — not their pick order in snake rounds.
+        overall:  p.pick_no || ((p.round - 1) * teams + (p.draft_slot || 1)),
         round:    p.round,
-        pick:     p.draft_slot || 1,
+        pick:     p.pick_no ? (p.pick_no - (p.round - 1) * teams) : (p.draft_slot || 1),
         teamId:   String(p.roster_id || ""),
         playerId: p.player_id || "",
         name:     p.metadata ? `${p.metadata.first_name || ""} ${p.metadata.last_name || ""}`.trim() : "",
