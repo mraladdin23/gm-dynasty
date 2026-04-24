@@ -4116,10 +4116,17 @@ const DLRTournament = (() => {
     // Build per-team score list and league name map
     const allTeamScores = [];
     const leagueNameMap = {};
+    // Build leagueNameMap from standingsCache where leagueName is already resolved
+    Object.values(t.standingsCache || {}).forEach(lc => {
+      if (lc.leagueId && lc.leagueName) leagueNameMap[String(lc.leagueId)] = lc.leagueName;
+    });
     enriched.forEach(m => {
       if (!leagueNameMap[m.leagueId]) {
-        const lMatch = Object.values(t.leagues || {}).find(l => String(l.leagueId) === String(m.leagueId));
-        leagueNameMap[m.leagueId] = lMatch?.leagueName || lMatch?.name || "";
+        // Fallback: drill into batch structure in t.leagues
+        for (const batch of Object.values(t.leagues || {})) {
+          const entry = batch.leagues?.[m.leagueId] || batch.leagues?.[String(m.leagueId)];
+          if (entry?.name) { leagueNameMap[m.leagueId] = entry.name; break; }
+        }
       }
       allTeamScores.push({ name: m.home.name, score: m.home.score, leagueId: m.leagueId });
       allTeamScores.push({ name: m.away.name, score: m.away.score, leagueId: m.leagueId });
