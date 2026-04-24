@@ -363,6 +363,7 @@
       `;
 
       document.getElementById("pub-back-btn")?.addEventListener("click", () => {
+        _clearAdpRefresh();
         window.history.pushState({}, "", window.location.pathname);
         _selectedYear = null;
         _activeTab    = "info";
@@ -400,8 +401,12 @@
       // Tab select
       document.getElementById("pub-tab-select")?.addEventListener("change", function() {
         _activeTab = this.value;
+        if (_activeTab !== "adp") _clearAdpRefresh();
         renderTab(_activeTab);
       });
+
+      // If ADP data already exists on this tournament, inject the tab option immediately
+      if (t.adp?.length) _ensureAdpTabOption();
 
       renderTab(_activeTab);
     }
@@ -625,20 +630,53 @@
     let _adpPos     = "all";
     const ADP_PAGE_SIZE = 25;
 
+    function _clearAdpRefresh() {
+      if (_adpRefreshTimer) { clearInterval(_adpRefreshTimer); _adpRefreshTimer = null; }
+    }
+
+    // Inject ADP option into tab select if not already present (handles late-arriving data)
+    function _ensureAdpTabOption() {
+      const sel = document.getElementById("pub-tab-select");
+      if (!sel || sel.querySelector('option[value="adp"]')) return;
+      const opt = document.createElement("option");
+      opt.value = "adp"; opt.textContent = "📊 ADP";
+      sel.appendChild(opt);
+    }
+
+    async function _refreshAdpData(body) {
+      try {
+        const snap  = await tRef(_currentTid).child("adp").once("value");
+        const fresh = snap.val();
+        if (!Array.isArray(fresh) || !fresh.length) return;
+        _currentT.adp = fresh;
+        _ensureAdpTabOption();
+        if (_activeTab === "adp") renderAdpTab(body);
+        // Stop polling if tournament is no longer live
+        if (!["active","registration_open"].includes(_currentT.status || "")) _clearAdpRefresh();
+      } catch(e) { /* non-fatal */ }
+    }
+
+    function _startAdpRefresh(body) {
+      _clearAdpRefresh();
+      if (!["active","registration_open"].includes(_currentT?.status || "")) return;
+      _adpRefreshTimer = setInterval(() => _refreshAdpData(body), 2 * 60 * 1000);
+    }
+
     function renderAdpTab(body) {
       const t   = _currentT;
       const adp = t.adp || [];
       if (!adp.length) {
-        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">📊</div><div class="trn-empty-title">No ADP data yet</div><div class="trn-empty-sub">ADP appears once the commissioner has loaded the Draft tab.</div></div>`;
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">📊</div><div class="trn-empty-title">No ADP data yet</div><div class="trn-empty-sub">ADP appears once the commissioner opens the Draft tab.</div></div>`;
+        _startAdpRefresh(body);
         return;
       }
 
-      // Apply position filter
+      _startAdpRefresh(body);
+
       const filtered = (_adpPos && _adpPos !== "all")
         ? adp.filter(p => p.position === _adpPos)
         : adp;
 
-      // Position filter options — only positions that appear in data
       const positions = [...new Set(adp.map(p => p.position || "?"))];
       const posOrder  = ["QB","RB","WR","TE","K","DEF"].filter(p => positions.includes(p));
       const extras    = positions.filter(p => !posOrder.includes(p) && p !== "?");
@@ -646,28 +684,43 @@
 
       const selStyle = "font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)";
 
-      // 4-col layout: rank | pos | player+nfl stacked | adp+count stacked
-      const COL = "40px 44px 1fr auto";
-      const header = `<div class="draft-auction-header" style="grid-template-columns:${COL}"><span>#</span><span>Pos</span><span>Player</span><span>ADP</span></div>`;
+      // Columns: # | Player (pos+name stacked) | Dft | ADP | Min | Range | Max
+      const COL = "32px 1fr 36px 52px 40px 76px 40px";
+      const header = `
+        <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
+          <span>#</span><span>Player</span>
+          <span style="text-align:center">Dft</span>
+          <span style="text-align:right">ADP</span>
+          <span style="text-align:right">Min</span>
+          <span style="text-align:center">Range</span>
+          <span style="text-align:right">Max</span>
+        </div>`;
 
       const totalPages = Math.ceil(filtered.length / ADP_PAGE_SIZE);
       const page       = Math.max(1, Math.min(_adpPage, totalPages));
       const pageSlice  = filtered.slice((page - 1) * ADP_PAGE_SIZE, page * ADP_PAGE_SIZE);
 
       const rows = pageSlice.map((p, i) => {
-        const rank = (page - 1) * ADP_PAGE_SIZE + i + 1;
-        const col  = POS_COLOR[p.position] || "#9ca3af";
+        const rank     = (page - 1) * ADP_PAGE_SIZE + i + 1;
+        const col      = POS_COLOR[p.position] || "#9ca3af";
+        const mn       = p.min  != null ? p.min  : "—";
+        const mx       = p.max  != null ? p.max  : "—";
+        const rangeStr = (p.p25 != null && p.p75 != null)
+          ? `${Math.round(p.p25)}–${Math.round(p.p75)}` : "—";
         return `
           <div class="draft-auction-row" style="grid-template-columns:${COL}">
-            <span class="draft-auction-rank dim">${rank}</span>
-            <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${esc(p.position || "?")}</span>
+            <span class="draft-auction-rank dim" style="font-size:.75rem">${rank}</span>
             <div>
-              <div class="draft-auction-name">${esc(p.name || "Unknown")}</div>
+              <div style="display:flex;align-items:center;gap:4px">
+                <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;flex-shrink:0">${esc(p.position || "?")}</span>
+                <span class="draft-auction-name">${esc(p.name || "Unknown")}</span>
+              </div>
             </div>
-            <div style="text-align:right;white-space:nowrap">
-              <div style="font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</div>
-              <div class="dim" style="font-size:.7rem">${p.count}×</div>
-            </div>
+            <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
+            <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+            <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
+            <span style="text-align:center;font-size:.75rem;color:var(--color-text-muted);font-variant-numeric:tabular-nums">${rangeStr}</span>
+            <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>
           </div>`;
       });
 
@@ -678,12 +731,19 @@
           <button class="draft-toggle-btn" id="pub-adp-next" ${page >= totalPages ? "disabled" : ""}>Next ›</button>
         </div>` : "";
 
+      const now       = new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+      const isLive    = ["active","registration_open"].includes(t.status || "");
+      const liveNote  = isLive
+        ? `<span style="font-size:.72rem;color:var(--color-text-dim)"> · auto-refreshes · ${now}</span>`
+        : "";
+
       body.innerHTML = `
-        <div class="trn-az-toolbar" style="margin-bottom:var(--space-3)">
+        <div class="trn-az-toolbar" style="margin-bottom:var(--space-3);display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
           <select id="pub-adp-pos" style="${selStyle}">
             <option value="all" ${_adpPos === "all" ? "selected" : ""}>All Positions</option>
             ${allPos.map(p => `<option value="${esc(p)}" ${_adpPos === p ? "selected" : ""}>${esc(p)}</option>`).join("")}
           </select>
+          ${liveNote}
         </div>
         <div class="trn-az-meta">${adp.length} players drafted · ${filtered.length} shown</div>
         <div class="draft-auction-list">

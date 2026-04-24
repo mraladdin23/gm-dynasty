@@ -1033,6 +1033,29 @@
 .trn-share-card-player     { font-size: .85rem; font-weight: 500; }
 .trn-share-card-footer     { padding: var(--space-2) var(--space-5); background: var(--color-surface-alt, var(--color-border)); font-size: .65rem; color: var(--color-text-dim); text-align: center; }
 
+/* ── Draft card steal/reach badges ────────────────── */
+.trn-card-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: .6rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  letter-spacing: .03em;
+  margin-left: var(--space-1);
+  white-space: nowrap;
+}
+.trn-card-badge--steal {
+  background: rgba(34,197,94,.15);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,.3);
+}
+.trn-card-badge--reach {
+  background: rgba(239,68,68,.12);
+  color: #ef4444;
+  border: 1px solid rgba(239,68,68,.25);
+}
+
 /* ── Matchups ────────────────────────────────────────── */
 .trn-mu-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .trn-mu-row {
