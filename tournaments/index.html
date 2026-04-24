@@ -290,10 +290,11 @@
     }
 
     // ── Single tournament view ───────────────────────────────
-    let _currentTid  = null;
-    let _currentT    = null;
-    let _activeTab   = "info";
-    let _selectedYear = null;  // null = all years / most recent
+    let _currentTid      = null;
+    let _currentT        = null;
+    let _activeTab       = "info";
+    let _selectedYear    = null;   // null = all years / most recent
+    let _adpRefreshTimer = null;   // setInterval handle for ADP auto-refresh
 
     async function loadTournament(tid) {
       const loading = document.getElementById("pub-loading");
@@ -355,7 +356,7 @@
           <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
             ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
             ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
-            ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
+            ${t.adp?.length ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
           </select>
         </div>
 
@@ -393,19 +394,8 @@
       });
 
       // Year selector (global — controls all tabs)
-      document.getElementById("pub-year-sel")?.addEventListener("change", async function() {
+      document.getElementById("pub-year-sel")?.addEventListener("change", function() {
         _selectedYear = parseInt(this.value);
-        // Fetch year-specific ADP if not already loaded
-        if (_activeTab === "adp" && !_currentT.adpByYear?.[_selectedYear]) {
-          try {
-            const snap = await tRef(_currentTid).child(`adpByYear/${_selectedYear}`).once("value");
-            const data = snap.val();
-            if (Array.isArray(data) && data.length) {
-              if (!_currentT.adpByYear) _currentT.adpByYear = {};
-              _currentT.adpByYear[_selectedYear] = data;
-            }
-          } catch(e) { /* non-fatal */ }
-        }
         renderTab(_activeTab);
       });
 
@@ -417,7 +407,7 @@
       });
 
       // If ADP data already exists on this tournament, inject the tab option immediately
-      if (t.adp?.length || Object.keys(t.adpByYear || {}).length) _ensureAdpTabOption();
+      if (t.adp?.length) _ensureAdpTabOption();
 
       renderTab(_activeTab);
     }
@@ -656,22 +646,13 @@
 
     async function _refreshAdpData(body) {
       try {
-        const year = _selectedYear || new Date().getFullYear();
-        const [byYearSnap, flatSnap] = await Promise.all([
-          tRef(_currentTid).child(`adpByYear/${year}`).once("value"),
-          tRef(_currentTid).child("adp").once("value")
-        ]);
-        const byYear = byYearSnap.val();
-        const flat   = flatSnap.val();
-        if (Array.isArray(byYear) && byYear.length) {
-          if (!_currentT.adpByYear) _currentT.adpByYear = {};
-          _currentT.adpByYear[year] = byYear;
-        }
-        if (Array.isArray(flat) && flat.length) _currentT.adp = flat;
-        const hasData = (Array.isArray(byYear) && byYear.length) || (Array.isArray(flat) && flat.length);
-        if (!hasData) return;
+        const snap  = await tRef(_currentTid).child("adp").once("value");
+        const fresh = snap.val();
+        if (!Array.isArray(fresh) || !fresh.length) return;
+        _currentT.adp = fresh;
         _ensureAdpTabOption();
         if (_activeTab === "adp") renderAdpTab(body);
+        // Stop polling if tournament is no longer live
         if (!["active","registration_open"].includes(_currentT.status || "")) _clearAdpRefresh();
       } catch(e) { /* non-fatal */ }
     }
@@ -683,10 +664,8 @@
     }
 
     function renderAdpTab(body) {
-      const t    = _currentT;
-      // Use year-specific ADP when available; fall back to flat adp for older data
-      const year = _selectedYear || (Object.keys(t.adpByYear || {}).sort((a,b) => b-a)[0]);
-      const adp  = (year && t.adpByYear?.[year]) || t.adp || [];
+      const t   = _currentT;
+      const adp = t.adp || [];
       if (!adp.length) {
         body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">📊</div><div class="trn-empty-title">No ADP data yet</div><div class="trn-empty-sub">ADP appears once the commissioner opens the Draft tab.</div></div>`;
         _startAdpRefresh(body);
