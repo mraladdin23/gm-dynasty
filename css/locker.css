@@ -881,7 +881,8 @@
 }
 .platform-relink-info {
   display: flex;
-  align-items: center;
+  align-items: column;
+  flex: 1;
   gap: var(--space-3);
 }
 .platform-relink-user {
