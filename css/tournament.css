@@ -1118,8 +1118,7 @@
   border-top: 1px solid var(--color-border);
   padding: 3px var(--space-2) var(--space-2);
   margin-top: auto;
-  justify-content: center; /* margin Δ centered by default */
-  position: relative;      /* league name absolutely right-aligned */
+  justify-content: center;
 }
 .trn-mu-card-lname {
   overflow: hidden;
@@ -1145,17 +1144,16 @@
   font-family: var(--font-display, monospace);
   text-align: center;
 }
-.trn-mu-card-fleague {
-  position: absolute;
-  right: var(--space-2);
-  font-size: .62rem;
+.trn-mu-card-fleague { display: none; } /* legacy — replaced by line--league */
+.trn-mu-card-line--league {
+  justify-content: center;
+  padding: 0 var(--space-2) var(--space-2);
+  font-size: .65rem;
   color: var(--color-text-dim);
-  opacity: .55;
+  opacity: .6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 50%;
-  text-align: right;
 }
 
 /* ── Highest-scoring card ────────────────────────────── */
