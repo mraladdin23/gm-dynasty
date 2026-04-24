@@ -290,10 +290,11 @@
     }
 
     // ── Single tournament view ───────────────────────────────
-    let _currentTid  = null;
-    let _currentT    = null;
-    let _activeTab   = "info";
-    let _selectedYear = null;  // null = all years / most recent
+    let _currentTid      = null;
+    let _currentT        = null;
+    let _activeTab       = "info";
+    let _selectedYear    = null;  // null = all years / most recent
+    let _adpRefreshTimer = null;  // setInterval handle for ADP auto-refresh
 
     async function loadTournament(tid) {
       const loading = document.getElementById("pub-loading");
