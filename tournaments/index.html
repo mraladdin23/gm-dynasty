@@ -290,11 +290,10 @@
     }
 
     // ── Single tournament view ───────────────────────────────
-    let _currentTid      = null;
-    let _currentT        = null;
-    let _activeTab       = "info";
-    let _selectedYear    = null;  // null = all years / most recent
-    let _adpRefreshTimer = null;  // setInterval handle for ADP auto-refresh
+    let _currentTid  = null;
+    let _currentT    = null;
+    let _activeTab   = "info";
+    let _selectedYear = null;  // null = all years / most recent
 
     async function loadTournament(tid) {
       const loading = document.getElementById("pub-loading");
@@ -685,9 +684,16 @@
 
       const selStyle = "font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)";
 
-      // Columns: # | Player (pos+name stacked) | Dft | ADP | Min | Range | Max
-      const COL = "32px 1fr 36px 52px 40px 76px 40px";
-      const header = `
+      // Responsive column spec — same logic as internal ADP view
+      const isMobile = window.innerWidth <= 640;
+      const COL = isMobile ? "28px 1fr 44px 34px 34px" : "32px 1fr 36px 52px 40px 76px 40px";
+      const header = isMobile ? `
+        <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
+          <span>#</span><span>Player</span>
+          <span style="text-align:right">ADP</span>
+          <span style="text-align:right">Min</span>
+          <span style="text-align:right">Max</span>
+        </div>` : `
         <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
           <span>#</span><span>Player</span>
           <span style="text-align:center">Dft</span>
@@ -708,6 +714,15 @@
         const mx       = p.max  != null ? p.max  : "—";
         const rangeStr = (p.p25 != null && p.p75 != null)
           ? `${Math.round(p.p25)}–${Math.round(p.p75)}` : "—";
+        const statCols = isMobile
+          ? `<span style="text-align:right;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+             <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mn}</span>
+             <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mx}</span>`
+          : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
+             <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+             <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
+             <span style="text-align:center;font-size:.75rem;color:var(--color-text-muted);font-variant-numeric:tabular-nums">${rangeStr}</span>
+             <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>`;
         return `
           <div class="draft-auction-row" style="grid-template-columns:${COL}">
             <span class="draft-auction-rank dim" style="font-size:.75rem">${rank}</span>
@@ -717,11 +732,7 @@
                 <span class="draft-auction-name">${esc(p.name || "Unknown")}</span>
               </div>
             </div>
-            <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
-            <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
-            <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
-            <span style="text-align:center;font-size:.75rem;color:var(--color-text-muted);font-variant-numeric:tabular-nums">${rangeStr}</span>
-            <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>
+            ${statCols}
           </div>`;
       });
 

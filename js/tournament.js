@@ -761,6 +761,15 @@ const DLRTournament = (() => {
             </span>
           </div>
           <div class="trn-detail-row">
+            <span>3rd-Round Reversal</span>
+            <span>
+              <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
+                <input type="checkbox" id="trn-3rr-toggle" ${meta.thirdRoundReversal ? "checked" : ""} />
+                <span style="font-size:.82rem">Draft uses third-round reversal (rounds 1&3 same direction, round 2 reverses, then continues snake)</span>
+              </label>
+            </span>
+          </div>
+          <div class="trn-detail-row">
             <span>Twitter Column</span>
             <span>
               <label class="trn-field-toggle" style="margin:0;gap:var(--space-2)">
@@ -833,6 +842,15 @@ const DLRTournament = (() => {
         await _tMetaRef(tid).update({ medianWins: this.checked });
         if (_tournaments[tid]?.meta) _tournaments[tid].meta.medianWins = this.checked;
         showToast(this.checked ? "Median wins enabled ✓" : "Median wins disabled ✓");
+      } catch(e) { showToast("Failed to save", "error"); }
+    });
+
+    // Third-round reversal toggle
+    document.getElementById("trn-3rr-toggle")?.addEventListener("change", async function() {
+      try {
+        await _tMetaRef(tid).update({ thirdRoundReversal: this.checked });
+        if (_tournaments[tid]?.meta) _tournaments[tid].meta.thirdRoundReversal = this.checked;
+        showToast(this.checked ? "3rd-round reversal enabled ✓" : "3rd-round reversal disabled ✓");
       } catch(e) { showToast("Failed to save", "error"); }
     });
 
@@ -3172,7 +3190,7 @@ const DLRTournament = (() => {
         return;
       }
       const adp = _computeADP(allPicks);
-      _draftCache = { picks: allPicks, adp, byLeague, fetchedAt: Date.now(), tid };
+      _draftCache = { picks: allPicks, adp, byLeague, fetchedAt: Date.now(), tid, _t: t };
       _renderDraftView(tid, t, body, _draftCache);
       // Sync ADP to public node in the background — non-blocking
       _writePublicADP(tid).catch(() => {});
@@ -3329,12 +3347,22 @@ const DLRTournament = (() => {
 
     const totalLeagues = Object.keys(_draftCache?.byLeague || {}).length;
 
-    // Columns: # | Player (pos badge + name + NFL stacked) | Dft | ADP | Min | Range | Max
-    const COL = "32px 1fr 36px 52px 40px 76px 40px";
-    const header = `
+    // Responsive column spec:
+    // Mobile (≤640px): 5 cols — #, Player, ADP, Min, Max
+    // Desktop:         7 cols — #, Player, Dft, ADP, Min, Range, Max
+    const isMobile = window.innerWidth <= 640;
+    const COL = isMobile
+      ? "28px 1fr 44px 34px 34px"
+      : "32px 1fr 36px 52px 40px 76px 40px";
+    const header = isMobile ? `
       <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
-        <span>#</span>
-        <span>Player</span>
+        <span>#</span><span>Player</span>
+        <span style="text-align:right">ADP</span>
+        <span style="text-align:right">Min</span>
+        <span style="text-align:right">Max</span>
+      </div>` : `
+      <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
+        <span>#</span><span>Player</span>
         <span style="text-align:center">Dft</span>
         <span style="text-align:right">ADP</span>
         <span style="text-align:right">Min</span>
@@ -3355,6 +3383,15 @@ const DLRTournament = (() => {
       const mn       = p.min  != null ? p.min  : "—";
       const mx       = p.max  != null ? p.max  : "—";
       const rangeStr = (p.p25 != null && p.p75 != null) ? `${Math.round(p.p25)}–${Math.round(p.p75)}` : "—";
+      const statCols = isMobile
+        ? `<span style="text-align:right;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+           <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mn}</span>
+           <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mx}</span>`
+        : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
+           <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+           <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
+           <span style="text-align:center;font-size:.75rem;color:var(--color-text-muted);font-variant-numeric:tabular-nums">${rangeStr}</span>
+           <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>`;
       return `
         <div class="draft-auction-row" style="grid-template-columns:${COL}" ${clickAttr}>
           <span class="draft-auction-rank dim" style="font-size:.75rem">${(_draftListPage - 1) * PAGE_SIZE + i + 1}</span>
@@ -3365,11 +3402,7 @@ const DLRTournament = (() => {
             </div>
             <div class="dim" style="font-size:.7rem;padding-left:2px">${_esc(nfl)}</div>
           </div>
-          <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
-          <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
-          <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
-          <span style="text-align:center;font-size:.75rem;color:var(--color-text-muted);font-variant-numeric:tabular-nums">${rangeStr}</span>
-          <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>
+          ${statCols}
         </div>`;
     });
     const totalPages = Math.ceil(rows.length / PAGE_SIZE);
@@ -3384,7 +3417,7 @@ const DLRTournament = (() => {
 
     el.innerHTML = `
       <div class="trn-az-meta">${adp.length} players drafted · ${filtered.length} shown · ${totalLeagues} leagues</div>
-      <div class="draft-auction-list">
+      <div class="draft-auction-list trn-adp-table">
         ${header}
         ${pageRows.join("")}
       </div>
@@ -3445,10 +3478,11 @@ const DLRTournament = (() => {
       Object.keys(byTeamRound).forEach(tid => { if (!slotOrder.includes(tid)) slotOrder.push(tid); });
     }
 
-    // Snake / third-round-reversal / linear detection.
-    // third_round_reversal: rounds 1,3,5,… go L→R; rounds 2,4,6,… go R→L
-    // EXCEPT round 3 "resets" back to L→R (same as round 1 order).
-    const is3RR   = draftType === "third_round_reversal";
+    // Snake / 3RR detection.
+    // For 3RR: read from tournament meta (set by admin) since Sleeper doesn't
+    // return this reliably in draft_type. We use the actual pick.pick field
+    // (slot within round) for grid column placement — no direction math needed.
+    const is3RR   = !!(leagueEntry?.thirdRoundReversal || _draftCache?._t?.meta?.thirdRoundReversal);
     const isSnake = is3RR || (draftType
       ? (draftType === "snake" || draftType === "startup")
       : (() => {
@@ -3456,33 +3490,34 @@ const DLRTournament = (() => {
           return r2picks.length > 0 && r2picks[0]?.teamId === slotOrder[slotOrder.length - 1];
         })());
 
+    // Build round×slot → pick lookup using the actual pick.pick value (slot within round).
+    // This is authoritative regardless of snake/3RR direction since Sleeper sets it correctly.
+    const byRoundSlot = {}; // { [round]: { [slot]: pick } }
+    picks.forEach(p => {
+      if (!p.round || !p.pick) return;
+      if (!byRoundSlot[p.round]) byRoundSlot[p.round] = {};
+      byRoundSlot[p.round][p.pick] = p;
+    });
+    const useSlotLookup = picks.some(p => p.pick > 0); // only if pick slot is populated
+
     const nameOf = (tid) => picks.find(pk => pk.teamId === tid)?.teamName || tid;
 
     const draftTypeLabel = is3RR ? "↩ 3rd-round reversal" : isSnake ? "🐍 snake" : "📋 linear";
     const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${draftTypeLabel}`;
 
-    // Returns whether a given round is reversed (right→left) for direction-aware draft types.
-    function _isRoundReversed(round) {
-      if (is3RR) {
-        // R1: L→R, R2: R→L, R3: L→R (reset), R4: R→L, R5: L→R, …
-        // i.e. reverse on even rounds EXCEPT round 3 (and 3+2n) "resets"
-        if (round === 1 || round === 3) return false;
-        if (round === 2) return true;
-        // rounds 4+: continue snake from round 4 onward (round 4 reversed, 5 not, …)
-        return (round % 2 === 0);
-      }
-      return isSnake && (round % 2 === 0);
-    }
-
     // ── Grid mode ────────────────────────────────────────────────────────────
     if (_draftBoardMode === "grid") {
       let boardHTML = "";
       for (let round = 1; round <= rounds; round++) {
-        const rowSlots = _isRoundReversed(round) ? [...slotOrder].reverse() : slotOrder;
+        // For 3RR and snake, slot ordering already encoded in pick.pick — display columns
+        // always L→R (slot 1..N), the pick.pick field tells us who is actually in each column.
         boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
-        rowSlots.forEach((tid, display) => {
+        slotOrder.forEach((tid, display) => {
+          const slot       = display + 1; // 1-based slot = column position in round 1
+          // Use slot-based lookup if available (authoritative for snake/3RR);
+          // fall back to byTeamRound for MFL/Yahoo which may not have pick.pick
+          const pk = (useSlotLookup && byRoundSlot[round]?.[slot]) || byTeamRound[tid]?.[round];
           const overallNum = (round - 1) * slotOrder.length + display + 1;
-          const pk = byTeamRound[tid]?.[round];
           if (pk) {
             const col      = POS_COLOR[pk.position] || "#9ca3af";
             const pName    = pk.name || "Unknown";
@@ -3517,7 +3552,7 @@ const DLRTournament = (() => {
       }
       el.innerHTML = `
         <div class="trn-az-meta">${metaLine}</div>
-        <div class="draft-board-scroll"><div class="draft-board">${boardHTML}</div></div>`;
+        <div class="trn-az-section draft-board-scroll"><div class="draft-board">${boardHTML}</div></div>`;
       return;
     }
 
@@ -3536,7 +3571,7 @@ const DLRTournament = (() => {
 
     const rows = pageRows.map(p => {
       const col      = POS_COLOR[p.position] || "#9ca3af";
-      const pickLabel = (isSnake || is3RR) ? p.overall : `${p.round}.${String(p.pick).padStart(2,"0")}`;
+      const pickLabel = p.round && p.pick ? `${p.round}.${String(p.pick).padStart(2,"0")}` : p.overall;
       const clickAttr = p.playerId
         ? `onclick="DLRPlayerCard.show('${_esc(p.playerId)}','${_esc(p.name)}')" style="cursor:pointer"`
         : "";
@@ -3585,119 +3620,275 @@ const DLRTournament = (() => {
     const myPicks = allPicks.filter(p => p.teamId === _draftCardTeam).sort((a, b) => a.overall - b.overall);
     if (!myPicks.length) { el.innerHTML = `<div class="trn-empty">No picks found for this team.</div>`; return; }
 
-    const teamName  = myPicks[0].teamName || _draftCardTeam;
-    const leagueName = _draftCache?.byLeague
-      ? (Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))?.leagueName || "Tournament Draft")
-      : "Tournament Draft";
+    const teamName = myPicks[0].teamName || _draftCardTeam;
 
-    // ADP lookup for steal/reach badges
+    // Build ADP lookup for steal/reach detection
     const adpMap = {};
     (_draftCache?.adp || []).forEach(a => { if (a.playerId) adpMap[a.playerId] = a; });
 
-    // Two-column split: odd total → left gets the extra round
-    const total      = myPicks.length;
-    const leftCount  = Math.ceil(total / 2);
-    const leftPicks  = myPicks.slice(0, leftCount);
-    const rightPicks = myPicks.slice(leftCount);
-
-    // Determine round size from leagueEntry for round.pick label formatting
-    const leagueEntry = _draftCache?.byLeague
-      ? Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))
-      : null;
-    const teamCount = leagueEntry?.slot_to_roster_id
-      ? Object.keys(leagueEntry.slot_to_roster_id).length
-      : (new Set(allPicks.map(p => p.teamId)).size || 12);
-
-    const _pickLabel = (p) => {
-      const round = p.round || Math.ceil(p.overall / teamCount);
-      const slot  = p.pick  || (p.overall - (round - 1) * teamCount);
-      return `${round}.${String(slot).padStart(2, "0")}`;
-    };
-
-    const _pickRow = (p) => {
-      const adpEntry = adpMap[p.playerId];
-      const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
-      const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
-      const badge    = isSteal
-        ? `<span class="trn-card-badge trn-card-badge--steal">💎 Steal</span>`
-        : isReach
-        ? `<span class="trn-card-badge trn-card-badge--reach">🚀 Reach</span>`
-        : "";
-      const col = POS_COLOR[p.position] || "#9ca3af";
-      return `
-        <div class="trn-share-card-pick">
-          <div class="trn-share-card-pick-num">
-            <span class="trn-share-card-round">${_pickLabel(p)}</span>
-            <span class="trn-share-card-overall">(#${p.overall})</span>
-          </div>
-          <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;font-size:.6rem;flex-shrink:0">${_esc(p.position || "?")}</span>
-          <span class="trn-share-card-player">${_esc(p.name || "Unknown")}</span>
-          ${badge}
-        </div>`;
-    };
+    const posGroups = {};
+    myPicks.forEach(p => {
+      const pos = p.position || "?";
+      if (!posGroups[pos]) posGroups[pos] = [];
+      posGroups[pos].push(p);
+    });
 
     el.innerHTML = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
         <button class="btn-primary btn-sm" id="trn-card-download-btn">⬇ Download Card</button>
       </div>
-      <div id="trn-share-card" class="trn-share-card" title="Press and hold to save image">
+      <div id="trn-share-card" class="trn-share-card">
         <div class="trn-share-card-header">
-          <div class="trn-share-card-tournament">${_esc(leagueName)}</div>
+          <div class="trn-share-card-tournament">${_esc(_draftCache?.byLeague ? Object.values(_draftCache.byLeague)[0]?.leagueName || "Tournament Draft" : "Tournament Draft")}</div>
           <div class="trn-share-card-team">${_esc(teamName)}</div>
-          <div class="trn-share-card-sub">${total} picks · avg pick #${(myPicks.reduce((s, p) => s + p.overall, 0) / total).toFixed(1)}</div>
+          <div class="trn-share-card-sub">${myPicks.length} picks · ADP ${(myPicks.reduce((s, p) => s + p.overall, 0) / myPicks.length).toFixed(1)} avg</div>
         </div>
-        <div class="trn-share-card-body trn-share-card-body--two-col">
-          <div class="trn-share-card-col">
-            ${leftPicks.map(_pickRow).join("")}
-          </div>
-          <div class="trn-share-card-col">
-            ${rightPicks.map(_pickRow).join("")}
-          </div>
+        <div class="trn-share-card-body">
+          ${PREFERRED_POS_ORDER.map(pos => {
+            const grp = posGroups[pos];
+            if (!grp?.length) return "";
+            const col = POS_COLOR[pos] || "#9ca3af";
+            return `
+              <div class="trn-share-card-group">
+                <div class="trn-share-card-pos" style="color:${col}">${pos}</div>
+                ${grp.map(p => {
+                  const adpEntry = adpMap[p.playerId];
+                  // Steal = drafted later than 75th pct (great value); Reach = earlier than 25th pct
+                  const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
+                  const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
+                  const badge    = isSteal
+                    ? `<span class="trn-card-badge trn-card-badge--steal">💎 Steal</span>`
+                    : isReach
+                    ? `<span class="trn-card-badge trn-card-badge--reach">🚀 Reach</span>`
+                    : "";
+                  return `
+                  <div class="trn-share-card-pick">
+                    <span class="trn-share-card-overall">#${p.overall}</span>
+                    <span class="trn-share-card-player">${_esc(p.name)}</span>
+                    ${badge}
+                  </div>`;
+                }).join("")}
+              </div>`;
+          }).join("")}
         </div>
         <div class="trn-share-card-footer">dynastylockerroom.com</div>
       </div>`;
 
     document.getElementById("trn-card-download-btn")?.addEventListener("click", () => _downloadDraftCard());
-
-    // Long-press on card → save as image (mobile + desktop)
-    const card = document.getElementById("trn-share-card");
-    if (card) {
-      let pressTimer = null;
-      const startPress = () => {
-        pressTimer = setTimeout(async () => {
-          pressTimer = null;
-          await _downloadDraftCard();
-        }, 600);
-      };
-      const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
-      card.addEventListener("touchstart",  startPress,  { passive: true });
-      card.addEventListener("touchend",    cancelPress);
-      card.addEventListener("touchmove",   cancelPress, { passive: true });
-      card.addEventListener("mousedown",   startPress);
-      card.addEventListener("mouseup",     cancelPress);
-      card.addEventListener("mouseleave",  cancelPress);
-      card.addEventListener("contextmenu", (e) => { e.preventDefault(); _downloadDraftCard(); });
-    }
   }
 
   async function _downloadDraftCard() {
-    const card = document.getElementById("trn-share-card");
-    if (!card) return;
+    if (!_draftCardTeam || !_draftCache) return;
     try {
-      // Load html2canvas from CDN if not present
-      if (typeof html2canvas === "undefined") {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-          s.onload = resolve; s.onerror = reject;
-          document.head.appendChild(s);
-        });
+      const allPicks  = _draftCache.picks || [];
+      const myPicks   = allPicks.filter(p => p.teamId === _draftCardTeam).sort((a, b) => a.overall - b.overall);
+      if (!myPicks.length) return;
+      const adpMap    = {};
+      (_draftCache.adp || []).forEach(a => { if (a.playerId) adpMap[a.playerId] = a; });
+      const teamName  = myPicks[0].teamName || _draftCardTeam;
+      const leagueEntry = _draftCache.byLeague
+        ? Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))
+        : null;
+      const leagueName = leagueEntry?.leagueName || "Tournament Draft";
+      const teamCount  = leagueEntry?.slot_to_roster_id
+        ? Object.keys(leagueEntry.slot_to_roster_id).length
+        : Math.max(...myPicks.map(p => p.pick || 1), 12);
+
+      const _pickLabel = (p) => {
+        const round = p.round || Math.ceil(p.overall / teamCount);
+        const slot  = p.pick  || (p.overall - (round - 1) * teamCount);
+        return `${round}.${String(slot).padStart(2, "0")}`;
+      };
+
+      // ── Canvas layout constants ──────────────────────────────────────────
+      const DPR    = 2;  // draw at 2× for crisp display
+      const W      = 680;
+      const ROW_H  = 28;
+      const HDR_H  = 72;
+      const FTR_H  = 24;
+      const PAD    = 20;
+      const GAP    = 24; // gap between columns
+      const total  = myPicks.length;
+      const leftCount  = Math.ceil(total / 2);
+      const colRows    = leftCount;  // height determined by left column
+      const BODY_H = colRows * ROW_H + PAD;
+      const H      = HDR_H + BODY_H + FTR_H;
+
+      const canvas = document.createElement("canvas");
+      canvas.width  = W  * DPR;
+      canvas.height = H  * DPR;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(DPR, DPR);
+
+      // Helper: hex → rgba
+      const hex2rgba = (hex, a = 1) => {
+        const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+        return `rgba(${r},${g},${b},${a})`;
+      };
+
+      // ── Colour palette (matches DLR dark theme) ─────────────────────────
+      const C = {
+        bg:       "#0f1923",
+        header:   "#1a3a5c",
+        surface:  "#1a2535",
+        border:   "#2a3f5a",
+        text:     "#e2e8f0",
+        dim:      "#4a6080",
+        muted:    "#8aa3c2",
+        gold:     "#f0b429",
+        steal:    "#22c55e",
+        stealBg:  "rgba(34,197,94,0.12)",
+        reach:    "#ef4444",
+        reachBg:  "rgba(239,68,68,0.10)",
+        POS: { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af" }
+      };
+
+      // ── Background ───────────────────────────────────────────────────────
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Header ───────────────────────────────────────────────────────────
+      ctx.fillStyle = C.header;
+      ctx.fillRect(0, 0, W, HDR_H);
+      // Gold accent line
+      ctx.fillStyle = C.gold;
+      ctx.fillRect(0, HDR_H - 2, W, 2);
+
+      ctx.fillStyle = C.muted;
+      ctx.font = `500 10px 'Barlow', system-ui, sans-serif`;
+      ctx.fillText(leagueName.toUpperCase(), PAD, 22);
+
+      ctx.fillStyle = C.text;
+      ctx.font = `700 22px 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif`;
+      ctx.fillText(teamName, PAD, 48);
+
+      ctx.fillStyle = C.dim;
+      ctx.font = `400 11px 'Barlow', system-ui, sans-serif`;
+      const avgPick = (myPicks.reduce((s, p) => s + p.overall, 0) / total).toFixed(1);
+      ctx.fillText(`${total} picks · avg pick #${avgPick}`, PAD, 64);
+
+      // ── Body: two columns ────────────────────────────────────────────────
+      const colW   = (W - PAD * 2 - GAP) / 2;
+      const leftX  = PAD;
+      const rightX = PAD + colW + GAP;
+
+      const _drawPick = (p, x, y) => {
+        const adpEntry = adpMap[p.playerId];
+        const isSteal  = adpEntry?.p75 != null && p.overall > adpEntry.p75;
+        const isReach  = adpEntry?.p25 != null && p.overall < adpEntry.p25;
+        const posColor = C.POS[p.position] || "#9ca3af";
+
+        // Alternating row bg
+        if ((myPicks.indexOf(p) % 2) === 0) {
+          ctx.fillStyle = C.surface;
+          ctx.fillRect(x, y, colW, ROW_H);
+        }
+
+        let cx = x + 4;
+
+        // Pick label: "2.07"
+        ctx.fillStyle = C.text;
+        ctx.font = `700 11px 'Barlow Condensed', 'Arial Narrow', monospace`;
+        ctx.fillText(_pickLabel(p), cx, y + ROW_H * 0.65);
+        cx += 34;
+
+        // Overall: "(#7)"
+        ctx.fillStyle = C.dim;
+        ctx.font = `400 9px 'Barlow', system-ui, sans-serif`;
+        ctx.fillText(`(#${p.overall})`, cx, y + ROW_H * 0.65);
+        cx += 32;
+
+        // Pos badge background
+        ctx.fillStyle = hex2rgba(posColor, 0.18);
+        const badgeW = 26, badgeH = 14;
+        const badgeY = y + (ROW_H - badgeH) / 2;
+        ctx.beginPath();
+        ctx.roundRect(cx, badgeY, badgeW, badgeH, 3);
+        ctx.fill();
+        ctx.strokeStyle = hex2rgba(posColor, 0.45);
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+        ctx.fillStyle = posColor;
+        ctx.font = `700 8.5px 'Barlow', system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(p.position || "?", cx + badgeW / 2, badgeY + 9.5);
+        ctx.textAlign = "left";
+        cx += badgeW + 5;
+
+        // Player name — clip to available width
+        const nameMaxW = colW - cx + x - 4 - (isSteal || isReach ? 46 : 0);
+        ctx.fillStyle = C.text;
+        ctx.font = `500 11px 'Barlow', system-ui, sans-serif`;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(cx, y, nameMaxW, ROW_H);
+        ctx.clip();
+        ctx.fillText(p.name || "Unknown", cx, y + ROW_H * 0.65);
+        ctx.restore();
+        cx += nameMaxW + 2;
+
+        // Steal / reach badge
+        if (isSteal || isReach) {
+          const bColor = isSteal ? C.steal : C.reach;
+          const bBg    = isSteal ? C.stealBg : C.reachBg;
+          const bLabel = isSteal ? "💎" : "🚀";
+          ctx.fillStyle = bBg;
+          ctx.beginPath();
+          ctx.roundRect(cx, y + (ROW_H - 14) / 2, 22, 14, 3);
+          ctx.fill();
+          ctx.fillStyle = bColor;
+          ctx.font = `10px serif`;
+          ctx.fillText(bLabel, cx + 4, y + ROW_H * 0.65);
+        }
+      };
+
+      for (let i = 0; i < myPicks.length; i++) {
+        const isLeft = i < leftCount;
+        const row    = isLeft ? i : i - leftCount;
+        const x      = isLeft ? leftX : rightX;
+        const y      = HDR_H + PAD / 2 + row * ROW_H;
+        _drawPick(myPicks[i], x, y);
       }
-      const canvas = await html2canvas(card, { scale: 2, backgroundColor: null, useCORS: true });
-      const link   = document.createElement("a");
-      link.download = `draft-card-${(_draftCardTeam || "team").replace(/\s+/g, "-")}.png`;
-      link.href    = canvas.toDataURL("image/png");
-      link.click();
+
+      // Column divider
+      ctx.strokeStyle = C.border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(leftX + colW + GAP / 2, HDR_H + 8);
+      ctx.lineTo(leftX + colW + GAP / 2, HDR_H + BODY_H - 8);
+      ctx.stroke();
+
+      // ── Footer ───────────────────────────────────────────────────────────
+      ctx.fillStyle = C.surface;
+      ctx.fillRect(0, H - FTR_H, W, FTR_H);
+      ctx.fillStyle = C.dim;
+      ctx.font = `400 9px 'Barlow', system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText("dynastylockerroom.com", W / 2, H - 8);
+      ctx.textAlign = "left";
+
+      // ── Save / share ─────────────────────────────────────────────────────
+      const filename = `draft-card-${teamName.replace(/[^a-z0-9]/gi, "-")}.png`;
+      // Try Web Share API first (mobile)
+      canvas.toBlob(async (blob) => {
+        if (navigator.share && navigator.canShare?.({ files: [new File([blob], filename, { type: "image/png" })] })) {
+          try {
+            await navigator.share({
+              files: [new File([blob], filename, { type: "image/png" })],
+              title: `${teamName} Draft Card`
+            });
+            return;
+          } catch(e) { /* fall through to download */ }
+        }
+        // Fallback: trigger download
+        const url  = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.download = filename;
+        link.href     = url;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }, "image/png");
+
     } catch(e) {
       showToast("Download failed: " + e.message, "error");
     }
