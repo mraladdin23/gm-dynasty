@@ -1366,3 +1366,48 @@
   .trn-az-section .draft-pick-team   { font-size: .48rem; }
   .trn-az-section .draft-pick-nfl    { display: none; }
 }
+
+/* ── Admin Yes/No toggles ────────────────────────────── */
+.trn-yn-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.trn-yn-btn {
+  padding: 3px 14px;
+  font-size: .82rem;
+  font-weight: 600;
+  background: transparent;
+  color: var(--color-text-muted);
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.trn-yn-btn + .trn-yn-btn { border-left: 1px solid var(--color-border); }
+.trn-yn-btn:hover { background: var(--color-surface-2); color: var(--color-text); }
+.trn-yn-btn--active {
+  background: var(--color-gold);
+  color: #0a0e1a;
+}
+.trn-yn-btn--active:hover { background: var(--color-gold-light); }
+
+/* ── Admin help tooltip button ───────────────────────── */
+.trn-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: .65rem;
+  font-weight: 700;
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  cursor: help;
+  line-height: 1;
+  flex-shrink: 0;
+  position: relative;
+}
+.trn-help-btn:hover { color: var(--color-gold); border-color: var(--color-gold); }
