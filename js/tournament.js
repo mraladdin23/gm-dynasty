@@ -4579,7 +4579,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
         <button class="btn-secondary btn-sm" id="trn-rosters-refresh-btn">↺ Refresh</button>
       </div>
-      <div id="trn-rosters-list">
+      <div id="trn-rosters-list" class="trn-rosters-grid">
         ${rows.map(row => _renderRosterCard(row, myKeys)).join("")}
       </div>`;
 
@@ -4609,61 +4609,49 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>`;
     }
 
-    // Separate starters and bench
-    const starters = row.players.filter(p => p.isStarter);
-    const bench    = row.players.filter(p => !p.isStarter);
+    // Group all players (starters + bench together) by position, sorted by rank within group.
+    // Matches the same pattern as the league detail roster tab (roster.js).
+    const POS_ORDER_TRN = ["QB","RB","WR","TE","K","DEF","DB","LB","DL","OL"];
+    const byPos = {};
+    POS_ORDER_TRN.forEach(p => { byPos[p] = []; });
+    byPos["—"] = [];
 
-    // Group starters by position — display order determines column order
-    const POS_ORDER  = ["QB","RB","WR","TE","K","DEF","DB","LB","DL","OL"];
-    const starterGroups = {};
-    starters.forEach(p => {
-      const pos = p.position || "?";
-      if (!starterGroups[pos]) starterGroups[pos] = [];
-      starterGroups[pos].push(p);
+    row.players.forEach(p => {
+      const pos = (p.position || "—").toUpperCase();
+      const grp = byPos[pos] !== undefined ? pos : "—";
+      byPos[grp].push({ ...p, rank: p.rank || 9999 });
     });
 
-    // Group bench by position
-    const benchGroups = {};
-    bench.forEach(p => {
-      const pos = p.position || "?";
-      if (!benchGroups[pos]) benchGroups[pos] = [];
-      benchGroups[pos].push(p);
-    });
+    // Sort each group by rank
+    Object.values(byPos).forEach(arr => arr.sort((a, b) => a.rank - b.rank));
 
-    // Render a single player chip
-    const chip = (p, isBench = false) => {
-      const col = POS_COLOR[p.position] || "#9ca3af";
-      return `<div class="trn-rp-chip${isBench ? " trn-rp-chip--bench" : ""}">
-        <span class="trn-rp-pos" style="background:${col}22;color:${col};border-color:${col}44">${_esc(p.position)}</span>
-        <span class="trn-rp-name">${_esc(p.name)}</span>
-        <span class="trn-rp-nfl">${_esc(p.team)}</span>
-      </div>`;
-    };
-
-    // Render one position group column (label + chips)
-    const posCol = (pos, players, isBench) => {
-      if (!players?.length) return "";
+    // Build position group sections — same structure as roster.js
+    let posHTML = "";
+    for (const pos of [...POS_ORDER_TRN, "—"]) {
+      const group = byPos[pos];
+      if (!group.length) continue;
       const col = POS_COLOR[pos] || "#9ca3af";
-      return `<div class="trn-rp-col">
-        <div class="trn-rp-col-label" style="color:${col}">${_esc(pos)}</div>
-        ${players.map(p => chip(p, isBench)).join("")}
-      </div>`;
-    };
-
-    // Build starter columns in position order
-    const starterCols = POS_ORDER
-      .filter(pos => starterGroups[pos]?.length)
-      .map(pos => posCol(pos, starterGroups[pos], false))
-      .join("");
-
-    // Build bench columns — all bench grouped under a single "BN" section
-    const benchAllPos = POS_ORDER.filter(pos => benchGroups[pos]?.length);
-    const benchSection = benchAllPos.length ? `
-      <div class="trn-rp-divider"></div>
-      <div class="trn-rp-bench-label">BENCH</div>
-      <div class="trn-rp-groups trn-rp-groups--bench">
-        ${benchAllPos.map(pos => posCol(pos, benchGroups[pos], true)).join("")}
-      </div>` : "";
+      posHTML += `
+        <div class="roster-pos-group">
+          <div class="roster-pos-header" style="color:${col}">
+            ${_esc(pos)}
+            <span class="roster-pos-count">${group.length}</span>
+          </div>
+          ${group.map(p => {
+            const isBench = !p.isStarter;
+            return `
+              <div class="roster-player-row trn-roster-player-row${isBench ? " trn-roster-player-row--bench" : ""}">
+                <div class="roster-player-info">
+                  <div class="roster-player-name">${_esc(p.name)}</div>
+                  <div class="roster-player-meta">
+                    <span class="roster-nfl-team">${_esc(p.team)}</span>
+                    ${isBench ? `<span class="trn-bn-tag">BN</span>` : ""}
+                  </div>
+                </div>
+              </div>`;
+          }).join("")}
+        </div>`;
+    }
 
     return `
       <div class="trn-roster-card ${isMe ? "trn-roster-card--me" : ""}">
@@ -4673,11 +4661,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
           <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
         </div>
-        <div class="trn-rp-body">
-          <div class="trn-rp-groups">
-            ${starterCols}
-          </div>
-          ${benchSection}
+        <div class="trn-roster-body">
+          <div class="roster-positions">${posHTML}</div>
         </div>
       </div>`;
   }
