@@ -1406,6 +1406,7 @@ const DLRTournament = (() => {
         <div style="display:flex;gap:var(--space-2)">
           <button class="btn-primary btn-sm" id="trn-import-participants-btn">Import CSV</button>
           <button class="btn-secondary btn-sm" id="trn-export-participants-btn">Export CSV</button>
+          <button class="btn-ghost btn-sm" id="trn-template-participants-btn" title="Download a blank CSV template with the correct column names">⬇ Template</button>
         </div>
       </div>
       <input type="file" id="trn-participants-csv-input" accept=".csv" style="display:none" />
@@ -1434,13 +1435,12 @@ const DLRTournament = (() => {
 
       <div class="trn-section-card" style="margin-top:var(--space-4)">
         <div class="trn-section-card-title">CSV Import Format</div>
-        <div style="font-size:.8rem;color:var(--color-text-dim);line-height:1.7">
-          Requires a header row. Columns should match your registration form:<br>
-          <strong>Required:</strong> <code>displayName, email</code><br>
-          <strong>Platform (for DLR matching):</strong> <code>sleeperUsername, mflEmail, yahooUsername</code><br>
-          <strong>Optional (if enabled on your form):</strong> <code>teamName, twitterHandle, gender</code><br>
-          <strong>History:</strong> <code>years</code> — pipe-separated e.g. <code>2023|2024</code><br>
-          Missing fields are imported as blank — no rows are rejected.
+        <div style="font-size:.8rem;color:var(--color-text-dim);line-height:1.8">
+          Must have a header row with these column names (case-insensitive):<br>
+          <code style="font-size:.78rem;display:block;margin:var(--space-2) 0;padding:var(--space-2) var(--space-3);background:var(--color-bg);border-radius:var(--radius-sm);border:1px solid var(--color-border)">displayName, email, sleeperUsername, mflEmail, yahooUsername, teamName, twitterHandle, gender, years</code>
+          <strong>displayName</strong> and <strong>email</strong> are the most important. Platform columns (<strong>sleeperUsername</strong>, <strong>mflEmail</strong>, <strong>yahooUsername</strong>) are used to auto-link participants to their DLR accounts.<br>
+          <strong>years</strong> — pipe-separated list of years this person has competed, e.g. <code>2022|2023|2024</code><br>
+          All columns are optional except displayName. Download the template to get started.
         </div>
       </div>
     `;
@@ -1455,6 +1455,18 @@ const DLRTournament = (() => {
     document.getElementById("trn-export-participants-btn")?.addEventListener("click", () =>
       _exportParticipantsCSV(t)
     );
+    document.getElementById("trn-template-participants-btn")?.addEventListener("click", () => {
+      const headers = "displayName,email,sleeperUsername,mflEmail,yahooUsername,teamName,twitterHandle,gender,years";
+      const example = "Jane Smith,jane@example.com,janesmith,,,,@janesmith,Female,2023|2024";
+      const csv  = headers + "\n" + example + "\n";
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = "participants_template.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
 
     const searchAndFilter = () => {
       const q      = (document.getElementById("trn-participants-search")?.value || "").toLowerCase();
