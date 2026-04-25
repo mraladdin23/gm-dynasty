@@ -990,20 +990,24 @@
   flex-wrap: wrap;
 }
 .trn-az-pill {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text-dim);
-  font-size: .8rem;
+  font-size: .72rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: all .15s;
+  transition: border-color var(--transition), color var(--transition);
 }
-.trn-az-pill.active,
 .trn-az-pill:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-dim, color-mix(in srgb, var(--color-accent) 12%, transparent));
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.trn-az-pill.active {
+  background: rgba(240,180,41,.12);
+  border-color: var(--color-gold-dim, var(--color-gold));
+  color: var(--color-gold);
 }
 
 /* ── ADP List ────────────────────────────────────────── */
@@ -1580,13 +1584,13 @@
   font-size: .82rem;
   font-weight: 600;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-dim);
   border: none;
   cursor: pointer;
   transition: background var(--transition), color var(--transition);
 }
 .trn-yn-btn + .trn-yn-btn { border-left: 1px solid var(--color-border); }
-.trn-yn-btn:hover { background: var(--color-surface-2); color: var(--color-text); }
+.trn-yn-btn:hover { background: var(--color-surface-2, var(--color-surface)); color: var(--color-text); }
 .trn-yn-btn--active {
   background: var(--color-gold);
   color: #0a0e1a;
@@ -1602,8 +1606,8 @@
   height: 16px;
   font-size: .65rem;
   font-weight: 700;
-  background: var(--color-surface-2);
-  color: var(--color-text-muted);
+  background: var(--color-surface-2, var(--color-surface));
+  color: var(--color-text-dim);
   border: 1px solid var(--color-border);
   border-radius: 50%;
   cursor: help;
