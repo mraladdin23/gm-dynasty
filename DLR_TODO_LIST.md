@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 24, 2026 — F5-P3-U5 (Rosters) complete. A1 (password reset), A2 (delete leagues), F5-P3-S8 (duplicate registration) added and built. Next: F5-P3 S1–S4 small fixes batch, then S6, S7, P4.*
+*Updated: April 25, 2026 — F5-P3-S1–S4 small fixes batch complete. Next: F5-P3-S6 (rules versioning), then S7, P4.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -78,51 +78,13 @@ to match. Interchangeable visual elements — door style, nameplates, decoration
 
 **Phase 1 — Foundation ✅ COMPLETE**
 **Phase 2 — Core Views ✅ COMPLETE** (Standings, Info, Rules, Registration, Participants)
-**Phase 3 — Analytics ⚠️ IN PROGRESS** (U4, U5, S-series remain)
+**Phase 3 — Analytics ⚠️ IN PROGRESS** (S6, S7 remain)
 **Phase 4 — Custom Playoffs** — next major milestone after P3 is clean
 **Phase 5 — Advanced** — after Phase 4
 
 ---
 
-## ── F5-P3: Analytics UX Improvements ──────────────────────────────
-
-### ~~F5-P3-U5 — Rosters: horizontal position-group card layout~~ ✅ COMPLETE
-**What:** ~~Reorganize the roster card to show players in horizontal position groups
-going across the card (QB | RB | WR | TE | FLEX | K | DEF), starters first then
-bench, ordered by rank/name within each group. Currently shows a flat vertical list.~~
-**Files:** `tournament.js`, `tournament.css`
-
----
-
 ## ── F5-P3: Small Fixes (quick wins) ───────────────────────────────
-
-### F5-P3-S1 — Registration: include tournament name + year in header 🟢
-**What:** Register button overlay title should say "Register for [Name] [Year]"
-(e.g. "Register for Scott Fish Bowl 2025") to make it unambiguous which year's
-registration the user is submitting.
-**Files:** `tournament.js`, `tournaments/index.html`
-**Attach:** `tournament.js`, `tournaments/index.html`
-
-### F5-P3-S2 — Standings: desktop vs mobile column strategy 🟢
-**What:** On desktop (>640px) restore League and Conference as separate columns.
-On mobile keep them stacked under display name. Internal and public site should use
-identical CSS.
-**Files:** `tournament.css`, `tournaments/index.html`
-**Attach:** `tournament.css`, `tournaments/index.html`
-
-### F5-P3-S3 — Public site: Twitter handle in standings 🟢
-**What:** On desktop (public site), show Twitter handle in parentheses after the
-display name as a clickable link. On mobile, make the display name itself the clickable
-link to their Twitter profile (if available).
-**Files:** `tournaments/index.html`
-**Attach:** `tournaments/index.html`
-
-### F5-P3-S4 — Info page: "Leagues" stat should say "Years" 🟢
-**What:** The stat card on the Info tab says "X Leagues" but it actually represents
-the number of distinct years the tournament has run. Change label to "Years" and
-compute from distinct years in standingsCache.
-**Files:** `tournament.js`, `tournaments/index.html`
-**Attach:** `tournament.js`, `tournaments/index.html`
 
 ### F5-P3-S6 — Rules: year-specific versioning 🟢
 **What:** Rules should be storable per year so 2023 rules are preserved when 2024
@@ -218,20 +180,18 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 |---|-----|-------------|--------|--------------|
 | 1 | ~~F5-P3-U4~~ | ~~Matchups: card layout + score histogram~~ | ✅ Done | — |
 | 2 | ~~F5-P3-U5~~ | ~~Rosters: position-group layout, 5-across grid~~ | ✅ Done | — |
-| 3 | F5-P3-S1–S4, S8 | Small fixes batch (registration, standings, info, years, dupe-check) | Medium | `tournament.js`, `tournament.css`, `tournaments/index.html` |
+| 3 | ~~F5-P3-S1–S4, S8~~ | ~~Small fixes batch (registration, standings, info, years, dupe-check)~~ | ✅ Done | — |
 | 4 | F5-P3-S6 | Rules: year-specific versioning | Small | `tournament.js` |
 | 5 | F5-P3-S7 | CSS consistency pass | Medium | `tournament.css`, `tournaments/index.html` |
-| 6 | A1 | Password reset | Small | `auth.js`, `index.html`, `auth.css` |
-| 7 | A2 | Delete league / delete platform from profile | Medium | `profile.js`, `firebase-db.js`, `index.html`, `locker.css` |
-| 8 | F5-P4 scoping | Custom playoffs scoping session | — | `tournament.js` |
-| 9 | F5-P4-A/B/C | Playoff config: method + qualification + format | High | `tournament.js` |
-| 10 | F5-P4-D/E/F | Playoff bracket rendering + sync + champion | High | `tournament.js`, `tournament.css`, `standings.js` |
-| 11 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 12 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 13 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
-| 14 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 15 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 16 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 6 | F5-P4 scoping | Custom playoffs scoping session | — | `tournament.js` |
+| 7 | F5-P4-A/B/C | Playoff config: method + qualification + format | High | `tournament.js` |
+| 8 | F5-P4-D/E/F | Playoff bracket rendering + sync + champion | High | `tournament.js`, `tournament.css`, `standings.js` |
+| 9 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 10 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 11 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
+| 12 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 13 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 14 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -252,6 +212,16 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 ## ✅ Completed
 
+### April 25, 2026 — Tournament Small Fixes Batch + Bug Fixes
+
+- **F5-P3-S1 — Registration year in header:** Registration overlay and section card title now read `meta.registrationYear` (stamped when admin advances to `registration_open`) instead of the standings year. Falls back to `new Date().getFullYear()`. Public site uses `t.registrationYear` from public node. (tournament.js, tournaments/index.html)
+- **F5-P3-S2 — Standings desktop/mobile column strategy:** Desktop (>640px) shows League and Conference as separate columns (`trn-col-league`, `trn-col-conf`). Mobile hides those columns and shows a stacked sub-line under the display name. Identical CSS behavior on internal and public sites. (tournament.js, tournament.css, tournaments/index.html)
+- **F5-P3-S3 — Public standings Twitter handle:** Desktop shows `@handle` as a pill badge next to the name (matching gender badge style). Mobile sub-line makes the display name itself a clickable Twitter link, followed by " · League Name". `twitterHandle` added to `participantMap` in `_writePublicSummary` so it flows to the public node. Internal standings match the same pill format. (tournament.js, tournament.css, tournaments/index.html)
+- **F5-P3-S4 — Info page "Years" stat:** Stat card now computes distinct years from `standingsCache` and shows "X Years" when standings data exists, falling back to "X Leagues" for new tournaments without history. Both internal and public. (tournament.js, tournaments/index.html)
+- **Bug — `_writePublicSummary` wiping ADP:** Switched from `.set()` to `.update()` on `publicTournaments/{tid}` so `adp` and `adpByYear` written by `_writePublicADP` are never overwritten. (tournament.js)
+- **Bug — rankBy handler missing `_writePublicSummary` call:** Standings ranking dropdown save now calls `_writePublicSummary` after updating Firebase. (tournament.js)
+- **🔄 Re-publish Public Summary button:** Added to Admin Tools card on Overview tab. Does a fresh Firebase read then calls both `_writePublicSummary` and `_writePublicADP` — use this any time participant data (names, handles, gender) needs to be pushed to the public site. (tournament.js)
+
 ### April 24, 2026 — Auth, Profile, Tournament
 
 - **A1 — Password reset:** "Forgot your password?" link on login screen. Looks up real email from `gmd/users/{username}/email`, calls Firebase `sendPasswordResetEmail()`. Wired entirely in `auth.js` + inline script in `index.html`. `auth.css` updated with `.auth-forgot`, `.auth-reset-hint`, `.auth-success` styles. (auth.js, auth.css, index.html)
@@ -271,7 +241,6 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - **Public ADP by year** — `_writePublicADP` writes to `adpByYear/{year}` + flat `/adp`; public site reads year-specific ADP; year selector fetches correct year on demand; auto-refresh during active drafts stops when tournament goes inactive
 - **`_computeADP`** — now returns `min`, `max`, `p25`, `p75` via linear interpolation
 - **`_adpRefreshTimer`** — declared in outer scope in `tournaments/index.html`
-
 - **F5-P3-U4:** Matchups UX overhaul — 5-card horizontal grid, 4 dropdown sections (Highest/Lowest/Closest/Blowouts), matchup cards with winner/loser/Δ/league lines, score histogram with median line and stat legend, improved AI recap prompt with distribution + lowest scorers
 
 ### Earlier completed items
