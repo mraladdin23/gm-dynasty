@@ -2783,7 +2783,7 @@ const DLRTournament = (() => {
           <button class="btn-secondary btn-sm" data-deny="${_esc(rid)}">✕ Deny</button>
         ` : ""}
         <button class="btn-primary" id="trn-save-invite-btn">Save Invite Link</button>
-        <button class="btn-danger btn-sm" id="trn-delete-reg-btn" style="margin-left:auto">🗑 Delete</button>
+        <button class="btn-danger" id="trn-delete-reg-btn" style="margin-left:auto">🗑 Delete</button>
       </div>
     `);
 
