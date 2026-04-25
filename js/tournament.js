@@ -60,6 +60,7 @@ const DLRTournament = (() => {
   let _activeAdminTab     = "overview";
   let _activeUserTab      = "info";
   let _tournamentYear     = null;   // global year filter — null = latest
+  let _rulesEditorYear    = null;   // year currently shown in admin rules editor
   let _viewingAsUser      = false;  // admin clicked "View" (participant mode)
 
   // ── Firebase helpers ───────────────────────────────────
@@ -566,10 +567,88 @@ const DLRTournament = (() => {
     }
   }
 
+  // ── Rules editor helpers ───────────────────────────────
+
+  // Build <option> list for the year dropdown in the admin rules editor.
+  // Shows all years that already have rules, plus the current calendar year
+  // if not already present, sorted descending. Selects _rulesEditorYear or latest.
+  function _buildRulesYearOptions(t) {
+    const rby  = t.rulesByYear || {};
+    const curY = new Date().getFullYear();
+    const years = [...new Set([...Object.keys(rby).map(Number), curY])]
+      .sort((a, b) => b - a);
+    if (!_rulesEditorYear || !years.includes(Number(_rulesEditorYear))) {
+      _rulesEditorYear = String(years[0]);
+    }
+    return years.map(y =>
+      `<option value="${y}" ${String(y) === String(_rulesEditorYear) ? "selected" : ""}>${y}</option>`
+    ).join("");
+  }
+
+  // Build the textarea + metadata footer for one year's rules.
+  function _buildRulesEditorInner(rules) {
+    rules = rules || {};
+    return `
+      <div class="form-group">
+        <label>Rules Document</label>
+        <textarea id="trn-rules-input" rows="14"
+          placeholder="Enter the full rules for your tournament…&#10;&#10;Use blank lines to separate sections. URLs are auto-linked."
+          style="width:100%;resize:vertical;font-family:inherit;font-size:.875rem">${_esc(rules.content || "")}</textarea>
+        <span class="field-hint">Plain text — line breaks preserved. URLs become clickable links for participants.</span>
+      </div>
+      ${rules.updatedAt ? `
+        <div style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+          Last updated: ${new Date(rules.updatedAt).toLocaleString()}
+          ${rules.updatedBy ? " by @" + _esc(rules.updatedBy) : ""}
+          ${rules.version ? " — v" + _esc(String(rules.version)) : ""}
+        </div>
+      ` : ""}
+      <div class="trn-form-actions">
+        <button class="btn-primary" id="trn-save-rules-btn">Publish Rules</button>
+      </div>`;
+  }
+
+  // Bind (or rebind after year change) the save handler.
+  function _bindSaveRulesHandler(tid, body) {
+    const btn = document.getElementById("trn-save-rules-btn");
+    if (!btn) return;
+    btn.replaceWith(btn.cloneNode(true));  // strip old listeners
+    document.getElementById("trn-save-rules-btn")?.addEventListener("click", async () => {
+      const year    = _rulesEditorYear || String(new Date().getFullYear());
+      const content = document.getElementById("trn-rules-input")?.value || "";
+      const rby     = _tournaments[tid]?.rulesByYear || {};
+      const prev    = rby[year] || {};
+      const newRules = {
+        content,
+        version:   (parseInt(prev.version || 0)) + 1,
+        updatedAt: Date.now(),
+        updatedBy: _currentUsername
+      };
+      try {
+        await GMD.child(`tournaments/${tid}/rulesByYear/${year}`).set(newRules);
+        if (!_tournaments[tid].rulesByYear) _tournaments[tid].rulesByYear = {};
+        _tournaments[tid].rulesByYear[year] = newRules;
+        _writePublicSummary(tid, _tournaments[tid]);
+        showToast(`Rules published for ${year} (v${newRules.version}) ✓`);
+        // Refresh inner to show updated metadata
+        const inner = document.getElementById("trn-rules-editor-inner");
+        if (inner) inner.innerHTML = _buildRulesEditorInner(newRules);
+        _bindSaveRulesHandler(tid, body);
+      } catch(e) { showToast("Failed to publish rules", "error"); }
+    });
+  }
+
   // ── Admin: Info / Rules editor ────────────────────────
   function _renderAdminInfoEdit(tid, t, body) {
     const meta  = t.meta  || {};
-    const rules = t.rules || {};
+    // Resolve initial editor year: keep _rulesEditorYear if valid, else latest with content, else current year
+    const _rby  = t.rulesByYear || {};
+    const _curY = new Date().getFullYear();
+    const _rbyYears = Object.keys(_rby).map(Number).sort((a,b) => b-a);
+    if (!_rulesEditorYear || !_rbyYears.includes(Number(_rulesEditorYear))) {
+      _rulesEditorYear = _rbyYears.length ? String(_rbyYears[0]) : String(_curY);
+    }
+    const rules = _rby[_rulesEditorYear] || {};
     const social = meta.socialLinks || {};
 
     body.innerHTML = `
@@ -602,25 +681,18 @@ const DLRTournament = (() => {
       </div>
 
       <!-- Rules section -->
-      <div class="trn-section-card">
-        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <div class="trn-section-card" id="trn-rules-editor-card">
+        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2)">
           <span>Tournament Rules</span>
-          ${rules.version ? `<span class="trn-rules-version-badge">v${_esc(String(rules.version))}</span>` : ""}
-        </div>
-        <div class="form-group">
-          <label>Rules Document</label>
-          <textarea id="trn-rules-input" rows="14" placeholder="Enter the full rules for your tournament…&#10;&#10;Use blank lines to separate sections. URLs are auto-linked."
-            style="width:100%;resize:vertical;font-family:inherit;font-size:.875rem">${_esc(rules.content || "")}</textarea>
-          <span class="field-hint">Plain text — line breaks preserved. URLs become clickable links for participants.</span>
-        </div>
-        ${rules.updatedAt ? `
-          <div style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-            Last updated: ${new Date(rules.updatedAt).toLocaleString()}
-            ${rules.updatedBy ? ` by @${_esc(rules.updatedBy)}` : ""}
+          <div style="display:flex;align-items:center;gap:var(--space-2)">
+            <label style="font-size:.8rem;font-weight:500;color:var(--color-text-dim)">Year:</label>
+            <select id="trn-rules-year-select" style="font-size:.8rem;padding:2px 6px">
+              ${_buildRulesYearOptions(t)}
+            </select>
           </div>
-        ` : ""}
-        <div class="trn-form-actions">
-          <button class="btn-primary" id="trn-save-rules-btn">Publish Rules</button>
+        </div>
+        <div id="trn-rules-editor-inner">
+          ${_buildRulesEditorInner(rules)}
         </div>
       </div>
     `;
@@ -650,27 +722,18 @@ const DLRTournament = (() => {
       } catch(e) { showToast("Failed to save info", "error"); }
     });
 
-    // Save rules handler
-    document.getElementById("trn-save-rules-btn")?.addEventListener("click", async () => {
-      const content = document.getElementById("trn-rules-input")?.value || "";
-      const prevVersion = parseInt(rules.version || 0);
-      const newRules = {
-        content,
-        version:   prevVersion + 1,
-        updatedAt: Date.now(),
-        updatedBy: _currentUsername
-      };
-      try {
-        await GMD.child("tournaments/" + tid + "/rules").set(newRules);
-        if (_tournaments[tid]) _tournaments[tid].rules = newRules;
-        _writePublicSummary(tid, _tournaments[tid]);
-        showToast("Rules published (v" + newRules.version + ") ✓");
-        // Refresh tab to show updated version badge
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
-        _renderAdminInfoEdit(tid, _tournaments[tid], body);
-      } catch(e) { showToast("Failed to publish rules", "error"); }
+    // Rules year dropdown — reload editor inner HTML on change
+    document.getElementById("trn-rules-year-select")?.addEventListener("change", function() {
+      _rulesEditorYear = this.value;
+      const rby = _tournaments[tid]?.rulesByYear || {};
+      const yr  = _rulesEditorYear;
+      const inner = document.getElementById("trn-rules-editor-inner");
+      if (inner) inner.innerHTML = _buildRulesEditorInner(rby[yr] || {});
+      _bindSaveRulesHandler(tid, body);
     });
+
+    // Save rules handler (extracted so year-change can rebind)
+    _bindSaveRulesHandler(tid, body);
   }
 
   // ── Admin: Overview tab ────────────────────────────────
@@ -4699,7 +4762,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const regCount    = Object.keys(t.registrations || {}).length;
     const distinctYears = [...new Set(Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean))].length || null;
     const social      = meta.socialLinks || {};
-    const rules       = t.rules          || null;
+    // Rules: pick latest year from rulesByYear for the info preview
+    const _rbyInfo  = t.rulesByYear || {};
+    const _rbyLatestYear = Object.keys(_rbyInfo).map(Number).sort((a,b)=>b-a)[0] || null;
+    const rules = _rbyLatestYear ? (_rbyInfo[_rbyLatestYear] || null) : null;
 
     // Status banner (active/playoffs/completed get a colored banner)
     const bannerColors = {
@@ -4807,8 +4873,40 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
   // ── User: Rules tab ─────────────────────────────────────
   function _renderRulesTab(t, body) {
-    const rules = t.rules || null;
-    if (!rules?.content) {
+    const rby   = t.rulesByYear || {};
+    const years = Object.keys(rby).map(Number).sort((a, b) => b - a);
+
+    // Determine which year to show: honour _tournamentYear if set + available, else latest
+    let selYear = _tournamentYear && rby[_tournamentYear]
+      ? String(_tournamentYear)
+      : (years.length ? String(years[0]) : null);
+
+    function _renderRulesContent(year) {
+      const rules = rby[year] || null;
+      const inner = document.getElementById("trn-rules-content");
+      if (!inner) return;
+      if (!rules?.content) {
+        inner.innerHTML = `
+          <div class="trn-empty" style="padding:var(--space-4) 0">
+            <div class="trn-empty-icon">📋</div>
+            <div class="trn-empty-title">No rules for ${year}</div>
+            <div class="trn-empty-sub">The commissioner hasn't published rules for this year.</div>
+          </div>`;
+        return;
+      }
+      const htmlContent = rules.content
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+        .replace(/\n/g, "<br>")
+        .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+      inner.innerHTML = `
+        <div style="display:flex;gap:var(--space-3);align-items:center;margin-bottom:var(--space-3);font-size:.78rem;color:var(--color-text-dim)">
+          ${rules.version ? `<span>Version ${_esc(String(rules.version))}</span>` : ""}
+          ${rules.updatedAt ? `<span>${new Date(rules.updatedAt).toLocaleDateString()}</span>` : ""}
+        </div>
+        <div class="trn-info-bio trn-rules-full">${htmlContent}</div>`;
+    }
+
+    if (!selYear) {
       body.innerHTML = `
         <div class="trn-empty">
           <div class="trn-empty-icon">📋</div>
@@ -4818,23 +4916,29 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       return;
     }
 
-    const htmlContent = rules.content
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-      .replace(/\n/g, "<br>")
-      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+    const yearOptions = years.map(y =>
+      `<option value="${y}" ${String(y) === selYear ? "selected" : ""}>${y}</option>`
+    ).join("");
 
     body.innerHTML = `
       <div class="trn-section-card">
-        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2)">
           <span>Tournament Rules</span>
-          <div style="display:flex;gap:var(--space-3);align-items:center">
-            ${rules.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">Version ${_esc(String(rules.version))}</span>` : ""}
-            ${rules.updatedAt ? `<span style="font-size:.75rem;color:var(--color-text-dim)">${new Date(rules.updatedAt).toLocaleDateString()}</span>` : ""}
-          </div>
+          ${years.length > 1 ? `
+            <div style="display:flex;align-items:center;gap:var(--space-2)">
+              <label style="font-size:.8rem;color:var(--color-text-dim)">Year:</label>
+              <select id="trn-rules-year-view" style="font-size:.8rem;padding:2px 6px">${yearOptions}</select>
+            </div>` : ""}
         </div>
-        <div class="trn-info-bio trn-rules-full">${htmlContent}</div>
-      </div>
-    `;
+        <div id="trn-rules-content"></div>
+      </div>`;
+
+    _renderRulesContent(selYear);
+
+    document.getElementById("trn-rules-year-view")?.addEventListener("change", function() {
+      selYear = this.value;
+      _renderRulesContent(selYear);
+    });
   }
 
   // ── Register page overlay (opened via pill button) ───────
@@ -5198,7 +5302,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         registrationCount: Object.keys(regs).length,
         registrationForm:  meta.registrationForm || { fields: [], optionalFields: [], customQuestions: [] },
         standingsCache:    t.standingsCache  || {},
-        rules:             t.rules           || null,
+        rulesByYear:       t.rulesByYear      || {},
         participantMap
       };
 
