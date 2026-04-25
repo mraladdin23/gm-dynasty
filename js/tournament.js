@@ -1890,9 +1890,8 @@ const DLRTournament = (() => {
 
     const twitterLink = (r) => {
       if (!r.twitterHandle) return "";
-      const h    = r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle;
-      const disp = "@" + _esc(h);
-      return ' (<a href="https://x.com/' + _esc(h) + '" target="_blank" rel="noopener" class="trn-st-twitter">' + disp + '</a>)';
+      const h = r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle;
+      return '<a href="https://x.com/' + _esc(h) + '" target="_blank" rel="noopener" class="trn-st-twitter">@' + _esc(h) + '</a>';
     };
 
     const rowHtml = (r) =>
@@ -5152,8 +5151,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           .filter(Boolean).map(_psk).filter(Boolean);
         keys.forEach(k => {
           participantMap[k] = {
-            displayName: p.displayName || null,
-            gender:      p.gender      || null
+            displayName:   p.displayName   || null,
+            gender:        p.gender        || null,
+            twitterHandle: p.twitterHandle || null
           };
         });
       });
