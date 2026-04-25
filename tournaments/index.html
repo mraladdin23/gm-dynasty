@@ -383,7 +383,7 @@
           <div class="trn-register-page">
             <div class="trn-register-page-header">
               <button class="btn-ghost btn-sm" id="pub-reg-back">← Back to ${esc(t.name || "Tournament")}</button>
-              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")}${_selectedYear ? " " + _selectedYear : ""}</h2>
+              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")} ${t.registrationYear || new Date().getFullYear()}</h2>
             </div>
             <div id="pub-register-page-body"></div>
           </div>`;
@@ -605,7 +605,7 @@
                     <span class="standings-team-cell">
                       <span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>
                       <span class="trn-st-name-wrap">
-                        <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}${r.twitterHandle ? ` <a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" title="${esc(r.twitterHandle.startsWith("@") ? r.twitterHandle : "@"+r.twitterHandle)}">𝕏</a>` : ""}</span>
+                        <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}${r.twitterHandle ? ` (<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter">@${esc(r.twitterHandle.replace(/^@/,""))}</a>)` : ""}</span>
                         <span class="trn-st-league trn-st-league--mobile">${r.twitterHandle ? `<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(r.teamName)}</a>` : esc(r.teamName)} · ${esc(r.leagueName)}</span>
                       </span>
                     </span>
@@ -828,7 +828,7 @@
 
       body.innerHTML = `
         <div class="trn-section-card">
-          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")}${_selectedYear ? " " + _selectedYear : ""}</div>
+          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")} ${t.registrationYear || new Date().getFullYear()}</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
             Fill in the form below. Your registration will be reviewed by the tournament admin.
           </p>

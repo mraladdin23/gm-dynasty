@@ -870,7 +870,12 @@ const DLRTournament = (() => {
 
   async function _changeStatus(tid, newStatus) {
     try {
-      await _tMetaRef(tid).update({ status: newStatus });
+      const updates = { status: newStatus };
+      // Stamp the registration year once when opening registration
+      if (newStatus === "registration_open") {
+        updates.registrationYear = new Date().getFullYear();
+      }
+      await _tMetaRef(tid).update(updates);
       showToast(`Status updated to: ${STATUS_LABELS[newStatus]} ✓`);
       // Reload view
       const snap = await _tRef(tid).once("value");
@@ -1775,7 +1780,7 @@ const DLRTournament = (() => {
     const hasDiv        = divisions.length > 0;
     const lastSyncedStr = lastSynced ? new Date(lastSynced).toLocaleString() : "Never";
     // gender is shown as inline badge on team name, not a column
-    // twitterHandle is shown as a link icon on the name cell, not a column
+    // twitterHandle is shown as "(@handle)" link inline after the display name
     const extraCols = [];
 
     body.innerHTML = `
@@ -1885,14 +1890,15 @@ const DLRTournament = (() => {
 
     const twitterLink = (r) => {
       if (!r.twitterHandle) return "";
-      const h = r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle;
-      return ' <a href="https://x.com/' + _esc(h) + '" target="_blank" rel="noopener" class="trn-st-twitter" title="@' + _esc(h) + '">𝕏</a>';
+      const h    = r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle;
+      const disp = "@" + _esc(h);
+      return ' (<a href="https://x.com/' + _esc(h) + '" target="_blank" rel="noopener" class="trn-st-twitter">' + disp + '</a>)';
     };
 
     const rowHtml = (r) =>
       "<tr>" +
       '<td class="standings-rank">' + r.overallRank + "</td>" +
-      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league trn-st-league--mobile\">" + _esc(r.leagueName) + "</span></span></span></td>" +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league trn-st-league--mobile\">" + (r.twitterHandle ? '<a href="https://x.com/' + _esc(r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle) + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">' + _esc(r.teamName) + "</a>" : _esc(r.teamName)) + " · " + _esc(r.leagueName) + "</span></span></span></td>" +
       '<td class="trn-col-league">' + _esc(r.leagueName) + "</td>" +
       (hasConf ? '<td class="trn-col-conf">' + _esc(r.conference) + "</td>" : "") +
       (hasDiv  ? '<td class="trn-col-conf">' + _esc(r.division)   + "</td>" : "") +
@@ -4821,7 +4827,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       <div class="trn-register-page">
         <div class="trn-register-page-header">
           <button class="btn-ghost btn-sm" id="trn-reg-back-btn">← Back to ${_esc(meta.name || "Tournament")}</button>
-          <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${_esc(meta.name || "Tournament")}${_tournamentYear ? " " + _tournamentYear : ""}</h2>
+          <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${_esc(meta.name || "Tournament")} ${meta.registrationYear || new Date().getFullYear()}</h2>
         </div>
         <div id="trn-register-page-body"></div>
       </div>`;
@@ -4875,7 +4881,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       ` : ""}
 
       <div class="trn-section-card">
-        <div class="trn-section-card-title">Register for ${_esc(meta.name || "Tournament")}${_tournamentYear ? " " + _tournamentYear : ""}</div>
+        <div class="trn-section-card-title">Register for ${_esc(meta.name || "Tournament")} ${meta.registrationYear || new Date().getFullYear()}</div>
         ${allFlds.map(f => {
           const isRequired = STD_FIELDS.includes(f);
           const isMissing  = missingFields.includes(f);
@@ -5161,7 +5167,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         bio:               meta.bio          || "",
         donationLink:      meta.donationLink || "",
         socialLinks:       meta.socialLinks  || {},
-        createdAt:         meta.createdAt    || 0,
+        createdAt:         meta.createdAt        || 0,
+        registrationYear:  meta.registrationYear || null,
         leagueCount,
         registrationCount: Object.keys(regs).length,
         registrationForm:  meta.registrationForm || { fields: [], optionalFields: [], customQuestions: [] },
