@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 24, 2026 — F5-P3 Analytics mostly complete. Remaining: U5 (Rosters), S-series small fixes, then P4 (Custom Playoffs).*
+*Updated: April 24, 2026 — F5-P3-U5 (Rosters) complete. A1 (password reset), A2 (delete leagues), F5-P3-S8 (duplicate registration) added and built. Next: F5-P3 S1–S4 small fixes batch, then S6, S7, P4.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -86,12 +86,11 @@ to match. Interchangeable visual elements — door style, nameplates, decoration
 
 ## ── F5-P3: Analytics UX Improvements ──────────────────────────────
 
-### F5-P3-U5 — Rosters: horizontal position-group card layout 🟡
-**What:** Reorganize the roster card to show players in horizontal position groups
+### ~~F5-P3-U5 — Rosters: horizontal position-group card layout~~ ✅ COMPLETE
+**What:** ~~Reorganize the roster card to show players in horizontal position groups
 going across the card (QB | RB | WR | TE | FLEX | K | DEF), starters first then
-bench, ordered by rank/name within each group. Currently shows a flat vertical list.
+bench, ordered by rank/name within each group. Currently shows a flat vertical list.~~
 **Files:** `tournament.js`, `tournament.css`
-**Attach:** `tournament.js`, `tournament.css`
 
 ---
 
@@ -218,19 +217,21 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 | # | ID | Description | Effort | Files Needed |
 |---|-----|-------------|--------|--------------|
 | 1 | ~~F5-P3-U4~~ | ~~Matchups: card layout + score histogram~~ | ✅ Done | — |
-| 2 | F5-P3-U5 | Rosters: horizontal position-group layout | Small | `tournament.js`, `tournament.css` |
-| 3 | F5-P3-S1–S4 | Small fixes batch (registration, standings, info, years) | Medium | `tournament.js`, `tournament.css`, `tournaments/index.html` |
+| 2 | ~~F5-P3-U5~~ | ~~Rosters: position-group layout, 5-across grid~~ | ✅ Done | — |
+| 3 | F5-P3-S1–S4, S8 | Small fixes batch (registration, standings, info, years, dupe-check) | Medium | `tournament.js`, `tournament.css`, `tournaments/index.html` |
 | 4 | F5-P3-S6 | Rules: year-specific versioning | Small | `tournament.js` |
 | 5 | F5-P3-S7 | CSS consistency pass | Medium | `tournament.css`, `tournaments/index.html` |
-| 6 | F5-P4 scoping | Custom playoffs scoping session | — | `tournament.js` |
-| 7 | F5-P4-A/B/C | Playoff config: method + qualification + format | High | `tournament.js` |
-| 8 | F5-P4-D/E/F | Playoff bracket rendering + sync + champion | High | `tournament.js`, `tournament.css`, `standings.js` |
-| 9 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 10 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 11 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
-| 12 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 13 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 14 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 6 | A1 | Password reset | Small | `auth.js`, `index.html`, `auth.css` |
+| 7 | A2 | Delete league / delete platform from profile | Medium | `profile.js`, `firebase-db.js`, `index.html`, `locker.css` |
+| 8 | F5-P4 scoping | Custom playoffs scoping session | — | `tournament.js` |
+| 9 | F5-P4-A/B/C | Playoff config: method + qualification + format | High | `tournament.js` |
+| 10 | F5-P4-D/E/F | Playoff bracket rendering + sync + champion | High | `tournament.js`, `tournament.css`, `standings.js` |
+| 11 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 12 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 13 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
+| 14 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 15 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 16 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -250,6 +251,13 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ---
 
 ## ✅ Completed
+
+### April 24, 2026 — Auth, Profile, Tournament
+
+- **A1 — Password reset:** "Forgot your password?" link on login screen. Looks up real email from `gmd/users/{username}/email`, calls Firebase `sendPasswordResetEmail()`. Wired entirely in `auth.js` + inline script in `index.html`. `auth.css` updated with `.auth-forgot`, `.auth-reset-hint`, `.auth-success` styles. (auth.js, auth.css, index.html)
+- **A2 — Delete league / delete platform from profile:** Single-league delete from ⋯ options modal (🗑 Remove button). Platform batch delete (🗑 Remove All) per platform in Edit Profile. Shared `#delete-league-modal` confirmation dialog. `GMDB.deleteLeague()` and `GMDB.deleteLeaguesByPlatform()` added — both clean up `leagueMeta` entries. In-memory state and rendered cards update immediately after delete. `btn-danger` style added to `locker.css`. (firebase-db.js, profile.js, index.html, locker.css)
+- **F5-P3-S8 — Duplicate registration prevention:** Check runs at top of `_submitRegistration` before field validation. Matches on DLR username, email, and Sleeper username against existing registrations. Shows clear message and blocks second submission. (tournament.js)
+- **F5-P3-U5 — Rosters tab layout overhaul:** Position-group layout matching league detail roster tab (`roster.js` pattern: `roster-pos-group` / `roster-pos-header` / `roster-player-row`). Starters and bench together, sorted by rank within group, bench dimmed at opacity .45. Single-line player rows: name + NFL team abbreviation inline. 5-across CSS grid on desktop (`repeat(5, 1fr)`, `align-items: stretch`), single column on mobile. All card bodies equal height via `flex: 1` on `.trn-roster-body`. (tournament.js, tournament.css)
 
 ### F5-P3 — Analytics (Draft, ADP, Admin UI) — completed April 2026
 - **F5-P3-B1:** Draft team ID collision — picks keyed as `{leagueId}:{teamId}` throughout `_renderAnalyticsDraft` and `_loadAndRenderMatchups`

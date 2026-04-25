@@ -383,7 +383,7 @@
           <div class="trn-register-page">
             <div class="trn-register-page-header">
               <button class="btn-ghost btn-sm" id="pub-reg-back">← Back to ${esc(t.name || "Tournament")}</button>
-              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")}</h2>
+              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")}${_selectedYear ? " " + _selectedYear : ""}</h2>
             </div>
             <div id="pub-register-page-body"></div>
           </div>`;
@@ -456,9 +456,10 @@
         ? rules.content.split("\n").slice(0,3).map(l => esc(l)).join("<br>") + (rules.content.split("\n").length > 3 ? "<br><em>…</em>" : "")
         : null;
 
+      const _infoYears = [...new Set(Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean))].length || null;
       body.innerHTML = `
         <div class="trn-info-stats" style="justify-content:flex-start">
-          <div class="trn-stat-card"><div class="trn-stat-value">${t.leagueCount || 0}</div><div class="trn-stat-label">Leagues</div></div>
+          <div class="trn-stat-card"><div class="trn-stat-value">${_infoYears || t.leagueCount || 0}</div><div class="trn-stat-label">${_infoYears ? "Years" : "Leagues"}</div></div>
           <div class="trn-stat-card"><div class="trn-stat-value">${t.registrationCount || 0}</div><div class="trn-stat-label">Registered</div></div>
           <div class="trn-stat-card"><div class="trn-stat-value">${t.regType === "invite" ? "Invite" : "Open"}</div><div class="trn-stat-label">Registration</div></div>
         </div>
@@ -539,7 +540,8 @@
             losses:      team.losses   || 0,
             pf:          team.pf       || 0,
             pa:          team.pa       || 0,
-            gender:      p.gender      || ""
+            gender:      p.gender      || "",
+            twitterHandle: pMap[_sk(team.teamName || "")]?.twitterHandle || ""
           });
         });
         if ((lc.lastSynced || 0) > lastSynced) lastSynced = lc.lastSynced;
@@ -588,7 +590,8 @@
             <thead><tr>
               <th class="standings-rank" data-col="overallRank" style="${thStyle}">#${si("overallRank")}</th>
               <th data-col="teamName" style="${thStyle}">Team${si("teamName")}</th>
-              ${hasConf ? `<th data-col="conference" style="${thStyle}">Conf${si("conference")}</th>` : ""}
+              <th data-col="leagueName" class="trn-col-league" style="${thStyle}">League${si("leagueName")}</th>
+              ${hasConf ? `<th data-col="conference" class="trn-col-conf" style="${thStyle}">Conf${si("conference")}</th>` : ""}
               <th class="standings-win"  data-col="wins"   style="${thStyle}">W${si("wins")}</th>
               <th class="standings-loss" data-col="losses" style="${thStyle}">L${si("losses")}</th>
               <th class="standings-num"  data-col="pf"     style="${thStyle}">PF${si("pf")}</th>
@@ -596,18 +599,19 @@
             </tr></thead>
             <tbody id="pub-st-tbody">
               ${sorted.map(r => `
-                <tr data-name="${esc(r.teamName.toLowerCase())}" data-raw="${esc((r.rawTeamName||r.teamName).toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}">
+                <tr data-name="${esc(r.teamName.toLowerCase())}" data-raw="${esc((r.rawTeamName||r.teamName).toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}" data-conf="${esc((r.conference||"").toLowerCase())}">
                   <td class="standings-rank">${r.overallRank}</td>
                   <td>
                     <span class="standings-team-cell">
                       <span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>
                       <span class="trn-st-name-wrap">
-                        <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}</span>
-                        <span class="trn-st-league">${esc(r.leagueName)}</span>
+                        <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}${r.twitterHandle ? ` <a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" title="${esc(r.twitterHandle.startsWith("@") ? r.twitterHandle : "@"+r.twitterHandle)}">𝕏</a>` : ""}</span>
+                        <span class="trn-st-league trn-st-league--mobile">${r.twitterHandle ? `<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(r.teamName)}</a>` : esc(r.teamName)} · ${esc(r.leagueName)}</span>
                       </span>
                     </span>
                   </td>
-                  ${hasConf ? `<td>${esc(r.conference)}</td>` : ""}
+                  <td class="trn-col-league">${esc(r.leagueName)}</td>
+                  ${hasConf ? `<td class="trn-col-conf">${esc(r.conference)}</td>` : ""}
                   <td class="standings-win">${r.wins}</td>
                   <td class="standings-loss">${r.losses}</td>
                   <td class="standings-num">${r.pf.toFixed(2)}</td>
@@ -621,7 +625,7 @@
       document.getElementById("pub-st-search")?.addEventListener("input", function() {
         const q = this.value.toLowerCase();
         document.querySelectorAll("#pub-st-tbody tr").forEach(row => {
-          const match = !q || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q);
+          const match = !q || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q) || row.dataset.conf?.includes(q);
           row.style.display = match ? "" : "none";
         });
       });
@@ -824,7 +828,7 @@
 
       body.innerHTML = `
         <div class="trn-section-card">
-          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")}</div>
+          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")}${_selectedYear ? " " + _selectedYear : ""}</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
             Fill in the form below. Your registration will be reviewed by the tournament admin.
           </p>

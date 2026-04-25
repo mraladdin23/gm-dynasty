@@ -37,7 +37,7 @@ GitHub Pages (dynastylockerroom.com)
 ## File Map — Every File and Its Purpose
 
 ### Root
-- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted at v=20. Viewport meta includes `viewport-fit=cover` for PWA safe area support.
+- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted: `locker.css v=22`, `auth.css v=6`, `tournament.css v=1`. Viewport meta includes `viewport-fit=cover` for PWA safe area support. Inline script at bottom wires forgot-password flow.
 - `worker.js` — Cloudflare Worker. MFL bundle fetches, Yahoo OAuth flow + bundle + playerStats. Deploy by pasting into Cloudflare dashboard.
 
 ### `css/`
@@ -51,8 +51,8 @@ GitHub Pages (dynastylockerroom.com)
 | File | Purpose |
 |------|---------|
 | `app.js` | Orchestrates screens, auth state, global monitors, button handlers. Yahoo OAuth callback handled via `#yahoo_token=` hash. |
-| `auth.js` | Firebase Auth wrapper. 8-second timeout on auth state to prevent mobile hang. |
-| `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. `saveLeagues` uses `.update()` (merge). |
+| `auth.js` | Firebase Auth wrapper. 8-second timeout on auth state to prevent mobile hang. `sendPasswordReset(username)` looks up real email from DB then calls Firebase `sendPasswordResetEmail()`. |
+| `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. `saveLeagues` uses `.update()` (merge). `deleteLeague(username, key)` and `deleteLeaguesByPlatform(username, platform)` remove `leagues/` + `leagueMeta/` entries. |
 | `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo/Sleeper import. Background identity resolution for all platforms. `resolved` flag system for historical league caching. `renderLocker` always closes the detail panel on load (prevents stuck panel on mobile). `_isSeasonComplete(l)` helper used for cross-platform finish label detection. |
 | `mfl.js` | MFL API helpers. Full set of normalizers for standings, matchups, brackets, drafts. |
 | `yahoo.js` | Yahoo OAuth token management, `getLeagueBundle`, `normalizeBundle`. Token logic: if `expiresAt` is unknown (0), use token optimistically. `hasKeeperPicks` detection from draft data. `uses_roster_import` in leagueMeta. `_getValidToken` and `_workerBase` exposed on public surface. |
@@ -153,9 +153,8 @@ Admin controls transitions manually. Draft tournaments with standings are still 
 
 ### Phase completion
 - **Phase 1 ✅** — Foundation (admin setup, roles, registration, participant DB, discovery)
-- **Phase 2 ✅ (mostly)** — Standings sync, public page, display name, gender badges, mobile fixes
-- **Phase 2 remaining** — Info page rich text, Rules tab
-- **Phase 3** — Analytics (draft board, weekly summaries, AI recap)
+- **Phase 2 ✅** — Standings sync, public page, display name, gender badges, Info tab, Rules tab
+- **Phase 3 ⚠️ IN PROGRESS** — Analytics: Draft ✅, ADP ✅, Matchups ✅, Rosters ✅. Remaining: S1–S4 small fixes, S6 (rules versioning), S7 (CSS pass)
 - **Phase 4** — Custom playoffs (bracket config, rendering)
 - **Phase 5** — Advanced (cross-platform identity merge, emails, message board)
 
@@ -175,7 +174,8 @@ Admin controls transitions manually. Draft tournaments with standings are still 
 - Do NOT set `overflow` on child containers inside a view — creates nested scroll contexts that break things
 
 ### CSS versioning
-- `locker.css` is at **v=21**
+- `locker.css` is at **v=22**
+- `auth.css` is at **v=6**
 - `tournament.css` is at **v=1** — bump when deploying tournament CSS changes
 - Cache bust by incrementing `?v=N` in the `<link>` tag in `index.html`
 
@@ -223,8 +223,14 @@ Admin controls transitions manually. Draft tournaments with standings are still 
 - **T4:** Public page fully synced to internal — same CSS classes, tab dropdown, year in toolbar, dimmed last-synced
 - **Display name + gender:** Internal and public standings now show participant `displayName`; gender badges inline; `participantMap` written to public Firebase node; Firebase key sanitization (`_sk`) fixes illegal-char crash
 
-*Document updated: April 22, 2026*
-*F5-P2 mostly complete. Next: F5-T1 (median wins + column settings), then F5-P2 remaining (Info page + Rules tab).*
+**April 24, 2026 — Auth, Profile, Tournament P3 completion:**
+- **A1 (Password reset):** `Auth.sendPasswordReset(username)` looks up real email from `gmd/users/{username}/email`, calls `sendPasswordResetEmail()`. "Forgot your password?" link on login → forgot form → success/back flow. Wired via inline script in `index.html` (no app.js changes needed — auth tab handler only targets `${target}-form` by data-tab, never touches `#forgot-form`).
+- **A2 (Delete leagues):** `GMDB.deleteLeague()` and `GMDB.deleteLeaguesByPlatform()` remove `leagues/` and `leagueMeta/` keys. `_promptDeleteLeague()` wired to 🗑 Remove in league ⋯ modal. `_deleteAllPlatformLeagues()` wired to 🗑 Remove All in Edit Profile per platform. Shared `#delete-league-modal` confirmation dialog with cloned buttons to prevent stale listener accumulation. `btn-danger` + `btn-danger.btn-sm` added to `locker.css`.
+- **F5-P3-S8 (Duplicate registration):** Check at top of `_submitRegistration` — matches DLR username, email, Sleeper username against existing registrations before writing.
+- **F5-P3-U5 (Rosters):** 5-across CSS grid, position-group layout matching `roster.js` pattern, starters+bench together sorted by rank, bench dimmed, single-line name+NFL team, equal-height card bodies via flexbox.
+
+*Document updated: April 24, 2026*
+*F5-P3 nearly complete. Next: S1–S4 small fixes batch (tournament.js, tournament.css, tournaments/index.html), then S6, S7, P4.*
 
 ---
 
