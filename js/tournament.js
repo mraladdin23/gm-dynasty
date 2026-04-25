@@ -2783,6 +2783,7 @@ const DLRTournament = (() => {
           <button class="btn-secondary btn-sm" data-deny="${_esc(rid)}">✕ Deny</button>
         ` : ""}
         <button class="btn-primary" id="trn-save-invite-btn">Save Invite Link</button>
+        <button class="btn-danger btn-sm" id="trn-delete-reg-btn" style="margin-left:auto">🗑 Delete</button>
       </div>
     `);
 
@@ -2805,6 +2806,23 @@ const DLRTournament = (() => {
         _closeModal();
       } catch(err) {
         showToast("Failed to save invite link", "error");
+      }
+    });
+
+    document.getElementById("trn-delete-reg-btn")?.addEventListener("click", async () => {
+      const name = r.displayName || r.teamName || rid;
+      if (!confirm(`Delete registration for "${name}"? This cannot be undone.`)) return;
+      try {
+        await _tRegsRef(tid).child(rid).remove();
+        showToast("Registration deleted ✓");
+        _closeModal();
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        _writePublicSummary(tid, _tournaments[tid]);
+        const body = document.getElementById("trn-tab-body");
+        if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
+      } catch(err) {
+        showToast("Failed to delete registration", "error");
       }
     });
   }
