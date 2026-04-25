@@ -1294,12 +1294,18 @@
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: var(--space-3);
-  align-items: start;
+  align-items: stretch;
 }
 
 /* ── Card body ────────────────────────────────────────── */
 .trn-roster-body {
   padding: var(--space-2) var(--space-2);
+  flex: 1;
+}
+
+.trn-roster-card {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Slim player rows — no photo, no meta row */
