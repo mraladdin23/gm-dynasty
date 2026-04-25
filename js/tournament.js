@@ -4639,15 +4639,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </div>
           ${group.map(p => {
             const isBench = !p.isStarter;
+            const nfl = p.team && p.team !== "FA" ? ` <span class="trn-rp-nfl-inline">${_esc(p.team)}</span>` : "";
             return `
               <div class="roster-player-row trn-roster-player-row${isBench ? " trn-roster-player-row--bench" : ""}">
-                <div class="roster-player-info">
-                  <div class="roster-player-name">${_esc(p.name)}</div>
-                  <div class="roster-player-meta">
-                    <span class="roster-nfl-team">${_esc(p.team)}</span>
-                    ${isBench ? `<span class="trn-bn-tag">BN</span>` : ""}
-                  </div>
-                </div>
+                <div class="trn-rp-name-line">${_esc(p.name)}${nfl}</div>
               </div>`;
           }).join("")}
         </div>`;
