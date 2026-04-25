@@ -575,7 +575,12 @@ const DLRTournament = (() => {
   function _buildRulesYearOptions(t) {
     const rby  = t.rulesByYear || {};
     const curY = new Date().getFullYear();
-    const years = [...new Set([...Object.keys(rby).map(Number), curY])]
+    // Include every year that has standings data (i.e. the tournament ran that year)
+    const standingsYears = Object.values(t.standingsCache || {})
+      .map(lc => lc.year).filter(Boolean).map(Number);
+    // Also include the current registration year if set
+    const regYear = t.meta?.registrationYear ? parseInt(t.meta.registrationYear) : null;
+    const years = [...new Set([...Object.keys(rby).map(Number), ...standingsYears, regYear || curY])]
       .sort((a, b) => b - a);
     if (!_rulesEditorYear || !years.includes(Number(_rulesEditorYear))) {
       _rulesEditorYear = String(years[0]);

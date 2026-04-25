@@ -357,6 +357,7 @@
             ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
             ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
             ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
+            ${Object.keys(t.rulesByYear || {}).length ? `<option value="rules" ${_activeTab === "rules" ? "selected" : ""}>📋 Rules</option>` : ""}
           </select>
         </div>
 
@@ -431,6 +432,7 @@
       else if (tab === "standings") renderStandingsTab(body);
       else if (tab === "register")  renderRegisterTab(body);
       else if (tab === "adp")       renderAdpTab(body);
+      else if (tab === "rules")     renderRulesTab(body);
     }
 
     // ── Info tab ────────────────────────────────────────────
@@ -450,11 +452,14 @@
           const label = key.charAt(0).toUpperCase() + key.slice(1);
           return `<a href="${esc(url)}" target="_blank" rel="noopener" class="trn-social-link">${icon} ${label}</a>`;
         }).join("");
-      // Rules preview (first 3 lines)
-      const rules = t.rules || null;
+      // Rules preview (first 3 lines) — read from rulesByYear (latest year)
+      const _rbyPub = t.rulesByYear || {};
+      const _rbyPubLatest = Object.keys(_rbyPub).map(Number).sort((a,b)=>b-a)[0] || null;
+      const rules = _rbyPubLatest ? (_rbyPub[_rbyPubLatest] || null) : null;
       const rulesPreview = rules?.content
         ? rules.content.split("\n").slice(0,3).map(l => esc(l)).join("<br>") + (rules.content.split("\n").length > 3 ? "<br><em>…</em>" : "")
         : null;
+      const _rulesYear = _rbyPubLatest;
 
       const _infoYears = [...new Set(Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean))].length || null;
       body.innerHTML = `
@@ -482,10 +487,93 @@
           <div class="trn-section-card">
             <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
               <span>Rules</span>
-              ${rules?.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">v${esc(String(rules.version))}</span>` : ""}
+              <div style="display:flex;gap:var(--space-2);align-items:center">
+                ${_rulesYear ? `<span style="font-size:.75rem;color:var(--color-text-dim)">${_rulesYear}</span>` : ""}
+                ${rules?.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">v${esc(String(rules.version))}</span>` : ""}
+              </div>
             </div>
             <div class="trn-info-bio trn-rules-preview">${rulesPreview}</div>
+            <button class="btn-secondary btn-sm" id="pub-view-rules-btn" style="margin-top:var(--space-3)">View Full Rules</button>
           </div>` : ""}`;
+    }
+
+      document.getElementById("pub-view-rules-btn")?.addEventListener("click", () => {
+        _activeTab = "rules";
+        const sel = document.getElementById("pub-tab-select");
+        if (sel) sel.value = "rules";
+        renderTab("rules");
+      });
+    }
+
+    // ── Rules tab (public) ──────────────────────────────────
+    function renderRulesTab(body) {
+      const t   = _currentT;
+      const rby = t.rulesByYear || {};
+      const years = Object.keys(rby).map(Number).sort((a, b) => b - a);
+
+      // Default to the globally selected year if available, else latest
+      let selYear = (_selectedYear && rby[_selectedYear])
+        ? String(_selectedYear)
+        : (years.length ? String(years[0]) : null);
+
+      function renderRulesContent(year) {
+        const inner = document.getElementById("pub-rules-content");
+        if (!inner) return;
+        const rules = rby[year] || null;
+        if (!rules?.content) {
+          inner.innerHTML = `
+            <div class="trn-empty" style="padding:var(--space-4) 0">
+              <div class="trn-empty-icon">📋</div>
+              <div class="trn-empty-title">No rules for ${year}</div>
+              <div class="trn-empty-sub">The commissioner hasn't published rules for this year.</div>
+            </div>`;
+          return;
+        }
+        const htmlContent = rules.content
+          .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+          .replace(/\n/g, "<br>")
+          .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+        inner.innerHTML = `
+          <div style="display:flex;gap:var(--space-3);align-items:center;margin-bottom:var(--space-3);font-size:.78rem;color:var(--color-text-dim)">
+            ${rules.version ? `<span>Version ${esc(String(rules.version))}</span>` : ""}
+            ${rules.updatedAt ? `<span>${new Date(rules.updatedAt).toLocaleDateString()}</span>` : ""}
+          </div>
+          <div class="trn-info-bio trn-rules-full">${htmlContent}</div>`;
+      }
+
+      if (!selYear) {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">📋</div>
+            <div class="trn-empty-title">No rules posted yet</div>
+            <div class="trn-empty-sub">The commissioner hasn't published rules for this tournament.</div>
+          </div>`;
+        return;
+      }
+
+      const yearOptions = years.map(y =>
+        `<option value="${y}" ${String(y) === selYear ? "selected" : ""}>${y}</option>`
+      ).join("");
+
+      body.innerHTML = `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2)">
+            <span>Tournament Rules</span>
+            ${years.length > 1 ? `
+              <div style="display:flex;align-items:center;gap:var(--space-2)">
+                <label style="font-size:.8rem;color:var(--color-text-dim)">Year:</label>
+                <select id="pub-rules-year" style="font-size:.8rem;padding:2px 6px">${yearOptions}</select>
+              </div>` : `<span style="font-size:.78rem;color:var(--color-text-dim)">${selYear}</span>`}
+          </div>
+          <div id="pub-rules-content"></div>
+        </div>`;
+
+      renderRulesContent(selYear);
+
+      document.getElementById("pub-rules-year")?.addEventListener("change", function() {
+        selYear = this.value;
+        renderRulesContent(selYear);
+      });
     }
 
     // ── Standings tab (read-only, reuses cached data) ───────
@@ -749,7 +837,7 @@
           : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
              <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
              <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
-             <span style="text-align:center;font-size:.75rem;color:var(--color-text-muted);font-variant-numeric:tabular-nums">${rangeStr}</span>
+             <span style="text-align:center;font-size:.75rem;color:var(--color-text-dim);font-variant-numeric:tabular-nums">${rangeStr}</span>
              <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>`;
         return `
           <div class="draft-auction-row" style="grid-template-columns:${COL}">
