@@ -783,12 +783,20 @@ const DLRTournament = (() => {
       <!-- Preview as User -->
       <div class="trn-section-card">
         <div class="trn-section-card-title">Admin Tools</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)">
           <div style="font-size:.85rem;color:var(--color-text-dim)">
             Preview this tournament as a regular participant (hides admin tabs).
           </div>
           <button class="btn-secondary btn-sm" id="trn-preview-user-btn">
             👁 Preview as User
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+          <div style="font-size:.85rem;color:var(--color-text-dim)">
+            Push latest participant data (names, handles, gender) to the public site.
+          </div>
+          <button class="btn-secondary btn-sm" id="trn-republish-btn">
+            🔄 Re-publish Public Summary
           </button>
         </div>
       </div>
@@ -813,8 +821,9 @@ const DLRTournament = (() => {
     document.getElementById("trn-rankby-select")?.addEventListener("change", async function() {
       try {
         await _tMetaRef(tid).update({ rankBy: this.value });
-        showToast("Ranking method saved ✓");
         _tournaments[tid].meta.rankBy = this.value;
+        _writePublicSummary(tid, _tournaments[tid]);
+        showToast("Ranking method saved ✓");
       } catch(e) { showToast("Failed to save ranking method", "error"); }
     });
 
@@ -860,6 +869,21 @@ const DLRTournament = (() => {
     document.getElementById("trn-3rr-no")?.addEventListener("click",  () => _save3RR(false));
 
     // Preview as User — switch to participant view mode
+    document.getElementById("trn-republish-btn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("trn-republish-btn");
+      if (btn) { btn.disabled = true; btn.textContent = "Publishing…"; }
+      try {
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        await _writePublicSummary(tid, _tournaments[tid]);
+        showToast("Public summary re-published ✓");
+      } catch(e) {
+        showToast("Re-publish failed", "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🔄 Re-publish Public Summary"; }
+      }
+    });
+
     document.getElementById("trn-preview-user-btn")?.addEventListener("click", () => {
       _viewingAsUser = true;
       _openTournamentView(tid);
