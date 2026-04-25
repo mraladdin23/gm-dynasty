@@ -4590,9 +4590,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   }
 
   function _renderRosterCard(row, myKeys) {
-    const medals = ["🥇","🥈","🥉"];
-    const medal  = medals[row.overallRank - 1] || `#${row.overallRank}`;
-    const isMe   = _isMyTeam(row.teamName || "", myKeys || new Set());
+    const medals   = ["🥇","🥈","🥉"];
+    const medal    = medals[row.overallRank - 1] || `#${row.overallRank}`;
+    const isMe     = _isMyTeam(row.teamName || "", myKeys || new Set());
     const youBadge = isMe ? ' <span class="trn-you-badge">you</span>' : "";
 
     if (!row.players) {
@@ -4609,16 +4609,61 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>`;
     }
 
-    // Group by position
-    const groups = {};
-    row.players.forEach(p => {
-      if (!groups[p.position]) groups[p.position] = [];
-      groups[p.position].push(p);
+    // Separate starters and bench
+    const starters = row.players.filter(p => p.isStarter);
+    const bench    = row.players.filter(p => !p.isStarter);
+
+    // Group starters by position — display order determines column order
+    const POS_ORDER  = ["QB","RB","WR","TE","K","DEF","DB","LB","DL","OL"];
+    const starterGroups = {};
+    starters.forEach(p => {
+      const pos = p.position || "?";
+      if (!starterGroups[pos]) starterGroups[pos] = [];
+      starterGroups[pos].push(p);
     });
 
-    const posOrder = ["QB","RB","WR","TE","K","DEF","DB","LB","DL","OL"];
-    const starter  = row.players.filter(p => p.isStarter);
-    const bench    = row.players.filter(p => !p.isStarter);
+    // Group bench by position
+    const benchGroups = {};
+    bench.forEach(p => {
+      const pos = p.position || "?";
+      if (!benchGroups[pos]) benchGroups[pos] = [];
+      benchGroups[pos].push(p);
+    });
+
+    // Render a single player chip
+    const chip = (p, isBench = false) => {
+      const col = POS_COLOR[p.position] || "#9ca3af";
+      return `<div class="trn-rp-chip${isBench ? " trn-rp-chip--bench" : ""}">
+        <span class="trn-rp-pos" style="background:${col}22;color:${col};border-color:${col}44">${_esc(p.position)}</span>
+        <span class="trn-rp-name">${_esc(p.name)}</span>
+        <span class="trn-rp-nfl">${_esc(p.team)}</span>
+      </div>`;
+    };
+
+    // Render one position group column (label + chips)
+    const posCol = (pos, players, isBench) => {
+      if (!players?.length) return "";
+      const col = POS_COLOR[pos] || "#9ca3af";
+      return `<div class="trn-rp-col">
+        <div class="trn-rp-col-label" style="color:${col}">${_esc(pos)}</div>
+        ${players.map(p => chip(p, isBench)).join("")}
+      </div>`;
+    };
+
+    // Build starter columns in position order
+    const starterCols = POS_ORDER
+      .filter(pos => starterGroups[pos]?.length)
+      .map(pos => posCol(pos, starterGroups[pos], false))
+      .join("");
+
+    // Build bench columns — all bench grouped under a single "BN" section
+    const benchAllPos = POS_ORDER.filter(pos => benchGroups[pos]?.length);
+    const benchSection = benchAllPos.length ? `
+      <div class="trn-rp-divider"></div>
+      <div class="trn-rp-bench-label">BENCH</div>
+      <div class="trn-rp-groups trn-rp-groups--bench">
+        ${benchAllPos.map(pos => posCol(pos, benchGroups[pos], true)).join("")}
+      </div>` : "";
 
     return `
       <div class="trn-roster-card ${isMe ? "trn-roster-card--me" : ""}">
@@ -4628,19 +4673,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
           <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
         </div>
-        <div class="trn-roster-players">
-          ${posOrder.map(pos => {
-            const grp = groups[pos];
-            if (!grp?.length) return "";
-            const col = POS_COLOR[pos] || "#9ca3af";
-            return grp.map(p => `
-              <div class="trn-roster-player ${p.isStarter ? "" : "trn-roster-player--bench"}">
-                <span class="trn-roster-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
-                <span class="trn-roster-player-name">${_esc(p.name)}</span>
-                <span class="trn-roster-nfl-team dim">${_esc(p.team)}</span>
-                ${!p.isStarter ? `<span class="trn-roster-bench-tag">BN</span>` : ""}
-              </div>`).join("");
-          }).join("")}
+        <div class="trn-rp-body">
+          <div class="trn-rp-groups">
+            ${starterCols}
+          </div>
+          ${benchSection}
         </div>
       </div>`;
   }
