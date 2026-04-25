@@ -1272,7 +1272,6 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: var(--space-3);
   overflow: hidden;
 }
 .trn-roster-card--slim .trn-roster-card-header { opacity: .8; }
@@ -1289,86 +1288,69 @@
 .trn-roster-record { font-size: .8rem; color: var(--color-text-dim); white-space: nowrap; }
 .trn-roster-pf     { font-size: .8rem; color: var(--color-text-dim); white-space: nowrap; }
 
-/* ── Roster body: position-group columns ──────────────── */
-.trn-rp-body {
-  padding: var(--space-3) var(--space-4);
+/* ── 5-across grid on desktop ─────────────────────────── */
+.trn-rosters-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-3);
+  align-items: start;
 }
 
-/* Horizontal row of position columns */
-.trn-rp-groups {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3) var(--space-4);
-  align-items: flex-start;
-}
-.trn-rp-groups--bench {
-  opacity: .6;
+/* ── Card body: reuses league-detail roster classes ────── */
+.trn-roster-body {
+  padding: var(--space-2) var(--space-3);
 }
 
-/* Single position column */
-.trn-rp-col {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 130px;
+/* Tournament player rows are slimmer than the full league detail */
+.trn-roster-body .roster-player-row {
+  padding: 3px var(--space-2);
+  cursor: default;
 }
-.trn-rp-col-label {
-  font-size: .62rem;
-  font-weight: 800;
-  letter-spacing: .07em;
-  text-transform: uppercase;
+.trn-roster-body .roster-player-row:hover {
+  background: transparent;
+}
+.trn-roster-body .roster-player-name {
+  font-size: .78rem;
+}
+.trn-roster-body .roster-player-meta {
+  font-size: .68rem;
+}
+.trn-roster-body .roster-nfl-team {
+  font-size: .68rem;
+}
+.trn-roster-body .roster-pos-group {
+  margin-bottom: var(--space-2);
+}
+.trn-roster-body .roster-pos-header {
+  font-size: .65rem;
+  padding: 2px 0;
   margin-bottom: 2px;
 }
-
-/* Player chip */
-.trn-rp-chip {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px var(--space-2);
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: .78rem;
-  white-space: nowrap;
-}
-.trn-rp-chip--bench {
-  background: transparent;
-  border-color: transparent;
-}
-.trn-rp-pos {
-  font-size: .58rem;
-  font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 3px;
-  border: 1px solid;
-  flex-shrink: 0;
-}
-.trn-rp-name { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.trn-rp-nfl  { font-size: .68rem; color: var(--color-text-dim); flex-shrink: 0; }
-
-/* Bench divider */
-.trn-rp-divider {
-  height: 1px;
-  background: var(--color-border);
-  margin: var(--space-2) 0;
-}
-.trn-rp-bench-label {
+.trn-roster-body .roster-pos-count {
   font-size: .6rem;
-  font-weight: 700;
-  letter-spacing: .1em;
+}
+
+/* Bench players dimmed */
+.trn-roster-player-row--bench {
+  opacity: .5;
+}
+
+/* BN tag */
+.trn-bn-tag {
+  font-size: .6rem;
   color: var(--color-text-dim);
-  margin-bottom: var(--space-2);
+  font-weight: 600;
+  letter-spacing: .04em;
 }
 
 @media (max-width: 640px) {
   /* trn-mu-card-league mobile handled in matchup block above */
   .trn-share-card { width: 100%; }
   .trn-roster-card-header { gap: var(--space-2); }
-  /* On mobile, tighten the position columns and allow them to fill width */
-  .trn-rp-col { min-width: 100px; flex: 1; }
-  .trn-rp-body { padding: var(--space-2) var(--space-3); }
-  .trn-rp-groups { gap: var(--space-2) var(--space-3); }
+  /* Rosters: single card per team on mobile */
+  .trn-rosters-grid {
+    grid-template-columns: 1fr;
+  }
   /* Draft card: single column on mobile */
   .trn-share-card-body--two-col {
     grid-template-columns: 1fr;
