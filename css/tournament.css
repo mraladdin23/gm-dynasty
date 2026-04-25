@@ -1374,7 +1374,21 @@
 .standings-team-cell { align-items: flex-start !important; width: 100%; min-width: 0; }
 .trn-st-name-wrap    { display: flex; flex-direction: column; min-width: 0; width: 100%; }
 .trn-st-name         { font-weight: 600; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* trn-st-league used as mobile stacked sub-line only (hidden on desktop via --mobile class) */
 .trn-st-league       { font-size: .68rem; color: var(--color-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+/* ── Standings: League and Conference separate columns ── */
+/* Desktop: show separate League/Conf columns, hide mobile sub-line */
+.trn-col-league { font-size: .78rem; color: var(--color-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.trn-col-conf   { font-size: .78rem; text-align: center; white-space: nowrap; }
+.trn-st-league--mobile { display: none; }
+
+/* Mobile: hide separate columns, show stacked sub-line */
+@media (max-width: 640px) {
+  .trn-col-league    { display: none; }
+  .trn-col-conf      { display: none; }
+  .trn-st-league--mobile { display: block; }
+}
 
 /* Tighten standings numbers on mobile */
 @media (max-width: 640px) {

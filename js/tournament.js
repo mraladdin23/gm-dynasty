@@ -1866,8 +1866,9 @@ const DLRTournament = (() => {
     const thead = "<thead><tr>" +
       '<th class="standings-rank" data-sort-col="overallRank" style="' + thBase + ';width:32px">#' + si("overallRank") + "</th>" +
       '<th data-sort-col="teamName" style="' + thBase + '">Team' + si("teamName") + "</th>" +
-      (hasConf ? '<th data-sort-col="conference" style="' + thBase + ';width:52px">Conf' + si("conference") + "</th>" : "") +
-      (hasDiv  ? '<th data-sort-col="division"   style="' + thBase + ';width:52px">Div'  + si("division")   + "</th>" : "") +
+      '<th data-sort-col="leagueName" class="trn-col-league" style="' + thBase + '">League' + si("leagueName") + "</th>" +
+      (hasConf ? '<th data-sort-col="conference" class="trn-col-conf" style="' + thBase + ';width:52px">Conf' + si("conference") + "</th>" : "") +
+      (hasDiv  ? '<th data-sort-col="division"   class="trn-col-conf" style="' + thBase + ';width:52px">Div'  + si("division")   + "</th>" : "") +
       extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thBase + '">' + col.label + si(col.key) + "</th>").join("") +
       '<th class="standings-win"  data-sort-col="wins"   style="' + thBase + ';width:36px">W'  + si("wins")   + "</th>" +
       '<th class="standings-loss" data-sort-col="losses" style="' + thBase + ';width:36px">L'  + si("losses") + "</th>" +
@@ -1891,9 +1892,10 @@ const DLRTournament = (() => {
     const rowHtml = (r) =>
       "<tr>" +
       '<td class="standings-rank">' + r.overallRank + "</td>" +
-      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league\">" + _esc(r.leagueName) + "</span></span></span></td>" +
-      (hasConf ? "<td>" + _esc(r.conference) + "</td>" : "") +
-      (hasDiv  ? "<td>" + _esc(r.division)   + "</td>" : "") +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league trn-st-league--mobile\">" + _esc(r.leagueName) + "</span></span></span></td>" +
+      '<td class="trn-col-league">' + _esc(r.leagueName) + "</td>" +
+      (hasConf ? '<td class="trn-col-conf">' + _esc(r.conference) + "</td>" : "") +
+      (hasDiv  ? '<td class="trn-col-conf">' + _esc(r.division)   + "</td>" : "") +
       extra.map(col => {
         if (col.key === "twitterHandle") {
           const h = r.twitterHandle || "";
@@ -4665,6 +4667,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const meta = t.meta || {};
     const leagueCount = Object.keys(t.leagues || {}).length;
     const regCount    = Object.keys(t.registrations || {}).length;
+    const distinctYears = [...new Set(Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean))].length || null;
     const social      = meta.socialLinks || {};
     const rules       = t.rules          || null;
 
@@ -4712,8 +4715,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       <div class="trn-info-stats">
         <div class="trn-stat-card">
-          <div class="trn-stat-value">${leagueCount}</div>
-          <div class="trn-stat-label">Leagues</div>
+          <div class="trn-stat-value">${distinctYears || leagueCount}</div>
+          <div class="trn-stat-label">${distinctYears ? "Years" : "Leagues"}</div>
         </div>
         <div class="trn-stat-card">
           <div class="trn-stat-value">${regCount}</div>
@@ -4818,7 +4821,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       <div class="trn-register-page">
         <div class="trn-register-page-header">
           <button class="btn-ghost btn-sm" id="trn-reg-back-btn">← Back to ${_esc(meta.name || "Tournament")}</button>
-          <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${_esc(meta.name || "Tournament")}</h2>
+          <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${_esc(meta.name || "Tournament")}${_tournamentYear ? " " + _tournamentYear : ""}</h2>
         </div>
         <div id="trn-register-page-body"></div>
       </div>`;
@@ -4872,7 +4875,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       ` : ""}
 
       <div class="trn-section-card">
-        <div class="trn-section-card-title">Register for ${_esc(meta.name || "Tournament")}</div>
+        <div class="trn-section-card-title">Register for ${_esc(meta.name || "Tournament")}${_tournamentYear ? " " + _tournamentYear : ""}</div>
         ${allFlds.map(f => {
           const isRequired = STD_FIELDS.includes(f);
           const isMissing  = missingFields.includes(f);
