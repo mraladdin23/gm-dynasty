@@ -2640,6 +2640,7 @@ const DLRTournament = (() => {
         <div style="display:flex;gap:var(--space-2)">
           <button class="btn-secondary btn-sm" id="trn-export-csv-btn">⬇ Export CSV</button>
           <button class="btn-secondary btn-sm" id="trn-import-csv-btn">⬆ Import CSV</button>
+          <button class="btn-ghost btn-sm" id="trn-template-reg-btn" title="Download a blank CSV template matching this tournament's registration form">⬇ Template</button>
         </div>
       </div>
       <input type="file" id="trn-csv-import-input" accept=".csv" style="display:none" />
@@ -2667,6 +2668,33 @@ const DLRTournament = (() => {
     document.getElementById("trn-export-csv-btn")?.addEventListener("click", () => _exportRegistrantsCSV(t));
     document.getElementById("trn-import-csv-btn")?.addEventListener("click", () => {
       document.getElementById("trn-csv-import-input")?.click();
+    });
+    document.getElementById("trn-template-reg-btn")?.addEventListener("click", () => {
+      const form    = t.meta?.registrationForm || {};
+      const stdCols = ["displayName", "email"];
+      const optCols = form.optionalFields || [];
+      const customCols = (form.customQuestions || []).map((q, i) => q.question || ("custom_" + i));
+      const headers = [...stdCols, ...optCols, ...customCols, "status"];
+      const example = headers.map(h => {
+        if (h === "displayName")     return "Jane Smith";
+        if (h === "email")           return "jane@example.com";
+        if (h === "sleeperUsername") return "janesmith";
+        if (h === "mflEmail")        return "jane@example.com";
+        if (h === "yahooUsername")   return "janesmith";
+        if (h === "teamName")        return "Jane's Team";
+        if (h === "twitterHandle")   return "@janesmith";
+        if (h === "gender")          return "Female";
+        if (h === "status")          return "pending";
+        return "";
+      });
+      const csv  = headers.join(",") + "\n" + example.join(",") + "\n";
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `registrants_template_${(t.meta?.name || "tournament").replace(/\s+/g, "_")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
     });
     document.getElementById("trn-csv-import-input")?.addEventListener("change", async e => {
       const file = e.target.files?.[0];
