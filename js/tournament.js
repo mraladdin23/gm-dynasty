@@ -876,6 +876,7 @@ const DLRTournament = (() => {
         const snap = await _tRef(tid).once("value");
         _tournaments[tid] = snap.val();
         await _writePublicSummary(tid, _tournaments[tid]);
+        await _writePublicADP(tid);
         showToast("Public summary re-published ✓");
       } catch(e) {
         showToast("Re-publish failed", "error");
@@ -5201,7 +5202,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         participantMap
       };
 
-      await GMD.child("publicTournaments/" + tid).set(summary);
+      await GMD.child("publicTournaments/" + tid).update(summary);
     } catch(err) {
       console.warn("[Tournament] _writePublicSummary failed:", err.message);
     }
