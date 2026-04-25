@@ -4601,8 +4601,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="trn-roster-card-header">
             <span class="trn-roster-rank">${medal}</span>
             <span class="trn-roster-team">${_esc(row.teamName || "Unknown")}${youBadge}</span>
-            <span class="trn-roster-record">${row.wins}–${row.losses}${row.ties ? `–${row.ties}` : ""}</span>
-            <span class="trn-roster-pf">${(row.pf || 0).toFixed(2)} PF</span>
+
             <span class="trn-platform-badge trn-platform-${row.platform || "unknown"}">${(row.platform || "?").toUpperCase()}</span>
           </div>
           <div style="padding:var(--space-2) var(--space-4);font-size:.78rem;color:var(--color-text-dim)">Roster details require Sleeper authentication.</div>
