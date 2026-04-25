@@ -1277,16 +1277,17 @@
 .trn-roster-card--slim .trn-roster-card-header { opacity: .8; }
 .trn-roster-card-header {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  min-height: 52px;
   background: var(--color-surface-alt, var(--color-border));
   flex-wrap: wrap;
 }
-.trn-roster-rank   { font-size: 1.1rem; }
-.trn-roster-team   { font-weight: 700; font-size: .95rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.trn-roster-record { font-size: .8rem; color: var(--color-text-dim); white-space: nowrap; }
-.trn-roster-pf     { font-size: .8rem; color: var(--color-text-dim); white-space: nowrap; }
+.trn-roster-rank   { font-size: 1rem; flex-shrink: 0; padding-top: 1px; }
+.trn-roster-team   { font-weight: 700; font-size: .88rem; flex: 1; min-width: 0; line-height: 1.25; }
+.trn-roster-record { font-size: .72rem; color: var(--color-text-dim); white-space: nowrap; flex-shrink: 0; padding-top: 2px; }
+.trn-roster-pf     { font-size: .72rem; color: var(--color-text-dim); white-space: nowrap; flex-shrink: 0; padding-top: 2px; }
 
 /* ── 5-across grid on desktop ─────────────────────────── */
 .trn-rosters-grid {
@@ -1296,51 +1297,51 @@
   align-items: start;
 }
 
-/* ── Card body: reuses league-detail roster classes ────── */
+/* ── Card body ────────────────────────────────────────── */
 .trn-roster-body {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-2);
 }
 
-/* Tournament player rows are slimmer than the full league detail */
+/* Slim player rows — no photo, no meta row */
 .trn-roster-body .roster-player-row {
-  padding: 3px var(--space-2);
+  padding: 1px var(--space-1);
   cursor: default;
+  min-height: unset;
 }
 .trn-roster-body .roster-player-row:hover {
   background: transparent;
-}
-.trn-roster-body .roster-player-name {
-  font-size: .78rem;
-}
-.trn-roster-body .roster-player-meta {
-  font-size: .68rem;
-}
-.trn-roster-body .roster-nfl-team {
-  font-size: .68rem;
 }
 .trn-roster-body .roster-pos-group {
   margin-bottom: var(--space-2);
 }
 .trn-roster-body .roster-pos-header {
-  font-size: .65rem;
+  font-size: .62rem;
   padding: 2px 0;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 .trn-roster-body .roster-pos-count {
-  font-size: .6rem;
+  font-size: .58rem;
+}
+
+/* Single-line: player name + NFL team abbreviation */
+.trn-rp-name-line {
+  font-size: .75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.trn-rp-nfl-inline {
+  font-size: .65rem;
+  color: var(--color-text-dim);
+  font-weight: 400;
+  margin-left: 3px;
 }
 
 /* Bench players dimmed */
 .trn-roster-player-row--bench {
-  opacity: .5;
-}
-
-/* BN tag */
-.trn-bn-tag {
-  font-size: .6rem;
-  color: var(--color-text-dim);
-  font-weight: 600;
-  letter-spacing: .04em;
+  opacity: .45;
 }
 
 @media (max-width: 640px) {
