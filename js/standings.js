@@ -1918,8 +1918,8 @@ const DLRStandings = (() => {
 
     // ── Column headers ───────────────────────────────────────
     const theadCols = isSpecial
-      ? `<th>Status</th><th title="Points For">PF</th>`
-      : `<th>W</th><th>L</th><th>T</th><th title="Points For">PF</th><th title="Points Against">PA</th>`;
+      ? `<th style="width:80px">Status</th><th style="width:56px" title="Points For">PF</th>`
+      : `<th style="width:30px">W</th><th style="width:30px">L</th><th style="width:26px">T</th><th style="width:56px" title="Points For">PF</th><th style="width:56px" title="Points Against">PA</th>`;
 
     // ── Rows ─────────────────────────────────────────────────
     const rows = displayStandings.map((s, i) => {
@@ -1992,7 +1992,7 @@ const DLRStandings = (() => {
         <td class="team-col">
           <div class="standings-team-cell">
             ${avatar}
-            <div>
+            <div style="min-width:0;overflow:hidden">
               <div class="standings-team-name">
                 ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}
               </div>
@@ -2024,7 +2024,7 @@ const DLRStandings = (() => {
       <div class="standings-table-wrap">
         <table class="standings-table">
           <thead><tr>
-            <th>#</th><th class="team-col">Team</th>
+            <th style="width:28px">#</th><th class="team-col">Team</th>
             ${theadCols}
           </tr></thead>
           <tbody>${rows}</tbody>
