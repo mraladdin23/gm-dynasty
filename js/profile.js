@@ -163,7 +163,7 @@ const Profile = (() => {
         franchiseId:    dynChainId,
         leagueName,
         season,
-        leagueType:     _detectMFLLeagueType(leagueName),
+        leagueType:     _detectMFLLeagueType(leagueName, leagueInfo),
         totalTeams:     Number(leagueInfo?.franchises) || 12,
         teamName:       myFranchise?.name     || "",
         isCommissioner: myFranchise?.is_commish === "1",
@@ -292,7 +292,12 @@ const Profile = (() => {
     return "redraft";
   }
 
-  function _detectMFLLeagueType(name) {
+  function _detectMFLLeagueType(name, leagueInfo) {
+    // Prefer the explicit API field — keeperType="dynasty"|"keeper"|"" 
+    const kt = (leagueInfo?.keeperType || "").toLowerCase();
+    if (kt === "dynasty") return "dynasty";
+    if (kt === "keeper")  return "keeper";
+    // Fall back to name-based detection
     const n = name.toLowerCase();
     if (n.includes("dynasty")) return "dynasty";
     if (n.includes("keeper"))  return "keeper";
