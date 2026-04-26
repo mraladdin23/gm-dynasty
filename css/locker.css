@@ -1650,9 +1650,9 @@ select option { background: var(--color-bg-2); }
 .standings-row--playoff { background: rgba(240,180,41,.04); }
 /* Fixed-width columns — must match <th> width attrs in JS */
 .standings-rank  { width: 28px;  text-align: center; color: var(--color-text-dim); font-size: .75rem; white-space: nowrap; }
-.standings-win   { width: 30px;  text-align: center; color: var(--color-green); font-weight: 700; white-space: nowrap; }
-.standings-loss  { width: 30px;  text-align: center; color: var(--color-red); white-space: nowrap; }
-.standings-tie   { width: 26px;  text-align: center; color: var(--color-text-dim); white-space: nowrap; }
+.standings-win   { width: 30px;  text-align: center; color: var(--color-green); font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.standings-loss  { width: 30px;  text-align: center; color: var(--color-red); font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.standings-tie   { width: 26px;  text-align: center; color: var(--color-text-dim); font-size: .78rem; white-space: nowrap; }
 .standings-num   { width: 56px;  text-align: right; font-family: var(--font-mono); font-size: .78rem; white-space: nowrap; }
 .standings-num.dim { color: var(--color-text-dim); }
 .standings-streak { width: 42px; text-align: center; font-family: var(--font-mono); font-size: .78rem; white-space: nowrap; }
