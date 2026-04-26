@@ -3530,7 +3530,7 @@ const DLRTournament = (() => {
     const isMobile = window.innerWidth <= 640;
     const COL = isMobile
       ? "28px 1fr 44px 34px 34px"
-      : "32px 1fr 36px 52px 40px 76px 40px";
+      : "32px 1fr 36px 52px 40px 40px 76px";
     const header = isMobile ? `
       <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
         <span>#</span><span>Player</span>
@@ -3566,7 +3566,7 @@ const DLRTournament = (() => {
            <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mx}</span>`
         : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
            <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
-           <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mn}</span>           	   <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mx}</span>
+           <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mn}</span>           	   	   <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mx}</span>
            <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${rangeStr}</span>`;
       return `
         <div class="draft-auction-row" style="grid-template-columns:${COL}" ${clickAttr}>
