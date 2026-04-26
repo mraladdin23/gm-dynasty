@@ -3543,7 +3543,7 @@ const DLRTournament = (() => {
         <span style="text-align:center">Dft</span>
         <span style="text-align:right">ADP</span>
         <span style="text-align:right">Min</span>
-        <span style="text-align:center">Range</span>
+        <span style="text-align:center">25-75%</span>
         <span style="text-align:right">Max</span>
       </div>`;
 
