@@ -1358,9 +1358,10 @@
   /* trn-mu-card-league mobile handled in matchup block above */
   .trn-share-card { width: 100%; }
   .trn-roster-card-header { gap: var(--space-2); }
-  /* Rosters: single card per team on mobile */
+  /* Rosters: 2 per row on mobile */
   .trn-rosters-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-2);
   }
   /* Draft card: single column on mobile */
   .trn-share-card-body--two-col {
@@ -1564,11 +1565,12 @@
   .trn-adp-table .draft-auction-header > *:nth-child(3),
   .trn-adp-table .draft-auction-row    > *:nth-child(3) { display: none !important; }
 
-  /* Draft board: slightly tighter round labels and pick cells */
+  /* Draft board: tighter cells for tournament 4-col board */
   .trn-az-section .draft-round-label { font-size: .68rem; padding: 2px var(--space-2); }
-  .trn-az-section .draft-pick        { padding: 3px 2px; }
-  .trn-az-section .draft-pick-name   { font-size: .54rem; }
-  .trn-az-section .draft-pick-team   { font-size: .48rem; }
+  .trn-az-section .draft-pick        { padding: 3px 4px; min-width: 70px; max-width: 84px; }
+  .trn-az-section .draft-pick-name   { font-size: .56rem; }
+  .trn-az-section .draft-pick-pos-team { font-size: .52rem; }
+  .trn-az-section .draft-pick-team   { font-size: .5rem; }
   .trn-az-section .draft-pick-nfl    { display: none; }
 }
 

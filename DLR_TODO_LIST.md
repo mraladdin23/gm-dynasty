@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 25, 2026 — F5-P3-S1–S4 small fixes batch complete. Next: F5-P3-S6 (rules versioning), then S7, P4.*
+*Updated: April 25, 2026 — F5-P3 fully complete (S6 rules-by-year, S7 CSS consistency, public bio/rules, registrant/participant template CSVs, registrant delete). Next: F5-P4 scoping.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -78,7 +78,7 @@ to match. Interchangeable visual elements — door style, nameplates, decoration
 
 **Phase 1 — Foundation ✅ COMPLETE**
 **Phase 2 — Core Views ✅ COMPLETE** (Standings, Info, Rules, Registration, Participants)
-**Phase 3 — Analytics ⚠️ IN PROGRESS** (S6, S7 remain)
+**Phase 3 — Analytics ✅ COMPLETE**
 **Phase 4 — Custom Playoffs** — next major milestone after P3 is clean
 **Phase 5 — Advanced** — after Phase 4
 
@@ -181,8 +181,8 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 | 1 | ~~F5-P3-U4~~ | ~~Matchups: card layout + score histogram~~ | ✅ Done | — |
 | 2 | ~~F5-P3-U5~~ | ~~Rosters: position-group layout, 5-across grid~~ | ✅ Done | — |
 | 3 | ~~F5-P3-S1–S4, S8~~ | ~~Small fixes batch (registration, standings, info, years, dupe-check)~~ | ✅ Done | — |
-| 4 | F5-P3-S6 | Rules: year-specific versioning | Small | `tournament.js` |
-| 5 | F5-P3-S7 | CSS consistency pass | Medium | `tournament.css`, `tournaments/index.html` |
+| 4 | ~~F5-P3-S6~~ | ~~Rules: year-specific versioning~~ | ✅ Done | — |
+| 5 | ~~F5-P3-S7~~ | ~~CSS consistency pass~~ | ✅ Done | — |
 | 6 | F5-P4 scoping | Custom playoffs scoping session | — | `tournament.js` |
 | 7 | F5-P4-A/B/C | Playoff config: method + qualification + format | High | `tournament.js` |
 | 8 | F5-P4-D/E/F | Playoff bracket rendering + sync + champion | High | `tournament.js`, `tournament.css`, `standings.js` |
@@ -211,6 +211,15 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ---
 
 ## ✅ Completed
+
+### April 25, 2026 — F5-P3 Completion
+
+- **F5-P3-S6 — Rules year-specific versioning:** Storage moved to `rulesByYear/{year}/`. Admin editor has year dropdown seeded from `standingsCache` + `registrationYear` + current year. User Rules tab has year selector when multiple years exist. Public site reads `rulesByYear` for both preview and full Rules tab. (`tournament.js`, `tournaments/index.html`)
+- **F5-P3-S7 — CSS consistency pass:** `.trn-az-pill` rewritten to match `.season-pill` pattern from `locker.css` (radius-sm, gold hover/active). `color-text-muted` → `color-text-dim` throughout. `var(--color-surface-2)` fallbacks added. (`tournament.css`)
+- **Public bio and rules:** `renderInfoTab` on public site reads from `rulesByYear`. Rules tab added to public nav (year selector, full content render). (`tournaments/index.html`)
+- **Registrant template CSV:** ⬇ Template button on registrants tab downloads a dynamic CSV matching the tournament's actual registration form fields. (`tournament.js`)
+- **Participant template CSV:** ⬇ Template button on participants tab downloads a fixed shell CSV with all importable columns and an example row. (`tournament.js`)
+- **Registrant delete:** 🗑 Delete button in registrant View modal. Confirm dialog, removes from Firebase, updates public summary, re-renders tab. (`tournament.js`)
 
 ### April 25, 2026 — Tournament Small Fixes Batch + Bug Fixes
 

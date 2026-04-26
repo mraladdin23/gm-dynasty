@@ -410,17 +410,22 @@ const DLRDraft = (() => {
           const color        = POS_COLOR[pos] || "#9ca3af";
           const pickerRoster = rosterMap[pick.roster_id];
           const pickLabel    = isSnake ? overallNum : `${r}.${String(originalSlot).padStart(2,"0")}`;
+          // Abbreviated name: "J. Jefferson" from "Justin Jefferson"
+          const shortName    = pick.metadata.last_name
+            ? pick.metadata.first_name.charAt(0) + ". " + pick.metadata.last_name
+            : pName;
 
           boardHTML += `
             <div class="draft-pick draft-pick--filled"
               onclick="DLRPlayerCard.show('${pick.player_id}','${_escAttr(pName)}')"
+              style="cursor:pointer;background:${color}18;border-color:${color}40"
               title="${_esc(pName)} · ${pos} · ${nfl}">
               <div class="draft-pick-num">${pickLabel}</div>
               <div class="draft-pick-player">
-                <div class="draft-pick-name">${_esc(pName)}</div>
+                <div class="draft-pick-name">${_esc(shortName)}</div>
                 <div class="draft-pick-meta">
                   <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
-                  <span class="draft-pick-nfl">${nfl}</span>
+                  <span class="draft-pick-pos-team">${pos} · ${nfl}</span>
                 </div>
               </div>
               <div class="draft-pick-team">${_esc(pickerRoster?.teamName || "")}</div>
@@ -852,17 +857,25 @@ const DLRDraft = (() => {
         const pickLabel = round > 0 && pickNum > 0 ? `${round}.${String(pickNum).padStart(2,"0")}` : (p.overall || "—");
         const sid   = info.sleeperId;
         const cardId = sid ? sid : (pid ? `mfl_${pid}` : null);
-        const clickAttr = cardId
-          ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')" style="cursor:pointer;"` : "";
+        const clickHandler = cardId
+          ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(name)}')"` : "";
 
         if (name && name !== "—") {
+          // Abbreviated name: "J. Jefferson" from "Justin Jefferson"
+          const nameParts = name.trim().split(/\s+/);
+          const shortName = nameParts.length > 1
+            ? nameParts[0].charAt(0) + ". " + nameParts.slice(1).join(" ")
+            : name;
           boardHTML += `
-            <div class="draft-pick draft-pick--filled" ${clickAttr} title="${_esc(name)} · ${pos}">
+            <div class="draft-pick draft-pick--filled" ${clickHandler}
+              style="background:${color}18;border-color:${color}40${clickHandler ? ";cursor:pointer" : ""}"
+              title="${_esc(name)} · ${pos}">
               <div class="draft-pick-num">${pickLabel}</div>
               <div class="draft-pick-player">
-                <div class="draft-pick-name">${_esc(name)}</div>
+                <div class="draft-pick-name">${_esc(shortName)}</div>
                 <div class="draft-pick-meta">
                   <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
+                  <span class="draft-pick-pos-team">${pos}</span>
                 </div>
               </div>
               <div class="draft-pick-team">${_esc(team)}</div>
@@ -1084,15 +1097,21 @@ const DLRDraft = (() => {
           const cardId   = info.sleeperPid || (pid ? `yahoo_${pid}` : null);
           const clickAttr = cardId ? `onclick="DLRPlayerCard.show('${cardId}','${_escAttr(info.name)}')" style="cursor:pointer"` : "";
           if (info.name) {
+            // Abbreviated name: "J. Jefferson" from "Justin Jefferson"
+            const nameParts = info.name.trim().split(/\s+/);
+            const shortName = nameParts.length > 1
+              ? nameParts[0].charAt(0) + ". " + nameParts.slice(1).join(" ")
+              : info.name;
             boardHTML += `
               <div class="draft-pick draft-pick--filled${isMe ? " draft-pick--mine" : ""}" ${clickAttr}
+                style="background:${color}18;border-color:${color}40${clickAttr ? ";cursor:pointer" : ""}"
                 title="${_esc(info.name)} · ${info.pos}">
                 <div class="draft-pick-num">${pickLabel}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(info.name)}${p.isKeeper ? '<span style="font-size:.6rem;color:var(--color-accent);font-weight:700;margin-left:3px">K</span>' : ""}</div>
+                  <div class="draft-pick-name">${_esc(shortName)}${p.isKeeper ? '<span style="font-size:.6rem;color:var(--color-accent);font-weight:700;margin-left:3px">K</span>' : ""}</div>
                   <div class="draft-pick-meta">
                     <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${info.pos}</span>
-                    ${info.nflTeam ? `<span class="draft-pick-nfl">${_esc(info.nflTeam)}</span>` : ""}
+                    <span class="draft-pick-pos-team">${info.pos}${info.nflTeam ? ` · ${_esc(info.nflTeam)}` : ""}</span>
                   </div>
                 </div>
                 <div class="draft-pick-team">${_esc(fantTeam)}</div>
