@@ -692,7 +692,7 @@
                       <span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>
                       <span class="trn-st-name-wrap">
                         <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}${r.twitterHandle ? `<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter">@${esc(r.twitterHandle.replace(/^@/,""))}</a>` : ""}</span>
-                        <span class="trn-st-league trn-st-league--mobile">${r.twitterHandle ? `<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(r.teamName)}</a>` : esc(r.teamName)} · ${esc(r.leagueName)}</span>
+                        <span class="trn-st-league trn-st-league--mobile">${esc(r.leagueName)}</span>
                       </span>
                     </span>
                   </td>

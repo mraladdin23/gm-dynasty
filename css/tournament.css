@@ -1568,8 +1568,8 @@
   /* Draft board: tighter cells for tournament 4-col board */
   .trn-az-section .draft-round-label { font-size: .68rem; padding: 2px var(--space-2); }
   .trn-az-section .draft-pick        { padding: 3px 4px; min-width: 70px; max-width: 84px; }
-  .trn-az-section .draft-pick-name   { font-size: .56rem; }
-  .trn-az-section .draft-pick-pos-team { font-size: .52rem; }
+  .trn-az-section .draft-pick-name   { font-size: .54rem; }
+  .trn-az-section .draft-pick-pos-team { font-size: .5rem; }
   .trn-az-section .draft-pick-team   { font-size: .5rem; }
   .trn-az-section .draft-pick-nfl    { display: none; }
 }

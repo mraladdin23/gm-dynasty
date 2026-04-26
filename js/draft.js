@@ -422,11 +422,7 @@ const DLRDraft = (() => {
               title="${_esc(pName)} · ${pos} · ${nfl}">
               <div class="draft-pick-num">${pickLabel}</div>
               <div class="draft-pick-player">
-                <div class="draft-pick-name">${_esc(shortName)}</div>
-                <div class="draft-pick-meta">
-                  <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
-                  <span class="draft-pick-pos-team">${pos} · ${nfl}</span>
-                </div>
+                <div class="draft-pick-name">${_esc(shortName)} <span class="draft-pick-pos-team">${pos} · ${nfl}</span></div>
               </div>
               <div class="draft-pick-team">${_esc(pickerRoster?.teamName || "")}</div>
             </div>`;
@@ -872,11 +868,7 @@ const DLRDraft = (() => {
               title="${_esc(name)} · ${pos}">
               <div class="draft-pick-num">${pickLabel}</div>
               <div class="draft-pick-player">
-                <div class="draft-pick-name">${_esc(shortName)}</div>
-                <div class="draft-pick-meta">
-                  <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${pos}</span>
-                  <span class="draft-pick-pos-team">${pos}</span>
-                </div>
+                <div class="draft-pick-name">${_esc(shortName)} <span class="draft-pick-pos-team">${pos}</span></div>
               </div>
               <div class="draft-pick-team">${_esc(team)}</div>
             </div>`;
@@ -1108,11 +1100,7 @@ const DLRDraft = (() => {
                 title="${_esc(info.name)} · ${info.pos}">
                 <div class="draft-pick-num">${pickLabel}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(shortName)}${p.isKeeper ? '<span style="font-size:.6rem;color:var(--color-accent);font-weight:700;margin-left:3px">K</span>' : ""}</div>
-                  <div class="draft-pick-meta">
-                    <span class="draft-pos-badge" style="background:${color}22;color:${color};border-color:${color}55">${info.pos}</span>
-                    <span class="draft-pick-pos-team">${info.pos}${info.nflTeam ? ` · ${_esc(info.nflTeam)}` : ""}</span>
-                  </div>
+                  <div class="draft-pick-name">${_esc(shortName)}${p.isKeeper ? '<span style="font-size:.6rem;color:var(--color-accent);font-weight:700;margin-left:3px">K</span>' : ""} <span class="draft-pick-pos-team">${info.pos}${info.nflTeam ? ` · ${_esc(info.nflTeam)}` : ""}</span></div>
                 </div>
                 <div class="draft-pick-team">${_esc(fantTeam)}</div>
               </div>`;

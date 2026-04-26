@@ -2001,7 +2001,7 @@ const DLRTournament = (() => {
     const rowHtml = (r) =>
       "<tr>" +
       '<td class="standings-rank">' + r.overallRank + "</td>" +
-      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league trn-st-league--mobile\">" + (r.twitterHandle ? '<a href="https://x.com/' + _esc(r.twitterHandle.startsWith("@") ? r.twitterHandle.slice(1) : r.twitterHandle) + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">' + _esc(r.teamName) + "</a>" : _esc(r.teamName)) + " · " + _esc(r.leagueName) + "</span></span></span></td>" +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league trn-st-league--mobile\">" + _esc(r.leagueName) + "</span></span></span></td>" +
       '<td class="trn-col-league">' + _esc(r.leagueName) + "</td>" +
       (hasConf ? '<td class="trn-col-conf">' + _esc(r.conference) + "</td>" : "") +
       (hasDiv  ? '<td class="trn-col-conf">' + _esc(r.division)   + "</td>" : "") +
@@ -3714,11 +3714,7 @@ const DLRTournament = (() => {
                 title="${_esc(pName)} · ${pos} · ${nfl}">
                 <div class="draft-pick-num">${overallNum}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(shortName)}</div>
-                  <div class="draft-pick-meta">
-                    <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
-                    <span class="draft-pick-pos-team">${pos} · ${nfl}</span>
-                  </div>
+                  <div class="draft-pick-name">${_esc(shortName)} <span class="draft-pick-pos-team">${pos} · ${nfl}</span></div>
                 </div>
                 <div class="draft-pick-team">${_esc(displayTeam)}</div>
               </div>`;
