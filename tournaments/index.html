@@ -810,10 +810,10 @@
         <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
           <span>#</span><span>Player</span>
           <span style="text-align:center">Dft</span>
-          <span style="text-align:right">ADP</span>
-          <span style="text-align:right">Min</span>
+          <span style="text-align:center">ADP</span>
+          <span style="text-align:center">Min</span>
+          <span style="text-align:center">Max</span>
           <span style="text-align:center">Range</span>
-          <span style="text-align:right">Max</span>
         </div>`;
 
       const totalPages = Math.ceil(filtered.length / ADP_PAGE_SIZE);
@@ -832,10 +832,9 @@
              <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mn}</span>
              <span class="dim" style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums">${mx}</span>`
           : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count}</span>
-             <span style="text-align:right;font-size:.82rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
-             <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mn}</span>
-             <span style="text-align:center;font-size:.75rem;color:var(--color-text-dim);font-variant-numeric:tabular-nums">${rangeStr}</span>
-             <span class="dim" style="text-align:right;font-size:.78rem;font-variant-numeric:tabular-nums">${mx}</span>`;
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mn}</span>             	     <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mx}</span>
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${rangeStr}</span>`;
         return `
           <div class="draft-auction-row" style="grid-template-columns:${COL}">
             <span class="draft-auction-rank dim" style="font-size:.75rem">${rank}</span>
