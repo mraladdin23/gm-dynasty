@@ -1397,14 +1397,15 @@
 
 /* Tighten standings numbers on mobile */
 @media (max-width: 640px) {
-  .standings-table          { font-size: .75rem; }
-  .standings-table tbody td { padding: 3px 2px; }
-  .standings-table thead th { padding: 3px 2px; }
+  .standings-table          { font-size: .72rem; }
+  .standings-table tbody td { padding: 2px 2px; }
+  .standings-table thead th { padding: 2px 2px; }
   .standings-win,
-  .standings-loss           { width: 28px; }
-  .standings-num            { width: 52px; }
-  .standings-rank           { width: 24px; }
-  .trn-st-name              { font-size: .78rem; }
+  .standings-loss           { width: 22px; }
+  .standings-num            { width: 44px; }
+  .standings-rank           { width: 20px; }
+  .trn-st-name              { font-size: .76rem; }
+  .trn-st-league            { font-size: .65rem; }
 }
 
 /* Recap editor */
@@ -1565,13 +1566,17 @@
   .trn-adp-table .draft-auction-header > *:nth-child(3),
   .trn-adp-table .draft-auction-row    > *:nth-child(3) { display: none !important; }
 
-  /* Draft board: tighter cells for tournament 4-col board */
-  .trn-az-section .draft-round-label { font-size: .68rem; padding: 2px var(--space-2); }
-  .trn-az-section .draft-pick        { padding: 3px 4px; min-width: 70px; max-width: 84px; }
-  .trn-az-section .draft-pick-name   { font-size: .54rem; }
-  .trn-az-section .draft-pick-pos-team { font-size: .5rem; }
-  .trn-az-section .draft-pick-team   { font-size: .5rem; }
-  .trn-az-section .draft-pick-nfl    { display: none; }
+  /* Draft board: force 4 equal columns, condense cards */
+  .trn-az-section .draft-board-scroll { overflow-x: hidden; }
+  .trn-az-section .draft-board        { width: 100%; }
+  .trn-az-section .draft-picks-row    { grid-template-columns: repeat(4, 1fr) !important; gap: 3px !important; }
+  .trn-az-section .draft-round-label  { font-size: .65rem; padding: 2px var(--space-1); margin-bottom: var(--space-1); }
+  .trn-az-section .draft-pick         { min-width: 0; max-width: none; min-height: 48px; padding: 3px 3px; gap: 1px; }
+  .trn-az-section .draft-pick-num     { font-size: .58rem; }
+  .trn-az-section .draft-pick-name    { font-size: .54rem; line-height: 1.2; }
+  .trn-az-section .draft-pick-pos-team { font-size: .48rem; }
+  .trn-az-section .draft-pick-team    { font-size: .48rem; margin-top: 1px; }
+  .trn-az-section .draft-pick-nfl     { display: none; }
 }
 
 /* ── Admin Yes/No toggles ────────────────────────────── */
