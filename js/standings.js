@@ -230,7 +230,6 @@ const DLRStandings = (() => {
                 <td class="standings-tie">${t.ties}</td>
                 <td class="standings-num">${fmt(t.fpts)}</td>
                 <td class="standings-num dim">${fmt(t.fpts_against)}</td>
-                <td class="standings-num dim">${t.max_pts > 0 ? fmt(t.max_pts) : "—"}</td>
               </tr>`;
             }).join("")}
           </tbody>
