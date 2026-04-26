@@ -199,10 +199,11 @@ const DLRStandings = (() => {
           <thead>
             <tr>
               <th style="width:28px">#</th><th class="team-col">Team</th>
-              <th style="width:30px">W</th><th style="width:30px">L</th><th style="width:26px">T</th>
-              <th style="width:56px" title="Points For">PF</th>
-              <th style="width:56px" title="Points Against">PA</th>
-              <th style="width:56px" title="Max Potential Points">MaxPF</th>
+              <th style="width:30px; text-align:center">W</th>
+	      <th style="width:30px; text-align:center">L</th>
+	      <th style="width:26px; text-align:center">T</th>
+              <th style="width:56px; text-align:center" title="Points For">PF</th>
+              <th style="width:56px; text-align:center" title="Points Against">PA</th>
             </tr>
           </thead>
           <tbody>
@@ -1566,9 +1567,11 @@ const DLRStandings = (() => {
           <thead><tr>
             <th style="width:28px">#</th>
             <th class="team-col">Team</th>
-            <th style="width:30px">W</th><th style="width:30px">L</th><th style="width:26px">T</th>
-            <th style="width:56px" title="Points For">PF</th>
-            <th style="width:56px" title="Points Against">PA</th>
+            <th style="width:30px; text-align:center">W</th>
+	    <th style="width:30px; text-align:center">L</th>
+            <th style="width:26px; text-align:center">T</th>
+            <th style="width:56px; text-align:center" title="Points For">PF</th>
+            <th style="width:56px; text-align:center" title="Points Against">PA</th>
             ${faabEnabled ? `<th style="width:46px" title="FAAB Remaining">$</th>` : ""}
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -1919,7 +1922,11 @@ const DLRStandings = (() => {
     // ── Column headers ───────────────────────────────────────
     const theadCols = isSpecial
       ? `<th style="width:80px">Status</th><th style="width:56px" title="Points For">PF</th>`
-      : `<th style="width:30px">W</th><th style="width:30px">L</th><th style="width:26px">T</th><th style="width:56px" title="Points For">PF</th><th style="width:56px" title="Points Against">PA</th>`;
+      : `<th style="width:30px; text-align:center">W</th>
+	 <th style="width:30px; text-align:center">L</th>
+	 <th style="width:26px; text-align:center">T</th>
+	 <th style="width:56px; text-align:center" title="Points For">PF</th>
+	 <th style="width:56px; text-align:center" title="Points Against">PA</th>`;
 
     // ── Rows ─────────────────────────────────────────────────
     const rows = displayStandings.map((s, i) => {
