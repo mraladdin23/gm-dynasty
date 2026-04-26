@@ -198,12 +198,11 @@ const DLRStandings = (() => {
         <table class="standings-table">
           <thead>
             <tr>
-              <th>#</th><th>Team</th>
-              <th>W</th><th>L</th><th>T</th>
-              <th title="Points For">PF</th>
-              <th title="Points Against">PA</th>
-              <th title="Max Potential Points">MaxPF</th>
-              <th>Streak</th>
+              <th style="width:28px">#</th><th class="team-col">Team</th>
+              <th style="width:30px">W</th><th style="width:30px">L</th><th style="width:26px">T</th>
+              <th style="width:56px" title="Points For">PF</th>
+              <th style="width:56px" title="Points Against">PA</th>
+              <th style="width:56px" title="Max Potential Points">MaxPF</th>
             </tr>
           </thead>
           <tbody>
@@ -218,10 +217,10 @@ const DLRStandings = (() => {
                                   t.streak.startsWith("L") ? "var(--color-red)"   : "var(--color-text-dim)";
               return `<tr class="${inPO ? "standings-row--playoff" : ""}" style="${inPO ? "border-left:3px solid var(--color-gold)" : "border-left:3px solid transparent"}">
                 <td class="standings-rank">${rank}</td>
-                <td>
+                <td class="team-col">
                   <div class="standings-team-cell">
                     ${avatar}
-                    <span class="${inPO ? "fw-700" : ""}">${_esc(t.display_name)}</span>
+                    <span class="standings-team-name ${inPO ? "fw-700" : ""}">${_esc(t.display_name)}</span>
                     
                   </div>
                 </td>
@@ -231,7 +230,6 @@ const DLRStandings = (() => {
                 <td class="standings-num">${fmt(t.fpts)}</td>
                 <td class="standings-num dim">${fmt(t.fpts_against)}</td>
                 <td class="standings-num dim">${t.max_pts > 0 ? fmt(t.max_pts) : "—"}</td>
-                <td class="standings-streak" style="color:${streakColor}">${t.streak}</td>
               </tr>`;
             }).join("")}
           </tbody>
@@ -1566,12 +1564,12 @@ const DLRStandings = (() => {
       <div class="standings-table-wrap">
         <table class="standings-table">
           <thead><tr>
-            <th>#</th>
+            <th style="width:28px">#</th>
             <th class="team-col">Team</th>
-            <th>W</th><th>L</th><th>T</th>
-            <th title="Points For">PF</th>
-            <th title="Points Against">PA</th>
-            ${faabEnabled ? `<th title="FAAB Remaining">$</th>` : ""}
+            <th style="width:30px">W</th><th style="width:30px">L</th><th style="width:26px">T</th>
+            <th style="width:56px" title="Points For">PF</th>
+            <th style="width:56px" title="Points Against">PA</th>
+            ${faabEnabled ? `<th style="width:46px" title="FAAB Remaining">$</th>` : ""}
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
