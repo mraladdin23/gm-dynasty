@@ -1535,7 +1535,7 @@ const DLRStandings = (() => {
         <td class="team-col">
           <div class="standings-team-cell">
             <div class="st-av" style="${avStyle}">${initial}</div>
-            <div>
+            <div style="min-width:0;overflow:hidden">
               <div class="standings-team-name">
                 ${_esc(name)}${isMe ? ' <span style="font-size:.7rem;color:var(--color-gold);font-weight:700;">★</span>' : ""}
               </div>
