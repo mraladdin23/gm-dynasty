@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 25, 2026 — F5-P3 fully complete (S6 rules-by-year, S7 CSS consistency, public bio/rules, registrant/participant template CSVs, registrant delete). Next: F5-P4 scoping.*
+*Updated: April 25, 2026 — F5-P3 fully complete + UI polish pass complete. F5-P4 playoffs scoped and ready to build.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -58,7 +58,7 @@ and analytics across all years, with a year selector at the top.
 next 4 → winner faces top 4 → top 2 for championship) that DLR tracks and updates
 independent of what the platform reports.
 **Files:** New module likely needed + `firebase-db.js`, `standings.js`, `index.html`
-**Note:** Large feature. Related to F5-P4 Tournament Playoffs below.
+**Note:** Large feature. Overlaps with F5-P4 — revisit scope after P4 ships.
 
 ---
 
@@ -79,73 +79,148 @@ to match. Interchangeable visual elements — door style, nameplates, decoration
 **Phase 1 — Foundation ✅ COMPLETE**
 **Phase 2 — Core Views ✅ COMPLETE** (Standings, Info, Rules, Registration, Participants)
 **Phase 3 — Analytics ✅ COMPLETE**
-**Phase 4 — Custom Playoffs** — next major milestone after P3 is clean
+**Phase 4 — Custom Playoffs** — scoped, ready to build (see below)
 **Phase 5 — Advanced** — after Phase 4
-
----
-
-## ── F5-P3: Small Fixes (quick wins) ───────────────────────────────
-
-### F5-P3-S6 — Rules: year-specific versioning 🟢
-**What:** Rules should be storable per year so 2023 rules are preserved when 2024
-rules are published. Store at `gmd/tournaments/{tid}/rulesByYear/{year}/` instead of
-`gmd/tournaments/{tid}/rules/`. Admin can see a year dropdown to view/edit past rules.
-Users see the rules for the currently selected year.
-**Files:** `tournament.js`
-**Attach:** `tournament.js`
-
-### F5-P3-S7 — CSS consistency pass 🟢
-**What:** Audit tournament.js / tournament.css / tournaments/index.html for visual
-inconsistencies with the main app (locker.css patterns). Specific items:
-- View pills should match `.season-pill` / `.season-pill--current` style from locker.css
-- Card component styling should match `.trn-section-card` consistently
-- Font sizes, spacing tokens, color variables should reference base.css vars not hardcoded values
-**Files:** `tournament.css`, `locker.css` (reference), `tournaments/index.html`
-**Attach:** `tournament.css`, `tournaments/index.html`
 
 ---
 
 ## ── F5-P4: Custom Playoffs ─────────────────────────────────────────
 
-**This is the next major milestone after P3 is complete.**
+**Architecture principle:** Playoff structure is stored as config data, not hardcoded logic.
+Rules (qualification, seeding, byes, bracket) are configurable objects that the app interprets.
+This keeps the system extensible without rewriting code for each new tournament format.
+
+**Key decisions locked in:**
+- Single elimination only (no double elimination — not used in fantasy football)
+- Scores/results auto-sync from platform matchup data (Sleeper/MFL/Yahoo) — no manual score entry
+- Playoffs are tournament-level (cross-platform, same bracket for all leagues)
+- Tournament champion determined at tournament level; optional league champion recognition
+- Admin + sub-admins can manually override any auto-generated bracket or matchup pairing
+- Bracket size auto-suggested based on qualifier count + bye count (next power of 2)
+- Admin can "draw" their own bracket for smaller tournaments
+
+**Firebase node:** `gmd/tournaments/{tid}/playoffs/`
+
+---
 
 ### F5-P4-A — Playoff config: champion determination method 🟡
-**What:** Admin configures how the tournament champion is determined. Two modes:
-1. **Total Points** — champion is team with highest cumulative PF (no bracket).
-2. **Bracket Playoff** — traditional elimination bracket.
-**Firebase:** `meta.championMethod: "points" | "bracket"`
+**What:** Admin configures how the tournament champion is determined:
+1. **Total Points** — champion = highest cumulative PF at end of regular season. No bracket.
+2. **Bracket Playoff** — H2H elimination bracket, winner is champion.
+3. **League Champions** — optionally surface per-league platform champions separately from tournament champion.
+**Firebase:** `meta.championMethod: "points" | "bracket"`, `meta.recognizeLeagueChampions: bool`
 **Files:** `tournament.js`
+
+---
 
 ### F5-P4-B — Playoff config: qualification rules 🟡
-**What:** Admin defines how teams qualify for the bracket. Options: top X by record,
-top X by PF, top X per conference, manual override.
-**Firebase:** `meta.playoffQualification: { method, count, perGroup? }`
+**What:** Admin defines who qualifies. Config-driven, not hardcoded. Options:
+- Top X by record
+- Top X by PF
+- Top X per conference / division
+- Composite: top X by wins, then fill remaining spots by PF (exclude already selected)
+- Manual override: admin hand-picks qualifiers regardless of standings
+
+Admin UI uses a rule builder (dropdowns + number inputs), not raw JSON editing.
+Sub-admins can also trigger manual override with appropriate permission.
+
+**Firebase:** `playoffs.qualification: { method, count, perGroup?, steps?, manualOverride?: [teamId] }`
 **Files:** `tournament.js`
 
-### F5-P4-C — Playoff config: bracket format 🟡
-**What:** Single elimination, double elimination, or custom seeding.
-**Firebase:** `meta.bracketFormat: "single" | "double" | "custom"`
+---
+
+### F5-P4-C — Playoff config: seeding + byes 🟡
+**What:** After qualification, admin configures seeding order and any byes.
+Seeding and qualification are separate concerns — teams may qualify one way and be seeded another.
+
+Seeding options:
+- By record (default)
+- By PF
+- By qualification order
+- Manual / custom
+
+Bye options:
+- None
+- Top N seeds get byes (most common)
+- Metric-based (e.g. top seed by PF gets bye)
+- Manual
+
+Bracket size auto-suggested: given Q qualifiers and B byes, suggest next power of 2
+bracket that fits (e.g. 10 teams → suggest 16-team bracket with 6 first-round byes,
+or 8-team with 2 byes depending on config). Admin confirms or adjusts.
+
+**Firebase:** `playoffs.seeding: { method }`, `playoffs.byes: { type, count }`, `playoffs.bracketSize: N`
 **Files:** `tournament.js`
 
-### F5-P4-D — Playoff bracket rendering (user view) 🟡
-**What:** Visual bracket for users showing matchups, results, advancement, champion.
-Reuse bracket rendering patterns from `standings.js` where possible.
-**Files:** `tournament.js`, `tournament.css`, `standings.js` (reference)
+---
 
-### F5-P4-E — Playoff weekly matchup sync 🟡
-**What:** During playoff weeks, Matchups tab shows bracket matchups labeled by round
-(Quarterfinals, Semifinals, Championship).
+### F5-P4-D — Bracket generation + admin draw 🟡
+**What:** Once qualification/seeding/byes are configured, bracket is generated.
+Two modes:
+1. **Auto-generate** — system places seeds into bracket slots based on seeding rules (1 vs last, 2 vs second-last, etc.)
+2. **Manual draw** — admin drags/assigns teams to bracket slots directly. Available for any size but especially useful for smaller tournaments.
+
+Admin can override any auto-generated bracket at any time (reassign teams to slots,
+adjust matchups before a round starts).
+
+Bracket is stateless and regenerable from config — stored result is just the slot assignments.
+
+**Firebase:** `playoffs.bracket: { rounds: [ { matchups: [ { slot, teamA, teamB, byeSlot? } ] } ] }`
+**Files:** `tournament.js`, `tournament.css`
+
+---
+
+### F5-P4-E — Playoff bracket rendering (user view) 🟡
+**What:** Visual bracket for users showing all rounds, matchups, scores (auto-synced),
+advancement, and champion. Renders from `playoffs.bracket` config.
+
+Bracket sizing adapts to bracket size (8/12/16/etc.) — horizontal scrollable on mobile.
+Shows: seed #, display name, score (from matchup sync), W/L result, advancement arrows.
+Champion slot at the end with 🏆.
+
+Also: Standings tab shows 🏆 next to tournament champion once determined.
+If `recognizeLeagueChampions` is on, a separate section surfaces per-league platform champions.
+
+**Files:** `tournament.js`, `tournament.css`
+
+---
+
+### F5-P4-F — Playoff weekly matchup sync 🟡
+**What:** During playoff weeks, the Matchups tab surfaces bracket matchups labeled by round
+(Quarterfinals / Semifinals / Championship). Scores pulled from the same platform sync
+already in use for regular season. No new sync mechanism needed — just filter by playoff week range
+and label by round based on bracket config.
+
+Winner auto-advances in bracket when both scores are final for that week.
+Admin can manually advance/override advancement if needed.
+
+**Firebase:** `meta.playoffStartWeek`, bracket advancement tracked in `playoffs.bracket`
 **Files:** `tournament.js`
 
-### F5-P4-F — Points-only champion detection 🟡
-**What:** When `championMethod === "points"`, champion = highest PF in standings.
-No bracket. Standings tab shows 🏆 next to top-PF team.
+---
+
+### F5-P4-G — Points-only champion detection 🟡
+**What:** When `championMethod === "points"`, champion = highest cumulative PF in standings.
+No bracket generated. Standings tab shows 🏆 next to the leader. Once the final week
+is synced, champion is locked and written to `playoffs.champion`.
 **Files:** `tournament.js`
 
-**Open questions before building P4:**
-- Double elimination: build now or defer to P5?
-- How does admin input results? Auto-sync from matchup data, manual entry, or hybrid?
-- F2 (Custom Playoff Tracker for individual leagues) overlaps with F5-P4 — merge or keep separate?
+---
+
+## ── F5-P4 Build Order ───────────────────────────────────────────────
+
+| Step | Task | Notes |
+|------|------|-------|
+| 1 | F5-P4-A | Champion method + league champion flag — admin settings UI |
+| 2 | F5-P4-B | Qualification rules — rule builder UI + Firebase write |
+| 3 | F5-P4-C | Seeding + byes + bracket size suggestion |
+| 4 | F5-P4-D | Bracket generation + manual draw UI |
+| 5 | F5-P4-E | Bracket rendering (user view) |
+| 6 | F5-P4-F | Matchup sync into bracket rounds |
+| 7 | F5-P4-G | Points-only path |
+
+Start with A+B+C in one session (all config/admin UI). Then D+E in one session (bracket render).
+Then F+G to wire up live data.
 
 ---
 
@@ -177,21 +252,16 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ## Suggested Session Order
 
 | # | ID | Description | Effort | Files Needed |
-|---|-----|-------------|--------|--------------|
-| 1 | ~~F5-P3-U4~~ | ~~Matchups: card layout + score histogram~~ | ✅ Done | — |
-| 2 | ~~F5-P3-U5~~ | ~~Rosters: position-group layout, 5-across grid~~ | ✅ Done | — |
-| 3 | ~~F5-P3-S1–S4, S8~~ | ~~Small fixes batch (registration, standings, info, years, dupe-check)~~ | ✅ Done | — |
-| 4 | ~~F5-P3-S6~~ | ~~Rules: year-specific versioning~~ | ✅ Done | — |
-| 5 | ~~F5-P3-S7~~ | ~~CSS consistency pass~~ | ✅ Done | — |
-| 6 | F5-P4 scoping | Custom playoffs scoping session | — | `tournament.js` |
-| 7 | F5-P4-A/B/C | Playoff config: method + qualification + format | High | `tournament.js` |
-| 8 | F5-P4-D/E/F | Playoff bracket rendering + sync + champion | High | `tournament.js`, `tournament.css`, `standings.js` |
-| 9 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 10 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 11 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
-| 12 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 13 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 14 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+|---|-----|-------------|--------|--------------| 
+| 1 | F5-P4-A/B/C | Playoff config: champion method + qualification + seeding/byes | High | `tournament.js` |
+| 2 | F5-P4-D/E | Bracket generation + manual draw + user view render | High | `tournament.js`, `tournament.css` |
+| 3 | F5-P4-F/G | Matchup sync into rounds + points-only path | Medium | `tournament.js` |
+| 4 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 5 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 6 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
+| 7 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 8 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 9 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -211,6 +281,15 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ---
 
 ## ✅ Completed
+
+### April 25, 2026 — UI Polish Pass (Mobile + Draft Cards + Standings)
+
+- **Roster tab mobile — 2 per row:** `trn-rosters-grid` changed from `1fr` to `repeat(2, 1fr)` on mobile. (`tournament.css`)
+- **Standings — PA column removed:** PA `<th>` and `<td>` removed from both internal and public standings tables. Data still computed internally; just not displayed. Frees space for team name + Twitter pill. (`tournament.js`, `tournaments/index.html`)
+- **Standings mobile tightening:** W/L columns 22px, PF 44px, rank 20px, cell padding 2px, font .72rem. `!important` added to override `locker.css` base padding in the internal app. Both internal and public sites now match. (`tournament.css`)
+- **Standings sub-line fix:** Mobile sub-line (`.trn-st-league--mobile`) changed from `teamName · leagueName` to just `leagueName` — display name was already on line 1. (`tournament.js`, `tournaments/index.html`)
+- **Draft card redesign:** Position-colored background tint (`{posColor}18`) on each card. Name abbreviated to `J. Jefferson` format. Position badge removed. `pos · NFL` rendered inline after name as dimmed `.draft-pick-pos-team` span. Two lines: player name + pos·team (line 1), fantasy team name (line 2). Applied across all four board renderers (Sleeper, MFL, Yahoo, tournament analytics). (`draft.js`, `tournament.js`, `locker.css`)
+- **Tournament draft board mobile — 4-col fit:** `draft-picks-row` forced to `repeat(4, 1fr)`, `overflow-x: hidden`, cards `min-height: 48px`, padding/gap condensed. Cards now fit 4-across without horizontal scroll. (`tournament.css`)
 
 ### April 25, 2026 — F5-P3 Completion
 

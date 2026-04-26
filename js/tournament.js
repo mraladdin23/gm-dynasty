@@ -3373,10 +3373,25 @@ const DLRTournament = (() => {
     const { picks, adp, byLeague } = cache;
     const leagues = Object.values(byLeague).filter(l => l.normalizedPicks?.length);
 
-    // Build unique team list from all picks
+    // Build unique team list from all picks, with league name for disambiguation
     const teamSet = {};
-    picks.forEach(p => { if (p.teamId) teamSet[p.teamId] = p.teamName || p.teamId; });
+    const teamLeagueMap = {}; // teamId → leagueName
+    picks.forEach(p => {
+      if (p.teamId) {
+        teamSet[p.teamId] = p.teamName || p.teamId;
+        if (!teamLeagueMap[p.teamId]) {
+          // Find which league this teamId belongs to
+          for (const l of Object.values(byLeague)) {
+            if (l.normalizedPicks?.some(np => np.teamId === p.teamId)) {
+              teamLeagueMap[p.teamId] = l.leagueName || "";
+              break;
+            }
+          }
+        }
+      }
+    });
     const teams = Object.entries(teamSet).sort((a, b) => a[1].localeCompare(b[1]));
+    const teamLabel = ([id, name]) => teamLeagueMap[id] ? `${name} — ${teamLeagueMap[id]}` : name;
 
     const leagueOpts = leagues.map(l => `<option value="${_esc(l.cacheKey)}">${_esc(l.leagueName)}</option>`).join("");
 
@@ -3419,7 +3434,7 @@ const DLRTournament = (() => {
               style="${selStyle};min-width:120px" />
             <select id="trn-draft-card-team" style="${selStyle}">
               <option value="">— Select team —</option>
-              ${teams.map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(name)}</option>`).join("")}
+              ${teams.map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(teamLabel([id, name]))}</option>`).join("")}
             </select>` : ""}
           <button class="btn-secondary btn-sm" id="trn-draft-refresh-btn">↺ Refresh</button>
         </div>
@@ -3471,8 +3486,8 @@ const DLRTournament = (() => {
       if (!sel) return;
       // Rebuild options filtered by search
       sel.innerHTML = `<option value="">— Select team —</option>` +
-        teams.filter(([, name]) => !_draftSearch || name.toLowerCase().includes(_draftSearch))
-          .map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(name)}</option>`).join("");
+        teams.filter(([id, name]) => !_draftSearch || name.toLowerCase().includes(_draftSearch) || (teamLeagueMap[id] || "").toLowerCase().includes(_draftSearch))
+          .map(([id, name]) => `<option value="${_esc(id)}" ${_draftCardTeam === id ? "selected" : ""}>${_esc(teamLabel([id, name]))}</option>`).join("");
     });
     document.getElementById("trn-draft-card-team")?.addEventListener("change", function() {
       _draftCardTeam = this.value || null;
