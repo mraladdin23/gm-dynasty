@@ -804,10 +804,20 @@ const DLRTournament = (() => {
           <div class="trn-detail-row">
             <span>Standings Ranking</span>
             <span>
-              <select id="trn-rankby-select" style="font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                <option value="record" ${(meta.rankBy || "record") === "record" ? "selected" : ""}>Record then PF</option>
-                <option value="pf"     ${meta.rankBy === "pf" ? "selected" : ""}>Points For only</option>
-              </select>
+              <div class="trn-yn-toggle">
+      		<button 
+       		  class="trn-yn-btn ${(meta.rankBy || "record") === "record" ? 'trn-yn-btn--active' : ''}" 
+        	  id="trn-rankby-h2h" 
+        	  data-val="record">
+        	  H2H
+      		</button>
+      		<button 
+        	  class="trn-yn-btn ${meta.rankBy === "pf" ? 'trn-yn-btn--active' : ''}" 
+        	  id="trn-rankby-points" 
+        	  data-val="pf">
+        	  Points
+      		</button>
+    	      </div>
             </span>
           </div>
           <div class="trn-detail-row">
