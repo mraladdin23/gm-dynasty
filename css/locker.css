@@ -1646,17 +1646,19 @@ select option { background: var(--color-bg-2); }
   vertical-align: middle;
 }
 .standings-row--playoff { background: rgba(240,180,41,.04); }
-.standings-rank { color: var(--color-text-dim); text-align: center; font-size: .75rem; }
-.standings-team-cell { display: flex; align-items: center; gap: var(--space-2); }
+.standings-rank { color: var(--color-text-dim); text-align: center; font-size: .75rem; width: 28px; white-space: nowrap; }
+.standings-team-cell { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.standings-team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.team-col { width: auto; max-width: 1px; }  /* auto-expands to fill remaining space; number cols take fixed width */
 .standings-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
 .st-av { width: 26px; height: 26px; border-radius: 50%; background: var(--color-surface); display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; color: var(--color-text-muted); flex-shrink: 0; }
 .bubble-tag { font-size: .65rem; color: var(--color-gold-dim); margin-left: var(--space-1); }
-.standings-win  { color: var(--color-green); font-weight: 700; text-align: center; }
-.standings-loss { color: var(--color-red);   text-align: center; }
-.standings-tie  { color: var(--color-text-dim); text-align: center; }
-.standings-num  { font-family: var(--font-mono); font-size: .78rem; text-align: right; }
+.standings-win  { color: var(--color-green); font-weight: 700; text-align: center; width: 32px; white-space: nowrap; }
+.standings-loss { color: var(--color-red);   text-align: center; width: 32px; white-space: nowrap; }
+.standings-tie  { color: var(--color-text-dim); text-align: center; width: 28px; white-space: nowrap; }
+.standings-num  { font-family: var(--font-mono); font-size: .78rem; text-align: right; width: 58px; white-space: nowrap; }
 .standings-num.dim { color: var(--color-text-dim); }
-.standings-streak { font-family: var(--font-mono); font-size: .78rem; text-align: center; }
+.standings-streak { font-family: var(--font-mono); font-size: .78rem; text-align: center; width: 44px; white-space: nowrap; }
 .fw-700 { font-weight: 700; }
 .standings-legend {
   display: flex;
