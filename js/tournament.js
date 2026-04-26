@@ -3574,9 +3574,9 @@ const DLRTournament = (() => {
           <div>
             <div style="display:flex;align-items:center;gap:4px">
               <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;flex-shrink:0">${_esc(p.position || "?")}</span>
-              <span class="draft-auction-name">${_esc(p.name || "Unknown")}</span>
+              <span class="draft-auction-name">${_esc(p.name || "Unknown")}</span>              
+	      <span class="draft-auction-team" style="font-size:.7;opacity:.75">${_esc(nfl)}</span>
             </div>
-            <div class="dim" style="font-size:.7rem;padding-left:2px">${_esc(nfl)}</div>
           </div>
           ${statCols}
         </div>`;
