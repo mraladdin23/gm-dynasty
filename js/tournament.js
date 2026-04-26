@@ -3541,10 +3541,10 @@ const DLRTournament = (() => {
       <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">
         <span>#</span><span>Player</span>
         <span style="text-align:center">Dft</span>
-        <span style="text-align:right">ADP</span>
-        <span style="text-align:right">Min</span>
+        <span style="text-align:center">ADP</span>
+        <span style="text-align:center">Min</span>
+        <span style="text-align:center">Max</span>
         <span style="text-align:center">25-75%</span>
-        <span style="text-align:right">Max</span>
       </div>`;
 
     // Paginate at 25 rows — declared before rows.map() so it's in scope for rank calc
@@ -3783,9 +3783,9 @@ const DLRTournament = (() => {
           <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${_esc(p.position || "?")}</span>
           <div>
             <div class="draft-auction-name">${_esc(p.name || "Unknown")}</div>
+	    <div class="draft-auction-team" style="font-size:.80rem>${_esc(p.name || "Unknown")}</div>
             <div class="dim" style="font-size:.7rem">${_esc(p.nflTeam || "FA")}</div>
           </div>
-          <span class="draft-auction-team" style="font-size:.82rem;align-self:center">${_esc(p.teamName || "")}</span>
         </div>`;
     });
 
