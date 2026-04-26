@@ -682,7 +682,6 @@
               <th class="standings-win"  data-col="wins"   style="${thStyle}">W${si("wins")}</th>
               <th class="standings-loss" data-col="losses" style="${thStyle}">L${si("losses")}</th>
               <th class="standings-num"  data-col="pf"     style="${thStyle}">PF${si("pf")}</th>
-              <th class="standings-num dim" data-col="pa"  style="${thStyle}">PA${si("pa")}</th>
             </tr></thead>
             <tbody id="pub-st-tbody">
               ${sorted.map(r => `
@@ -702,7 +701,6 @@
                   <td class="standings-win">${r.wins}</td>
                   <td class="standings-loss">${r.losses}</td>
                   <td class="standings-num">${r.pf.toFixed(2)}</td>
-                  <td class="standings-num dim">${r.pa.toFixed(2)}</td>
                 </tr>`).join("")}
             </tbody>
           </table>

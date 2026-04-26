@@ -1983,7 +1983,6 @@ const DLRTournament = (() => {
       '<th class="standings-win"  data-sort-col="wins"   style="' + thBase + ';width:36px">W'  + si("wins")   + "</th>" +
       '<th class="standings-loss" data-sort-col="losses" style="' + thBase + ';width:36px">L'  + si("losses") + "</th>" +
       '<th class="standings-num"  data-sort-col="pf"     style="' + thBase + ';width:64px">PF' + si("pf")     + "</th>" +
-      '<th class="standings-num dim" data-sort-col="pa"  style="' + thBase + ';width:64px">PA' + si("pa")     + "</th>" +
       "</tr></thead>";
 
     const genderBadge = (g) => {
@@ -2018,7 +2017,6 @@ const DLRTournament = (() => {
       '<td class="standings-win">'  + r.wins + "</td>" +
       '<td class="standings-loss">' + r.losses + "</td>" +
       '<td class="standings-num">'  + r.pf.toFixed(2) + "</td>" +
-      '<td class="standings-num dim">' + r.pa.toFixed(2) + "</td>" +
       "</tr>";
 
     const tableWrap = (innerRows) =>
@@ -3705,16 +3703,21 @@ const DLRTournament = (() => {
             const clickFn  = pk.playerId
               ? `DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pName)}')`
               : "";
+            // Abbreviated name: "J. Jefferson" from "Justin Jefferson"
+            const nameParts = pName.trim().split(/\s+/);
+            const shortName = nameParts.length > 1
+              ? nameParts[0].charAt(0) + ". " + nameParts.slice(1).join(" ")
+              : pName;
             boardHTML += `
               <div class="draft-pick draft-pick--filled"
-                ${clickFn ? `onclick="${clickFn}" style="cursor:pointer"` : ""}
+                ${clickFn ? `onclick="${clickFn}" style="cursor:pointer;background:${col}18;border-color:${col}40"` : `style="background:${col}18;border-color:${col}40"`}
                 title="${_esc(pName)} · ${pos} · ${nfl}">
                 <div class="draft-pick-num">${overallNum}</div>
                 <div class="draft-pick-player">
-                  <div class="draft-pick-name">${_esc(pName)}</div>
+                  <div class="draft-pick-name">${_esc(shortName)}</div>
                   <div class="draft-pick-meta">
                     <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55">${pos}</span>
-                    <span class="draft-pick-nfl">${nfl}</span>
+                    <span class="draft-pick-pos-team">${pos} · ${nfl}</span>
                   </div>
                 </div>
                 <div class="draft-pick-team">${_esc(displayTeam)}</div>
