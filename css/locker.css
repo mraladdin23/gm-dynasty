@@ -2649,7 +2649,7 @@ select option { background: var(--color-bg-2); }
 }
 .draft-pick-team {
   font-size: .68rem;
-  color: var(--color-text-dim);
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2657,6 +2657,7 @@ select option { background: var(--color-bg-2); }
 }
 .draft-pick-owner {
   font-size: .72rem;
+  color: var(--color-text);
   margin-top: auto;
 }
 .draft-empty {
