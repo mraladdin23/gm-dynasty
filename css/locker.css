@@ -2586,8 +2586,8 @@ select option { background: var(--color-bg-2); }
 }
 .draft-status { font-weight: 600; }
 
-.draft-board-scroll {overflow-x: hidden;}
-.draft-board {width: 100%;}
+.draft-board-scroll {overflow-x: hidden !important}
+.draft-board {width: 100% !important; min-width: 0 !important;}
 
 .draft-round {}
 .draft-round-label {
@@ -2599,11 +2599,15 @@ select option { background: var(--color-bg-2); }
   margin-bottom: var(--space-2);
 }
 .draft-picks-row {
-   display: grid;
+   display: grid !important;
    grid-template-columns: repeat(4, 1fr) !important; gap: 3px !important;
 }
 
-.draft-pick {min-width: 0; max-width: none; min-height: 48px; padding: 3px 3px; gap: 1px;}
+.draft-pick {min-width: 0 !important;
+  max-width: none !important;
+  width: 100% !important;
+  min-height: 48px;
+  padding: 3px 3px !important;}
 .draft-pick--filled {
   cursor: pointer;
 }
