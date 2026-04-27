@@ -1702,3 +1702,95 @@
   border-radius: var(--radius-sm);
   line-height: 1.4;
 }
+
+/* ── F5-P4: Week Stepper ─────────────────────────────── */
+.trn-week-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 28px;
+}
+.trn-week-step-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text-dim);
+  background: var(--color-surface-2, var(--color-surface));
+  border: none;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  user-select: none;
+  flex-shrink: 0;
+}
+.trn-week-step-btn:hover {
+  background: var(--color-gold-light, rgba(212,175,55,.18));
+  color: var(--color-gold, #d4af37);
+}
+.trn-week-step-val {
+  min-width: 46px;
+  text-align: center;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  padding: 0 4px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: .01em;
+}
+
+/* ── F5-P4: Playoff Mode Cards ───────────────────────── */
+.trn-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+@media (max-width: 600px) {
+  .trn-mode-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.trn-mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-2) var(--space-1);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md, var(--radius-sm));
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.trn-mode-card:hover {
+  border-color: var(--color-gold, #d4af37);
+  background: var(--color-gold-light, rgba(212,175,55,.08));
+}
+.trn-mode-card--active {
+  border-color: var(--color-gold, #d4af37);
+  background: var(--color-gold-light, rgba(212,175,55,.14));
+}
+.trn-mode-card--active:hover { transform: none; }
+.trn-mode-icon  { font-size: 1.3rem; line-height: 1; }
+.trn-mode-label { font-size: .78rem; font-weight: 700; color: var(--color-text); }
+.trn-mode-sub   { font-size: .7rem;  color: var(--color-text-dim); }
+.trn-mode-desc  {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-2, var(--color-surface));
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  line-height: 1.5;
+}

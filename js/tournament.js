@@ -822,15 +822,6 @@ const DLRTournament = (() => {
             </span>
           </div>
           <div class="trn-detail-row">
-            <span>Playoff Start Week</span>
-            <span>
-              <input type="number" id="trn-playoff-week-input" min="1" max="18"
-                value="${meta.playoffStartWeek || ""}"
-                placeholder="e.g. 15"
-                style="width:70px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-            </span>
-          </div>
-          <div class="trn-detail-row">
             <span style="display:flex;align-items:center;gap:5px">
               Median Wins
               <button class="trn-help-btn" title="Each week, any team that beats the median score of all teams across all leagues gets an extra +1 Win credited. Sleeper leagues only.">?</button>
@@ -901,21 +892,6 @@ const DLRTournament = (() => {
       document.querySelector('.trn-tab[data-tab="registrations"]')?.click();
     });
 
-    // Playoff start week — save on blur or Enter
-    const playoffWeekInput = document.getElementById("trn-playoff-week-input");
-    const _savePlayoffWeek = async function() {
-      const raw = parseInt(playoffWeekInput?.value) || null;
-      const prev = t.meta?.playoffStartWeek || null;
-      if (raw === prev) return; // no change
-      try {
-        await _tMetaRef(tid).update({ playoffStartWeek: raw });
-        if (_tournaments[tid]?.meta) _tournaments[tid].meta.playoffStartWeek = raw;
-        showToast(raw ? `Playoff start week set to ${raw} ✓` : "Playoff start week cleared ✓");
-      } catch(e) { showToast("Failed to save playoff week", "error"); }
-    };
-    playoffWeekInput?.addEventListener("blur", _savePlayoffWeek);
-    playoffWeekInput?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); _savePlayoffWeek(); } });
-
     // Median wins Yes/No
     const _saveMedianWins = async (val) => {
       try {
@@ -984,29 +960,67 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // _openTournamentViewAsUser removed — now handled via _viewingAsUser flag in _openTournamentView
 
   // ── F5-P4 Playoff Configuration ────────────────────────────────────────────
-  // Renders HTML for the Playoff Configuration section card (A+B+C).
-  // Called inside _renderAdminOverview; reads from t.playoffs (may be undefined).
-  function _renderPlayoffConfigHTML(tid, t) {
-    const po = t.playoffs || {};
+  // Four playoff modes:
+  //   total_points  — no qualification, no bracket; champion = highest cumulative PF
+  //   points_rounds — teams qualify, each round top N/% advance by points (no H2H)
+  //   h2h_bracket   — teams qualify, standard single-elim H2H bracket
+  //   custom_bracket— teams qualify, custom rounds where groups compete (multi-team per slot)
+  //
+  // Weeks: playoffs.startWeek / playoffs.endWeek written here AND meta.playoffStartWeek
+  // kept in sync so existing standings sync code keeps working without changes.
 
-    // ── A: Champion method ──────────────────────────────
-    const method = po.championMethod || "bracket";
+  // ── Week stepper widget ─────────────────────────────────────────────────────
+  // Returns HTML for a −/value/+ stepper. id is the root element id.
+  function _weekStepperHTML(id, value, label, helpText) {
+    const display = value ? `Wk ${value}` : "—";
+    return `
+      <div class="trn-detail-row">
+        <span style="display:flex;align-items:center;gap:5px">
+          ${_esc(label)}
+          ${helpText ? `<button class="trn-help-btn" title="${_esc(helpText)}">?</button>` : ""}
+        </span>
+        <span>
+          <div class="trn-week-stepper" id="${id}">
+            <button class="trn-week-step-btn" data-dir="-1" aria-label="Decrease">−</button>
+            <span class="trn-week-step-val" data-raw="${value || 0}">${display}</span>
+            <button class="trn-week-step-btn" data-dir="1" aria-label="Increase">+</button>
+          </div>
+        </span>
+      </div>`;
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  function _renderPlayoffConfigHTML(tid, t) {
+    const po   = t.playoffs || {};
+    const meta = t.meta     || {};
+
+    // ── Mode ────────────────────────────────────────────
+    // Migrate legacy: if old meta.playoffStartWeek exists but playoffs.mode doesn't, default bracket
+    const mode = po.mode || (meta.playoffStartWeek ? "h2h_bracket" : "total_points");
+
+    // ── Weeks ───────────────────────────────────────────
+    // startWeek: read playoffs.startWeek, fall back to legacy meta.playoffStartWeek
+    const startWeek = po.startWeek || meta.playoffStartWeek || null;
+    const endWeek   = po.endWeek   || null;
+    const showWeeks = mode !== "total_points";
+
+    // ── Champion / league champs ────────────────────────
     const recognizeLeague = !!po.recognizeLeagueChampions;
 
-    // ── B: Qualification rules ──────────────────────────
-    const qual = po.qualification || {};
-    const qualMethod = qual.method || "top_record";
-    // steps array for composite method
-    const qualSteps = qual.steps && qual.steps.length ? qual.steps : [{ by: "wins", count: 4 }];
-    const qualCount = qual.count || 8;
-    const qualPerGroup = qual.perGroup || 2;
+    // ── Qualification ───────────────────────────────────
+    const showQual  = mode !== "total_points";
+    const qual      = po.qualification || {};
+    const qualMethod  = qual.method  || "top_record";
+    const qualCount   = qual.count   || 8;
+    const qualPerGroup= qual.perGroup|| 2;
+    const qualSteps   = qual.steps && qual.steps.length ? qual.steps : [{ by: "wins", count: 4 }];
 
     const _stepHTML = (step, idx) => `
       <div class="trn-qual-step" data-step-idx="${idx}">
         <span class="trn-qual-step-num">${idx + 1}.</span>
         <select class="trn-qual-step-by" data-step-idx="${idx}">
-          <option value="wins"   ${step.by === "wins"   ? "selected" : ""}>Wins</option>
-          <option value="pf"     ${step.by === "pf"     ? "selected" : ""}>Points For</option>
+          <option value="wins" ${step.by === "wins" ? "selected" : ""}>Wins</option>
+          <option value="pf"   ${step.by === "pf"   ? "selected" : ""}>Points For</option>
         </select>
         <span style="font-size:.8rem;color:var(--color-text-dim)">Top</span>
         <input class="trn-qual-step-count" type="number" min="1" max="99"
@@ -1016,22 +1030,36 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${qualSteps.length <= 1 ? "disabled" : ""} title="Remove step">✕</button>
       </div>`;
 
-    const compositeStepsHTML = qualSteps.map((s, i) => _stepHTML(s, i)).join("");
+    // ── Points rounds config ─────────────────────────────
+    const showPointsRounds = mode === "points_rounds";
+    const rounds = po.pointsRounds || {};
+    const advanceMethod = rounds.advanceMethod || "count";
+    const advanceCount  = rounds.advanceCount  || 4;
+    const advancePct    = rounds.advancePct    || 50;
 
-    // ── C: Seeding + byes ───────────────────────────────
-    const seeding = po.seeding || {};
-    const byes    = po.byes    || {};
-    const seedMethod  = seeding.method  || "record";
-    const byeType     = byes.type       || "none";
-    const byeCount    = byes.count      || 2;
-    const bracketSize = po.bracketSize  || null;
+    // ── Seeding + byes ───────────────────────────────────
+    const showSeeding = ["h2h_bracket","custom_bracket","points_rounds"].includes(mode);
+    const seeding   = po.seeding || {};
+    const byes      = po.byes    || {};
+    const seedMethod  = seeding.method || "record";
+    const byeType     = byes.type      || "none";
+    const byeCount    = byes.count     || 2;
+    const bracketSize = po.bracketSize || null;
 
-    // Auto-suggest bracket size based on qualifier count + bye count
-    const effectiveQualifiers = qualMethod === "composite" ? qualSteps.reduce((s, st) => s + (parseInt(st.count) || 0), 0)
-                               : qualMethod === "top_per_group" ? qualPerGroup * 4 // rough estimate
-                               : qualCount;
-    const totalSlots = effectiveQualifiers + (byeType === "none" ? 0 : byeCount);
+    // Suggest bracket size
+    const effectiveQ = qualMethod === "composite" ? qualSteps.reduce((s,st) => s + (parseInt(st.count)||0), 0)
+                     : qualMethod === "top_per_group" ? qualPerGroup * 4
+                     : qualCount;
+    const totalSlots  = effectiveQ + (byeType === "none" ? 0 : byeCount);
     const suggestedBracket = Math.pow(2, Math.ceil(Math.log2(Math.max(totalSlots, 2))));
+
+    // ── Mode descriptions ────────────────────────────────
+    const MODE_DESC = {
+      total_points:   "Champion is the team with the highest cumulative Points For at the end of the regular season. No bracket or playoff rounds.",
+      points_rounds:  "Teams qualify based on standings, then compete across playoff weeks — each round the top N scorers advance. No head-to-head matchups.",
+      h2h_bracket:    "Teams qualify and are placed into a standard single-elimination bracket. Each round is one week of head-to-head matchups.",
+      custom_bracket: "Teams qualify and compete in custom rounds where multiple teams can share a slot — for example 4 teams compete and the top 2 advance each round."
+    };
 
     return `
       <div class="trn-section-card" id="trn-playoff-config-card">
@@ -1041,26 +1069,205 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         </div>
         <div id="trn-playoff-config-body">
 
-          <!-- A: Champion Method -->
-          <div class="trn-playoff-sub">
+          <!-- Mode selector -->
+          <div class="trn-playoff-sub" style="border-top:none;padding-top:0;margin-top:var(--space-1)">
+            <div class="trn-playoff-sub-title">Format</div>
+            <div class="trn-mode-grid">
+              ${[
+                { val:"total_points",   icon:"📊", label:"Total Points",    sub:"Highest PF wins" },
+                { val:"points_rounds",  icon:"📈", label:"Points Rounds",   sub:"Advance by score" },
+                { val:"h2h_bracket",    icon:"🥊", label:"H2H Bracket",     sub:"Single elimination" },
+                { val:"custom_bracket", icon:"⚙️", label:"Custom Bracket",  sub:"Multi-team rounds" }
+              ].map(m => `
+                <button class="trn-mode-card ${mode === m.val ? "trn-mode-card--active" : ""}"
+                  data-mode="${m.val}" id="trn-mode-${m.val}">
+                  <span class="trn-mode-icon">${m.icon}</span>
+                  <span class="trn-mode-label">${m.label}</span>
+                  <span class="trn-mode-sub">${m.sub}</span>
+                </button>`).join("")}
+            </div>
+            <div class="trn-mode-desc" id="trn-mode-desc">${MODE_DESC[mode]}</div>
+          </div>
+
+          <!-- Playoff Weeks (hidden for total_points) -->
+          <div class="trn-playoff-sub" id="trn-weeks-section" ${showWeeks ? "" : 'style="display:none"'}>
             <div class="trn-playoff-sub-title">
-              Champion Determination
-              <button class="trn-help-btn" title="How the tournament champion is decided. 'Bracket' runs a head-to-head elimination. 'Total Points' crowns the highest cumulative scorer — no bracket needed.">?</button>
+              Playoff Weeks
+              <button class="trn-help-btn" title="The NFL weeks that make up your playoff rounds. Start week is also used to exclude playoff weeks from regular-season standings.">?</button>
+            </div>
+            <div class="trn-detail-rows">
+              ${_weekStepperHTML("trn-start-week-stepper", startWeek, "Start Week",
+                "First week of playoffs. Regular-season standings are calculated through the week before this.")}
+              ${_weekStepperHTML("trn-end-week-stepper",   endWeek,   "End Week",
+                "Last week of playoffs (championship week).")}
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+              <button class="btn-primary btn-sm" id="trn-weeks-save">Save Weeks</button>
+            </div>
+          </div>
+
+          <!-- Points Rounds config (points_rounds only) -->
+          <div class="trn-playoff-sub" id="trn-points-rounds-section" ${showPointsRounds ? "" : 'style="display:none"'}>
+            <div class="trn-playoff-sub-title">
+              Advancement Rules
+              <button class="trn-help-btn" title="Each playoff round, teams are ranked by their weekly score. The top N or top % of scorers advance to the next round.">?</button>
             </div>
             <div class="trn-detail-rows">
               <div class="trn-detail-row">
-                <span>Champion Method</span>
+                <span>Advance Method</span>
                 <span>
                   <div class="trn-yn-toggle">
-                    <button class="trn-yn-btn ${method === "bracket" ? "trn-yn-btn--active" : ""}" id="trn-champ-bracket" data-val="bracket">Bracket</button>
-                    <button class="trn-yn-btn ${method === "points"  ? "trn-yn-btn--active" : ""}" id="trn-champ-points"  data-val="points">Total Points</button>
+                    <button class="trn-yn-btn ${advanceMethod === "count" ? "trn-yn-btn--active" : ""}" id="trn-adv-count" data-val="count">Top N Teams</button>
+                    <button class="trn-yn-btn ${advanceMethod === "pct"   ? "trn-yn-btn--active" : ""}" id="trn-adv-pct"   data-val="pct">Top %</button>
                   </div>
+                </span>
+              </div>
+              <div class="trn-detail-row" id="trn-adv-count-row" ${advanceMethod === "count" ? "" : 'style="display:none"'}>
+                <span>Teams Advancing per Round</span>
+                <span>
+                  <input type="number" id="trn-adv-count-val" min="1" max="64"
+                    value="${advanceCount}"
+                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                </span>
+              </div>
+              <div class="trn-detail-row" id="trn-adv-pct-row" ${advanceMethod === "pct" ? "" : 'style="display:none"'}>
+                <span>Percent Advancing per Round</span>
+                <span style="display:flex;align-items:center;gap:var(--space-1)">
+                  <input type="number" id="trn-adv-pct-val" min="1" max="99"
+                    value="${advancePct}"
+                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                  <span style="font-size:.82rem;color:var(--color-text-dim)">%</span>
+                </span>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+              <button class="btn-primary btn-sm" id="trn-points-rounds-save">Save Advancement Rules</button>
+            </div>
+          </div>
+
+          <!-- Qualification (all modes except total_points) -->
+          <div class="trn-playoff-sub" id="trn-qual-section" ${showQual ? "" : 'style="display:none"'}>
+            <div class="trn-playoff-sub-title">
+              Qualification Rules
+              <button class="trn-help-btn" title="Who makes the playoffs? Choose how teams qualify — top by record, top by points, per division/conference, composite, or manual.">?</button>
+            </div>
+            <div class="trn-detail-rows">
+              <div class="trn-detail-row">
+                <span>Method</span>
+                <span>
+                  <select id="trn-qual-method" style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                    <option value="top_record"    ${qualMethod === "top_record"    ? "selected" : ""}>Top X by Record</option>
+                    <option value="top_pf"        ${qualMethod === "top_pf"        ? "selected" : ""}>Top X by Points For</option>
+                    <option value="top_per_group" ${qualMethod === "top_per_group" ? "selected" : ""}>Top X per Division / Conf</option>
+                    <option value="composite"     ${qualMethod === "composite"     ? "selected" : ""}>Composite (multi-step)</option>
+                    <option value="manual"        ${qualMethod === "manual"        ? "selected" : ""}>Manual Override</option>
+                  </select>
+                </span>
+              </div>
+              <div id="trn-qual-count-row" class="trn-detail-row"
+                ${["top_record","top_pf"].includes(qualMethod) ? "" : 'style="display:none"'}>
+                <span>Number of Qualifiers</span>
+                <span>
+                  <input type="number" id="trn-qual-count" min="2" max="64" value="${qualCount}"
+                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                </span>
+              </div>
+              <div id="trn-qual-pergroup-row" class="trn-detail-row"
+                ${qualMethod === "top_per_group" ? "" : 'style="display:none"'}>
+                <span>Qualifiers per Division / Conf</span>
+                <span>
+                  <input type="number" id="trn-qual-pergroup" min="1" max="10" value="${qualPerGroup}"
+                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                </span>
+              </div>
+              <div id="trn-qual-composite-section" ${qualMethod === "composite" ? "" : 'style="display:none"'}>
+                <div style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-1) 0 var(--space-2)">
+                  Steps run in order — each fills spots from teams not yet selected.
+                </div>
+                <div id="trn-qual-steps-list" class="trn-qual-steps">
+                  ${qualSteps.map((s, i) => _stepHTML(s, i)).join("")}
+                </div>
+                <button class="btn-secondary btn-xs" id="trn-qual-add-step"
+                  style="margin-top:var(--space-2)">+ Add Step</button>
+              </div>
+              <div id="trn-qual-manual-note" class="trn-detail-row"
+                ${qualMethod === "manual" ? "" : 'style="display:none"'}>
+                <span style="color:var(--color-text-dim);font-size:.82rem;grid-column:1/-1">
+                  You'll hand-pick qualifiers when building the bracket (next phase).
+                </span>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+              <button class="btn-primary btn-sm" id="trn-qual-save">Save Qualification Rules</button>
+            </div>
+          </div>
+
+          <!-- Seeding + Byes (all bracket/round modes) -->
+          <div class="trn-playoff-sub" id="trn-seeding-section" ${showSeeding ? "" : 'style="display:none"'}>
+            <div class="trn-playoff-sub-title">
+              Seeding &amp; Byes
+              <button class="trn-help-btn" title="Seeding determines bracket order. Byes give top seeds a first-round pass. Bracket size must be a power of 2.">?</button>
+            </div>
+            <div class="trn-detail-rows">
+              <div class="trn-detail-row">
+                <span>Seeding Method</span>
+                <span>
+                  <select id="trn-seed-method" style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                    <option value="record"     ${seedMethod === "record"     ? "selected" : ""}>By Record</option>
+                    <option value="pf"         ${seedMethod === "pf"         ? "selected" : ""}>By Points For</option>
+                    <option value="qual_order" ${seedMethod === "qual_order" ? "selected" : ""}>By Qualification Order</option>
+                    <option value="manual"     ${seedMethod === "manual"     ? "selected" : ""}>Manual / Custom</option>
+                  </select>
                 </span>
               </div>
               <div class="trn-detail-row">
                 <span style="display:flex;align-items:center;gap:5px">
+                  Byes
+                  <button class="trn-help-btn" title="Top seeds receive a first-round bye and advance automatically without playing.">?</button>
+                </span>
+                <span>
+                  <div class="trn-yn-toggle">
+                    <button class="trn-yn-btn ${byeType === "none"   ? "trn-yn-btn--active" : ""}" id="trn-bye-none"   data-val="none">None</button>
+                    <button class="trn-yn-btn ${byeType === "top_n"  ? "trn-yn-btn--active" : ""}" id="trn-bye-topn"  data-val="top_n">Top N Seeds</button>
+                    <button class="trn-yn-btn ${byeType === "manual" ? "trn-yn-btn--active" : ""}" id="trn-bye-manual" data-val="manual">Manual</button>
+                  </div>
+                </span>
+              </div>
+              <div class="trn-detail-row" id="trn-bye-count-row" ${byeType !== "none" ? "" : 'style="display:none"'}>
+                <span>Number of Byes</span>
+                <span>
+                  <input type="number" id="trn-bye-count" min="1" max="16" value="${byeCount}"
+                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                </span>
+              </div>
+              <div class="trn-detail-row" id="trn-bracket-size-row"
+                ${["h2h_bracket","custom_bracket"].includes(mode) ? "" : 'style="display:none"'}>
+                <span style="display:flex;align-items:center;gap:5px">
+                  Bracket Size
+                  <button class="trn-help-btn" title="Must be a power of 2 (8, 16, 32…). Suggested from qualifier + bye count.">?</button>
+                </span>
+                <span style="display:flex;align-items:center;gap:var(--space-2)">
+                  <input type="number" id="trn-bracket-size" min="4" max="128"
+                    value="${bracketSize || suggestedBracket}"
+                    style="width:64px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                  <span class="trn-bracket-suggest-chip" id="trn-bracket-suggest-chip"
+                    title="Suggested from qualifier + bye count">Suggested: ${suggestedBracket}</span>
+                </span>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+              <button class="btn-primary btn-sm" id="trn-seeding-save">Save Seeding &amp; Byes</button>
+            </div>
+          </div>
+
+          <!-- League champion recognition (all modes) -->
+          <div class="trn-playoff-sub">
+            <div class="trn-playoff-sub-title">League Champions</div>
+            <div class="trn-detail-rows">
+              <div class="trn-detail-row">
+                <span style="display:flex;align-items:center;gap:5px">
                   Recognize League Champions
-                  <button class="trn-help-btn" title="Separately surface each league's platform champion in the standings view. Independent of the tournament champion.">?</button>
+                  <button class="trn-help-btn" title="Separately surface each league's platform champion in standings. Independent of the tournament champion.">?</button>
                 </span>
                 <span>
                   <div class="trn-yn-toggle">
@@ -1072,135 +1279,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             </div>
           </div>
 
-          <!-- B: Qualification Rules (hidden when Total Points) -->
-          <div class="trn-playoff-sub" id="trn-qual-section" ${method === "points" ? 'style="display:none"' : ""}>
-            <div class="trn-playoff-sub-title">
-              Qualification Rules
-              <button class="trn-help-btn" title="Who makes the playoffs? Choose how teams qualify — top by record, top by points, per division/conference, composite, or manual override.">?</button>
-            </div>
-            <div class="trn-detail-rows">
-              <div class="trn-detail-row">
-                <span>Qualification Method</span>
-                <span>
-                  <select id="trn-qual-method" style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                    <option value="top_record"    ${qualMethod === "top_record"    ? "selected" : ""}>Top X by Record</option>
-                    <option value="top_pf"        ${qualMethod === "top_pf"        ? "selected" : ""}>Top X by Points For</option>
-                    <option value="top_per_group" ${qualMethod === "top_per_group" ? "selected" : ""}>Top X per Division/Conference</option>
-                    <option value="composite"     ${qualMethod === "composite"     ? "selected" : ""}>Composite (multi-step)</option>
-                    <option value="manual"        ${qualMethod === "manual"        ? "selected" : ""}>Manual Override</option>
-                  </select>
-                </span>
-              </div>
-
-              <!-- Simple count (top_record, top_pf) -->
-              <div id="trn-qual-count-row" class="trn-detail-row"
-                ${["top_record","top_pf"].includes(qualMethod) ? "" : 'style="display:none"'}>
-                <span>Number of Qualifiers</span>
-                <span>
-                  <input type="number" id="trn-qual-count" min="2" max="64"
-                    value="${qualCount}"
-                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                </span>
-              </div>
-
-              <!-- Per group count -->
-              <div id="trn-qual-pergroup-row" class="trn-detail-row"
-                ${qualMethod === "top_per_group" ? "" : 'style="display:none"'}>
-                <span>Qualifiers per Division/Conf</span>
-                <span>
-                  <input type="number" id="trn-qual-pergroup" min="1" max="10"
-                    value="${qualPerGroup}"
-                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                </span>
-              </div>
-
-              <!-- Composite steps -->
-              <div id="trn-qual-composite-section"
-                ${qualMethod === "composite" ? "" : 'style="display:none"'}>
-                <div style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-1) 0 var(--space-2)">
-                  Each step fills spots from teams not yet selected. Steps run in order.
-                </div>
-                <div id="trn-qual-steps-list" class="trn-qual-steps">
-                  ${compositeStepsHTML}
-                </div>
-                <button class="btn-secondary btn-xs" id="trn-qual-add-step"
-                  style="margin-top:var(--space-2)">+ Add Step</button>
-              </div>
-
-              <!-- Manual override note -->
-              <div id="trn-qual-manual-note" class="trn-detail-row"
-                ${qualMethod === "manual" ? "" : 'style="display:none"'}>
-                <span style="color:var(--color-text-dim);font-size:.82rem;grid-column:1/-1">
-                  You'll hand-pick qualifiers when building the bracket (F5-P4-D).
-                </span>
-              </div>
-            </div>
-            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
-              <button class="btn-primary btn-sm" id="trn-qual-save">Save Qualification Rules</button>
-            </div>
-          </div>
-
-          <!-- C: Seeding + Byes (hidden when Total Points) -->
-          <div class="trn-playoff-sub" id="trn-seeding-section" ${method === "points" ? 'style="display:none"' : ""}>
-            <div class="trn-playoff-sub-title">
-              Seeding &amp; Byes
-              <button class="trn-help-btn" title="Seeding determines bracket order. Byes give top seeds a first-round pass. Bracket size auto-suggests based on your qualifier + bye count.">?</button>
-            </div>
-            <div class="trn-detail-rows">
-              <div class="trn-detail-row">
-                <span>Seeding Method</span>
-                <span>
-                  <select id="trn-seed-method" style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                    <option value="record"    ${seedMethod === "record"    ? "selected" : ""}>By Record</option>
-                    <option value="pf"        ${seedMethod === "pf"        ? "selected" : ""}>By Points For</option>
-                    <option value="qual_order"${seedMethod === "qual_order"? "selected" : ""}>By Qualification Order</option>
-                    <option value="manual"    ${seedMethod === "manual"    ? "selected" : ""}>Manual / Custom</option>
-                  </select>
-                </span>
-              </div>
-              <div class="trn-detail-row">
-                <span style="display:flex;align-items:center;gap:5px">
-                  Byes
-                  <button class="trn-help-btn" title="Top seeds receive a first-round bye (they advance automatically without playing week 1 of playoffs).">?</button>
-                </span>
-                <span>
-                  <div class="trn-yn-toggle">
-                    <button class="trn-yn-btn ${byeType === "none"  ? "trn-yn-btn--active" : ""}" id="trn-bye-none"   data-val="none">None</button>
-                    <button class="trn-yn-btn ${byeType === "top_n" ? "trn-yn-btn--active" : ""}" id="trn-bye-topn"  data-val="top_n">Top N Seeds</button>
-                    <button class="trn-yn-btn ${byeType === "manual"? "trn-yn-btn--active" : ""}" id="trn-bye-manual" data-val="manual">Manual</button>
-                  </div>
-                </span>
-              </div>
-              <div class="trn-detail-row" id="trn-bye-count-row"
-                ${byeType !== "none" ? "" : 'style="display:none"'}>
-                <span>Number of Byes</span>
-                <span>
-                  <input type="number" id="trn-bye-count" min="1" max="16"
-                    value="${byeCount}"
-                    style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                </span>
-              </div>
-              <div class="trn-detail-row">
-                <span style="display:flex;align-items:center;gap:5px">
-                  Bracket Size
-                  <button class="trn-help-btn" title="Must be a power of 2 (8, 16, 32…). Suggested based on your qualifier + bye count. You can override it.">?</button>
-                </span>
-                <span style="display:flex;align-items:center;gap:var(--space-2)">
-                  <input type="number" id="trn-bracket-size" min="4" max="128"
-                    value="${bracketSize || suggestedBracket}"
-                    style="width:64px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                  <span class="trn-bracket-suggest-chip" id="trn-bracket-suggest-chip"
-                    title="Suggested based on qualifier + bye count">
-                    Suggested: ${suggestedBracket}
-                  </span>
-                </span>
-              </div>
-            </div>
-            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
-              <button class="btn-primary btn-sm" id="trn-seeding-save">Save Seeding &amp; Byes</button>
-            </div>
-          </div>
-
         </div><!-- /trn-playoff-config-body -->
       </div>
     `;
@@ -1208,7 +1286,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   // ── F5-P4: Wire playoff config event listeners ──────────────────────────────
   function _wirePlayoffConfigListeners(tid, t) {
-    const po = t.playoffs || {};
+    const MODE_DESC = {
+      total_points:   "Champion is the team with the highest cumulative Points For at the end of the regular season. No bracket or playoff rounds.",
+      points_rounds:  "Teams qualify based on standings, then compete across playoff weeks — each round the top N scorers advance. No head-to-head matchups.",
+      h2h_bracket:    "Teams qualify and are placed into a standard single-elimination bracket. Each round is one week of head-to-head matchups.",
+      custom_bracket: "Teams qualify and compete in custom rounds where multiple teams can share a slot — for example 4 teams compete and the top 2 advance each round."
+    };
 
     // ── Collapse toggle ─────────────────────────────────
     document.getElementById("trn-playoff-config-toggle")?.addEventListener("click", () => {
@@ -1216,44 +1299,126 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const arrow = document.getElementById("trn-playoff-collapse-arrow");
       if (!body) return;
       const collapsed = body.style.display === "none";
-      body.style.display  = collapsed ? "" : "none";
+      body.style.display = collapsed ? "" : "none";
       if (arrow) arrow.textContent = collapsed ? "▾" : "▸";
     });
 
-    // ── A: Champion method ──────────────────────────────
-    const _saveChampMethod = async (val) => {
-      try {
-        await _tPlayoffsRef(tid).update({ championMethod: val });
-        if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
-        _tournaments[tid].playoffs.championMethod = val;
-        ["bracket","points"].forEach(v => {
-          document.getElementById(`trn-champ-${v}`)?.classList.toggle("trn-yn-btn--active", val === v);
+    // ── Mode cards ──────────────────────────────────────
+    const _updateSectionVisibility = (mode) => {
+      const bracketModes = ["h2h_bracket","custom_bracket"];
+      const qualModes    = ["points_rounds","h2h_bracket","custom_bracket"];
+      document.getElementById("trn-weeks-section")?.style.setProperty("display",
+        mode !== "total_points" ? "" : "none");
+      document.getElementById("trn-points-rounds-section")?.style.setProperty("display",
+        mode === "points_rounds" ? "" : "none");
+      document.getElementById("trn-qual-section")?.style.setProperty("display",
+        qualModes.includes(mode) ? "" : "none");
+      document.getElementById("trn-seeding-section")?.style.setProperty("display",
+        qualModes.includes(mode) ? "" : "none");
+      document.getElementById("trn-bracket-size-row")?.style.setProperty("display",
+        bracketModes.includes(mode) ? "" : "none");
+    };
+
+    document.querySelectorAll(".trn-mode-card").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const val = btn.dataset.mode;
+        // Update active state
+        document.querySelectorAll(".trn-mode-card").forEach(b =>
+          b.classList.toggle("trn-mode-card--active", b.dataset.mode === val));
+        // Update description
+        const descEl = document.getElementById("trn-mode-desc");
+        if (descEl) descEl.textContent = MODE_DESC[val] || "";
+        // Show/hide sections
+        _updateSectionVisibility(val);
+        // Persist
+        try {
+          await _tPlayoffsRef(tid).update({ mode: val });
+          if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+          _tournaments[tid].playoffs.mode = val;
+          showToast("Playoff format saved ✓");
+        } catch(e) { showToast("Failed to save format", "error"); }
+      });
+    });
+
+    // ── Week stepper helper ─────────────────────────────
+    const _wireWeekStepper = (stepperId, onSave) => {
+      const el = document.getElementById(stepperId);
+      if (!el) return;
+      const valEl = el.querySelector(".trn-week-step-val");
+      const getRaw = () => parseInt(valEl?.dataset.raw) || 0;
+      const setVal = (v) => {
+        const clamped = Math.max(1, Math.min(18, v));
+        if (valEl) {
+          valEl.dataset.raw = clamped;
+          valEl.textContent = clamped ? `Wk ${clamped}` : "—";
+        }
+      };
+      const clearVal = () => {
+        if (valEl) { valEl.dataset.raw = 0; valEl.textContent = "—"; }
+      };
+      el.querySelectorAll(".trn-week-step-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const dir = parseInt(btn.dataset.dir);
+          const cur = getRaw();
+          if (cur === 0 && dir === -1) { clearVal(); return; }
+          setVal(cur === 0 ? (dir === 1 ? 1 : 18) : cur + dir);
         });
-        // Show/hide bracket-only sections
-        const bracketMode = val === "bracket";
-        document.getElementById("trn-qual-section")?.style.setProperty("display",    bracketMode ? "" : "none");
-        document.getElementById("trn-seeding-section")?.style.setProperty("display", bracketMode ? "" : "none");
-        showToast(val === "bracket" ? "Champion method: Bracket ✓" : "Champion method: Total Points ✓");
-      } catch(e) { showToast("Failed to save", "error"); }
+      });
+      el.addEventListener("dblclick", () => clearVal());
     };
-    document.getElementById("trn-champ-bracket")?.addEventListener("click", () => _saveChampMethod("bracket"));
-    document.getElementById("trn-champ-points")?.addEventListener("click",  () => _saveChampMethod("points"));
 
-    // League champion recognition Yes/No
-    const _saveLeagueChamp = async (val) => {
+    _wireWeekStepper("trn-start-week-stepper");
+    _wireWeekStepper("trn-end-week-stepper");
+
+    document.getElementById("trn-weeks-save")?.addEventListener("click", async () => {
+      const startEl = document.querySelector("#trn-start-week-stepper .trn-week-step-val");
+      const endEl   = document.querySelector("#trn-end-week-stepper .trn-week-step-val");
+      const startWeek = parseInt(startEl?.dataset.raw) || null;
+      const endWeek   = parseInt(endEl?.dataset.raw)   || null;
+      if (startWeek && endWeek && endWeek < startWeek) {
+        showToast("End week must be after start week", "error"); return;
+      }
       try {
-        await _tPlayoffsRef(tid).update({ recognizeLeagueChampions: val });
+        // Write to playoffs node + keep meta.playoffStartWeek in sync for standings sync
+        await _tPlayoffsRef(tid).update({ startWeek, endWeek });
+        await _tMetaRef(tid).update({ playoffStartWeek: startWeek });
         if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
-        _tournaments[tid].playoffs.recognizeLeagueChampions = val;
-        document.getElementById("trn-league-champ-yes")?.classList.toggle("trn-yn-btn--active",  val);
-        document.getElementById("trn-league-champ-no")?.classList.toggle("trn-yn-btn--active",  !val);
-        showToast(val ? "League champions will be recognized ✓" : "League champion recognition off ✓");
-      } catch(e) { showToast("Failed to save", "error"); }
-    };
-    document.getElementById("trn-league-champ-yes")?.addEventListener("click", () => _saveLeagueChamp(true));
-    document.getElementById("trn-league-champ-no")?.addEventListener("click",  () => _saveLeagueChamp(false));
+        _tournaments[tid].playoffs.startWeek = startWeek;
+        _tournaments[tid].playoffs.endWeek   = endWeek;
+        if (_tournaments[tid].meta) _tournaments[tid].meta.playoffStartWeek = startWeek;
+        showToast(startWeek ? `Playoff weeks set: Wk ${startWeek}–Wk ${endWeek || "?"} ✓` : "Playoff weeks cleared ✓");
+      } catch(e) { showToast("Failed to save weeks", "error"); }
+    });
 
-    // ── B: Qualification method dropdown visibility ─────
+    // ── Points rounds advancement ───────────────────────
+    document.getElementById("trn-adv-count")?.addEventListener("click", () => {
+      document.getElementById("trn-adv-count")?.classList.add("trn-yn-btn--active");
+      document.getElementById("trn-adv-pct")?.classList.remove("trn-yn-btn--active");
+      document.getElementById("trn-adv-count-row")?.style.setProperty("display", "");
+      document.getElementById("trn-adv-pct-row")?.style.setProperty("display",   "none");
+    });
+    document.getElementById("trn-adv-pct")?.addEventListener("click", () => {
+      document.getElementById("trn-adv-pct")?.classList.add("trn-yn-btn--active");
+      document.getElementById("trn-adv-count")?.classList.remove("trn-yn-btn--active");
+      document.getElementById("trn-adv-pct-row")?.style.setProperty("display",   "");
+      document.getElementById("trn-adv-count-row")?.style.setProperty("display", "none");
+    });
+    document.getElementById("trn-points-rounds-save")?.addEventListener("click", async () => {
+      const advMethod = document.getElementById("trn-adv-count")?.classList.contains("trn-yn-btn--active")
+        ? "count" : "pct";
+      const advCount = parseInt(document.getElementById("trn-adv-count-val")?.value) || 4;
+      const advPct   = parseInt(document.getElementById("trn-adv-pct-val")?.value)   || 50;
+      try {
+        const rounds = { advanceMethod: advMethod,
+          ...(advMethod === "count" ? { advanceCount: advCount } : { advancePct: advPct }) };
+        await _tPlayoffsRef(tid).update({ pointsRounds: rounds });
+        if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+        _tournaments[tid].playoffs.pointsRounds = rounds;
+        showToast("Advancement rules saved ✓");
+      } catch(e) { showToast("Failed to save", "error"); }
+    });
+
+    // ── Qualification method visibility ─────────────────
     const qualMethodEl = document.getElementById("trn-qual-method");
     const _updateQualVisibility = (method) => {
       document.getElementById("trn-qual-count-row")?.style.setProperty("display",
@@ -1267,7 +1432,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     };
     qualMethodEl?.addEventListener("change", () => _updateQualVisibility(qualMethodEl.value));
 
-    // Composite steps — delegated listeners on the steps list
+    // Composite steps
     const stepsList = document.getElementById("trn-qual-steps-list");
     const _getStepsFromDOM = () => {
       const rows = stepsList?.querySelectorAll(".trn-qual-step") || [];
@@ -1293,13 +1458,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             ${steps.length <= 1 ? "disabled" : ""} title="Remove step">✕</button>
         </div>`).join("");
     };
-
     document.getElementById("trn-qual-add-step")?.addEventListener("click", () => {
-      const steps = _getStepsFromDOM();
-      steps.push({ by: "pf", count: 2 });
-      _rebuildStepsHTML(steps);
+      _rebuildStepsHTML([..._getStepsFromDOM(), { by: "pf", count: 2 }]);
     });
-
     stepsList?.addEventListener("click", (e) => {
       if (!e.target.closest(".trn-qual-step-remove")) return;
       const idx = parseInt(e.target.closest(".trn-qual-step-remove").dataset.stepIdx);
@@ -1308,18 +1469,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       steps.splice(idx, 1);
       _rebuildStepsHTML(steps);
     });
-
-    // Save Qualification Rules
     document.getElementById("trn-qual-save")?.addEventListener("click", async () => {
       const method = qualMethodEl?.value || "top_record";
       const qualData = { method };
-      if (["top_record","top_pf"].includes(method)) {
-        qualData.count = parseInt(document.getElementById("trn-qual-count")?.value) || 8;
-      } else if (method === "top_per_group") {
-        qualData.perGroup = parseInt(document.getElementById("trn-qual-pergroup")?.value) || 2;
-      } else if (method === "composite") {
-        qualData.steps = _getStepsFromDOM();
-      }
+      if (["top_record","top_pf"].includes(method))  qualData.count    = parseInt(document.getElementById("trn-qual-count")?.value) || 8;
+      else if (method === "top_per_group")            qualData.perGroup = parseInt(document.getElementById("trn-qual-pergroup")?.value) || 2;
+      else if (method === "composite")                qualData.steps    = _getStepsFromDOM();
       try {
         await _tPlayoffsRef(tid).update({ qualification: qualData });
         if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
@@ -1328,37 +1483,30 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       } catch(e) { showToast("Failed to save qualification rules", "error"); }
     });
 
-    // ── C: Byes toggle visibility ───────────────────────
-    const _updateByeVisibility = (type) => {
+    // ── Byes toggle ─────────────────────────────────────
+    const _saveBye = (val) => {
+      ["none","top_n","manual"].forEach(v => {
+        const id = v === "top_n" ? "trn-bye-topn" : `trn-bye-${v}`;
+        document.getElementById(id)?.classList.toggle("trn-yn-btn--active", val === v);
+      });
       document.getElementById("trn-bye-count-row")?.style.setProperty("display",
-        type !== "none" ? "" : "none");
-    };
-    const _saveBye = async (val) => {
-      try {
-        ["none","top_n","manual"].forEach(v => {
-          document.getElementById(`trn-bye-${v === "top_n" ? "topn" : v}`)
-            ?.classList.toggle("trn-yn-btn--active", val === v);
-        });
-        _updateByeVisibility(val);
-        // If switching away from none, persist immediately; full save happens on Save button
-        if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
-        _tournaments[tid].playoffs.byes = { ...(_tournaments[tid].playoffs.byes || {}), type: val };
-      } catch(e) { showToast("Failed", "error"); }
+        val !== "none" ? "" : "none");
+      if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+      if (!_tournaments[tid].playoffs.byes) _tournaments[tid].playoffs.byes = {};
+      _tournaments[tid].playoffs.byes.type = val;
     };
     document.getElementById("trn-bye-none")?.addEventListener("click",   () => _saveBye("none"));
     document.getElementById("trn-bye-topn")?.addEventListener("click",   () => _saveBye("top_n"));
     document.getElementById("trn-bye-manual")?.addEventListener("click", () => _saveBye("manual"));
 
-    // Save Seeding & Byes
     document.getElementById("trn-seeding-save")?.addEventListener("click", async () => {
       const seedMethod  = document.getElementById("trn-seed-method")?.value || "record";
       const byeTypeEl   = document.querySelector(".trn-yn-btn--active[id^='trn-bye-']");
-      const byeType     = byeTypeEl ? (byeTypeEl.id === "trn-bye-topn" ? "top_n" : byeTypeEl.id === "trn-bye-manual" ? "manual" : "none") : "none";
+      const byeType     = byeTypeEl?.id === "trn-bye-topn"   ? "top_n"
+                        : byeTypeEl?.id === "trn-bye-manual" ? "manual" : "none";
       const byeCount    = parseInt(document.getElementById("trn-bye-count")?.value) || 2;
       const bracketSize = parseInt(document.getElementById("trn-bracket-size")?.value) || null;
-      // Validate bracket size is power of 2
-      const isPow2 = bracketSize && (bracketSize & (bracketSize - 1)) === 0;
-      if (bracketSize && !isPow2) {
+      if (bracketSize && (bracketSize & (bracketSize - 1)) !== 0) {
         showToast("Bracket size must be a power of 2 (e.g. 8, 16, 32)", "error"); return;
       }
       try {
@@ -1373,7 +1521,22 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         showToast("Seeding & byes saved ✓");
       } catch(e) { showToast("Failed to save seeding & byes", "error"); }
     });
+
+    // ── League champion recognition ─────────────────────
+    const _saveLeagueChamp = async (val) => {
+      try {
+        await _tPlayoffsRef(tid).update({ recognizeLeagueChampions: val });
+        if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+        _tournaments[tid].playoffs.recognizeLeagueChampions = val;
+        document.getElementById("trn-league-champ-yes")?.classList.toggle("trn-yn-btn--active",  val);
+        document.getElementById("trn-league-champ-no")?.classList.toggle("trn-yn-btn--active",  !val);
+        showToast(val ? "League champions will be recognized ✓" : "League champion recognition off ✓");
+      } catch(e) { showToast("Failed to save", "error"); }
+    };
+    document.getElementById("trn-league-champ-yes")?.addEventListener("click", () => _saveLeagueChamp(true));
+    document.getElementById("trn-league-champ-no")?.addEventListener("click",  () => _saveLeagueChamp(false));
   }
+
 
   async function _changeStatus(tid, newStatus) {
     try {
