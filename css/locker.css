@@ -2586,16 +2586,8 @@ select option { background: var(--color-bg-2); }
 }
 .draft-status { font-weight: 600; }
 
-.draft-board-scroll {
-  overflow-x: auto;
-  padding-bottom: var(--space-3);
-}
-.draft-board {
-  min-width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
+.draft-board-scroll {overflow-x: hidden;}
+.draft-board {width: 100%;}
 
 .draft-round {}
 .draft-round-label {
@@ -2607,21 +2599,11 @@ select option { background: var(--color-bg-2); }
   margin-bottom: var(--space-2);
 }
 .draft-picks-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: var(--space-2);
+   display: grid;
+   grid-template-columns: repeat(4, 1fr) !important; gap: 3px !important;
 }
 
-.draft-pick {
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-2);
-  border: 1px solid var(--color-border);
-  min-height: 72px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  transition: border-color var(--transition), background var(--transition);
-}
+.draft-pick {min-width: 0; max-width: none; min-height: 48px; padding: 3px 3px; gap: 1px;}
 .draft-pick--filled {
   cursor: pointer;
 }
