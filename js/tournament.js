@@ -896,14 +896,6 @@ const DLRTournament = (() => {
     document.getElementById("trn-goto-regs-btn")?.addEventListener("click", () => {
       document.querySelector('.trn-tab[data-tab="registrations"]')?.click();
     });
-    document.getElementById("trn-rankby-select")?.addEventListener("change", async function() {
-      try {
-        await _tMetaRef(tid).update({ rankBy: this.value });
-        _tournaments[tid].meta.rankBy = this.value;
-        _writePublicSummary(tid, _tournaments[tid]);
-        showToast("Ranking method saved ✓");
-      } catch(e) { showToast("Failed to save ranking method", "error"); }
-    });
 
     // Playoff start week — save on blur or Enter
     const playoffWeekInput = document.getElementById("trn-playoff-week-input");
@@ -945,6 +937,19 @@ const DLRTournament = (() => {
     };
     document.getElementById("trn-3rr-yes")?.addEventListener("click", () => _save3RR(true));
     document.getElementById("trn-3rr-no")?.addEventListener("click",  () => _save3RR(false));
+
+const _saveRankBy = async (val) => {
+  try {
+    await _tMetaRef(tid).update({ rankBy: val });
+    if (_tournaments[tid]?.meta) _tournaments[tid].meta.rankBy = val;
+    document.getElementById("trn-rankby-h2h")?.classList.toggle("trn-yn-btn--active",    val === "record");
+    document.getElementById("trn-rankby-points")?.classList.toggle("trn-yn-btn--active", val === "pf");
+    _writePublicSummary(tid, _tournaments[tid]);
+    showToast(val === "record" ? "Ranking set to H2H ✓" : "Ranking set to Points ✓");
+  } catch(e) { showToast("Failed to save ranking method", "error"); }
+};
+document.getElementById("trn-rankby-h2h")?.addEventListener("click",    () => _saveRankBy("record"));
+document.getElementById("trn-rankby-points")?.addEventListener("click", () => _saveRankBy("pf"));
 
     // Preview as User — switch to participant view mode
     document.getElementById("trn-republish-btn")?.addEventListener("click", async () => {
