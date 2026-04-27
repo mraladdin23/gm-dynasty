@@ -1623,3 +1623,82 @@
   position: relative;
 }
 .trn-help-btn:hover { color: var(--color-gold); border-color: var(--color-gold); }
+
+/* ── F5-P4: Playoff Configuration ───────────────────── */
+.trn-playoff-sub {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+}
+.trn-playoff-sub:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: var(--space-1);
+}
+.trn-playoff-sub-title {
+  font-size: .8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.trn-collapse-arrow {
+  font-size: .85rem;
+  color: var(--color-text-dim);
+  transition: transform .15s ease;
+  user-select: none;
+}
+
+/* Composite qualification steps */
+.trn-qual-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.trn-qual-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.trn-qual-step-num {
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  min-width: 14px;
+}
+.trn-qual-step-by {
+  font-size: .82rem;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* Bracket size suggestion chip */
+.trn-bracket-suggest-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--color-gold-light, rgba(212,175,55,.15));
+  color: var(--color-gold, #d4af37);
+  border: 1px solid var(--color-gold, #d4af37);
+  cursor: default;
+  white-space: nowrap;
+}
+
+/* Extra small button variant */
+.btn-xs {
+  font-size: .72rem;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
