@@ -2657,7 +2657,6 @@ select option { background: var(--color-bg-2); }
 }
 .draft-pick-owner {
   font-size: .72rem;
-  color: var(--color-text-dim);
   margin-top: auto;
 }
 .draft-empty {

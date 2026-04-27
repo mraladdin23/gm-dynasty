@@ -4313,7 +4313,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             boardHTML += `
               <div class="draft-pick draft-pick--empty">
                 <div class="draft-pick-num">${overallNum}</div>
-                <div class="draft-pick-owner dim">${_esc(nameOf(tid))}</div>
+                <div class="draft-pick-owner">${_esc(nameOf(tid))}</div>
               </div>`;
           }
         });
