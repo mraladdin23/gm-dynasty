@@ -2003,3 +2003,191 @@
   color: var(--color-text-dim);
   white-space: nowrap;
 }
+
+/* ── F5-P4: Playoff Year Selector ───────────────────── */
+.trn-playoff-year-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+.trn-playoff-year-pills {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.trn-year-pill {
+  font-size: .78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.trn-year-pill:hover {
+  border-color: var(--color-gold, #d4af37);
+  color: var(--color-gold, #d4af37);
+}
+.trn-year-pill--active {
+  border-color: var(--color-gold, #d4af37);
+  background: var(--color-gold-light, rgba(212,175,55,.15));
+  color: var(--color-gold, #d4af37);
+}
+.trn-playoff-year-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.trn-playoff-active-year-note {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-3);
+}
+
+/* ── F5-P4: Season Summary Card ─────────────────────── */
+.trn-summary-card {
+  border-top: 2px solid var(--color-gold, #d4af37);
+}
+.trn-summary-lock-badge {
+  font-size: .7rem;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--color-surface-2, var(--color-surface));
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  cursor: default;
+}
+.trn-summary-year-bar {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.trn-summary-year-pill {
+  font-size: .76rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 99px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.trn-summary-year-pill--active {
+  border-color: var(--color-gold, #d4af37);
+  color: var(--color-gold, #d4af37);
+  background: var(--color-gold-light, rgba(212,175,55,.12));
+}
+.trn-summary-section {
+  margin-bottom: var(--space-4);
+}
+.trn-summary-section:last-child { margin-bottom: 0; }
+.trn-summary-section-title {
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-summary-po-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.trn-summary-mode-icon { font-size: 1.2rem; }
+.trn-summary-mode-label {
+  font-size: .9rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.trn-summary-weeks {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2, var(--color-surface));
+  border: 1px solid var(--color-border);
+}
+.trn-summary-qual,
+.trn-summary-rounds {
+  font-size: .82rem;
+  color: var(--color-text-dim);
+  line-height: 1.6;
+  margin-top: var(--space-1);
+}
+.trn-summary-empty {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+  padding: var(--space-2) 0;
+}
+
+/* ── F5-P4: Scoring Table ───────────────────────────── */
+.trn-scoring-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+.trn-scoring-table thead tr {
+  background: var(--color-surface-2, var(--color-surface));
+}
+.trn-scoring-table th {
+  text-align: left;
+  font-weight: 700;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-text-dim);
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-scoring-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+.trn-scoring-table tr:last-child td { border-bottom: none; }
+.trn-scoring-label { color: var(--color-text-dim); }
+.trn-scoring-val   { font-weight: 600; color: var(--color-text); }
+.trn-scoring-diff-row td { background: rgba(212,175,55,.07); }
+.trn-scoring-platform-tag {
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  margin-left: 4px;
+  text-transform: uppercase;
+}
+.trn-scoring-diff-note {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-top: var(--space-2);
+  font-style: italic;
+}
+
+/* ── Summary edit mode ───────────────────────────────── */
+.trn-summary-edited-badge {
+  font-size: .7rem;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: rgba(212,175,55,.12);
+  border: 1px solid var(--color-gold, #d4af37);
+  color: var(--color-gold, #d4af37);
+  cursor: default;
+}
+.trn-summary-override-text {
+  font-size: .85rem;
+  line-height: 1.65;
+  color: var(--color-text);
+  margin-bottom: var(--space-3);
+  white-space: pre-wrap;
+}
