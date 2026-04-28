@@ -1794,3 +1794,109 @@
   border: 1px solid var(--color-border);
   line-height: 1.5;
 }
+
+/* ── F5-P4: Round Builders ───────────────────────────── */
+.trn-rounds-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.trn-pr-round-row,
+.trn-cr-round-row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.trn-pr-round-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-pr-round-label {
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-text-dim);
+}
+.trn-pr-round-body {
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.trn-pr-advance-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.trn-pr-field-label {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+/* Season avg blend row */
+.trn-round-blend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-border);
+  margin-top: var(--space-1);
+}
+.trn-round-blend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.trn-blend-weight-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.trn-blend-label,
+.trn-blend-pct-label,
+.trn-blend-hint {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+}
+.trn-blend-hint { font-style: italic; }
+
+/* Custom rounds fields */
+.trn-cr-fields {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.trn-cr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.trn-cr-summary {
+  font-size: .78rem;
+  padding: 4px 8px;
+  background: var(--color-surface-2, var(--color-surface));
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+.trn-cr-summary-text { color: var(--color-text-dim); }
+
+.trn-rounds-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-1);
+}
