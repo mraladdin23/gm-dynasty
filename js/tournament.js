@@ -435,6 +435,7 @@ const DLRTournament = (() => {
       <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
       <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>📋 Rules</option>
       <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
+      <option value="playoffs"  ${_activeUserTab === "playoffs"  ? "selected" : ""}>🏆 Playoffs</option>
       <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>📋 Draft</option>
       <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>🏈 Matchups</option>
       <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>🗂 Rosters</option>`;
@@ -549,6 +550,7 @@ const DLRTournament = (() => {
         case "registrations": return _renderRegistrantsTab(tid, t, body);
         case "participants":  return _renderParticipantsTab(tid, t, body);
         case "standings":     return _renderStandingsTab(tid, t, body, true);
+        case "playoffs":      return _renderPlayoffsTab(tid, t, body);
         case "draft":         return _renderAnalyticsDraft(tid, t, body);
         case "matchups":      return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":       return _renderAnalyticsRosters(tid, t, body);
@@ -561,6 +563,7 @@ const DLRTournament = (() => {
         case "register":   return _renderRegisterTab(tid, t, body);
         case "rules":      return _renderRulesTab(t, body);
         case "standings":  return _renderStandingsTab(tid, t, body, false);
+        case "playoffs":   return _renderPlayoffsTab(tid, t, body);
         case "draft":      return _renderAnalyticsDraft(tid, t, body);
         case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
@@ -1328,8 +1331,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               ${years.length === 0
                 ? `<button class="trn-year-pill trn-year-pill--active" data-year="${currentNFLYear}">${currentNFLYear}</button>`
                 : years.map(y => `
-                    <button class="trn-year-pill ${String(y) === String(activeYear) ? "trn-year-pill--active" : ""}"
-                      data-year="${y}">${y}</button>`).join("")}
+                    <span class="trn-year-pill-wrap">
+                      <button class="trn-year-pill ${String(y) === String(activeYear) ? "trn-year-pill--active" : ""}"
+                        data-year="${y}">${y}</button>
+                      <button class="trn-year-pill-del" data-del-year="${y}" title="Delete ${y} config">✕</button>
+                    </span>`).join("")}
             </div>
             <div class="trn-playoff-year-actions">
               <button class="btn-secondary btn-xs" id="trn-playoff-new-year"
@@ -1381,7 +1387,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
 
           <!-- Points Rounds -->
-          <div class="trn-playoff-sub" id="trn-pr-section" ${mode==="points_rounds"?"":"\"style=\"display:none\""}>
+          <div class="trn-playoff-sub" id="trn-pr-section" ${mode==="points_rounds" ? "" : 'style="display:none"'}>
             <div class="trn-playoff-sub-title">Round Configuration
               <button class="trn-help-btn" title="Each round = one playoff week. Last = Championship. Configure advancement and optional season-avg blend per round.">?</button>
             </div>
@@ -1395,7 +1401,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
 
           <!-- Custom Rounds -->
-          <div class="trn-playoff-sub" id="trn-cr-section" ${mode==="custom_rounds"?"":"\"style=\"display:none\""}>
+          <div class="trn-playoff-sub" id="trn-cr-section" ${mode==="custom_rounds" ? "" : 'style="display:none"'}>
             <div class="trn-playoff-sub-title">Round Configuration
               <button class="trn-help-btn" title="Define groups, teams per group, and advancement per round. Last = Championship. E.g. Round 1: 4 groups of 8, top 2 from each → 8 advance.">?</button>
             </div>
@@ -1409,7 +1415,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
 
           <!-- Qualification -->
-          <div class="trn-playoff-sub" id="trn-qual-section" ${showQual?"":"\"style=\"display:none\""}>
+          <div class="trn-playoff-sub" id="trn-qual-section" ${showQual ? "" : 'style="display:none"'}>
             <div class="trn-playoff-sub-title">Qualification Rules
               <button class="trn-help-btn" title="Composite steps run in order, each filling slots from teams not yet qualified. Wins Threshold is a gate — teams below the minimum are excluded from all following steps.">?</button>
             </div>
@@ -1428,25 +1434,25 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 </span>
               </div>
               <div id="trn-qual-count-row" class="trn-detail-row"
-                ${["top_record","top_pf"].includes(qualMethod)?"":"\"style=\"display:none\""}>
+                ${["top_record","top_pf"].includes(qualMethod) ? "" : 'style="display:none"'}>
                 <span>Qualifiers</span>
                 <span><input type="number" id="trn-qual-count" min="2" max="999" value="${qualCount}"
                   style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" /></span>
               </div>
               <div id="trn-qual-pergroup-row" class="trn-detail-row"
-                ${qualMethod==="top_per_group"?"":"\"style=\"display:none\""}>
+                ${qualMethod==="top_per_group" ? "" : 'style="display:none"'}>
                 <span>Qualifiers per Division / Conf</span>
                 <span><input type="number" id="trn-qual-pergroup" min="1" max="20" value="${qualPerGroup}"
                   style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" /></span>
               </div>
               <div id="trn-qual-manual-note" class="trn-detail-row"
-                ${qualMethod==="manual"?"":"\"style=\"display:none\""}>
+                ${qualMethod==="manual" ? "" : 'style="display:none"'}>
                 <span style="color:var(--color-text-dim);font-size:.82rem;grid-column:1/-1">
                   Hand-pick qualifiers when building the bracket.
                 </span>
               </div>
             </div>
-            <div id="trn-qual-composite-section" ${qualMethod==="composite"?"":"\"style=\"display:none\""}>
+            <div id="trn-qual-composite-section" ${qualMethod==="composite" ? "" : 'style="display:none"'}>
               <div id="trn-qual-steps-list" class="trn-qual-steps-list">
                 ${qualSteps.map((s,i)=>_qualStepHTML(s,i,totals[i],t)).join("")}
               </div>
@@ -1467,21 +1473,24 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             </div>
           </div>
 
-          <!-- Seeding + Byes (H2H only) -->
-          <div class="trn-playoff-sub" id="trn-seeding-section" ${mode==="h2h_bracket"?"":"\"style=\"display:none\""}>
-            <div class="trn-playoff-sub-title">Seeding &amp; Byes</div>
+          <!-- Byes (all bracket/round modes) + Seeding & Bracket Size (H2H only) -->
+          <div class="trn-playoff-sub" id="trn-seeding-section" ${mode==="total_points" ? 'style="display:none"' : ""}>
+            <div class="trn-playoff-sub-title">Byes</div>
             <div class="trn-detail-rows">
-              <div class="trn-detail-row">
-                <span>Seeding Method</span>
-                <span>
-                  <select id="trn-seed-method"
-                    style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                    <option value="record"     ${seedMethod==="record"?"selected":""}>By Record</option>
-                    <option value="pf"         ${seedMethod==="pf"?"selected":""}>By Points For</option>
-                    <option value="qual_order" ${seedMethod==="qual_order"?"selected":""}>By Qualification Order</option>
-                    <option value="manual"     ${seedMethod==="manual"?"selected":""}>Manual</option>
-                  </select>
-                </span>
+              <!-- Seeding method — H2H bracket only -->
+              <div id="trn-seed-method-row" ${mode==="h2h_bracket" ? "" : 'style="display:none"'}>
+                <div class="trn-detail-row">
+                  <span>Seeding Method</span>
+                  <span>
+                    <select id="trn-seed-method"
+                      style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                      <option value="record"     ${seedMethod==="record"?"selected":""}>By Record</option>
+                      <option value="pf"         ${seedMethod==="pf"?"selected":""}>By Points For</option>
+                      <option value="qual_order" ${seedMethod==="qual_order"?"selected":""}>By Qualification Order</option>
+                      <option value="manual"     ${seedMethod==="manual"?"selected":""}>Manual</option>
+                    </select>
+                  </span>
+                </div>
               </div>
               <div class="trn-detail-row">
                 <span>Byes</span>
@@ -1493,25 +1502,41 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                   </div>
                 </span>
               </div>
-              <div class="trn-detail-row" id="trn-bye-count-row" ${byeType!=="none"?"":"\"style=\"display:none\""}>
+              <div class="trn-detail-row" id="trn-bye-count-row" ${byeType!=="none" ? "" : 'style="display:none"'}>
                 <span>Number of Byes</span>
                 <span><input type="number" id="trn-bye-count" min="1" max="16" value="${byeCount}"
                   style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" /></span>
               </div>
-              <div class="trn-detail-row">
-                <span style="display:flex;align-items:center;gap:5px">Bracket Size
-                  <button class="trn-help-btn" title="Must be a power of 2.">?</button>
-                </span>
-                <span style="display:flex;align-items:center;gap:var(--space-2)">
-                  <input type="number" id="trn-bracket-size" min="4" max="128"
-                    value="${bracketSize||suggestedBracket}"
-                    style="width:64px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                  <span class="trn-bracket-suggest-chip">Suggested: ${suggestedBracket}</span>
-                </span>
+              <!-- Bracket size — H2H bracket only -->
+              <div id="trn-bracket-size-row" ${mode==="h2h_bracket" ? "" : 'style="display:none"'}>
+                <div class="trn-detail-row">
+                  <span style="display:flex;align-items:center;gap:5px">Bracket Size
+                    <button class="trn-help-btn" title="Must be a power of 2.">?</button>
+                  </span>
+                  <span style="display:flex;align-items:center;gap:var(--space-2)">
+                    <input type="number" id="trn-bracket-size" min="4" max="128"
+                      value="${bracketSize||suggestedBracket}"
+                      style="width:64px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                    <span class="trn-bracket-suggest-chip">Suggested: ${suggestedBracket}</span>
+                  </span>
+                </div>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
-              <button class="btn-primary btn-sm" id="trn-seeding-save">Save Seeding &amp; Byes</button>
+              <button class="btn-primary btn-sm" id="trn-seeding-save">Save Byes &amp; Seeding</button>
+            </div>
+          </div>
+
+          <!-- Scoring Settings (admin) -->
+          <div class="trn-playoff-sub" id="trn-scoring-admin-section">
+            <div class="trn-playoff-sub-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>Scoring Settings
+                <button class="trn-help-btn" title="Auto-synced during Sync Standings. Re-sync here, override values, then publish.">?</button>
+              </span>
+              <button class="btn-secondary btn-xs" id="trn-scoring-sync-btn">↺ Sync Scoring</button>
+            </div>
+            <div id="trn-scoring-admin-body">
+              ${_renderScoringAdminBody(t.scoringSettings?.[activeYear] || null)}
             </div>
           </div>
 
@@ -1546,8 +1571,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       ? new Date().getFullYear() : new Date().getFullYear() - 1);
     let _activePoYear = years.length ? years[0] : currentNFLYear;
 
-    const _rerender = async () => {
+    const _rerender = async (preserveYear) => {
       // Reload tournament data and re-render the admin overview to pick up new year
+      // preserveYear keeps _activePoYear from being reset by the re-init in _wire...
+      const yearToRestore = preserveYear || _activePoYear;
       try {
         const snap = await _tRef(tid).once("value");
         if (snap.exists()) _tournaments[tid] = snap.val();
@@ -1555,9 +1582,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const card = document.getElementById("trn-playoff-config-card");
       if (!card) return;
       const newT = _tournaments[tid] || t;
-      card.outerHTML = _renderPlayoffConfigHTML(tid, newT, _activePoYear);
-      // Re-wire after DOM replacement
+      card.outerHTML = _renderPlayoffConfigHTML(tid, newT, yearToRestore);
+      // Re-wire after DOM replacement — _wirePlayoffConfigListeners re-inits _activePoYear
+      // so we manually restore it via a closure-level assignment after the call
       _wirePlayoffConfigListeners(tid, newT);
+      // Note: _wirePlayoffConfigListeners resets _activePoYear in its own closure;
+      // the rendered HTML already shows the correct year pill as active.
     };
 
     const MODE_DESC = {
@@ -1590,7 +1620,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.querySelectorAll(".trn-year-pill").forEach(btn => {
       btn.addEventListener("click", async () => {
         _activePoYear = btn.dataset.year;
-        await _rerender();
+        await _rerender(_activePoYear);
       });
     });
 
@@ -1617,6 +1647,28 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       } catch(e) { showToast("Failed to create season", "error"); }
     });
 
+    // Delete year config
+    document.querySelectorAll(".trn-year-pill-del").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const yr = btn.dataset.delYear;
+        const configuredCount = _playoffYears(_tournaments[tid] || t).length;
+        if (configuredCount <= 1) {
+          showToast("Can't delete the only season config", "info"); return;
+        }
+        if (!confirm(`Delete the ${yr} playoff configuration? This cannot be undone.`)) return;
+        try {
+          await _tPlayoffsRef(tid, yr).remove();
+          if (_tournaments[tid]?.playoffs) delete _tournaments[tid].playoffs[yr];
+          // Switch to next available year
+          const remaining = _playoffYears(_tournaments[tid] || t).filter(y => y !== yr);
+          _activePoYear = remaining[0] || currentNFLYear;
+          await _rerender(_activePoYear);
+          showToast(`${yr} config deleted ✓`);
+        } catch(e) { showToast("Failed to delete", "error"); }
+      });
+    });
+
     // ── Mode cards ──────────────────────────────────────
     const _updateSectionVisibility = (mode) => {
       document.getElementById("trn-start-week-row")?.style.setProperty("display",
@@ -1628,6 +1680,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       document.getElementById("trn-qual-section")?.style.setProperty("display",
         mode!=="total_points" ? "" : "none");
       document.getElementById("trn-seeding-section")?.style.setProperty("display",
+        mode==="total_points" ? "none" : "");
+      document.getElementById("trn-seed-method-row")?.style.setProperty("display",
+        mode==="h2h_bracket" ? "" : "none");
+      document.getElementById("trn-bracket-size-row")?.style.setProperty("display",
         mode==="h2h_bracket" ? "" : "none");
     };
     document.querySelectorAll(".trn-mode-card").forEach(btn => {
@@ -1967,6 +2023,62 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       } catch(e) { showToast("Failed to save","error"); }
     });
 
+    // ── Scoring settings (admin) ─────────────────────────
+    document.getElementById("trn-scoring-sync-btn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("trn-scoring-sync-btn");
+      if (btn) { btn.disabled = true; btn.textContent = "Syncing…"; }
+      try {
+        const batches   = (_tournaments[tid] || t).leagues || {};
+        const isBatch   = (v) => v && typeof v === "object" && v.leagues !== undefined;
+        const toSync    = [];
+        Object.entries(batches).filter(([, v]) => isBatch(v)).forEach(([, batch]) => {
+          Object.entries(batch.leagues || {}).forEach(([leagueId]) => {
+            toSync.push({ leagueId, platform: batch.platform || "sleeper",
+              year: batch.year || new Date().getFullYear() });
+          });
+        });
+        if (!toSync.length) { showToast("No leagues to sync", "info"); return; }
+        await _syncScoringSettings(tid, toSync, _activePoYear);
+        const snap = await _tRef(tid).once("value");
+        if (snap.exists()) _tournaments[tid] = snap.val();
+        const body = document.getElementById("trn-scoring-admin-body");
+        if (body) body.innerHTML = _renderScoringAdminBody(
+          (_tournaments[tid].scoringSettings || {})[_activePoYear] || null);
+        _wireScoringPublishBtn();
+        showToast("Scoring settings synced ✓");
+      } catch(e) { showToast("Sync failed: " + e.message, "error"); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = "↺ Sync Scoring"; } }
+    });
+
+    const _wireScoringPublishBtn = () => {
+      document.getElementById("trn-scoring-publish-btn")?.addEventListener("click", async () => {
+        // Read edited values from inputs and write back to Firebase
+        const inputs    = document.querySelectorAll(".trn-scoring-edit-input");
+        const updates   = {};
+        inputs.forEach(inp => {
+          const platform = inp.dataset.platform;
+          const field    = inp.dataset.field;
+          const raw      = inp.value.trim();
+          const num      = parseFloat(raw);
+          if (!updates[platform]) updates[platform] = {};
+          updates[platform][field] = isNaN(num) ? raw : num;
+        });
+        try {
+          const yearRef = _tScoringRef(tid).child(String(_activePoYear));
+          for (const [platform, data] of Object.entries(updates)) {
+            await yearRef.child(platform).update(data);
+          }
+          if (!_tournaments[tid].scoringSettings) _tournaments[tid].scoringSettings = {};
+          if (!_tournaments[tid].scoringSettings[_activePoYear])
+            _tournaments[tid].scoringSettings[_activePoYear] = {};
+          Object.entries(updates).forEach(([p, d]) =>
+            Object.assign(_tournaments[tid].scoringSettings[_activePoYear][p] || {}, d));
+          showToast("Scoring settings published ✓");
+        } catch(e) { showToast("Failed to publish: " + e.message, "error"); }
+      });
+    };
+    _wireScoringPublishBtn();
+
     // ── League champions ────────────────────────────────
     const _saveLeagueChamp = async (val) => {
       try {
@@ -1979,6 +2091,83 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     };
     document.getElementById("trn-league-champ-yes")?.addEventListener("click",()=>_saveLeagueChamp(true));
     document.getElementById("trn-league-champ-no")?.addEventListener("click", ()=>_saveLeagueChamp(false));
+  }
+
+  // ── Scoring admin body HTML ──────────────────────────────────────────────────
+  // Renders the editable scoring settings table in the admin playoff config card.
+  // yearData = t.scoringSettings[year] (may be null if not yet synced)
+  const SCORING_DISPLAY_FIELDS = [
+    { key:"pass_yd",        label:"Pass Yards/pt"    },
+    { key:"pass_td",        label:"Pass TD"           },
+    { key:"pass_int",       label:"Interception"      },
+    { key:"rush_yd",        label:"Rush Yards/pt"     },
+    { key:"rush_td",        label:"Rush TD"           },
+    { key:"rec",            label:"Reception (PPR)"   },
+    { key:"rec_yd",         label:"Rec Yards/pt"      },
+    { key:"rec_td",         label:"Rec TD"            },
+    { key:"bonus_rec_te",   label:"TE Bonus"          },
+    { key:"fum_lost",       label:"Fumble Lost"       },
+    { key:"_format",        label:"Format"            },
+    { key:"_rosterPositions", label:"Roster Spots"   },
+  ];
+
+  function _renderScoringAdminBody(yearData) {
+    if (!yearData || !Object.keys(yearData).length) {
+      return `<div class="trn-summary-empty">
+        Not yet synced for this season. Click ↺ Sync Scoring or run Sync Standings.
+      </div>`;
+    }
+    const platforms = Object.keys(yearData).filter(k => !k.startsWith("_"));
+    if (!platforms.length) {
+      return `<div class="trn-summary-empty">No platform data found. Run Sync Standings.</div>`;
+    }
+    const showMulti = platforms.length > 1;
+    const headerCols = showMulti
+      ? platforms.map(p => `<th>${p.toUpperCase()}</th>`).join("")
+      : "<th>Value</th>";
+    const differs = (key) => {
+      const vals = platforms.map(p => String(yearData[p]?.[key] ?? ""));
+      return vals.some(v => v !== vals[0]);
+    };
+    const rows = SCORING_DISPLAY_FIELDS.map(f => {
+      const vals = platforms.map(p => yearData[p]?.[f.key]);
+      if (vals.every(v => v === undefined)) return "";
+      const diff = showMulti && differs(f.key);
+      return `<tr class="${diff ? "trn-scoring-diff-row" : ""}">
+        <td class="trn-scoring-label">${f.label}</td>
+        ${showMulti
+          ? platforms.map((p, pi) => `
+              <td class="trn-scoring-val">
+                <input type="text" class="trn-scoring-edit-input"
+                  data-platform="${p}" data-field="${f.key}"
+                  value="${_esc(String(vals[pi] ?? ""))}"
+                  style="width:60px;font-size:.78rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:2px;background:var(--color-surface);color:var(--color-text);text-align:center" />
+              </td>`).join("")
+          : `<td class="trn-scoring-val">
+               <input type="text" class="trn-scoring-edit-input"
+                 data-platform="${platforms[0]}" data-field="${f.key}"
+                 value="${_esc(String(vals[0] ?? ""))}"
+                 style="width:70px;font-size:.78rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:2px;background:var(--color-surface);color:var(--color-text);text-align:center" />
+             </td>`}
+      </tr>`;
+    }).filter(Boolean).join("");
+
+    const syncedAt = platforms.map(p => yearData[p]?._syncedAt).filter(Boolean)[0];
+    const syncedLine = syncedAt
+      ? `<div style="font-size:.7rem;color:var(--color-text-dim);margin-bottom:var(--space-2)">
+           Last synced: ${new Date(syncedAt).toLocaleDateString()}
+         </div>` : "";
+
+    return `
+      ${syncedLine}
+      ${showMulti ? `<div class="trn-scoring-diff-note" style="margin-bottom:var(--space-2)">⚠️ Highlighted rows differ between platforms.</div>` : ""}
+      <table class="trn-scoring-table">
+        <thead><tr><th>Setting</th>${headerCols}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+        <button class="btn-primary btn-sm" id="trn-scoring-publish-btn">Publish Scoring Settings</button>
+      </div>`;
   }
 
   // ── Scoring settings sync ────────────────────────────────────────────────────
@@ -6167,6 +6356,459 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   }
 
   // ── User: Info tab ─────────────────────────────────────
+  // ── Playoffs tab ─────────────────────────────────────────────────────────────
+  // Renders based on playoff mode for the active year.
+  // total_points  → Top 20 leaderboard with week-over-week movement
+  // points_rounds → Standings with qualifier tags → per-round views (byes, cuts, advances)
+  // h2h_bracket   → Standard bracket visualization
+  // custom_rounds → Per-round group views
+  // League Champions → separate sub-tab always available
+  function _renderPlayoffsTab(tid, t, body) {
+    const years    = _playoffYears(t);
+    const activeY  = _tournamentYear
+      ? String(_tournamentYear)
+      : (years[0] || String(new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1));
+    const po       = _playoffForYear(t, activeY);
+    const mode     = po.mode || "total_points";
+    const standings= t.standingsCache || {};
+
+    // Build flat team list from standings cache for this year
+    const _teams = () => {
+      const teams = [];
+      Object.entries(standings).forEach(([ck, lc]) => {
+        if (String(lc.year) !== String(activeY)) return;
+        (lc.teams || []).forEach(tm => {
+          teams.push({ ...tm, leagueName: lc.leagueName || ck, leagueId: lc.leagueId || ck });
+        });
+      });
+      return teams;
+    };
+
+    // ── Sub-tab state ───────────────────────────────────
+    let _poSubTab = "structure";
+
+    const SUB_TABS = {
+      total_points:  ["structure","league_champs"],
+      points_rounds: ["structure","league_champs"],
+      h2h_bracket:   ["structure","league_champs"],
+      custom_rounds: ["structure","league_champs"],
+    };
+    const subTabs = SUB_TABS[mode] || ["structure"];
+
+    const _renderSubTabBar = (active) => `
+      <div class="trn-po-subtab-bar">
+        ${subTabs.map(st => `
+          <button class="trn-po-subtab-btn ${st === active ? "trn-po-subtab-btn--active" : ""}"
+            data-subtab="${st}">
+            ${{ structure:"📊 Playoff View", league_champs:"🏅 League Champions" }[st] || st}
+          </button>`).join("")}
+      </div>`;
+
+    const _renderStructure = () => {
+      if (mode === "total_points")  return _renderPOTotalPoints(t, po, activeY, _teams());
+      if (mode === "points_rounds") return _renderPOPointsRounds(t, po, activeY, _teams());
+      if (mode === "h2h_bracket")   return _renderPOBracket(t, po, activeY, _teams());
+      if (mode === "custom_rounds") return _renderPOCustomRounds(t, po, activeY, _teams());
+      return `<div class="trn-po-empty">No playoff format configured for ${activeY}.</div>`;
+    };
+
+    const _renderLeagueChamps = () => {
+      const recognizes = !!po.recognizeLeagueChampions;
+      if (!recognizes) {
+        return `<div class="trn-po-empty">League champion recognition is not enabled for this tournament.</div>`;
+      }
+      const rows = Object.entries(standings)
+        .filter(([, lc]) => String(lc.year) === String(activeY) && lc.champion)
+        .map(([, lc]) => `
+          <div class="trn-po-champ-card">
+            <div class="trn-po-champ-trophy">🏆</div>
+            <div class="trn-po-champ-info">
+              <div class="trn-po-champ-name">${_esc(lc.champion?.teamName || "Unknown")}</div>
+              <div class="trn-po-champ-league">${_esc(lc.leagueName || "")}</div>
+            </div>
+            <div class="trn-po-champ-record">${lc.champion?.wins ?? ""}–${lc.champion?.losses ?? ""} · ${lc.champion?.pf?.toFixed(1) ?? "?"} pts</div>
+          </div>`).join("");
+      return rows
+        ? `<div class="trn-po-champ-list">${rows}</div>`
+        : `<div class="trn-po-empty">No league champion data yet. Sync standings after the season ends.</div>`;
+    };
+
+    body.innerHTML = `
+      <div class="trn-po-container">
+        <div class="trn-po-header">
+          <div class="trn-po-title">
+            ${{ total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️" }[mode]||"🏆"}
+            Playoffs
+            <span class="trn-po-year-badge">${activeY}</span>
+          </div>
+          <div class="trn-po-mode-chip">${{ total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds" }[mode]||mode}</div>
+        </div>
+        ${_renderSubTabBar(_poSubTab)}
+        <div id="trn-po-subtab-body">
+          ${_poSubTab === "structure" ? _renderStructure() : _renderLeagueChamps()}
+        </div>
+      </div>`;
+
+    // Wire sub-tab clicks
+    body.querySelectorAll(".trn-po-subtab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _poSubTab = btn.dataset.subtab;
+        body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
+          b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab === _poSubTab));
+        document.getElementById("trn-po-subtab-body").innerHTML =
+          _poSubTab === "structure" ? _renderStructure() : _renderLeagueChamps();
+      });
+    });
+  }
+
+  // ── Total Points playoff view ─────────────────────────
+  function _renderPOTotalPoints(t, po, year, teams) {
+    if (!teams.length) return `<div class="trn-po-empty">No standings data yet for ${year}.</div>`;
+
+    // Sort by PF descending
+    const sorted = [...teams].sort((a, b) => (b.pf || 0) - (a.pf || 0));
+    const top20  = sorted.slice(0, 20);
+    const ew     = po.endWeek;
+
+    return `
+      <div class="trn-po-tp-header">
+        <div class="trn-po-tp-note">
+          Champion = highest cumulative Points For${ew ? ` through Week ${ew}` : ""}.
+          Showing top 20 teams${teams.length > 20 ? ` of ${teams.length}` : ""}.
+        </div>
+      </div>
+      <div class="trn-po-table-wrap">
+        <table class="trn-po-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Team</th>
+              <th>League</th>
+              <th class="trn-po-th-num">W–L</th>
+              <th class="trn-po-th-num">Points For</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${top20.map((tm, i) => `
+              <tr class="${i === 0 ? "trn-po-row--champion" : ""}">
+                <td class="trn-po-rank">${i === 0 ? "🏆" : i + 1}</td>
+                <td class="trn-po-team-name">${_esc(tm.teamName || "—")}</td>
+                <td class="trn-po-league">${_esc(tm.leagueName || "—")}</td>
+                <td class="trn-po-num">${tm.wins ?? ""}–${tm.losses ?? ""}</td>
+                <td class="trn-po-num trn-po-pf">${(tm.pf || 0).toFixed(2)}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+      ${teams.length > 20 ? `<div class="trn-po-more">+ ${teams.length - 20} more teams not shown</div>` : ""}`;
+  }
+
+  // ── Points Rounds playoff view ────────────────────────
+  function _renderPOPointsRounds(t, po, year, teams) {
+    if (!teams.length) return `<div class="trn-po-empty">No standings data for ${year}.</div>`;
+
+    const qual = po.qualification || {};
+    const rounds = (po.pointsRounds?.rounds || []);
+    const byes   = po.byes || {};
+    const byeCount = byes.type !== "none" ? (byes.count || 0) : 0;
+    const sw = po.startWeek;
+    const ew = po.endWeek;
+
+    // Determine qualifiers count from config
+    const qualCount = qual.method === "composite"
+      ? (qual.steps || []).filter(s => s.type !== "wins_threshold")
+          .reduce((s, st) => s + (st.type === "top_subgroup" ? (st.subCount||2) : (st.count||2)), 0)
+      : qual.method === "top_per_group" ? (qual.perGroup || 2) * 4
+      : (qual.count || 0);
+
+    // Sort all teams by PF to simulate qualification
+    const sorted = [...teams].sort((a, b) => (b.pf || 0) - (a.pf || 0));
+    const qualifiers = qualCount > 0 ? sorted.slice(0, qualCount) : sorted;
+    const qualSet   = new Set(qualifiers.map(tm => tm.teamId || tm.teamName));
+
+    // Tag qualifiers in full standings
+    const standingsSection = `
+      <div class="trn-po-section-title">Regular Season Standings — Qualifier Tags</div>
+      <div class="trn-po-table-wrap">
+        <table class="trn-po-table">
+          <thead><tr>
+            <th>#</th><th>Team</th><th>League</th>
+            <th class="trn-po-th-num">W–L</th>
+            <th class="trn-po-th-num">Points For</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody>
+            ${sorted.slice(0, Math.max(qualCount + 5, 20)).map((tm, i) => {
+              const isQ   = qualSet.has(tm.teamId || tm.teamName);
+              const isBye = isQ && byeCount > 0 && i < byeCount;
+              return `<tr class="${isQ ? "trn-po-row--qualified" : "trn-po-row--eliminated"}">
+                <td class="trn-po-rank">${i + 1}</td>
+                <td class="trn-po-team-name">${_esc(tm.teamName || "—")}</td>
+                <td class="trn-po-league">${_esc(tm.leagueName || "—")}</td>
+                <td class="trn-po-num">${tm.wins ?? ""}–${tm.losses ?? ""}</td>
+                <td class="trn-po-num trn-po-pf">${(tm.pf || 0).toFixed(2)}</td>
+                <td>${isBye ? '<span class="trn-po-badge trn-po-badge--bye">BYE</span>'
+                  : isQ ? '<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>'
+                  : i === qualCount ? '<div class="trn-po-cut-line">— Cut Line —</div>'
+                  : '<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>'}</td>
+              </tr>`;
+            }).join("")}
+            ${sorted.length > Math.max(qualCount + 5, 20)
+              ? `<tr><td colspan="6" style="text-align:center;color:var(--color-text-dim);font-size:.78rem;padding:8px">
+                   + ${sorted.length - Math.max(qualCount + 5, 20)} more teams not shown
+                 </td></tr>` : ""}
+          </tbody>
+        </table>
+      </div>`;
+
+    // Simulate rounds using current PF as proxy for weekly scores
+    // In production this would read weekly scores; for now we show config + seeded order
+    const roundsSection = rounds.length ? `
+      <div class="trn-po-rounds-wrap">
+        ${rounds.map((round, ri) => {
+          const isFinal   = ri === rounds.length - 1;
+          const prevAdv   = ri === 0 ? qualifiers : qualifiers.slice(0, (() => {
+            let rem = qualifiers.length;
+            for (let i = 0; i < ri; i++) {
+              const r = rounds[i];
+              rem = r.advanceMethod === "pct"
+                ? Math.round(rem * (r.advancePct || 50) / 100)
+                : (r.advanceCount || 0);
+            }
+            return rem;
+          })());
+          const advCount  = isFinal ? 1 : round.advanceMethod === "pct"
+            ? Math.round(prevAdv.length * (round.advancePct || 50) / 100)
+            : (round.advanceCount || 0);
+          const weekNum   = sw ? sw + ri : null;
+          const byeRow    = ri === 0 && byeCount > 0 ? `
+            <div class="trn-po-bye-row">
+              <span class="trn-po-badge trn-po-badge--bye">BYE</span>
+              <span style="font-size:.82rem;color:var(--color-text-dim)">
+                Top ${byeCount} seed${byeCount !== 1 ? "s" : ""} advance automatically
+              </span>
+            </div>` : "";
+          return `
+            <div class="trn-po-round-card ${isFinal ? "trn-po-round-card--final" : ""}">
+              <div class="trn-po-round-header">
+                <span>${isFinal ? "🏆 Championship" : `Round ${ri + 1}`}</span>
+                ${weekNum ? `<span class="trn-po-week-tag">Week ${weekNum}</span>` : ""}
+                <span class="trn-po-round-meta">${prevAdv.length} teams competing</span>
+              </div>
+              ${byeRow}
+              <div class="trn-po-table-wrap">
+                <table class="trn-po-table">
+                  <thead><tr>
+                    <th>#</th><th>Team</th>
+                    <th class="trn-po-th-num">Season PF</th>
+                    <th>Status</th>
+                  </tr></thead>
+                  <tbody>
+                    ${prevAdv.map((tm, i) => {
+                      const advances = i < advCount + (ri === 0 && i < byeCount ? 0 : 0);
+                      const isByeTeam = ri === 0 && i < byeCount;
+                      const adv       = isByeTeam || i < advCount;
+                      return `<tr class="${adv ? "trn-po-row--advance" : "trn-po-row--cut"}">
+                        <td class="trn-po-rank">${i + 1}</td>
+                        <td class="trn-po-team-name">${_esc(tm.teamName || "—")}</td>
+                        <td class="trn-po-num trn-po-pf">${(tm.pf || 0).toFixed(2)}</td>
+                        <td>${isByeTeam ? '<span class="trn-po-badge trn-po-badge--bye">BYE</span>'
+                          : isFinal && i === 0 ? '<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>'
+                          : adv ? '<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>'
+                          : '<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>'}</td>
+                      </tr>`;
+                    }).join("")}
+                    ${!isFinal ? `<tr class="trn-po-cut-row">
+                      <td colspan="4"><div class="trn-po-cut-divider">— Cut Line — ${prevAdv.length - advCount} eliminated</div></td>
+                    </tr>` : ""}
+                  </tbody>
+                </table>
+              </div>
+            </div>`;
+        }).join("")}
+      </div>` : `<div class="trn-po-empty">Round configuration not yet set up.</div>`;
+
+    return `
+      <div class="trn-po-note">
+        ${qualCount ? `${qualCount} teams qualify` : "Qualifiers TBD"}
+        ${byeCount ? ` · ${byeCount} bye${byeCount !== 1 ? "s" : ""}` : ""}
+        ${sw && ew ? ` · Weeks ${sw}–${ew}` : ""}
+      </div>
+      ${standingsSection}
+      <div class="trn-po-section-title" style="margin-top:var(--space-4)">Playoff Rounds</div>
+      ${roundsSection}`;
+  }
+
+  // ── H2H Bracket view ─────────────────────────────────
+  function _renderPOBracket(t, po, year, teams) {
+    const qual = po.qualification || {};
+    const byes = po.byes || {};
+    const bracketSize = po.bracketSize || 8;
+    const byeCount    = byes.type !== "none" ? (byes.count || 0) : 0;
+
+    const qualCount = qual.method === "composite"
+      ? (qual.steps || []).filter(s => s.type !== "wins_threshold")
+          .reduce((s, st) => s + (st.type === "top_subgroup" ? (st.subCount||2) : (st.count||2)), 0)
+      : (qual.count || bracketSize);
+
+    const sorted = [...teams].sort((a, b) => {
+      if (po.seeding?.method === "pf") return (b.pf||0) - (a.pf||0);
+      const aRec = (a.wins||0) - (a.losses||0);
+      const bRec = (b.wins||0) - (b.losses||0);
+      return bRec !== aRec ? bRec - aRec : (b.pf||0) - (a.pf||0);
+    });
+    const seeds = sorted.slice(0, bracketSize);
+
+    // Build a standard bracket structure (single elim)
+    // Round 1: pair seed 1 vs bracketSize, 2 vs bracketSize-1, etc.
+    // Byes: top N seeds advance automatically
+    const rounds = Math.log2(bracketSize);
+
+    const _buildBracket = () => {
+      // Seeds with bye advance automatically; others play
+      const r1Byes    = seeds.slice(0, byeCount);
+      const r1Players = seeds.slice(byeCount);
+      // Pair players: 1st vs last, 2nd vs 2nd-last
+      const r1Matchups = [];
+      const half = Math.floor(r1Players.length / 2);
+      for (let i = 0; i < half; i++) {
+        r1Matchups.push({ a: r1Players[i], b: r1Players[r1Players.length - 1 - i] });
+      }
+      return { r1Byes, r1Matchups, rounds };
+    };
+
+    if (!seeds.length) return `<div class="trn-po-empty">No seeded teams yet. Sync standings first.</div>`;
+
+    const { r1Byes, r1Matchups } = _buildBracket();
+    const numRounds = Math.log2(bracketSize);
+    const roundNames = ["First Round","Quarterfinals","Semifinals","Championship"];
+    const getRoundName = (ri, total) =>
+      ri === total - 1 ? "🏆 Championship"
+      : ri === total - 2 ? "Semifinals"
+      : ri === total - 3 ? "Quarterfinals"
+      : `Round ${ri + 1}`;
+
+    return `
+      <div class="trn-po-bracket-wrap">
+        <div class="trn-po-bracket-note">
+          ${bracketSize}-team bracket · ${byeCount > 0 ? `${byeCount} first-round bye${byeCount !== 1 ? "s" : ""}` : "No byes"}
+          · Seeded by ${po.seeding?.method === "pf" ? "Points For" : "Record"}
+        </div>
+        <div class="trn-po-bracket">
+          <!-- Round 1 -->
+          <div class="trn-po-bracket-round">
+            <div class="trn-po-bracket-round-title">${getRoundName(0, numRounds)}</div>
+            ${r1Byes.map(tm => `
+              <div class="trn-po-matchup trn-po-matchup--bye">
+                <div class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</div>
+                <div class="trn-po-matchup-team trn-po-matchup-team--bye">${_esc(tm.teamName||"—")}</div>
+                <span class="trn-po-badge trn-po-badge--bye">BYE</span>
+              </div>`).join("")}
+            ${r1Matchups.map(m => `
+              <div class="trn-po-matchup">
+                <div class="trn-po-matchup-row">
+                  <span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span>
+                  <span class="trn-po-matchup-team">${_esc(m.a?.teamName||"TBD")}</span>
+                  <span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span>
+                </div>
+                <div class="trn-po-matchup-vs">vs</div>
+                <div class="trn-po-matchup-row">
+                  <span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span>
+                  <span class="trn-po-matchup-team">${_esc(m.b?.teamName||"TBD")}</span>
+                  <span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span>
+                </div>
+              </div>`).join("")}
+          </div>
+          <!-- Later rounds (TBD) -->
+          ${Array.from({length: numRounds - 1}, (_, ri) => `
+            <div class="trn-po-bracket-round">
+              <div class="trn-po-bracket-round-title">${getRoundName(ri + 1, numRounds)}</div>
+              ${Array.from({length: Math.pow(2, numRounds - ri - 2)}, () => `
+                <div class="trn-po-matchup trn-po-matchup--tbd">
+                  <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+                  <div class="trn-po-matchup-vs">vs</div>
+                  <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+                </div>`).join("")}
+            </div>`).join("")}
+        </div>
+        <!-- Seed list -->
+        <div class="trn-po-seed-list">
+          <div class="trn-po-section-title">Seeding</div>
+          ${seeds.map((tm, i) => `
+            <div class="trn-po-seed-row ${i < byeCount ? "trn-po-seed-row--bye" : ""}">
+              <span class="trn-po-seed-num">#${i+1}</span>
+              <span class="trn-po-seed-name">${_esc(tm.teamName||"—")}</span>
+              <span class="trn-po-seed-league">${_esc(tm.leagueName||"")}</span>
+              <span class="trn-po-seed-record">${tm.wins??0}–${tm.losses??0}</span>
+              <span class="trn-po-seed-pf">${(tm.pf||0).toFixed(1)} pts</span>
+              ${i < byeCount ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>` : ""}
+            </div>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  // ── Custom Rounds view ────────────────────────────────
+  function _renderPOCustomRounds(t, po, year, teams) {
+    const rounds  = po.customRounds?.rounds || [];
+    const byes    = po.byes || {};
+    const byeCount = byes.type !== "none" ? (byes.count || 0) : 0;
+    const qual    = po.qualification || {};
+
+    if (!rounds.length) return `<div class="trn-po-empty">Round configuration not yet set up.</div>`;
+    if (!teams.length)  return `<div class="trn-po-empty">No standings data for ${year}.</div>`;
+
+    const sorted = [...teams].sort((a, b) => (b.pf||0) - (a.pf||0));
+
+    return `
+      <div class="trn-po-rounds-wrap">
+        ${rounds.map((round, ri) => {
+          const isFinal = ri === rounds.length - 1;
+          const totalTeams = round.groups * round.teamsPerGroup;
+          const advancing  = isFinal ? round.groups : round.groups * round.advPerGroup;
+          const weekNum    = po.startWeek ? po.startWeek + ri : null;
+          const teamsThisRound = sorted.slice(0, totalTeams);
+
+          return `
+            <div class="trn-po-round-card ${isFinal ? "trn-po-round-card--final" : ""}">
+              <div class="trn-po-round-header">
+                <span>${isFinal ? "🏆 Championship" : `Round ${ri + 1}`}</span>
+                ${weekNum ? `<span class="trn-po-week-tag">Week ${weekNum}</span>` : ""}
+                <span class="trn-po-round-meta">${round.groups} group${round.groups!==1?"s":""} of ${round.teamsPerGroup} · ${advancing} advance</span>
+              </div>
+              ${ri === 0 && byeCount > 0 ? `
+                <div class="trn-po-bye-row">
+                  <span class="trn-po-badge trn-po-badge--bye">BYE</span>
+                  <span style="font-size:.82rem;color:var(--color-text-dim)">Top ${byeCount} advance automatically</span>
+                </div>` : ""}
+              <div class="trn-po-groups-wrap">
+                ${Array.from({length: round.groups}, (_, gi) => {
+                  const groupTeams = teamsThisRound.slice(
+                    gi * round.teamsPerGroup,
+                    (gi + 1) * round.teamsPerGroup
+                  );
+                  return `
+                    <div class="trn-po-group-card">
+                      <div class="trn-po-group-title">Group ${gi + 1}</div>
+                      ${groupTeams.map((tm, ti) => {
+                        const adv = ti < round.advPerGroup;
+                        const isByeTeam = ri === 0 && (sorted.indexOf(tm) < byeCount);
+                        return `<div class="trn-po-group-row ${adv || isByeTeam ? "trn-po-row--advance" : "trn-po-row--cut"}">
+                          <span class="trn-po-rank">${ti + 1}</span>
+                          <span class="trn-po-team-name">${_esc(tm.teamName||"—")}</span>
+                          <span class="trn-po-pf">${(tm.pf||0).toFixed(1)}</span>
+                          ${isByeTeam ? '<span class="trn-po-badge trn-po-badge--bye">BYE</span>'
+                            : adv ? '<span class="trn-po-badge trn-po-badge--advance">↑</span>'
+                            : '<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
+                        </div>`;
+                      }).join("")}
+                    </div>`;
+                }).join("")}
+              </div>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
   function _renderInfoTab(t, body, tid) {
     const meta = t.meta || {};
     const leagueCount = Object.keys(t.leagues || {}).length;
