@@ -1779,9 +1779,12 @@
 }
 .trn-mode-card--active {
   border-color: var(--color-gold, #d4af37);
-  background: var(--color-gold-light, rgba(212,175,55,.14));
+  background: var(--color-gold, #d4af37);
 }
 .trn-mode-card--active:hover { transform: none; }
+.trn-mode-card--active .trn-mode-icon  { filter: none; }
+.trn-mode-card--active .trn-mode-label { color: #000 !important; }
+.trn-mode-card--active .trn-mode-sub   { color: rgba(0,0,0,.65) !important; }
 .trn-mode-icon  { font-size: 1.3rem; line-height: 1; }
 .trn-mode-label { font-size: .78rem; font-weight: 700; color: var(--color-text); }
 .trn-mode-sub   { font-size: .7rem;  color: var(--color-text-dim); }
@@ -2258,8 +2261,10 @@
 }
 .trn-po-subtab-btn:hover { color: var(--color-text); border-color: var(--color-gold, #d4af37); }
 .trn-po-subtab-btn--active {
-  background: var(--color-gold-light, rgba(212,175,55,.15));
-  border-color: var(--color-gold, #d4af37); color: var(--color-gold, #d4af37);
+  background: var(--color-gold, #d4af37);
+  border-color: var(--color-gold, #d4af37);
+  color: #000;
+  font-weight: 700;
 }
 .trn-po-empty {
   font-size: .85rem; color: var(--color-text-dim); font-style: italic;
@@ -2401,3 +2406,45 @@
 .trn-po-champ-name { font-weight: 700; font-size: .9rem; }
 .trn-po-champ-league { font-size: .75rem; color: var(--color-text-dim); }
 .trn-po-champ-record { font-size: .78rem; color: var(--color-text-dim); white-space: nowrap; }
+
+/* ── Scope pill buttons (qual steps + bye scope) ─────── */
+.trn-qs-scope-pills {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.trn-qs-scope-pill {
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  border: none;
+  border-right: 1px solid var(--color-border);
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background .12s, color .12s;
+  white-space: nowrap;
+}
+.trn-qs-scope-pill:last-child { border-right: none; }
+.trn-qs-scope-pill:hover { background: var(--color-surface-2, var(--color-surface)); color: var(--color-text); }
+.trn-qs-scope-pill--active {
+  background: var(--color-gold, #d4af37);
+  color: #000;
+  font-weight: 700;
+}
+
+/* ── Scoring row delete button ───────────────────────── */
+.trn-scoring-del-row {
+  font-size: .65rem;
+  color: var(--color-text-dim);
+  padding: 1px 4px;
+  opacity: .5;
+  transition: opacity .12s, color .12s;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+.trn-scoring-del-row:hover { opacity: 1; color: #e05555; }

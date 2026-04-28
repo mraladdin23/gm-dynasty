@@ -1198,14 +1198,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       : isScoped ? `+${slotsAdded} ${scopeLabel}`
       : `+${slotsAdded} → ${runningTotal}`;
 
-    // Scope selector HTML — reused in both record and pf bodies
-    const _scopeSelect = (idSuffix) => `
-      <select class="trn-qs-scope" data-step-idx="${idx}"
-        style="font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-        <option value="overall"    ${scope==="overall"    ? "selected" : ""}>Overall</option>
-        <option value="conference" ${scope==="conference" ? "selected" : ""}${!hasConfs ? ' title="No conferences configured yet"' : ""}>Per Conference</option>
-        <option value="division"   ${scope==="division"   ? "selected" : ""}${!hasDivs  ? ' title="No divisions configured yet"'   : ""}>Per Division</option>
-      </select>`;
+    // Scope pill buttons — reused in both record and pf bodies
+    const _scopePills = () => `
+      <div class="trn-qs-scope-pills" data-step-idx="${idx}">
+        <button class="trn-qs-scope-pill ${scope==="overall"    ? "trn-qs-scope-pill--active" : ""}" data-scope="overall"    data-step-idx="${idx}">Overall</button>
+        <button class="trn-qs-scope-pill ${scope==="conference" ? "trn-qs-scope-pill--active" : ""}" data-scope="conference" data-step-idx="${idx}"
+          ${!hasConfs ? 'title="No conferences configured yet" style="opacity:.5"' : ""}>Conf</button>
+        <button class="trn-qs-scope-pill ${scope==="division"   ? "trn-qs-scope-pill--active" : ""}" data-scope="division"   data-step-idx="${idx}"
+          ${!hasDivs  ? 'title="No divisions configured yet"   style="opacity:.5"' : ""}>Div</button>
+      </div>`;
     return `
       <div class="trn-qual-step-card" data-step-idx="${idx}">
         <div class="trn-qual-step-card-header">
@@ -1230,7 +1231,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <input type="number" class="trn-qs-count" data-step-idx="${idx}"
                 min="1" max="999" value="${count}"
                 style="width:54px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;margin:0 4px" />
-              ${_scopeSelect("rec")}
+              ${_scopePills()}
               <span style="font-size:.8rem;color:var(--color-text-dim);margin-left:4px">by H2H record (not yet qualified)</span>
             </div>
           </div>
@@ -1239,7 +1240,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <input type="number" class="trn-qs-count" data-step-idx="${idx}"
                 min="1" max="999" value="${count}"
                 style="width:54px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;margin:0 4px" />
-              ${_scopeSelect("pf")}
+              ${_scopePills()}
               <span style="font-size:.8rem;color:var(--color-text-dim);margin-left:4px">by Points For (not yet qualified)</span>
             </div>
           </div>
@@ -1553,12 +1554,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                     title="Overall = top N seeds across all teams. Per Conference = top N from each conference. Per Division = top N from each division.">?</button>
                 </span>
                 <span>
-                  <select id="trn-bye-scope"
-                    style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                    <option value="overall"    ${byeScope==="overall"    ? "selected" : ""}>Overall</option>
-                    <option value="conference" ${byeScope==="conference" ? "selected" : ""}>Per Conference</option>
-                    <option value="division"   ${byeScope==="division"   ? "selected" : ""}>Per Division</option>
-                  </select>
+                  <div class="trn-qs-scope-pills" id="trn-bye-scope-pills">
+                    <button class="trn-qs-scope-pill ${byeScope==="overall"    ? "trn-qs-scope-pill--active" : ""}" data-scope="overall">Overall</button>
+                    <button class="trn-qs-scope-pill ${byeScope==="conference" ? "trn-qs-scope-pill--active" : ""}" data-scope="conference">Conf</button>
+                    <button class="trn-qs-scope-pill ${byeScope==="division"   ? "trn-qs-scope-pill--active" : ""}" data-scope="division">Div</button>
+                  </div>
                 </span>
               </div>
               <!-- Bracket size — H2H bracket only -->
@@ -1945,7 +1945,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const base = { type };
       if (["top_record","top_pf"].includes(type)) {
         base.count = parseInt(card.querySelector(`.trn-qs-count[data-step-idx="${idx}"]`)?.value)||2;
-        base.scope = card.querySelector(".trn-qs-scope")?.value || "overall";
+        base.scope = card.querySelector(".trn-qs-scope-pill--active")?.dataset.scope || "overall";
       }
       if (type==="wins_threshold")
         base.minWins = parseInt(card.querySelector(".trn-qs-min-wins")?.value)||13;
@@ -1963,7 +1963,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       stepsListEl?.querySelectorAll(".trn-qual-step-card").forEach(card => {
         const type   = card.querySelector(".trn-qs-type")?.value||"top_pf";
         const idx    = card.dataset.stepIdx;
-        const scope  = card.querySelector(".trn-qs-scope")?.value || "overall";
+        const scope  = card.querySelector(".trn-qs-scope-pill--active")?.dataset.scope || "overall";
         const isScoped = ["top_record","top_pf"].includes(type) && scope !== "overall";
         const add    = type==="wins_threshold" ? 0
           : type==="top_subgroup" ? (parseInt(card.querySelector(".trn-qs-sub-count")?.value)||2)
@@ -1981,7 +1981,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           }
         }
       });
-      if (totalCountEl) totalCountEl.textContent = sum + (sum < stepsListEl?.querySelectorAll(".trn-qs-scope[value='division'], .trn-qs-scope[value='conference']").length ? "+" : "");
+      if (totalCountEl) totalCountEl.textContent = sum + (stepsListEl?.querySelectorAll(".trn-qs-scope-pill--active[data-scope='division'], .trn-qs-scope-pill--active[data-scope='conference']").length ? "+" : "");
     };
 
     const _rebuildSteps = (steps) => {
@@ -2020,8 +2020,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       });
       stepsListEl?.querySelectorAll(".trn-qs-count,.trn-qs-sub-count,.trn-qs-min-wins")
         .forEach(inp => inp.addEventListener("input", _refreshTotals));
-      stepsListEl?.querySelectorAll(".trn-qs-scope")
-        .forEach(sel => sel.addEventListener("change", _refreshTotals));
+      // Wire scope pill clicks
+      stepsListEl?.querySelectorAll(".trn-qs-scope-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+          const idx = pill.dataset.stepIdx;
+          // Deactivate siblings, activate this one
+          pill.closest(".trn-qs-scope-pills")?.querySelectorAll(".trn-qs-scope-pill").forEach(p =>
+            p.classList.toggle("trn-qs-scope-pill--active", p === pill));
+          _refreshTotals();
+        });
+      });
       stepsListEl?.querySelectorAll(".trn-qs-remove").forEach(btn => {
         btn.addEventListener("click", () => {
           const steps = _getSteps(); if (steps.length<=1) return;
@@ -2064,10 +2072,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       document.getElementById("trn-bye-scope-row")?.style.setProperty("display", showBye?"":"none");
     };
     // Live scope label update on the count row
-    document.getElementById("trn-bye-scope")?.addEventListener("change", () => {
-      const sv = document.getElementById("trn-bye-scope")?.value || "overall";
-      const lbl = document.getElementById("trn-bye-count-scope-label");
-      if (lbl) lbl.textContent = sv==="overall"?"(overall)":sv==="conference"?"(per conference)":"(per division)";
+    // Bye scope pill clicks
+    document.getElementById("trn-bye-scope-pills")?.querySelectorAll(".trn-qs-scope-pill").forEach(pill => {
+      pill.addEventListener("click", () => {
+        document.getElementById("trn-bye-scope-pills")?.querySelectorAll(".trn-qs-scope-pill")
+          .forEach(p => p.classList.toggle("trn-qs-scope-pill--active", p === pill));
+        const sv = pill.dataset.scope || "overall";
+        const lbl = document.getElementById("trn-bye-count-scope-label");
+        if (lbl) lbl.textContent = sv==="overall"?"(overall)":sv==="conference"?"(per conference)":"(per division)";
+      });
     });
     document.getElementById("trn-bye-none")?.addEventListener("click",   ()=>_saveBye("none"));
     document.getElementById("trn-bye-topn")?.addEventListener("click",   ()=>_saveBye("top_n"));
@@ -2077,7 +2090,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byeTypeEl   = document.querySelector(".trn-yn-btn--active[id^='trn-bye-']");
       const byeType     = byeTypeEl?.id==="trn-bye-topn"?"top_n":byeTypeEl?.id==="trn-bye-manual"?"manual":"none";
       const byeCount    = parseInt(document.getElementById("trn-bye-count")?.value)||2;
-      const byeScope    = document.getElementById("trn-bye-scope")?.value || "overall";
+      const byeScope    = document.querySelector("#trn-bye-scope-pills .trn-qs-scope-pill--active")?.dataset.scope || "overall";
       const bracketSize = parseInt(document.getElementById("trn-bracket-size")?.value)||null;
       if (bracketSize && (bracketSize&(bracketSize-1))!==0) {
         showToast("Bracket size must be a power of 2","error"); return;
@@ -2121,6 +2134,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     const _wireScoringPublish = () => {
+      // Row delete buttons
+      document.querySelectorAll(".trn-scoring-del-row").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const field    = btn.dataset.field;
+          const platform = btn.dataset.platform;
+          if (!confirm(`Remove "${SCORING_KEY_META[field] || field}" from scoring settings?`)) return;
+          try {
+            await _tScoringRef(tid).child(_activePoYear).child(platform).child(field).remove();
+            btn.closest("tr")?.remove();
+            showToast(`"${SCORING_KEY_META[field] || field}" removed ✓`);
+          } catch(e) { showToast("Failed: " + e.message, "error"); }
+        });
+      });
+
       document.getElementById("trn-scoring-publish-btn")?.addEventListener("click", async () => {
         const inputs = document.querySelectorAll(".trn-scoring-edit-input");
         const updates = {};
@@ -2184,7 +2211,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const vals = platforms.map(p => String(yearData[p]?.[key] ?? ""));
       return vals.some(v => v !== vals[0]);
     };
-    // Collect all non-zero keys synced from API
+    // Collect all non-internal keys
     const allKeys = new Set();
     platforms.forEach(p => Object.keys(yearData[p] || {}).forEach(k => {
       if (!k.startsWith("_") || k === "_format" || k === "_rosterPositions") allKeys.add(k);
@@ -2194,37 +2221,81 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       ...knownOrder.filter(k => allKeys.has(k)),
       ...[...allKeys].filter(k => !knownOrder.includes(k)).sort()
     ];
+
+    // Source league info line
+    const sourceLines = platforms.map(p => {
+      const ln = yearData[p]?._sourceLeagueName || yearData[p]?._sourceLeagueId;
+      return ln ? `<span style="font-size:.72rem;color:var(--color-text-dim)">${_esc(p.toUpperCase())}: pulled from <strong>${_esc(ln)}</strong></span>` : "";
+    }).filter(Boolean).join(" &nbsp;·&nbsp; ");
+
     const headerCols = showMulti
-      ? platforms.map(p => `<th>${p.toUpperCase()}</th>`).join("")
-      : "<th>Value</th>";
+      ? platforms.map(p => `<th>${p.toUpperCase()}</th><th style="width:20px"></th>`).join("")
+      : `<th>Value</th><th style="width:20px"></th>`;
+
     const rows = sortedKeys.map(k => {
       const vals = platforms.map(p => yearData[p]?.[k]);
       if (vals.every(v => v === undefined || v === null)) return "";
       const diff  = showMulti && differs(k);
       const label = SCORING_KEY_META[k] || k;
-      return `<tr class="${diff ? "trn-scoring-diff-row" : ""}">
+      return `<tr class="${diff ? "trn-scoring-diff-row" : ""}" data-scoring-key="${_esc(k)}">
         <td class="trn-scoring-label">${label}</td>
         ${showMulti
-          ? platforms.map((p, pi) => `<td class="trn-scoring-val">
-              <input type="text" class="trn-scoring-edit-input" data-platform="${p}" data-field="${k}"
-                value="${_esc(String(vals[pi] ?? ""))}"
-                style="width:60px;font-size:.78rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:2px;background:var(--color-surface);color:var(--color-text);text-align:center" /></td>`).join("")
+          ? platforms.map((p, pi) => `
+              <td class="trn-scoring-val">
+                <input type="text" class="trn-scoring-edit-input" data-platform="${p}" data-field="${k}"
+                  value="${_esc(String(vals[pi] ?? ""))}"
+                  style="width:60px;font-size:.78rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:2px;background:var(--color-surface);color:var(--color-text);text-align:center" />
+              </td>
+              <td><button class="trn-scoring-del-row btn-ghost btn-xs" data-field="${k}" data-platform="${p}" title="Remove this setting">✕</button></td>`).join("")
           : `<td class="trn-scoring-val">
                <input type="text" class="trn-scoring-edit-input" data-platform="${platforms[0]}" data-field="${k}"
                  value="${_esc(String(vals[0] ?? ""))}"
-                 style="width:80px;font-size:.78rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:2px;background:var(--color-surface);color:var(--color-text);text-align:center" /></td>`}
+                 style="width:80px;font-size:.78rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:2px;background:var(--color-surface);color:var(--color-text);text-align:center" />
+             </td>
+             <td><button class="trn-scoring-del-row btn-ghost btn-xs" data-field="${k}" data-platform="${platforms[0]}" title="Remove this setting">✕</button></td>`}
       </tr>`;
     }).filter(Boolean).join("");
+
     const syncedAt = platforms.map(p => yearData[p]?._syncedAt).filter(Boolean)[0];
     const syncLine = syncedAt
-      ? `<div style="font-size:.7rem;color:var(--color-text-dim);margin-bottom:var(--space-2)">Last synced: ${new Date(syncedAt).toLocaleDateString()}</div>` : "";
-    return `${syncLine}
-      ${showMulti ? `<div class="trn-scoring-diff-note" style="margin-bottom:var(--space-2)">⚠️ Rows highlighted differ between platforms.</div>` : ""}
+      ? `Last synced: ${new Date(syncedAt).toLocaleDateString()}` : "";
+
+    // Raw API data for debugging
+    const rawBlocks = platforms.map(p => {
+      const raw = yearData[p]?._rawApi;
+      if (!raw) return "";
+      let parsed = {};
+      try { parsed = JSON.parse(raw); } catch(e) { return ""; }
+      // Show all fields including zero-value ones
+      const rawRows = Object.entries(parsed)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .map(([k,v]) => `<tr><td style="padding:2px 6px;font-size:.72rem;color:var(--color-text-dim)">${_esc(k)}</td><td style="padding:2px 6px;font-size:.72rem;font-variant-numeric:tabular-nums">${v}</td></tr>`)
+        .join("");
+      return `<div style="margin-top:var(--space-2)">
+        <div style="font-size:.72rem;font-weight:700;color:var(--color-text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">${p.toUpperCase()} — Raw API scoring_settings (all fields including zeroes)</div>
+        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+          <table style="width:100%;border-collapse:collapse"><tbody>${rawRows}</tbody></table>
+        </div>
+      </div>`;
+    }).filter(Boolean).join("");
+
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:var(--space-2)">
+        <div style="display:flex;flex-direction:column;gap:2px">${syncLine ? `<span style="font-size:.7rem;color:var(--color-text-dim)">${syncLine}</span>` : ""}
+          ${sourceLines ? `<span>${sourceLines}</span>` : ""}
+        </div>
+        <span style="font-size:.7rem;color:var(--color-text-dim)">Edit values inline · ✕ to remove a row</span>
+      </div>
+      ${showMulti ? `<div class="trn-scoring-diff-note" style="margin-bottom:var(--space-2)">⚠️ Highlighted rows differ between platforms.</div>` : ""}
       <table class="trn-scoring-table">
         <thead><tr><th>Setting</th>${headerCols}</tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody id="trn-scoring-tbody">${rows}</tbody>
       </table>
-      <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-2);flex-wrap:wrap;gap:var(--space-1)">
+        <details style="font-size:.75rem;color:var(--color-text-dim)">
+          <summary style="cursor:pointer">🔍 View raw API data</summary>
+          ${rawBlocks || "<em>No raw data stored. Re-sync to capture it.</em>"}
+        </details>
         <button class="btn-primary btn-sm" id="trn-scoring-publish-btn">Publish Scoring Settings</button>
       </div>`;
   }
@@ -2257,23 +2328,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     if (byPlatform.sleeper) {
       try {
         const leagueId = byPlatform.sleeper.leagueId;
+        const leagueName = byPlatform.sleeper.leagueName || leagueId;
         const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`);
         if (r.ok) {
           const d = await r.json();
           const ss = d.scoring_settings || {};
           const rp = d.roster_positions || [];
-          // Normalize: only include non-zero overrides + key settings
-          const settings = {};
           // Read ALL non-zero values from the API directly
+          const settings = {};
           Object.entries(ss).forEach(([k, v]) => {
             if (v !== 0 && v !== null && v !== undefined) settings[k] = v;
           });
-          // PPR detection
-          settings._ppr    = ss.rec || 0;
-          settings._format = ss.rec >= 1 ? "PPR" : ss.rec >= 0.5 ? "Half PPR" : "Standard";
-          settings._rosterPositions = rp.filter(p => p !== "BN").join(", ");
-          settings._platform = "sleeper";
-          settings._syncedAt = Date.now();
+          // Derived meta
+          settings._ppr             = ss.rec !== undefined ? ss.rec : 0;
+          settings._format          = (ss.rec >= 1) ? "PPR" : (ss.rec >= 0.5) ? "Half PPR" : "Standard";
+          settings._rosterPositions = rp.filter(p => p !== "BN" && p !== "LB").join(", ");
+          settings._sourceLeagueId  = leagueId;
+          settings._sourceLeagueName= leagueName;
+          settings._platform        = "sleeper";
+          settings._syncedAt        = Date.now();
+          settings._rawApi          = JSON.stringify(ss); // Store raw for debugging
           results.sleeper = settings;
         }
       } catch(e) { console.warn("[tournament.js] Scoring sync (Sleeper) failed:", e); }
