@@ -2203,3 +2203,201 @@
   display: inline-block;
   margin-left: 4px;
 }
+
+/* ── Year pill delete button ─────────────────────────── */
+.trn-year-pill-wrap {
+  display: inline-flex; align-items: center;
+  border-radius: 99px; overflow: hidden;
+  border: 1.5px solid var(--color-border);
+}
+.trn-year-pill-wrap .trn-year-pill { border: none; border-radius: 0; }
+.trn-year-pill-del {
+  font-size: .65rem; font-weight: 700; padding: 3px 6px;
+  background: var(--color-surface-2, var(--color-surface));
+  color: var(--color-text-dim);
+  border: none; border-left: 1px solid var(--color-border);
+  cursor: pointer; line-height: 1;
+  transition: background .12s, color .12s;
+}
+.trn-year-pill-del:hover { background: rgba(200,60,60,.15); color: #e05555; }
+
+/* ── Scoring admin section ───────────────────────────── */
+.trn-scoring-edit-input { vertical-align: middle; }
+.trn-scoring-diff-row td { background: rgba(212,175,55,.07); }
+.trn-scoring-diff-note { font-size: .75rem; color: var(--color-text-dim); font-style: italic; }
+.trn-scoring-label { color: var(--color-text-dim); font-size: .82rem; }
+.trn-scoring-val   { font-size: .82rem; }
+
+/* ── Playoffs Tab ────────────────────────────────────── */
+.trn-po-container { padding: var(--space-2) 0; }
+.trn-po-header {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-bottom: var(--space-3); flex-wrap: wrap;
+}
+.trn-po-title { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: var(--space-1); }
+.trn-po-year-badge {
+  font-size: .75rem; font-weight: 700; padding: 2px 8px; border-radius: 99px;
+  background: var(--color-gold-light, rgba(212,175,55,.15));
+  border: 1px solid var(--color-gold, #d4af37); color: var(--color-gold, #d4af37);
+}
+.trn-po-mode-chip {
+  font-size: .75rem; padding: 2px 10px; border-radius: 99px;
+  background: var(--color-surface-2, var(--color-surface));
+  border: 1px solid var(--color-border); color: var(--color-text-dim); font-weight: 600;
+}
+.trn-po-subtab-bar {
+  display: flex; gap: var(--space-1); margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-2); flex-wrap: wrap;
+}
+.trn-po-subtab-btn {
+  font-size: .8rem; font-weight: 600; padding: 4px 12px;
+  border-radius: var(--radius-sm); border: 1px solid var(--color-border);
+  background: var(--color-surface); color: var(--color-text-dim);
+  cursor: pointer; white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.trn-po-subtab-btn:hover { color: var(--color-text); border-color: var(--color-gold, #d4af37); }
+.trn-po-subtab-btn--active {
+  background: var(--color-gold-light, rgba(212,175,55,.15));
+  border-color: var(--color-gold, #d4af37); color: var(--color-gold, #d4af37);
+}
+.trn-po-empty {
+  font-size: .85rem; color: var(--color-text-dim); font-style: italic;
+  padding: var(--space-4) var(--space-2); text-align: center;
+}
+.trn-po-tp-note, .trn-po-note { font-size: .78rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
+.trn-po-section-title {
+  font-size: .72rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--color-text-dim); margin-bottom: var(--space-2);
+}
+.trn-po-table-wrap { overflow-x: auto; margin-bottom: var(--space-3); }
+.trn-po-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.trn-po-table thead tr { background: var(--color-surface-2, var(--color-surface)); }
+.trn-po-table th {
+  text-align: left; font-size: .7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--color-text-dim); padding: 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-po-th-num { text-align: right; }
+.trn-po-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+.trn-po-table tr:last-child td { border-bottom: none; }
+.trn-po-rank     { font-weight: 700; color: var(--color-text-dim); min-width: 28px; }
+.trn-po-team-name{ font-weight: 600; }
+.trn-po-league   { font-size: .75rem; color: var(--color-text-dim); }
+.trn-po-num, .trn-po-pf { text-align: right; font-variant-numeric: tabular-nums; }
+.trn-po-pf { font-weight: 600; }
+.trn-po-more { font-size: .75rem; color: var(--color-text-dim); text-align: center; }
+
+/* Row states */
+.trn-po-row--champion td     { background: rgba(212,175,55,.12); }
+.trn-po-row--champion .trn-po-team-name { color: var(--color-gold,#d4af37); font-weight: 800; }
+.trn-po-row--bye-seed td     { background: rgba(212,175,55,.07); }
+.trn-po-row--qualified td    { background: rgba(60,180,60,.06); }
+.trn-po-row--eliminated td   { opacity: .5; }
+.trn-po-row--advance td      { background: rgba(60,180,60,.08); }
+.trn-po-row--cut td          { opacity: .55; }
+.trn-po-cut-row td           { padding: 0; }
+.trn-po-cut-divider {
+  text-align: center; font-size: .7rem; font-weight: 700; color: #e05555;
+  letter-spacing: .04em; padding: 4px 0;
+  border-top: 2px dashed rgba(224,85,85,.4); border-bottom: 2px dashed rgba(224,85,85,.4);
+}
+
+/* Badges */
+.trn-po-badge {
+  display: inline-flex; align-items: center; font-size: .68rem; font-weight: 700;
+  padding: 2px 7px; border-radius: 99px; white-space: nowrap;
+}
+.trn-po-badge--qualified  { background: rgba(60,180,60,.18); color: #3aaa4a; border: 1px solid #3aaa4a; }
+.trn-po-badge--bye        { background: rgba(212,175,55,.18); color: var(--color-gold,#d4af37); border: 1px solid var(--color-gold,#d4af37); }
+.trn-po-badge--advance    { background: rgba(60,180,60,.15); color: #3aaa4a; border: 1px solid #3aaa4a; }
+.trn-po-badge--eliminated { background: rgba(224,85,85,.12); color: #e05555; border: 1px solid #e05555; }
+.trn-po-badge--champion   { background: rgba(212,175,55,.2); color: var(--color-gold,#d4af37); border: 2px solid var(--color-gold,#d4af37); font-size: .75rem; }
+
+/* Round cards */
+.trn-po-round-card { border: 1px solid var(--color-border); border-radius: var(--radius-sm); overflow: hidden; }
+.trn-po-round-card--final { border-color: var(--color-gold,#d4af37); border-width: 2px; }
+.trn-po-round-header {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 7px 12px; background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border); font-size: .82rem; font-weight: 700; flex-wrap: wrap;
+}
+.trn-po-round-card--final .trn-po-round-header { background: rgba(212,175,55,.1); }
+.trn-po-week-tag {
+  font-size: .72rem; padding: 1px 7px; border-radius: 99px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  color: var(--color-text-dim); font-weight: 600;
+}
+.trn-po-round-meta { font-size: .72rem; color: var(--color-text-dim); font-weight: 400; margin-left: auto; }
+.trn-po-bye-row {
+  display: flex; align-items: center; gap: var(--space-2); padding: 6px 12px;
+  background: rgba(212,175,55,.06); border-bottom: 1px solid var(--color-border);
+}
+
+/* Custom round groups */
+.trn-po-groups-wrap { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2); }
+.trn-po-group-card {
+  flex: 1; min-width: 160px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); overflow: hidden;
+}
+.trn-po-group-title {
+  font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+  padding: 4px 8px; background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border); color: var(--color-text-dim);
+}
+.trn-po-group-row {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: 4px 8px; border-bottom: 1px solid var(--color-border); font-size: .78rem;
+}
+.trn-po-group-row:last-child { border-bottom: none; }
+.trn-po-group-row.trn-po-row--cut { opacity: .5; }
+
+/* Bracket */
+.trn-po-bracket-note { font-size: .78rem; color: var(--color-text-dim); margin-bottom: var(--space-3); }
+.trn-po-bracket-wrap { overflow-x: auto; margin-bottom: var(--space-4); }
+.trn-po-bracket { display: flex; gap: var(--space-4); min-width: 600px; align-items: flex-start; }
+.trn-po-bracket-round { display: flex; flex-direction: column; gap: var(--space-2); min-width: 175px; }
+.trn-po-bracket-round-title {
+  font-size: .7rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--color-text-dim); margin-bottom: var(--space-1);
+}
+.trn-po-matchup { border: 1px solid var(--color-border); border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface); }
+.trn-po-matchup--bye { border-color: var(--color-gold,#d4af37); }
+.trn-po-matchup--tbd { opacity: .4; }
+.trn-po-matchup-row {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: 5px 8px; border-bottom: 1px solid var(--color-border); font-size: .78rem;
+}
+.trn-po-matchup-row:last-child { border-bottom: none; }
+.trn-po-matchup--bye .trn-po-matchup-row { background: rgba(212,175,55,.08); }
+.trn-po-matchup-seed { font-size: .68rem; color: var(--color-text-dim); min-width: 22px; }
+.trn-po-matchup-team { flex: 1; font-weight: 600; font-size: .78rem; }
+.trn-po-matchup-team--bye { color: var(--color-gold,#d4af37); }
+.trn-po-matchup-pf { font-size: .72rem; color: var(--color-text-dim); }
+.trn-po-matchup-vs { text-align: center; font-size: .68rem; color: var(--color-text-dim); padding: 2px; }
+.trn-po-tbd { color: var(--color-text-dim); font-style: italic; }
+.trn-po-seed-list { margin-top: var(--space-3); }
+.trn-po-seed-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 5px 2px; border-bottom: 1px solid var(--color-border); font-size: .82rem; flex-wrap: wrap;
+}
+.trn-po-seed-row:last-child { border-bottom: none; }
+.trn-po-seed-row--bye { background: rgba(212,175,55,.06); border-radius: var(--radius-sm); padding: 5px 6px; }
+.trn-po-seed-num { font-weight: 700; color: var(--color-text-dim); min-width: 28px; }
+.trn-po-seed-name { font-weight: 600; flex: 1; }
+.trn-po-seed-league { font-size: .72rem; color: var(--color-text-dim); }
+.trn-po-seed-record, .trn-po-seed-pf { font-size: .75rem; color: var(--color-text-dim); }
+
+/* League champs */
+.trn-po-champ-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.trn-po-champ-card {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-gold,#d4af37); border-radius: var(--radius-sm);
+  background: rgba(212,175,55,.06);
+}
+.trn-po-champ-trophy { font-size: 1.4rem; }
+.trn-po-champ-info { flex: 1; }
+.trn-po-champ-name { font-weight: 700; font-size: .9rem; }
+.trn-po-champ-league { font-size: .75rem; color: var(--color-text-dim); }
+.trn-po-champ-record { font-size: .78rem; color: var(--color-text-dim); white-space: nowrap; }
