@@ -1900,3 +1900,106 @@
   align-items: center;
   margin-top: var(--space-1);
 }
+
+/* ── F5-P4: Qualification Step Cards ────────────────── */
+.trn-qual-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.trn-qual-step-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.trn-qual-step-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-qual-step-num-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-gold, #d4af37);
+  color: #000;
+  font-size: .7rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.trn-qual-step-card-body {
+  padding: var(--space-2) var(--space-3);
+}
+.trn-qs-inline-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: .82rem;
+  color: var(--color-text);
+}
+.trn-qs-running-total {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.trn-qs-total-chip {
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--color-gold-light, rgba(212,175,55,.15));
+  color: var(--color-gold, #d4af37);
+  border: 1px solid var(--color-gold, #d4af37);
+  white-space: nowrap;
+}
+.trn-qs-gate-badge {
+  font-size: .68rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: rgba(120,120,200,.15);
+  color: #8888ee;
+  border: 1px solid #8888ee;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+/* Subgroup row */
+.trn-qs-subgroup-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.trn-qs-subgroup-hint {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+/* Qual total row */
+.trn-qual-total-row {
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  padding: var(--space-1) 0;
+  border-top: 1px dashed var(--color-border);
+  margin-top: var(--space-1);
+}
+.trn-qual-total-row strong {
+  color: var(--color-gold, #d4af37);
+  font-size: .9rem;
+}
+
+/* ── F5-P4: Blend row updates ───────────────────────── */
+.trn-blend-formula {
+  font-size: .75rem;
+  font-style: italic;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
