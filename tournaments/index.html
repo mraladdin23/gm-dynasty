@@ -313,6 +313,7 @@
 
       const isDraft      = (t.status || "draft") === "draft";
       const hasStandings = t.standingsCache && Object.keys(t.standingsCache).length > 0;
+      const hasPlayoffs  = !!(t.playoffs && t.playoffs.mode);
       const regOpen      = ["registration_open", "active"].includes(t.status);
 
       // Build sorted year list from standingsCache
@@ -356,6 +357,7 @@
           <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
             ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
             ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
+            ${hasPlayoffs  ? `<option value="playoffs"  ${_activeTab === "playoffs"  ? "selected" : ""}>🥇 Playoffs</option>`  : ""}
             ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
             ${Object.keys(t.rulesByYear || {}).length ? `<option value="rules" ${_activeTab === "rules" ? "selected" : ""}>📋 Rules</option>` : ""}
           </select>
@@ -430,6 +432,7 @@
       if (!body) return;
       if (tab === "info")           renderInfoTab(body);
       else if (tab === "standings") renderStandingsTab(body);
+      else if (tab === "playoffs")  renderPlayoffsTab(body);
       else if (tab === "register")  renderRegisterTab(body);
       else if (tab === "adp")       renderAdpTab(body);
       else if (tab === "rules")     renderRulesTab(body);
@@ -734,6 +737,207 @@
 
     function _clearAdpRefresh() {
       if (_adpRefreshTimer) { clearInterval(_adpRefreshTimer); _adpRefreshTimer = null; }
+    }
+
+    }
+
+    // ── Public Playoffs Tab ──────────────────────────────
+    // Reads from publicTournaments/{tid}/playoffs — written by admin "Publish Playoffs" button.
+    function renderPlayoffsTab(body) {
+      const t = _currentT;
+      const po = t.playoffs || {};
+      const mode = po.mode || "total_points";
+      const standings = po.standings || [];
+      const rounds = po.rounds || [];
+      const qualCount = po.qualCount || standings.filter(tm => tm.qualified).length;
+      const byeCount  = po.byeCount || 0;
+
+      if (!po.mode) {
+        body.innerHTML = `<div class="trn-po-container"><div class="trn-po-empty">Playoff information has not been published yet.</div></div>`;
+        return;
+      }
+
+      const modeLabel = {total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds"}[mode]||mode;
+      const modeIcon  = {total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️"}[mode]||"🏆";
+      const sw = po.startWeek, ew = po.endWeek;
+
+      // Build tabs
+      const tabs = [{ id:"standings", label:"📊 Standings" }];
+      if (mode==="total_points")   tabs.push({id:"leaderboard",label:"🏆 Leaderboard"});
+      else if (mode==="points_rounds") rounds.forEach((_,i)=>{
+        const isF=i===rounds.length-1;
+        tabs.push({id:`round_${i}`,label:isF?"🏆 Championship":`Round ${i+1}`});
+      });
+      else if (mode==="h2h_bracket") tabs.push({id:"bracket",label:"🥊 Bracket"});
+      else if (mode==="custom_rounds") rounds.forEach((_,i)=>{
+        const isF=i===rounds.length-1;
+        tabs.push({id:`cround_${i}`,label:isF?"🏆 Championship":`Round ${i+1}`});
+      });
+
+      let _tab = tabs[0].id;
+
+      const _tabBar = (active) => `<div class="trn-po-subtab-bar">
+        ${tabs.map(tb=>`<button class="trn-po-subtab-btn ${tb.id===active?"trn-po-subtab-btn--active":""}" data-subtab="${tb.id}">${tb.label}</button>`).join("")}
+      </div>`;
+
+      const _standingsView = () => {
+        const note = mode==="total_points"
+          ? `Champion = highest PF${ew?` through Week ${ew}`:""}.`
+          : `Top ${qualCount} qualify${byeCount?` · ${byeCount} bye${byeCount!==1?"s":""}`:""}.${sw?` Playoffs Wk ${sw}`:""}`;
+        return `<div class="trn-po-tp-note">${note}</div>
+          <div class="trn-po-table-wrap"><table class="trn-po-table">
+            <thead><tr><th>#</th><th>Team</th><th>League</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
+            <tbody>${standings.map((tm,i)=>{
+              const isBye=tm.bye, isQ=tm.qualified, isChamp=mode==="total_points"&&i===0;
+              const rowCls=isChamp?"trn-po-row--champion":isBye?"trn-po-row--bye-seed":isQ?"trn-po-row--qualified":"trn-po-row--eliminated";
+              const badge=isChamp?`<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
+                :isBye?`<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+                :isQ?`<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>`
+                :`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+              const cutRow=(!tm.qualified&&standings[i-1]?.qualified)?`<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line —</div></td></tr>`:"";
+              return `${cutRow}<tr class="${rowCls}">
+                <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
+                <td class="trn-po-team-name">${esc(tm.teamName||"—")}</td>
+                <td class="trn-po-league">${esc(tm.leagueName||"—")}</td>
+                <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
+                <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
+                <td>${badge}</td></tr>`;
+            }).join("")}</tbody>
+          </table></div>`;
+      };
+
+      const _leaderboard = () => `
+        <div class="trn-po-table-wrap"><table class="trn-po-table">
+          <thead><tr><th>#</th><th>Team</th><th>League</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th></tr></thead>
+          <tbody>${standings.slice(0,20).map((tm,i)=>`<tr class="${i===0?"trn-po-row--champion":""}">
+            <td class="trn-po-rank">${i===0?"🏆":i+1}</td>
+            <td class="trn-po-team-name">${esc(tm.teamName||"—")}</td>
+            <td class="trn-po-league">${esc(tm.leagueName||"—")}</td>
+            <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
+            <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        ${standings.length>20?`<div class="trn-po-more">+ ${standings.length-20} more teams</div>`:""}`;
+
+      const _roundView = (roundIdx, isCustom) => {
+        const round = rounds[roundIdx];
+        if (!round) return `<div class="trn-po-empty">Round data not available.</div>`;
+        const isFinal = roundIdx === rounds.length-1;
+        const weekNum = sw ? sw+roundIdx : null;
+        const qualPool = standings.filter(tm=>tm.qualified);
+        // Approximate pool by advancing from previous rounds
+        let pool = [...qualPool];
+        for (let i=0; i<roundIdx; i++) {
+          const r=rounds[i];
+          const adv = isCustom ? r.groups*(r.advPerGroup||0)
+            : r.advanceMethod==="pct"?Math.round(pool.length*(r.advancePct||50)/100):(r.advanceCount||0);
+          pool=pool.slice(0,adv+(i===0?byeCount:0));
+        }
+        const advCount = isFinal ? 1
+          : isCustom ? round.groups*(round.advPerGroup||0)
+          : round.advanceMethod==="pct" ? Math.round(pool.length*(round.advancePct||50)/100)
+          : (round.advanceCount||0);
+        const totalAdv = roundIdx===0 ? advCount+byeCount : advCount;
+        return `
+          <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
+            <div class="trn-po-round-header">
+              <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
+              ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
+              <span class="trn-po-round-meta">${pool.length} teams</span>
+            </div>
+            ${roundIdx===0&&byeCount>0?`<div class="trn-po-bye-row"><span class="trn-po-badge trn-po-badge--bye">BYE</span><span style="font-size:.82rem;color:var(--color-text-dim)"> Top ${byeCount} advance automatically</span></div>`:""}
+          </div>
+          <div class="trn-po-table-wrap" style="margin-top:var(--space-2)"><table class="trn-po-table">
+            <thead><tr><th>#</th><th>Team</th><th>League</th><th class="trn-po-th-num">Season PF</th><th>Status</th></tr></thead>
+            <tbody>${pool.map((tm,i)=>{
+              const isByeTeam=roundIdx===0&&i<byeCount, adv=isByeTeam||i<totalAdv;
+              const rowCls=isFinal&&i===0?"trn-po-row--champion":isByeTeam?"trn-po-row--bye-seed":adv?"trn-po-row--advance":"trn-po-row--cut";
+              const badge=isFinal&&i===0?`<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
+                :isByeTeam?`<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+                :adv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+                :`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+              const cutAfter=!isFinal&&i===totalAdv-1;
+              return `<tr class="${rowCls}"><td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name">${esc(tm.teamName||"—")}</td><td class="trn-po-league">${esc(tm.leagueName||"—")}</td><td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td><td>${badge}</td></tr>
+              ${cutAfter?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line —</div></td></tr>`:""}`;
+            }).join("")}</tbody>
+          </table></div>`;
+      };
+
+      const _bracketView = () => {
+        const bracketSize = po.bracketSize||8;
+        const seeds = standings.slice(0,bracketSize);
+        const numRounds = Math.log2(bracketSize);
+        const r1Byes = seeds.slice(0,byeCount);
+        const r1Players = seeds.slice(byeCount);
+        const r1Matchups=[];
+        for(let i=0;i<Math.floor(r1Players.length/2);i++)
+          r1Matchups.push({a:r1Players[i],b:r1Players[r1Players.length-1-i]});
+        const rName=(ri,tot)=>ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
+        return `<div class="trn-po-bracket-wrap"><div class="trn-po-bracket">
+          <div class="trn-po-bracket-round">
+            <div class="trn-po-bracket-round-title">${rName(0,numRounds)}</div>
+            ${r1Byes.map(tm=>`<div class="trn-po-matchup trn-po-matchup--bye"><div class="trn-po-matchup-row">
+              <span class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</span>
+              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${esc(tm.teamName||"—")}</span>
+              <span class="trn-po-badge trn-po-badge--bye" style="margin-left:auto">BYE</span>
+            </div></div>`).join("")}
+            ${r1Matchups.map(m=>`<div class="trn-po-matchup">
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${esc(m.a?.teamName||"TBD")}</span><span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span></div>
+              <div class="trn-po-matchup-vs">vs</div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${esc(m.b?.teamName||"TBD")}</span><span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span></div>
+            </div>`).join("")}
+          </div>
+          ${Array.from({length:numRounds-1},(_,ri)=>`<div class="trn-po-bracket-round">
+            <div class="trn-po-bracket-round-title">${rName(ri+1,numRounds)}</div>
+            ${Array.from({length:Math.pow(2,numRounds-ri-2)},()=>`<div class="trn-po-matchup trn-po-matchup--tbd">
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+              <div class="trn-po-matchup-vs">vs</div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+            </div>`).join("")}
+          </div>`).join("")}
+        </div></div>
+        <div class="trn-po-seed-list"><div class="trn-po-section-title">Seedings</div>
+          ${seeds.map((tm,i)=>`<div class="trn-po-seed-row ${i<byeCount?"trn-po-seed-row--bye":""}">
+            <span class="trn-po-seed-num">#${i+1}</span>
+            <span class="trn-po-seed-name">${esc(tm.teamName||"—")}</span>
+            <span class="trn-po-seed-league">${esc(tm.leagueName||"")}</span>
+            <span class="trn-po-seed-record">${tm.wins??0}–${tm.losses??0}</span>
+            <span class="trn-po-seed-pf">${(tm.pf||0).toFixed(1)} pts</span>
+            ${i<byeCount?`<span class="trn-po-badge trn-po-badge--bye">BYE</span>`:""}
+          </div>`).join("")}
+        </div>`;
+      };
+
+      const _renderContent = (tabId) => {
+        if (tabId==="standings")   return _standingsView();
+        if (tabId==="leaderboard") return _leaderboard();
+        if (tabId==="bracket")     return _bracketView();
+        if (tabId.startsWith("round_"))  return _roundView(parseInt(tabId.split("_")[1]),false);
+        if (tabId.startsWith("cround_")) return _roundView(parseInt(tabId.split("_")[1]),true);
+        return `<div class="trn-po-empty">Tab not found.</div>`;
+      };
+
+      const publishedDate = po.publishedAt
+        ? `<span style="font-size:.72rem;color:var(--color-text-dim)">Updated ${new Date(po.publishedAt).toLocaleDateString()}</span>` : "";
+
+      body.innerHTML = `<div class="trn-po-container">
+        <div class="trn-po-header">
+          <div class="trn-po-title">${modeIcon} Playoffs <span class="trn-po-year-badge">${po.year||""}</span></div>
+          <div class="trn-po-mode-chip">${modeLabel}</div>
+          ${publishedDate}
+        </div>
+        ${_tabBar(_tab)}
+        <div id="pub-po-content">${_renderContent(_tab)}</div>
+      </div>`;
+
+      body.querySelectorAll(".trn-po-subtab-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          _tab = btn.dataset.subtab;
+          body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
+            b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_tab));
+          document.getElementById("pub-po-content").innerHTML = _renderContent(_tab);
+        });
+      });
     }
 
     // Inject ADP option into tab select if not already present (handles late-arriving data)
