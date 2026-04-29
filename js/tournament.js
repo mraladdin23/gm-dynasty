@@ -3706,7 +3706,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       try {
         const data = await _fetchSleeperStandings(l.leagueId, playoffWeek);
         if (data) {
-          let { teams, weeklyScores } = data;
+          let { teams, weeklyScores, leagueStatus, playoffWinnerRosterId } = data;
           if (medianWins && weeklyScores) {
             const delta = _computeMedianWins(weeklyScores);
             teams = teams.map(tm => {
@@ -3718,7 +3718,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               };
             });
           }
-          cacheUpdates[ck(l)] = { ...l, teams, lastSynced: Date.now() };
+          // Build champion object: playoff winner if bracket ran, otherwise reg season leader
+          let champion = null;
+          if (playoffWinnerRosterId) {
+            const winnerTeam = teams.find(tm => String(tm.teamId) === playoffWinnerRosterId);
+            if (winnerTeam) champion = { ...winnerTeam, isPlayoffChampion: true };
+          }
+          if (!champion) {
+            // Fallback: regular season leader (most wins, then PF)
+            const regChamp = [...teams].sort((a,b) =>
+              (b.wins||0)-(a.wins||0) || (b.pf||0)-(a.pf||0))[0];
+            if (regChamp) champion = { ...regChamp, isPlayoffChampion: false };
+          }
+          cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now() };
         }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
       done++; setP("Syncing " + done + "/" + total + "...");
@@ -3782,9 +3794,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // ── Platform fetchers ──────────────────────────────────
 
   async function _fetchSleeperStandings(leagueId, playoffStartWeek) {
-    const [rU, rR] = await Promise.all([
+    const [rU, rR, rL] = await Promise.all([
       fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users"),
-      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters")
+      fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters"),
+      fetch("https://api.sleeper.app/v1/league/" + leagueId)
     ]);
     if (!rU.ok || !rR.ok) return null;
     const users   = await rU.json();
@@ -3792,7 +3805,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const uMap = {};
     (users || []).forEach(u => { uMap[u.user_id] = u.display_name || u.username || u.user_id; });
 
-    // If playoffStartWeek is set, recompute W/L from matchup results
+    // Parse league info to determine if playoffs ran and who won
+    const leagueInfo = rL.ok ? await rL.json().catch(() => null) : null;
+    const leagueStatus = leagueInfo?.status || "";
+    const hasPlayoffs  = leagueStatus === "post_season" || leagueStatus === "complete";
+
+    // If the league ran its own playoffs, fetch the winners bracket to find the champion
+    let playoffWinnerRosterId = null;
+    if (hasPlayoffs) {
+      try {
+        const rB = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/winners_bracket");
+        if (rB.ok) {
+          const bracket = await rB.json();
+          // p===1 is the championship game; m.w is the winning roster_id
+          const champGame = (bracket || []).find(m => m.p === 1);
+          if (champGame?.w != null) playoffWinnerRosterId = String(champGame.w);
+        }
+      } catch(e) { /* bracket fetch failure is non-fatal */ }
+    }
+
+
     // so we only count regular season weeks (weeks 1 through playoffStartWeek-1)
     if (playoffStartWeek && playoffStartWeek > 1) {
       const lastRegWeek = playoffStartWeek - 1;
@@ -3847,7 +3879,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         };
       });
       // Median wins: pass weeklyScores to allow caller to apply them
-      return { teams, weeklyScores: allWeeks };
+      return { teams, weeklyScores: allWeeks, leagueStatus, playoffWinnerRosterId };
     }
 
     // No playoff week set — fetch all weeks to compute median wins later
@@ -3878,7 +3910,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       pf:       parseFloat(((r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100).toFixed(2)),
       pa:       parseFloat(((r.settings?.fpts_against || 0) + (r.settings?.fpts_against_decimal || 0) / 100).toFixed(2))
     }));
-    return { teams, weeklyScores };
+    return { teams, weeklyScores, leagueStatus, playoffWinnerRosterId };
   }
 
   // ── Compute median wins from weekly matchup arrays ──────
@@ -6461,17 +6493,29 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const po      = _playoffForYear(t, activeY);
     const mode    = po.mode || "total_points";
 
+    // Build gender lookup from participants (gender is not stored in lc.teams)
+    const _skPo = (s) => String(s||'').trim().toLowerCase().replace(/[.#$\/\[\]]/g, '_');
+    const genderMap = {};
+    Object.values(t.participants || {}).forEach(p => {
+      if (!p.gender) return;
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean)
+        .forEach(name => { genderMap[_skPo(name)] = p.gender; });
+    });
+
     // Flat team list for active year from standings cache
     const allTeams = [];
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
-      (lc.teams || []).forEach(tm => allTeams.push({
-        ...tm,
-        leagueName: lc.leagueName || ck,
-        // division/conference live on the league entry, not the individual team object
-        division:   lc.division   || "",
-        conference: lc.conference || "",
-      }));
+      (lc.teams || []).forEach(tm => {
+        const gender = genderMap[_skPo(tm.teamName)] || genderMap[_skPo(tm.rawTeamName)] || '';
+        allTeams.push({
+          ...tm,
+          leagueName: lc.leagueName || ck,
+          division:   lc.division   || '',
+          conference: lc.conference || '',
+          gender,
+        });
+      });
     });
 
     // Sort teams
@@ -6661,56 +6705,56 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const note = mode === "total_points"
         ? `Champion = highest PF${ew ? ` through Week ${ew}` : ""}.`
         : `${qualifiers.length} qualified · ${elimCount} eliminated${byeCount ? ` · ${byeCount} bye${byeCount!==1?"s":""}` : ""}${sw ? ` · Playoffs Wk ${sw}` : ""}`;
-      // Single cut line: appears after the last qualified row in sorted order
-      let lastQualIdx = -1;
-      sortedTeams.forEach((tm, i) => {
-        if (qualSet.has(_teamKey(tm))) lastQualIdx = i;
-      });
+
+      // Sort: qualified teams first (by PF desc), then eliminated (by PF desc)
+      // Per-division rules scatter Q/E throughout sorted order so we group them cleanly
+      const qualTeams = sortedTeams.filter(tm => qualSet.has(_teamKey(tm)));
+      const elimTeams = sortedTeams.filter(tm => !qualSet.has(_teamKey(tm)));
+      const displayTeams = [...qualTeams, ...elimTeams];
+
+      const _row = (tm, i) => {
+        const isQ   = i < qualTeams.length;   // first block = qualified
+        const isBye = byeSet.has(_teamKey(tm));
+        const isChamp = mode === "total_points" && i === 0;
+        const rowCls = isChamp ? "trn-po-row--champion"
+          : isBye ? "trn-po-row--bye-seed"
+          : isQ   ? "trn-po-row--qualified"
+          : "trn-po-row--eliminated";
+        const badge = isChamp
+          ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
+          : isBye
+          ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+          : isQ
+          ? `<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>`
+          : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+        // Single cut line between the two blocks
+        const divider = (i === qualTeams.length && elimTeams.length > 0)
+          ? `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line — ${qualTeams.length} qualified · ${elimTeams.length} eliminated —</div></td></tr>`
+          : "";
+        return `${divider}<tr class="${rowCls}">
+          <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
+          <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
+          <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
+          <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
+          <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
+          <td>${badge}</td>
+        </tr>`;
+      };
+
       return `
         <div class="trn-po-tp-note">${note}</div>
         <div class="trn-po-table-wrap">
           <table class="trn-po-table">
             <thead><tr>
-              <th>#</th><th>Team</th><th>League / Div</th>
+              <th>#</th><th>Team</th><th>League</th>
               <th class="trn-po-th-num">W–L</th>
               <th class="trn-po-th-num">Points For</th>
               <th>Status</th>
             </tr></thead>
-            <tbody>
-              ${sortedTeams.map((tm, i) => {
-                const teamKey = tm.teamId || tm.rawTeamName || tm.teamName;
-                const isQ     = qualSet.has(_teamKey(tm));
-                const isBye   = byeSet.has(_teamKey(tm));
-                const isChamp = mode === "total_points" && i === 0;
-                const rowCls  = isChamp ? "trn-po-row--champion"
-                  : isBye ? "trn-po-row--bye-seed"
-                  : isQ   ? "trn-po-row--qualified"
-                  : "trn-po-row--eliminated";
-                const badge   = isChamp
-                  ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
-                  : isBye
-                  ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-                  : isQ
-                  ? `<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>`
-                  : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-                // Cut line appears once, right after the last qualified team
-                const cutRow = (i === lastQualIdx + 1 && lastQualIdx >= 0)
-                  ? `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line — ${qualifiers.length} qualified · ${elimCount} eliminated —</div></td></tr>`
-                  : "";
-                return `${cutRow}<tr class="${rowCls}">
-                  <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
-                  <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
-                  <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
-                  <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
-                  <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
-                  <td>${badge}</td>
-                </tr>`;
-              }).join("")}
-            </tbody>
+            <tbody>${displayTeams.map(_row).join("")}</tbody>
           </table>
         </div>`;
     };
-
     // ── Total points leaderboard ─────────────────────────
     const _renderLeaderboard = () => `
       <div class="trn-po-table-wrap">
@@ -6931,20 +6975,40 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── League champs ────────────────────────────────────
     const _renderLeagueChamps = () => {
+      // champion is now stored on each lc during sync:
+      //   lc.champion.isPlayoffChampion=true  → league ran its own playoffs, this is the bracket winner
+      //   lc.champion.isPlayoffChampion=false → regular season leader (no playoffs ran yet)
+      // If lc.champion is absent (pre-sync data), fall back to deriving from lc.teams.
+      const _getChamp = (lc) => {
+        if (lc.champion) return lc.champion;
+        // Legacy fallback: derive from stored teams (wins desc, then pf desc)
+        if (!lc.teams?.length) return null;
+        return [...lc.teams].sort((a,b) =>
+          (b.wins||0)-(a.wins||0) || (b.pf||0)-(a.pf||0))[0] || null;
+      };
       const rows = Object.entries(t.standingsCache||{})
-        .filter(([,lc])=>String(lc.year)===String(activeY)&&lc.champion)
-        .map(([,lc])=>`<div class="trn-po-champ-card">
-          <div class="trn-po-champ-trophy">🏆</div>
-          <div class="trn-po-champ-info">
-            <div class="trn-po-champ-name">${_esc(lc.champion?.teamName||"Unknown")}</div>
-            <div class="trn-po-champ-league">${_esc(lc.leagueName||"")}</div>
-          </div>
-          <div class="trn-po-champ-record">${lc.champion?.wins??0}–${lc.champion?.losses??0} · ${(lc.champion?.pf||0).toFixed(1)} pts</div>
-        </div>`).join("");
+        .filter(([,lc]) => String(lc.year) === String(activeY))
+        .sort(([,a],[,b]) => (a.leagueName||"").localeCompare(b.leagueName||""))
+        .map(([,lc]) => {
+          const champ = _getChamp(lc);
+          if (!champ) return "";
+          const isPlayoffChamp = champ.isPlayoffChampion === true;
+          const champLabel = isPlayoffChamp
+            ? `🏆 <span style="font-size:.68rem;color:var(--color-text-dim)">(playoff)</span>`
+            : `🏆 <span style="font-size:.68rem;color:var(--color-text-dim)">(reg. season leader)</span>`;
+          return `<div class="trn-po-champ-card">
+            <div class="trn-po-champ-trophy">${champLabel}</div>
+            <div class="trn-po-champ-info">
+              <div class="trn-po-champ-name">${_esc(champ.teamName||"Unknown")}</div>
+              <div class="trn-po-champ-league">${_esc(lc.leagueName||"")}</div>
+            </div>
+            <div class="trn-po-champ-record">${champ.wins??0}–${champ.losses??0} · ${(champ.pf||0).toFixed(1)} pts</div>
+          </div>`;
+        }).filter(Boolean).join("");
       return rows
         ? `<div class="trn-po-champ-list">${rows}</div>`
-        : `<div class="trn-po-empty">No league champion data yet.</div>`;
-    };
+        : `<div class="trn-po-empty">No standings data yet. Run Sync Standings first.</div>`;
+    }
 
     // ── Render active tab ─────────────────────────────────
     const _renderContent = (tabId) => {
