@@ -877,33 +877,21 @@
         ${standings.length>20?`<div class="trn-po-more">+ ${standings.length-20} more teams</div>`:""}`;
 
       // ── Round view (points_rounds / custom_rounds) ─────────
+      // weeklyScores from snapshot: {leagueId: {week: {rosterId: pts}}}
+      const weeklyScores = po.weeklyScores || {};
+      const _weekPts = (tm, week) => {
+        if (!week || !tm.leagueId || !tm.teamId) return null;
+        return weeklyScores[tm.leagueId]?.[String(week)]?.[String(tm.teamId)] ?? null;
+      };
+      const regSeasonWeeks = sw ? sw - 1 : null;
+
       const _roundView = (roundIdx, isCustom) => {
         const round = rounds[roundIdx];
         if (!round) return `<div class="trn-po-empty">Round data not available.</div>`;
-        const isFinal = roundIdx === rounds.length-1;
-        const weekNum = sw ? sw+roundIdx : null;
-        // Pool: qualified teams, then simulate advancement by position for display
-        // (public site shows static published data — no live score fetch)
-        let pool = standings.filter(tm=>tm.qualified);
-        for (let i=0; i<roundIdx; i++) {
-          const r=rounds[i];
-          const poolByes = i===0 ? byeCount : 0;
-          const competitors = pool.length - poolByes;
-          const adv = isCustom ? (r.groups||0)*(r.advPerGroup||0)
-            : r.advanceMethod==="pct" ? Math.round(competitors*(r.advancePct||50)/100)
-            : (r.advanceCount||0);
-          pool = [...pool.slice(0,poolByes), ...pool.slice(poolByes, poolByes+adv)];
-        }
-        const isByeRound = roundIdx===0 && byeCount>0;
-        const poolByes   = isByeRound ? byeCount : 0;
-        const competitors = pool.length - poolByes;
-        const advCount = isFinal ? 1
-          : isCustom ? (round.groups||0)*(round.advPerGroup||0)
-          : round.advanceMethod==="pct" ? Math.round(competitors*(round.advancePct||50)/100)
-          : (round.advanceCount||0);
-        const totalAdv = poolByes + advCount;
+        const isFinal  = roundIdx === rounds.length-1;
+        const weekNum  = sw ? sw+roundIdx : null;
 
-        const blend = round.blend;
+        const blend        = round.blend;
         const blendEnabled = !!(blend?.enabled);
         const blendWeight  = blend?.weight ?? 30;
         const blendMode    = blend?.mode || "weighted";
@@ -913,15 +901,75 @@
             ? `Score = week × ${100-blendWeight}% + ${histLabel} × ${blendWeight}%`
             : `Score = week pts + ${histLabel} × ${blendWeight}%`;
 
+        // Build pool: bye teams first, then rest, simulate advancement using stored weekly scores
+        const byeTeams_  = standings.filter(tm => tm.bye);
+        const compTeams_ = standings.filter(tm => tm.qualified && !tm.bye);
+        let pool = [...byeTeams_, ...compTeams_];
+
+        for (let ri = 0; ri < roundIdx; ri++) {
+          const r = rounds[ri];
+          const rWeekNum  = sw ? sw + ri : null;
+          const isByeRi   = ri === 0 && byeCount > 0;
+          const rPoolByes = isByeRi ? byeCount : 0;
+          const compSection = pool.slice(rPoolByes);
+          const competitors = compSection.length;
+          const adv = isCustom ? (r.groups||0)*(r.advPerGroup||0)
+            : r.advanceMethod==="pct" ? Math.round(competitors*(r.advancePct||50)/100)
+            : (r.advanceCount||0);
+          // Sort comp section by week score if available, else by PF
+          const sorted = [...compSection].sort((a, b) => {
+            const sa = _weekPts(a, rWeekNum) ?? -1;
+            const sb = _weekPts(b, rWeekNum) ?? -1;
+            if (sb !== sa) return sb - sa;
+            return (b.pf||0) - (a.pf||0);
+          });
+          pool = [...pool.slice(0, rPoolByes), ...sorted.slice(0, adv)];
+        }
+
+        const isByeRound  = roundIdx === 0 && byeCount > 0;
+        const poolByes    = isByeRound ? byeCount : 0;
+        const competitors = pool.length - poolByes;
+        const advCount = isFinal ? 1
+          : isCustom ? (round.groups||0)*(round.advPerGroup||0)
+          : round.advanceMethod==="pct" ? Math.round(competitors*(round.advancePct||50)/100)
+          : (round.advanceCount||0);
+
+        // Annotate with this week's score and sort competing section
+        const regWeeks = regSeasonWeeks || 1;
+        const poolScored = pool.map(tm => {
+          const wkScore  = _weekPts(tm, weekNum);
+          const regAvgPW = (tm.pf||0) / regWeeks;
+          const bScore   = !blendEnabled || wkScore == null ? null
+            : blendMode==="weighted"
+              ? wkScore * (1 - blendWeight/100) + regAvgPW * (blendWeight/100)
+              : wkScore + regAvgPW * (blendWeight/100);
+          return { ...tm, wkScore, regAvgPW, bScore };
+        });
+        const byeSect = poolScored.slice(0, poolByes);
+        const compSect = poolScored.slice(poolByes).sort((a, b) => {
+          const sa = blendEnabled ? (b.bScore ?? b.wkScore ?? b.pf) : (b.wkScore ?? b.pf);
+          const sb = blendEnabled ? (a.bScore ?? a.wkScore ?? a.pf) : (a.wkScore ?? a.pf);
+          return sa - sb;
+        });
+        const sortedPool = [...byeSect, ...compSect];
+
         const summary = isByeRound
           ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advCount} advance · ${competitors-advCount} eliminated`
-          : `${pool.length} competing · ${advCount} advance · ${pool.length-totalAdv} eliminated`;
+          : `${pool.length} competing · ${advCount} advance · ${pool.length-(poolByes+advCount)} eliminated`;
 
-        const rows = pool.map((tm,i) => {
-          const isByeTeam = isByeRound && i<poolByes;
+        const tableId  = `pub-round-table-${roundIdx}`;
+        const byeBarId = `pub-round-bye-bar-${roundIdx}`;
+        const headerCols = blendEnabled
+          ? `<th class="trn-po-th-num trn-po-col-wk">Wk Score</th><th class="trn-po-th-num trn-po-col-avg">Avg/Wk</th><th class="trn-po-th-num trn-po-col-blend">Blend</th>`
+          : `<th class="trn-po-th-num">Wk Score</th>`;
+        const colSpan = blendEnabled ? 6 : 4;
+        const tableClass = blendEnabled ? "trn-po-table trn-po-table--blend" : "trn-po-table";
+
+        const rows = sortedPool.map((tm, i) => {
+          const isByeTeam = isByeRound && i < poolByes;
           const compIdx   = i - poolByes;
           const isCompAdv = !isByeTeam && compIdx < advCount;
-          const isChamp   = isFinal && i===poolByes;
+          const isChamp   = isFinal && i === poolByes;
           const rowCls    = isChamp ? "trn-po-row--champion"
             : isByeTeam ? "trn-po-row--bye-seed"
             : isCompAdv ? "trn-po-row--advance" : "trn-po-row--cut";
@@ -930,17 +978,39 @@
             : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
             : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
             : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-          const cutAfter = !isFinal && !isByeTeam && compIdx===advCount-1;
-          return `<tr class="${rowCls}">
+          const cutAfter = !isFinal && !isByeTeam && compIdx === advCount-1;
+          const scoreCell = isByeTeam
+            ? (blendEnabled ? `<td class="trn-po-num dim trn-po-col-wk">—</td><td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : `<td class="trn-po-num dim">—</td>`)
+            : blendEnabled
+              ? `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
+                 <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
+                 <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
+              : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
+          const byeClass = isByeTeam ? " pub-bye-row" : "";
+          return `<tr class="${rowCls}${byeClass}" ${isByeTeam ? 'style="display:none"' : ""}>
             <td class="trn-po-rank">${i+1}</td>
             <td class="trn-po-team-name">
               <div>${_name(tm)}</div>
               <div class="trn-st-sub trn-st-sub--league">${esc(tm.leagueName||"")}</div>
             </td>
-            <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
+            ${scoreCell}
             <td>${badge}</td>
-          </tr>${cutAfter?`<tr class="trn-po-cut-row"><td colspan="4"><div class="trn-po-cut-divider">— Cut Line — ${advCount} advance · ${competitors-advCount} eliminated</div></td></tr>`:""}`;
+          </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${advCount} advance · ${competitors-advCount} eliminated</div></td></tr>` : ""}`;
         }).join("");
+
+        // After DOM insertion, wire bye toggle via setTimeout
+        setTimeout(() => {
+          const byeBar = document.getElementById(byeBarId);
+          const table  = document.getElementById(tableId);
+          if (!byeBar || !table || poolByes === 0) return;
+          let byesVisible = false;
+          const update = () => {
+            byeBar.innerHTML = `<button class="trn-po-bye-toggle">${byesVisible?"▼ Hide":"▶ Show"} ${poolByes} bye${poolByes!==1?"s":""} (auto-advance)</button>`;
+            table.querySelectorAll(".pub-bye-row").forEach(tr => { tr.style.display = byesVisible ? "" : "none"; });
+            byeBar.querySelector("button").onclick = () => { byesVisible = !byesVisible; update(); };
+          };
+          update();
+        }, 0);
 
         return `
           <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
@@ -950,12 +1020,14 @@
               <span class="trn-po-round-meta">${summary}</span>
             </div>
             <div class="trn-po-round-blend-note">${blendNote}</div>
-            ${isByeRound?`<div class="trn-po-bye-row"><span class="trn-po-badge trn-po-badge--bye">BYE</span><span style="font-size:.82rem;color:var(--color-text-dim)"> Top ${byeCount} seed${byeCount!==1?"s":""} advance automatically</span></div>`:""}
           </div>
-          <div class="trn-po-table-wrap" style="margin-top:var(--space-2)"><table class="trn-po-table">
-            <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">Season PF</th><th>Status</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table></div>`;
+          <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
+            <div id="${byeBarId}"></div>
+            <table class="${tableClass}" id="${tableId}">
+              <thead><tr><th>#</th><th>Team</th>${headerCols}<th>Status</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
       };
 
       // ── Bracket view ──────────────────────────────────────
