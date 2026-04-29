@@ -6723,7 +6723,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         ${tabs.map(tab => `
           <button class="trn-po-subtab-btn ${tab.id===active?"trn-po-subtab-btn--active":""}"
             data-subtab="${tab.id}">${tab.label}</button>`).join("")}
-      </div>`;
+      </div>
+      <select class="trn-po-tab-select" id="trn-po-tab-select" aria-label="Select section">
+        ${tabs.map(tab => `
+          <option value="${tab.id}" ${tab.id===active?"selected":""}>${tab.label}</option>`).join("")}
+      </select>`;
 
     // ── Standings view (all modes) ───────────────────────
     const _renderStandingsView = () => {
@@ -6756,7 +6760,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
         // Single cut line between the two blocks
         const divider = (i === qualTeams.length && elimTeams.length > 0)
-          ? `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line — ${qualTeams.length} qualified · ${elimTeams.length} eliminated —</div></td></tr>`
+          ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Qualification Cut Line — ${qualTeams.length} qualified · ${elimTeams.length} eliminated —</div></td></tr>`
           : "";
         // Champion banner row (total_points mode)
         const champBanner = isChamp ? `<tr class="trn-po-row--champion-banner">
@@ -6773,8 +6777,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </tr>` : "";
         return `${champBanner}${divider}<tr class="${rowCls}">
           <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
-          <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
-          <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
+          <td class="trn-po-team-name">
+            <div>${_esc(_displayName(tm))}</div>
+            <div class="trn-po-team-sub">${_esc(tm.leagueName||"—")}</div>
+          </td>
           <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
           <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
           <td>${badge}</td>
@@ -6786,9 +6792,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         <div class="trn-po-table-wrap">
           <table class="trn-po-table">
             <thead><tr>
-              <th>#</th><th>Team</th><th>League</th>
+              <th>#</th><th>Team</th>
               <th class="trn-po-th-num">W–L</th>
-              <th class="trn-po-th-num">Points For</th>
+              <th class="trn-po-th-num">PF</th>
               <th>Status</th>
             </tr></thead>
             <tbody>${displayTeams.map(_row).join("")}</tbody>
@@ -6875,8 +6881,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const tableId  = `trn-po-round-table-${roundIdx}`;
       const loaderId = `trn-po-round-loader-${roundIdx}`;
       const headerCols = blendEnabled
-        ? `<th class="trn-po-th-num">Wk Score</th><th class="trn-po-th-num">Avg/Wk</th><th class="trn-po-th-num">Blend</th>`
-        : `<th class="trn-po-th-num">Week Score</th>`;
+        ? `<th class="trn-po-th-num trn-po-col-wk">Wk Score</th><th class="trn-po-th-num trn-po-col-avg">Avg/Wk</th><th class="trn-po-th-num trn-po-col-blend">Blend</th>`
+        : `<th class="trn-po-th-num trn-po-col-wk">Week Score</th>`;
       const colSpan = blendEnabled ? 7 : 5;
 
       // Shell renders synchronously; pool/scores filled async
@@ -6892,9 +6898,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">
             ⏳ Loading scores…
           </div>
+          <div id="${tableId}-bye-bar" style="display:none"></div>
           <table class="trn-po-table" id="${tableId}" style="display:none">
             <thead><tr>
-              <th>#</th><th>Team</th><th>League</th>
+              <th>#</th><th>Team</th>
               ${headerCols}
               <th>Status</th>
             </tr></thead>
@@ -7029,16 +7036,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
             const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
             const wkCell = isByeTeam
-              ? `<td class="trn-po-num dim">—</td>${blendEnabled ? `<td class="trn-po-num dim">—</td><td class="trn-po-num dim">—</td>` : ""}`
+              ? `<td class="trn-po-num dim trn-po-col-wk">—</td>${blendEnabled ? `<td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : ""}`
               : blendEnabled
-                ? `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
-                   <td class="trn-po-num">${tm.regAvgPW.toFixed(2)}</td>
-                   <td class="trn-po-num trn-po-pf">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
-                : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
+                ? `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
+                   <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
+                   <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
+                : `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
             return `<tr class="${rowCls}">
               <td class="trn-po-rank">${i+1}</td>
-              <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
-              <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
+              <td class="trn-po-team-name">
+                <div>${_esc(_displayName(tm))}</div>
+                <div class="trn-po-team-sub">${_esc(tm.leagueName||"—")}</div>
+              </td>
               ${wkCell}
               <td>${badge}</td>
             </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
@@ -7046,8 +7055,37 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           const table  = document.getElementById(tableId);
           const loader = document.getElementById(loaderId);
-          if (table) { table.querySelector("tbody").innerHTML = rows; table.style.display = ""; }
+          if (table) {
+            table.querySelector("tbody").innerHTML = rows;
+            table.style.display = "";
+            // Mark bye rows with a class so they can be toggled
+            table.querySelectorAll("tbody tr").forEach((tr, idx) => {
+              if (idx < poolByes) tr.classList.add("trn-po-bye-row-data");
+            });
+          }
           if (loader) loader.style.display = "none";
+
+          // Bye collapse bar
+          if (poolByes > 0) {
+            const byeBar = document.getElementById(tableId + "-bye-bar");
+            if (byeBar) {
+              let byesVisible = false;
+              const _updateByeBar = () => {
+                byeBar.innerHTML = `<button class="trn-po-bye-toggle" onclick="">
+                  ${byesVisible ? "▼" : "▶"} ${byesVisible ? "Hide" : "Show"} ${poolByes} bye${poolByes!==1?"s":""} (auto-advance)
+                </button>`;
+                byeBar.style.display = "";
+                table.querySelectorAll(".trn-po-bye-row-data").forEach(tr => {
+                  tr.style.display = byesVisible ? "" : "none";
+                });
+                byeBar.querySelector("button").onclick = () => {
+                  byesVisible = !byesVisible;
+                  _updateByeBar();
+                };
+              };
+              _updateByeBar(); // start collapsed
+            }
+          }
 
         } catch(e) {
           const loader = document.getElementById(loaderId);
@@ -7207,7 +7245,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds"}[mode]||mode}</div>
-
+          ${tid ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
         </div>
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
@@ -7218,8 +7256,40 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         _poViewTab = btn.dataset.subtab;
         body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
           b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
+        const sel = document.getElementById("trn-po-tab-select");
+        if (sel) sel.value = _poViewTab;
         document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
       });
+    });
+    document.getElementById("trn-po-tab-select")?.addEventListener("change", function() {
+      _poViewTab = this.value;
+      body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
+        b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
+      document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
+    });
+    document.getElementById("trn-po-publish-btn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("trn-po-publish-btn");
+      if (btn) { btn.disabled=true; btn.textContent="Publishing…"; }
+      try {
+        const snapshot = {
+          mode, year:activeY, qualCount, byeCount,
+          startWeek: po.startWeek||null, endWeek: po.endWeek||null,
+          rounds: mode==="points_rounds" ? (po.pointsRounds?.rounds||[])
+            : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
+          bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
+          seeding: po.seeding||null, byes: po.byes||null,
+          standings: sortedTeams.map((tm,i) => ({
+            rank:i+1, teamName:tm.teamName, displayName:_displayName(tm),
+            leagueName:tm.leagueName, division:tm.division||"", conference:tm.conference||"",
+            wins:tm.wins, losses:tm.losses, pf:tm.pf,
+            qualified: qualSet.has(_teamKey(tm)), bye: byeSet.has(_teamKey(tm))
+          })),
+          publishedAt: Date.now()
+        };
+        await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
+        showToast("Playoffs published ✓");
+      } catch(e) { showToast("Publish failed: "+e.message, "error"); }
+      finally { if (btn) { btn.disabled=false; btn.textContent="📢 Publish"; } }
     });
 
     // Auto-publish playoffs snapshot whenever the tab is rendered
