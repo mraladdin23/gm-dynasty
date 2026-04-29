@@ -6493,23 +6493,32 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const po      = _playoffForYear(t, activeY);
     const mode    = po.mode || "total_points";
 
-    // Build gender lookup from participants (gender is not stored in lc.teams)
+    // Build participant lookups (gender + displayName) — not stored in lc.teams
     const _skPo = (s) => String(s||'').trim().toLowerCase().replace(/[.#$\/\[\]]/g, '_');
-    const genderMap = {};
+    const genderMap      = {};
+    const displayNameMap = {};
     Object.values(t.participants || {}).forEach(p => {
-      if (!p.gender) return;
-      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean)
-        .forEach(name => { genderMap[_skPo(name)] = p.gender; });
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(name => {
+        const k = _skPo(name);
+        if (p.gender)       genderMap[k]      = p.gender;
+        if (p.displayName)  displayNameMap[k] = p.displayName;
+      });
     });
+    const _displayName = (tm) =>
+      displayNameMap[_skPo(tm.teamName)] ||
+      displayNameMap[_skPo(tm.rawTeamName)] ||
+      tm.teamName || '—';
 
     // Flat team list for active year from standings cache
     const allTeams = [];
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
       (lc.teams || []).forEach(tm => {
-        const gender = genderMap[_skPo(tm.teamName)] || genderMap[_skPo(tm.rawTeamName)] || '';
+        const gender      = genderMap[_skPo(tm.teamName)]      || genderMap[_skPo(tm.rawTeamName)]      || '';
+        const displayName = displayNameMap[_skPo(tm.teamName)] || displayNameMap[_skPo(tm.rawTeamName)] || tm.teamName || '';
         allTeams.push({
           ...tm,
+          displayName,
           leagueName: lc.leagueName || ck,
           division:   lc.division   || '',
           conference: lc.conference || '',
@@ -6768,7 +6777,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             ${sortedTeams.slice(0,20).map((tm,i) => `
               <tr class="${i===0?"trn-po-row--champion":""}">
                 <td class="trn-po-rank">${i===0?"🏆":i+1}</td>
-                <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
+                <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
                 <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
                 <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
                 <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
@@ -6817,14 +6826,46 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const eliminated     = pool.length - totalAdvancing;
 
       const blend = round.blend;
-      const blendNote = blend?.enabled
-        ? `Scoring: ${blend.mode === "weighted"
-            ? `week × ${100-(blend.weight||30)}% + avg × ${blend.weight||30}%`
-            : `week + avg × ${blend.weight||30}%`}`
-        : "Scoring: weekly score";
+
+      // ── Blend/avg scoring helpers ────────────────────────
+      // tm.pf = cumulative season total. Convert to per-week average for blend scoring.
+      // For additive mode in round N, the "average" accumulates:
+      //   round 0 = regular season avg (pf / reg_season_weeks)
+      //   round 1 = avg including round 0 playoff week
+      //   round 2 = avg including rounds 0+1 playoff weeks, etc.
+      // We don't store per-round scores, so we use pf / total_weeks as the base avg.
+      const _weeksPlayed = (tm) => (tm.wins||0) + (tm.losses||0) + (tm.ties||0) || 1;
+      // Regular season weeks = total weeks minus playoff weeks played so far (roundIdx)
+      const _regWeeks    = (tm) => Math.max(1, _weeksPlayed(tm) - roundIdx);
+      const _regAvg      = (tm) => (tm.pf||0) / _weeksPlayed(tm); // per-week avg from total PF
+
+      // Blend score for display: approximated because we don't store per-week scores.
+      // Shows the avg component clearly so admin/user understands the number.
+      const _blendAvgLabel = blend?.enabled
+        ? (roundIdx === 0
+            ? `reg avg`
+            : `reg+playoff avg (${roundIdx} playoff wk${roundIdx!==1?'s':''})`)
+        : null;
+
+      const blendEnabled = !!(blend?.enabled);
+      const blendWeight  = blend?.weight ?? 30;
+      const blendMode    = blend?.mode || "weighted";
+      const blendNote = blendEnabled
+        ? (blendMode === "weighted"
+            ? `Score = week × ${100-blendWeight}% + ${_blendAvgLabel} × ${blendWeight}%`
+            : `Score = week pts + ${_blendAvgLabel} × ${blendWeight}%`)
+        : "Score = weekly points";
+
+      // Display value: for blend we show the avg component (can't show final score without week's result)
+      const _displayPF = (tm) => {
+        if (!blendEnabled) return (tm.pf||0).toFixed(2) + " PF";
+        const avg = _regAvg(tm);
+        return avg.toFixed(2) + " avg/wk";
+      };
+      const pfColHeader = blendEnabled ? "Avg PF/wk" : "Season PF";
 
       const summary = isByeRound
-        ? `${pool.length} total · ${poolByes} byes auto-advance · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
+        ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
         : `${pool.length} competing · ${advFromComp} advance · ${eliminated} eliminated`;
 
       return `
@@ -6834,6 +6875,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
             <span class="trn-po-round-meta">${summary}</span>
           </div>
+          <div class="trn-po-round-blend-note">${blendNote}</div>
           ${isByeRound?`<div class="trn-po-bye-row">
             <span class="trn-po-badge trn-po-badge--bye">BYE</span>
             <span style="font-size:.82rem;color:var(--color-text-dim)">
@@ -6845,15 +6887,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <table class="trn-po-table">
             <thead><tr>
               <th>#</th><th>Team</th><th>League</th>
-              <th class="trn-po-th-num">Season PF</th>
+              <th class="trn-po-th-num">${pfColHeader}</th>
               <th>Status</th>
             </tr></thead>
             <tbody>
               ${pool.map((tm, i) => {
                 const isByeTeam  = isByeRound && i < poolByes;
                 const isCompAdv  = !isByeTeam && (i - poolByes) < advFromComp;
-                const isChamp    = isFinal && i === poolByes; // first competitor in final
-                const adv        = isByeTeam || isCompAdv;
+                const isChamp    = isFinal && i === poolByes;
                 const rowCls     = isChamp ? "trn-po-row--champion"
                   : isByeTeam ? "trn-po-row--bye-seed"
                   : isCompAdv ? "trn-po-row--advance"
@@ -6865,15 +6906,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                   : isCompAdv
                   ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
                   : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-                // Cut line: between last competitive advancer and first eliminated
-                // Byes are above cut (they auto-advance), do NOT count toward cut position
-                const compIdx  = i - poolByes; // position within the competitive pool
+                const compIdx  = i - poolByes;
                 const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
                 return `<tr class="${rowCls}">
                   <td class="trn-po-rank">${i+1}</td>
-                  <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
+                  <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
                   <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
-                  <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
+                  <td class="trn-po-num trn-po-pf">${_displayPF(tm)}</td>
                   <td>${badge}</td>
                 </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
               }).join("")}
@@ -6903,13 +6942,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             <div class="trn-po-bracket-round-title">${getRoundName(0,numRounds)}</div>
             ${r1Byes.map(tm=>`<div class="trn-po-matchup trn-po-matchup--bye"><div class="trn-po-matchup-row">
               <span class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</span>
-              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${_esc(tm.teamName||"—")}</span>
+              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${_esc(_displayName(tm))}</span>
               <span class="trn-po-badge trn-po-badge--bye" style="margin-left:auto">BYE</span>
             </div></div>`).join("")}
             ${r1Matchups.map(m=>`<div class="trn-po-matchup">
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${_esc(m.a?.teamName||"TBD")}</span><span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span></div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${_esc(m.a ? _displayName(m.a) : "TBD")}</span><span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span></div>
               <div class="trn-po-matchup-vs">vs</div>
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${_esc(m.b?.teamName||"TBD")}</span><span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span></div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${_esc(m.b ? _displayName(m.b) : "TBD")}</span><span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span></div>
             </div>`).join("")}
           </div>
           ${Array.from({length:numRounds-1},(_,ri)=>`<div class="trn-po-bracket-round">
@@ -6925,7 +6964,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="trn-po-section-title">Seedings</div>
           ${seeds.map((tm,i)=>`<div class="trn-po-seed-row ${i<byeCount?"trn-po-seed-row--bye":""}">
             <span class="trn-po-seed-num">#${i+1}</span>
-            <span class="trn-po-seed-name">${_esc(tm.teamName||"—")}</span>
+            <span class="trn-po-seed-name">${_esc(_displayName(tm))}</span>
             <span class="trn-po-seed-league">${_esc(tm.leagueName||"")}</span>
             <span class="trn-po-seed-record">${tm.wins??0}–${tm.losses??0}</span>
             <span class="trn-po-seed-pf">${(tm.pf||0).toFixed(1)} pts</span>
@@ -6961,7 +7000,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 const adv = isByeTeam || ti<round.advPerGroup;
                 return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}">
                   <span class="trn-po-rank">${ti+1}</span>
-                  <span class="trn-po-team-name">${_esc(tm.teamName||"—")}</span>
+                  <span class="trn-po-team-name">${_esc(_displayName(tm))}</span>
                   <span class="trn-po-pf" style="margin-left:auto">${(tm.pf||0).toFixed(1)}</span>
                   ${isByeTeam?'<span class="trn-po-badge trn-po-badge--bye">BYE</span>'
                     :adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
@@ -6999,7 +7038,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           return `<div class="trn-po-champ-card">
             <div class="trn-po-champ-trophy">${champLabel}</div>
             <div class="trn-po-champ-info">
-              <div class="trn-po-champ-name">${_esc(champ.teamName||"Unknown")}</div>
+              <div class="trn-po-champ-name">${_esc(displayNameMap[_skPo(champ.teamName)] || champ.teamName||"Unknown")}</div>
               <div class="trn-po-champ-league">${_esc(lc.leagueName||"")}</div>
             </div>
             <div class="trn-po-champ-record">${champ.wins??0}–${champ.losses??0} · ${(champ.pf||0).toFixed(1)} pts</div>
