@@ -2574,3 +2574,75 @@
   border-bottom: 1px solid var(--color-border);
   font-style: italic;
 }
+
+/* ── Playoffs tab select (mobile dropdown for sections) ─── */
+.trn-po-tab-select {
+  display: none; /* hidden on desktop — shown via media query below */
+  width: 100%;
+  font-size: .88rem;
+  font-weight: 600;
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-gold, #d4af37);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  margin-bottom: var(--space-3);
+  appearance: auto;
+}
+
+/* ── Team sub-line (league name under team name) ────────── */
+.trn-po-team-sub {
+  font-size: .7rem;
+  color: var(--color-text-dim);
+  font-weight: 400;
+  white-space: normal;
+  line-height: 1.3;
+}
+.trn-po-team-name {
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* ── Bye toggle button ───────────────────────────────────── */
+.trn-po-bye-toggle {
+  font-size: .75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--color-gold, #d4af37);
+  border-radius: var(--radius-sm);
+  background: rgba(212,175,55,.08);
+  color: var(--color-gold, #d4af37);
+  cursor: pointer;
+  margin-bottom: var(--space-1);
+  width: 100%;
+  text-align: left;
+  transition: background .12s;
+}
+.trn-po-bye-toggle:hover { background: rgba(212,175,55,.16); }
+
+/* ── Mobile: show select, hide button bar; hide avg/wk cols ── */
+@media (max-width: 600px) {
+  .trn-po-subtab-bar   { display: none; }
+  .trn-po-tab-select   { display: block; }
+
+  /* Hide wk-score and avg columns on mobile when blend is active */
+  .trn-po-col-wk,
+  .trn-po-col-avg  { display: none; }
+  /* Only keep blend column */
+  .trn-po-col-blend { display: table-cell; }
+
+  /* Tighten table padding */
+  .trn-po-table th,
+  .trn-po-table td { padding: 4px 5px; font-size: .75rem; }
+  .trn-po-rank      { min-width: 20px; }
+  .trn-po-champion-banner { flex-direction: column; text-align: center; }
+  .trn-po-champion-label  { margin-top: var(--space-1); }
+}
+
+/* Desktop: blend cols all visible */
+@media (min-width: 601px) {
+  .trn-po-col-wk,
+  .trn-po-col-avg,
+  .trn-po-col-blend { display: table-cell; }
+}
