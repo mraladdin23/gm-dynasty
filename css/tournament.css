@@ -2448,3 +2448,65 @@
   border: none;
 }
 .trn-scoring-del-row:hover { opacity: 1; color: #e05555; }
+
+/* ── Playoff Config Section-Nav ──────────────────────── */
+.trn-pc-card { overflow: hidden; }
+.trn-pc-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-3);
+}
+.trn-pc-section-select {
+  flex: 1;
+  min-width: 180px;
+  font-size: .85rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border: 1.5px solid var(--color-gold, #d4af37);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  appearance: auto;
+}
+.trn-pc-body { }
+.trn-pc-section { animation: trn-fade-in .15s ease; }
+@keyframes trn-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.trn-pc-row-label {
+  font-size: .7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1);
+}
+.trn-pc-na-note {
+  font-size: .82rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+  padding: var(--space-3) 0;
+}
+
+/* ── Mobile polish for playoff config ───────────────── */
+@media (max-width: 600px) {
+  .trn-mode-grid { grid-template-columns: repeat(2, 1fr); }
+  .trn-detail-row { flex-direction: column; gap: var(--space-1); align-items: flex-start; }
+  .trn-yn-toggle { flex-wrap: wrap; }
+  .trn-week-stepper { width: 100%; justify-content: center; }
+  .trn-qual-step-card-header { flex-wrap: wrap; gap: var(--space-1); }
+  .trn-qs-subgroup-row { flex-wrap: wrap; gap: var(--space-1); }
+  .trn-rounds-actions { flex-direction: column; align-items: stretch; }
+  .trn-rounds-actions button { width: 100%; }
+  .trn-pr-advance-row { flex-wrap: wrap; }
+  .trn-cr-fields { flex-direction: column; }
+  .trn-playoff-year-bar { flex-direction: column; align-items: flex-start; }
+  .trn-pc-section-select { width: 100%; }
+  .trn-scoring-table { font-size: .75rem; }
+  .trn-scoring-table th, .trn-scoring-table td { padding: 3px 5px; }
+  .trn-pc-header { flex-direction: column; align-items: stretch; }
+  .trn-pc-header .trn-section-card-title { font-size: .9rem; }
+}
