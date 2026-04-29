@@ -1194,23 +1194,24 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       wins_threshold: "Wins Threshold (gate)",
       top_subgroup:   "Top N from Subgroup",
     };
-    // For scoped steps we can't know the total at config time (depends on # of divisions/confs)
-    const isScoped   = (type === "top_record" || type === "top_pf") && scope !== "overall";
+    // Scoped steps (per-division/conf) show "+N per X" instead of cumulative total
+    const isScoped   = (type === "top_record" || type === "top_pf" || type === "top_subgroup") && scope !== "overall";
     const scopeLabel = scope === "division" ? "per div" : scope === "conference" ? "per conf" : null;
     const slotsAdded = type === "wins_threshold" ? 0
       : type === "top_subgroup" ? subCount : count;
     const chipText   = type === "wins_threshold" ? null
-      : isScoped ? `+${slotsAdded} ${scopeLabel}`
+      : isScoped ? `+${slotsAdded} ${scopeLabel} *`
       : `+${slotsAdded} → ${runningTotal}`;
 
-    // Scope pill buttons — reused in both record and pf bodies
+    // Scope pill buttons — reused in record, pf, and subgroup bodies
+    // Always show all three at full opacity — dimming only when user selects that scope with no groups configured
     const _scopePills = () => `
       <div class="trn-qs-scope-pills" data-step-idx="${idx}">
         <button class="trn-qs-scope-pill ${scope==="overall"    ? "trn-qs-scope-pill--active" : ""}" data-scope="overall"    data-step-idx="${idx}">Overall</button>
         <button class="trn-qs-scope-pill ${scope==="conference" ? "trn-qs-scope-pill--active" : ""}" data-scope="conference" data-step-idx="${idx}"
-          ${!hasConfs ? 'title="No conferences configured yet" style="opacity:.5"' : ""}>Conf</button>
+          ${!hasConfs ? 'title="No conferences configured yet"' : ""}>Conf</button>
         <button class="trn-qs-scope-pill ${scope==="division"   ? "trn-qs-scope-pill--active" : ""}" data-scope="division"   data-step-idx="${idx}"
-          ${!hasDivs  ? 'title="No divisions configured yet"   style="opacity:.5"' : ""}>Div</button>
+          ${!hasDivs  ? 'title="No divisions configured yet"'   : ""}>Div</button>
       </div>`;
     return `
       <div class="trn-qual-step-card" data-step-idx="${idx}">
@@ -1316,11 +1317,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       { type:"top_pf", count:8 }
     ];
     const _runTotals = (steps) => {
+      // Returns running totals for display. Scoped steps (per-division/conference) contribute
+      // their count (n per group) to display but are flagged separately so the chip shows
+      // "+N per div" instead of a cumulative total that would be misleading.
       let s=0;
       return steps.map(st => {
-        if (st.type==="wins_threshold") return s;
-        s += st.type==="top_subgroup" ? (st.subCount||2) : (st.count||2);
-        return s;
+        if (st.type==="wins_threshold") return s; // gate — no slots
+        const isScoped = (st.type==="top_record"||st.type==="top_pf"||st.type==="top_subgroup")
+          && (st.scope==="division"||st.scope==="conference");
+        const add = st.type==="top_subgroup" ? (st.subCount||2) : (st.count||2);
+        if (!isScoped) s += add; // only add to running total when overall
+        return s; // for scoped steps: return current sum without adding (chip shows "+N per X" separately)
       });
     };
     const totals = _runTotals(qualSteps);
@@ -1357,32 +1364,32 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       custom_rounds: "Author each round manually: groups, teams per group, advancement rules."
     };
 
+    // ── Year bar HTML (rendered outside sections, always visible) ────────────
+    const yearBarHTML = `
+      <div class="trn-playoff-year-bar trn-pc-year-bar">
+        <div class="trn-playoff-year-pills" id="trn-playoff-year-pills">
+          ${years.length === 0
+            ? `<button class="trn-year-pill trn-year-pill--active" data-year="${currentNFLYear}">${currentNFLYear}</button>`
+            : years.map(y => {
+                const hasConfig = !!(t.playoffs && typeof (t.playoffs||{})[y] === "object");
+                return `<span class="trn-year-pill-wrap">
+                  <button class="trn-year-pill ${String(y)===String(activeYear)?"trn-year-pill--active":""}" data-year="${y}">${y}</button>
+                  ${hasConfig?`<button class="trn-year-pill-del" data-del-year="${y}" title="Delete ${y} config">✕</button>`:""}
+                </span>`;
+              }).join("")}
+        </div>
+        <button class="btn-secondary btn-xs" id="trn-playoff-new-year" title="Start config for next season">+ Season</button>
+      </div>
+      <div class="trn-playoff-active-year-note" style="margin-bottom:var(--space-2)">
+        Editing: <strong id="trn-playoff-editing-year">${activeYear || (years[0] || currentNFLYear)}</strong>
+        <span style="font-size:.72rem;color:var(--color-text-dim)">(NFL year auto-detected)</span>
+      </div>`;
+
     // ── Section A: Playoff Format ─────────────────────────────────────────────
     const sectionFormat = `
       <div class="trn-pc-section" id="trn-pc-format">
-        <!-- Year bar -->
-        <div class="trn-pc-row-label">Season</div>
-        <div class="trn-playoff-year-bar">
-          <div class="trn-playoff-year-pills" id="trn-playoff-year-pills">
-            ${years.length === 0
-              ? `<button class="trn-year-pill trn-year-pill--active" data-year="${currentNFLYear}">${currentNFLYear}</button>`
-              : years.map(y => {
-                  const hasConfig = !!(t.playoffs && typeof (t.playoffs||{})[y] === "object");
-                  return `<span class="trn-year-pill-wrap">
-                    <button class="trn-year-pill ${String(y)===String(activeYear)?"trn-year-pill--active":""}" data-year="${y}">${y}</button>
-                    ${hasConfig?`<button class="trn-year-pill-del" data-del-year="${y}" title="Delete ${y} config">✕</button>`:""}
-                  </span>`;
-                }).join("")}
-          </div>
-          <button class="btn-secondary btn-xs" id="trn-playoff-new-year" title="Start config for next season">+ Season</button>
-        </div>
-        <div class="trn-playoff-active-year-note">
-          Editing: <strong id="trn-playoff-editing-year">${activeYear || (years[0] || currentNFLYear)}</strong>
-          <span style="font-size:.72rem;color:var(--color-text-dim)">(NFL year auto-detected from leagues)</span>
-        </div>
-
         <!-- Mode cards -->
-        <div class="trn-pc-row-label" style="margin-top:var(--space-3)">Format</div>
+        <div class="trn-pc-row-label">Format</div>
         <div class="trn-mode-grid">
           ${[
             { val:"total_points",  icon:"📊", label:"Total Points",  sub:"Highest PF wins"   },
@@ -1470,8 +1477,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             ${qualSteps.map((s,i)=>_qualStepHTML(s,i,totals[i],t)).join("")}
           </div>
           <div class="trn-qual-total-row">
-            Total qualifier slots: <strong id="trn-qual-total-count">${totals[totals.length-1]||0}</strong>
-            <span style="font-size:.72rem;color:var(--color-text-dim);margin-left:4px">(steps marked * depend on # of groups)</span>
+            Overall qualifier slots: <strong id="trn-qual-total-count">${totals[totals.length-1]||0}</strong>
+            <span style="font-size:.72rem;color:var(--color-text-dim);margin-left:4px">+ steps marked * add N per division/conference (total depends on your group count)</span>
           </div>
           <div class="trn-rounds-actions" style="margin-top:var(--space-2)">
             <div style="display:flex;gap:var(--space-1);flex-wrap:wrap">
@@ -1601,6 +1608,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       <div class="trn-section-card trn-pc-card" id="trn-playoff-config-card">
         <div class="trn-pc-header">
           <div class="trn-section-card-title" style="margin-bottom:0">🏆 Playoff Configuration</div>
+          ${yearBarHTML}
           <select class="trn-pc-section-select" id="trn-pc-section-select">
             <option value="format">⚙️ Playoff Format</option>
             <option value="qual"   ${!showQual?"disabled":""}>📋 Qualification Rules${!showQual?" (n/a)":""}</option>
@@ -2228,10 +2236,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // MFL: fetches export?TYPE=rules for scoring rules
   // Writes one entry per platform (settings assumed consistent within platform)
   async function _syncScoringSettings(tid, toSync, year) {
+    // Filter to only leagues matching the target year, then pick first per platform
+    const yearStr = String(year || new Date().getFullYear());
+    const filtered = toSync.filter(l => String(l.year) === yearStr);
+    const pool = filtered.length ? filtered : toSync; // fallback to all if none match year
     const byPlatform = {};
-    toSync.forEach(l => {
+    pool.forEach(l => {
       if (!byPlatform[l.platform]) byPlatform[l.platform] = l;
     });
+    console.log(`[tournament.js] Scoring sync for year ${yearStr}: using league ${byPlatform.sleeper?.leagueId} (${byPlatform.sleeper?.leagueName || "?"})`);
 
     const SLEEPER_FIELD_LABELS = {
       pass_yd:0.04, pass_td:4, pass_int:-2, pass_2pt:2,
