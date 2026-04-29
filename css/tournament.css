@@ -2532,3 +2532,45 @@
 .trn-pc-year-bar { order: 3; }
 /* Editing note takes its own row below */
 .trn-playoff-active-year-note { order: 4; width: 100%; }
+
+/* ── Playoffs champion banner ────────────────────────── */
+.trn-po-row--champion-banner td { padding: 0 !important; border: none !important; }
+.trn-po-champion-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(135deg, rgba(212,175,55,.25), rgba(212,175,55,.08));
+  border: 2px solid var(--color-gold, #d4af37);
+  border-radius: var(--radius-sm);
+  margin: var(--space-2) 0;
+  flex-wrap: wrap;
+}
+.trn-po-champion-trophy { font-size: 2.2rem; flex-shrink: 0; }
+.trn-po-champion-info   { flex: 1; min-width: 120px; }
+.trn-po-champion-name   {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--color-gold, #d4af37);
+  letter-spacing: .01em;
+}
+.trn-po-champion-sub    { font-size: .78rem; color: var(--color-text-dim); margin-top: 2px; }
+.trn-po-champion-label  {
+  font-size: .78rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 99px;
+  background: var(--color-gold, #d4af37);
+  color: #000;
+  white-space: nowrap;
+}
+
+/* ── Round blend note ────────────────────────────────── */
+.trn-po-round-blend-note {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  padding: 5px 12px;
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+  font-style: italic;
+}

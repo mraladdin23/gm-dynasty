@@ -6671,10 +6671,28 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
        : byeRaw)
       : 0;
 
-    // Compute which teams have a bye: top byeCount of the qualifiers sorted by seeding metric
+    // Compute which teams have a bye — respects bye scope (overall / division / conference)
     const seedMetric = po.seeding?.method === "record" ? "record" : "pf";
     const seededQualifiers = _sortByMetric([...qualifiers], seedMetric);
-    const byeSet = new Set(seededQualifiers.slice(0, byeCount).map(_teamKey));
+    const byeSet = (() => {
+      if (!byeCount) return new Set();
+      if (byeScope === "overall") {
+        // Top N overall
+        return new Set(seededQualifiers.slice(0, byeCount).map(_teamKey));
+      }
+      // Top byeRaw per division/conference group
+      const groups = {};
+      seededQualifiers.forEach(tm => {
+        const g = _groupKey(tm, byeScope) || "__none__";
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(tm);
+      });
+      const byeTeams = [];
+      Object.values(groups).forEach(group => {
+        byeTeams.push(...group.slice(0, byeRaw));
+      });
+      return new Set(byeTeams.map(_teamKey));
+    })();
 
     // Build tab list based on mode
     const _buildTabs = () => {
@@ -6740,9 +6758,22 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const divider = (i === qualTeams.length && elimTeams.length > 0)
           ? `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line — ${qualTeams.length} qualified · ${elimTeams.length} eliminated —</div></td></tr>`
           : "";
-        return `${divider}<tr class="${rowCls}">
+        // Champion banner row (total_points mode)
+        const champBanner = isChamp ? `<tr class="trn-po-row--champion-banner">
+          <td colspan="6">
+            <div class="trn-po-champion-banner">
+              <span class="trn-po-champion-trophy">🏆</span>
+              <div class="trn-po-champion-info">
+                <div class="trn-po-champion-name">${_esc(_displayName(tm))}</div>
+                <div class="trn-po-champion-sub">${_esc(tm.leagueName||"")} · ${(tm.pf||0).toFixed(2)} pts · ${tm.wins??0}–${tm.losses??0}</div>
+              </div>
+              <span class="trn-po-champion-label">🏆 Tournament Champion</span>
+            </div>
+          </td>
+        </tr>` : "";
+        return `${champBanner}${divider}<tr class="${rowCls}">
           <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
-          <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
+          <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
           <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
           <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
           <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
@@ -6788,6 +6819,37 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       ${sortedTeams.length>20?`<div class="trn-po-more">+ ${sortedTeams.length-20} more teams</div>`:""}`;
 
     // ── Points round tab ─────────────────────────────────
+    // Builds a leagueId→teamId map so we can fetch per-week scores from Sleeper
+    const leagueIdByTeamKey = {};
+    const leagueIdByName    = {};
+    Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== String(activeY)) return;
+      const leagueId = lc.leagueId || ck.replace(/^\d+_/, "");
+      leagueIdByName[lc.leagueName || ck] = leagueId;
+      (lc.teams || []).forEach(tm => {
+        leagueIdByTeamKey[_teamKey({...tm, leagueName: lc.leagueName || ck})] = leagueId;
+      });
+    });
+
+    // Reg season weeks: playoff start week minus 1. Falls back to wins+losses+ties.
+    const regSeasonWeeks = po.startWeek ? (po.startWeek - 1) : null;
+
+    // Cache for fetched weekly scores: "leagueId|week" → {rosterId: score}
+    const _weekScoreCache = {};
+    const _fetchWeekScores = async (leagueId, week) => {
+      const key = leagueId + "|" + week;
+      if (_weekScoreCache[key]) return _weekScoreCache[key];
+      try {
+        const r = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week);
+        if (!r.ok) return {};
+        const data = await r.json();
+        const map = {};
+        (data || []).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
+        _weekScoreCache[key] = map;
+        return map;
+      } catch(e) { return {}; }
+    };
+
     const _renderPointsRound = (roundIdx) => {
       const rounds = po.pointsRounds?.rounds || [];
       const round  = rounds[roundIdx];
@@ -6796,79 +6858,58 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const weekNum  = po.startWeek ? po.startWeek + roundIdx : null;
 
       // ── Pool simulation ──────────────────────────────────
-      // Round 0 pool = all qualifiers (byes are IN the pool, they just skip competition)
-      // Round N pool = bye teams + competitive advancers from round N-1
-      let pool = [...qualifiers]; // starts as full qualifier list
-
+      let pool = [...qualifiers];
       for (let ri = 0; ri < roundIdx; ri++) {
         const r = rounds[ri];
-        const poolByes = ri === 0 ? byeCount : 0; // only round 0 has byes
-        const competitors = pool.length - poolByes; // teams actually competing
+        const poolByes    = ri === 0 ? byeCount : 0;
+        const competitors = pool.length - poolByes;
         const advFromComp = r.advanceMethod === "pct"
           ? Math.round(competitors * (r.advancePct || 50) / 100)
           : (r.advanceCount || 0);
-        // Next round pool: bye teams + competitive advancers
-        // Byes are the top byeCount by seed (already at front of pool from _sortByMetric)
         pool = [...pool.slice(0, poolByes), ...pool.slice(poolByes, poolByes + advFromComp)];
       }
 
-      const isByeRound = roundIdx === 0 && byeCount > 0;
-      const poolByes   = isByeRound ? byeCount : 0;
-      const competitors = pool.length - poolByes; // teams actually playing this round
-
-      // How many competitive teams advance (byes always advance, counted separately)
+      const isByeRound  = roundIdx === 0 && byeCount > 0;
+      const poolByes    = isByeRound ? byeCount : 0;
+      const competitors = pool.length - poolByes;
       const advFromComp = isFinal ? 1
         : round.advanceMethod === "pct"
           ? Math.round(competitors * (round.advancePct || 50) / 100)
           : (round.advanceCount || 0);
-
-      const totalAdvancing = poolByes + advFromComp; // byes + competitive advancers
+      const totalAdvancing = poolByes + advFromComp;
       const eliminated     = pool.length - totalAdvancing;
 
-      const blend = round.blend;
-
-      // ── Blend/avg scoring helpers ────────────────────────
-      // tm.pf = cumulative season total. Convert to per-week average for blend scoring.
-      // For additive mode in round N, the "average" accumulates:
-      //   round 0 = regular season avg (pf / reg_season_weeks)
-      //   round 1 = avg including round 0 playoff week
-      //   round 2 = avg including rounds 0+1 playoff weeks, etc.
-      // We don't store per-round scores, so we use pf / total_weeks as the base avg.
-      const _weeksPlayed = (tm) => (tm.wins||0) + (tm.losses||0) + (tm.ties||0) || 1;
-      // Regular season weeks = total weeks minus playoff weeks played so far (roundIdx)
-      const _regWeeks    = (tm) => Math.max(1, _weeksPlayed(tm) - roundIdx);
-      const _regAvg      = (tm) => (tm.pf||0) / _weeksPlayed(tm); // per-week avg from total PF
-
-      // Blend score for display: approximated because we don't store per-week scores.
-      // Shows the avg component clearly so admin/user understands the number.
-      const _blendAvgLabel = blend?.enabled
-        ? (roundIdx === 0
-            ? `reg avg`
-            : `reg+playoff avg (${roundIdx} playoff wk${roundIdx!==1?'s':''})`)
-        : null;
-
+      // ── Blend / scoring description ──────────────────────
+      const blend       = round.blend;
       const blendEnabled = !!(blend?.enabled);
       const blendWeight  = blend?.weight ?? 30;
       const blendMode    = blend?.mode || "weighted";
-      const blendNote = blendEnabled
-        ? (blendMode === "weighted"
-            ? `Score = week × ${100-blendWeight}% + ${_blendAvgLabel} × ${blendWeight}%`
-            : `Score = week pts + ${_blendAvgLabel} × ${blendWeight}%`)
-        : "Score = weekly points";
 
-      // Display value: for blend we show the avg component (can't show final score without week's result)
-      const _displayPF = (tm) => {
-        if (!blendEnabled) return (tm.pf||0).toFixed(2) + " PF";
-        const avg = _regAvg(tm);
-        return avg.toFixed(2) + " avg/wk";
-      };
-      const pfColHeader = blendEnabled ? "Avg PF/wk" : "Season PF";
+      // Reg avg = season PF / reg season weeks
+      // For round N (0-indexed), the "history" includes reg season + rounds 0..(N-1)
+      const historyLabel = roundIdx === 0
+        ? "reg season avg"
+        : `avg (reg + ${roundIdx} playoff wk${roundIdx !== 1 ? "s" : ""})`;
+
+      const blendNote = !blendEnabled
+        ? "Score = this week's points"
+        : blendMode === "weighted"
+          ? `Score = week × ${100-blendWeight}% + ${historyLabel} × ${blendWeight}%`
+          : `Score = week pts + ${historyLabel} × ${blendWeight}%`;
 
       const summary = isByeRound
         ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
         : `${pool.length} competing · ${advFromComp} advance · ${eliminated} eliminated`;
 
-      return `
+      const tableId = `trn-po-round-table-${roundIdx}`;
+      const loaderId = `trn-po-round-loader-${roundIdx}`;
+
+      // Build table shell synchronously; fill scores asynchronously
+      const headerCols = blendEnabled
+        ? `<th class="trn-po-th-num">Wk Score</th><th class="trn-po-th-num">Avg/Wk</th><th class="trn-po-th-num">Blend Score</th>`
+        : `<th class="trn-po-th-num">Week Score</th>`;
+
+      const shell = `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
@@ -6884,41 +6925,102 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </div>`:""}
         </div>
         <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
-          <table class="trn-po-table">
+          <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">
+            Loading week ${weekNum||"?"} scores…
+          </div>
+          <table class="trn-po-table" id="${tableId}" style="display:none">
             <thead><tr>
               <th>#</th><th>Team</th><th>League</th>
-              <th class="trn-po-th-num">${pfColHeader}</th>
+              ${headerCols}
               <th>Status</th>
             </tr></thead>
-            <tbody>
-              ${pool.map((tm, i) => {
-                const isByeTeam  = isByeRound && i < poolByes;
-                const isCompAdv  = !isByeTeam && (i - poolByes) < advFromComp;
-                const isChamp    = isFinal && i === poolByes;
-                const rowCls     = isChamp ? "trn-po-row--champion"
-                  : isByeTeam ? "trn-po-row--bye-seed"
-                  : isCompAdv ? "trn-po-row--advance"
-                  : "trn-po-row--cut";
-                const badge = isChamp
-                  ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
-                  : isByeTeam
-                  ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-                  : isCompAdv
-                  ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-                  : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-                const compIdx  = i - poolByes;
-                const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
-                return `<tr class="${rowCls}">
-                  <td class="trn-po-rank">${i+1}</td>
-                  <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
-                  <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
-                  <td class="trn-po-num trn-po-pf">${_displayPF(tm)}</td>
-                  <td>${badge}</td>
-                </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
-              }).join("")}
-            </tbody>
+            <tbody></tbody>
           </table>
         </div>`;
+
+      // Async fetch and render
+      if (weekNum) {
+        // Collect distinct leagueIds for the teams in this pool
+        const leagueIds = [...new Set(pool.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
+
+        Promise.all(leagueIds.map(lid => _fetchWeekScores(lid, weekNum))).then(scoreMaps => {
+          const byLeague = {};
+          leagueIds.forEach((lid, i) => { byLeague[lid] = scoreMaps[i] || {}; });
+
+          // Build the table rows with actual scores
+          // Sort pool by blend score (or raw week score) desc
+          const poolWithScores = pool.map(tm => {
+            const lid      = leagueIdByTeamKey[_teamKey(tm)] || "";
+            const weekScore = byLeague[lid]?.[String(tm.teamId)] ?? null;
+            const regWeeks  = regSeasonWeeks || Math.max(1, (tm.wins||0)+(tm.losses||0)+(tm.ties||0) - roundIdx);
+            // For rounds 1+, total weeks = reg + playoff rounds so far
+            const totalHistWeeks = regWeeks + roundIdx;
+            // We only have cumulative PF; approx: regAvg = pf/regWeeks (before playoffs started)
+            // For rounds 1+, we include previous playoff weeks proportionally
+            const regAvgPerWk = (tm.pf||0) / Math.max(1, regWeeks);
+            const blendScore  = weekScore == null ? null
+              : blendMode === "weighted"
+                ? weekScore * (1 - blendWeight/100) + regAvgPerWk * (blendWeight/100)
+                : weekScore + regAvgPerWk * (blendWeight/100);
+            return { ...tm, weekScore, regAvgPerWk, blendScore };
+          });
+
+          // Sort competing teams by blend/week score desc; byes stay at top
+          const byeTeams_  = poolWithScores.slice(0, poolByes);
+          const compTeams_ = poolWithScores.slice(poolByes)
+            .sort((a, b) => {
+              const sa = blendEnabled ? (b.blendScore ?? b.weekScore ?? b.pf)
+                                       : (b.weekScore ?? b.pf);
+              const sb = blendEnabled ? (a.blendScore ?? a.weekScore ?? a.pf)
+                                       : (a.weekScore ?? a.pf);
+              return sa - sb;
+            });
+          const sortedPool = [...byeTeams_, ...compTeams_];
+
+          const rows = sortedPool.map((tm, i) => {
+            const isByeTeam  = isByeRound && i < poolByes;
+            const isCompAdv  = !isByeTeam && (i - poolByes) < advFromComp;
+            const isChamp    = isFinal && i === poolByes;
+            const rowCls     = isChamp ? "trn-po-row--champion"
+              : isByeTeam ? "trn-po-row--bye-seed"
+              : isCompAdv ? "trn-po-row--advance" : "trn-po-row--cut";
+            const badge = isChamp
+              ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
+              : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+              : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+            const compIdx  = i - poolByes;
+            const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
+            const wkCell = isByeTeam ? `<td class="trn-po-num dim">—</td>` + (blendEnabled ? `<td class="trn-po-num dim">—</td><td class="trn-po-num dim">—</td>` : "")
+              : blendEnabled
+                ? `<td class="trn-po-num trn-po-pf">${tm.weekScore != null ? tm.weekScore.toFixed(2) : "—"}</td>
+                   <td class="trn-po-num">${tm.regAvgPerWk.toFixed(2)}</td>
+                   <td class="trn-po-num trn-po-pf">${tm.blendScore != null ? tm.blendScore.toFixed(2) : "—"}</td>`
+                : `<td class="trn-po-num trn-po-pf">${tm.weekScore != null ? tm.weekScore.toFixed(2) : "—"}</td>`;
+
+            return `<tr class="${rowCls}">
+              <td class="trn-po-rank">${i+1}</td>
+              <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
+              <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
+              ${wkCell}
+              <td>${badge}</td>
+            </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${blendEnabled?7:5}"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
+          }).join("");
+
+          const table  = document.getElementById(tableId);
+          const loader = document.getElementById(loaderId);
+          if (table) {
+            table.querySelector("tbody").innerHTML = rows;
+            table.style.display = "";
+          }
+          if (loader) loader.style.display = "none";
+        }).catch(() => {
+          const loader = document.getElementById(loaderId);
+          if (loader) loader.textContent = "Could not load week scores.";
+        });
+      }
+
+      return shell;
     };
 
     // ── H2H bracket ──────────────────────────────────────
@@ -7068,7 +7170,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds"}[mode]||mode}</div>
-          ${tid ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish Playoffs</button>` : ""}
+
         </div>
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
@@ -7083,9 +7185,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       });
     });
 
-    document.getElementById("trn-po-publish-btn")?.addEventListener("click", async () => {
-      const btn = document.getElementById("trn-po-publish-btn");
-      if (btn) { btn.disabled=true; btn.textContent="Publishing…"; }
+    // Auto-publish playoffs snapshot whenever the tab is rendered
+    // This keeps the public site current without a manual step
+    ;(async () => {
+      if (!tid) return;
       try {
         const snapshot = {
           mode, year:activeY, qualCount, byeCount,
@@ -7107,9 +7210,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         };
         await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
         showToast("Playoffs published to public site ✓");
-      } catch(e) { showToast("Publish failed: "+e.message, "error"); }
-      finally { if (btn) { btn.disabled=false; btn.textContent="📢 Publish Playoffs"; } }
-    });
+      } catch(e) { console.warn("[Playoffs] Auto-publish failed:", e.message); }
+    })();
   }
 
   function _renderInfoTab(t, body, tid) {
