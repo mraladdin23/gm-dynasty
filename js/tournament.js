@@ -6854,79 +6854,43 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const rounds = po.pointsRounds?.rounds || [];
       const round  = rounds[roundIdx];
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
-      const isFinal  = roundIdx === rounds.length - 1;
-      const weekNum  = po.startWeek ? po.startWeek + roundIdx : null;
+      const isFinal = roundIdx === rounds.length - 1;
+      const weekNum = po.startWeek ? po.startWeek + roundIdx : null;
 
-      // ── Pool simulation ──────────────────────────────────
-      let pool = [...qualifiers];
-      for (let ri = 0; ri < roundIdx; ri++) {
-        const r = rounds[ri];
-        const poolByes    = ri === 0 ? byeCount : 0;
-        const competitors = pool.length - poolByes;
-        const advFromComp = r.advanceMethod === "pct"
-          ? Math.round(competitors * (r.advancePct || 50) / 100)
-          : (r.advanceCount || 0);
-        pool = [...pool.slice(0, poolByes), ...pool.slice(poolByes, poolByes + advFromComp)];
-      }
-
-      const isByeRound  = roundIdx === 0 && byeCount > 0;
-      const poolByes    = isByeRound ? byeCount : 0;
-      const competitors = pool.length - poolByes;
-      const advFromComp = isFinal ? 1
-        : round.advanceMethod === "pct"
-          ? Math.round(competitors * (round.advancePct || 50) / 100)
-          : (round.advanceCount || 0);
-      const totalAdvancing = poolByes + advFromComp;
-      const eliminated     = pool.length - totalAdvancing;
-
-      // ── Blend / scoring description ──────────────────────
-      const blend       = round.blend;
+      // Blend config for this round
+      const blend        = round.blend;
       const blendEnabled = !!(blend?.enabled);
       const blendWeight  = blend?.weight ?? 30;
       const blendMode    = blend?.mode || "weighted";
 
-      // Reg avg = season PF / reg season weeks
-      // For round N (0-indexed), the "history" includes reg season + rounds 0..(N-1)
       const historyLabel = roundIdx === 0
         ? "reg season avg"
         : `avg (reg + ${roundIdx} playoff wk${roundIdx !== 1 ? "s" : ""})`;
-
       const blendNote = !blendEnabled
         ? "Score = this week's points"
         : blendMode === "weighted"
           ? `Score = week × ${100-blendWeight}% + ${historyLabel} × ${blendWeight}%`
           : `Score = week pts + ${historyLabel} × ${blendWeight}%`;
 
-      const summary = isByeRound
-        ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
-        : `${pool.length} competing · ${advFromComp} advance · ${eliminated} eliminated`;
-
-      const tableId = `trn-po-round-table-${roundIdx}`;
+      const tableId  = `trn-po-round-table-${roundIdx}`;
       const loaderId = `trn-po-round-loader-${roundIdx}`;
-
-      // Build table shell synchronously; fill scores asynchronously
       const headerCols = blendEnabled
-        ? `<th class="trn-po-th-num">Wk Score</th><th class="trn-po-th-num">Avg/Wk</th><th class="trn-po-th-num">Blend Score</th>`
+        ? `<th class="trn-po-th-num">Wk Score</th><th class="trn-po-th-num">Avg/Wk</th><th class="trn-po-th-num">Blend</th>`
         : `<th class="trn-po-th-num">Week Score</th>`;
+      const colSpan = blendEnabled ? 7 : 5;
 
+      // Shell renders synchronously; pool/scores filled async
       const shell = `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
             ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
-            <span class="trn-po-round-meta">${summary}</span>
           </div>
           <div class="trn-po-round-blend-note">${blendNote}</div>
-          ${isByeRound?`<div class="trn-po-bye-row">
-            <span class="trn-po-badge trn-po-badge--bye">BYE</span>
-            <span style="font-size:.82rem;color:var(--color-text-dim)">
-              Top ${byeCount} seed${byeCount!==1?"s":""} advance automatically — not competing this week
-            </span>
-          </div>`:""}
         </div>
         <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
           <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">
-            Loading week ${weekNum||"?"} scores…
+            ⏳ Loading scores…
           </div>
           <table class="trn-po-table" id="${tableId}" style="display:none">
             <thead><tr>
@@ -6938,90 +6902,163 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </table>
         </div>`;
 
-      // Async fetch and render
-      if (weekNum) {
-        // Collect distinct leagueIds for the teams in this pool
-        const leagueIds = [...new Set(pool.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
+      // ── Async: fetch all weeks needed, simulate advancement, render ─────
+      (async () => {
+        try {
+          // We need weekly scores for:
+          //   - All previous rounds (to correctly simulate who advanced into this round)
+          //   - This round (to show/sort by current week score)
+          const weeksNeeded = [];
+          if (po.startWeek) {
+            for (let w = po.startWeek; w <= (weekNum || po.startWeek); w++) {
+              weeksNeeded.push(w);
+            }
+          } else if (weekNum) {
+            weeksNeeded.push(weekNum);
+          }
 
-        Promise.all(leagueIds.map(lid => _fetchWeekScores(lid, weekNum))).then(scoreMaps => {
-          const byLeague = {};
-          leagueIds.forEach((lid, i) => { byLeague[lid] = scoreMaps[i] || {}; });
+          // Fetch all needed weeks for all leagues in the full qualifier pool
+          const allLeagueIds = [...new Set(qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
+          const fetchAll = weeksNeeded.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)));
+          await Promise.all(fetchAll);
 
-          // Build the table rows with actual scores
-          // Sort pool by blend score (or raw week score) desc
-          const poolWithScores = pool.map(tm => {
-            const lid      = leagueIdByTeamKey[_teamKey(tm)] || "";
-            const weekScore = byLeague[lid]?.[String(tm.teamId)] ?? null;
-            const regWeeks  = regSeasonWeeks || Math.max(1, (tm.wins||0)+(tm.losses||0)+(tm.ties||0) - roundIdx);
-            // For rounds 1+, total weeks = reg + playoff rounds so far
-            const totalHistWeeks = regWeeks + roundIdx;
-            // We only have cumulative PF; approx: regAvg = pf/regWeeks (before playoffs started)
-            // For rounds 1+, we include previous playoff weeks proportionally
-            const regAvgPerWk = (tm.pf||0) / Math.max(1, regWeeks);
-            const blendScore  = weekScore == null ? null
+          // Helper: get a team's score for a given week
+          const _weekScore = (tm, week) => {
+            const lid = leagueIdByTeamKey[_teamKey(tm)];
+            if (!lid || !week) return null;
+            return _weekScoreCache[lid + "|" + week]?.[String(tm.teamId)] ?? null;
+          };
+
+          // ── Simulate advancement through previous rounds using actual scores ──
+          // Start with full qualifier pool. For each previous round, sort the
+          // competitive section by that round's actual week score and keep top N.
+          let pool = [...qualifiers];
+
+          for (let ri = 0; ri < roundIdx; ri++) {
+            const r         = rounds[ri];
+            const rWeekNum  = po.startWeek ? po.startWeek + ri : null;
+            const isByeRi   = ri === 0 && byeCount > 0;
+            const rPoolByes = isByeRi ? byeCount : 0;
+
+            const byeSection  = pool.slice(0, rPoolByes);
+            const compSection = pool.slice(rPoolByes);
+            const competitors = compSection.length;
+            const advFromComp = r.advanceMethod === "pct"
+              ? Math.round(competitors * (r.advancePct || 50) / 100)
+              : (r.advanceCount || 0);
+
+            // Sort competing section by that week's score (desc), then by pf as tiebreak
+            const sorted = [...compSection].sort((a, b) => {
+              const sa = _weekScore(a, rWeekNum) ?? -1;
+              const sb = _weekScore(b, rWeekNum) ?? -1;
+              if (sb !== sa) return sb - sa;
+              return (b.pf||0) - (a.pf||0);
+            });
+
+            // Next pool = byes + top advFromComp competitive scorers
+            pool = [...byeSection, ...sorted.slice(0, advFromComp)];
+          }
+
+          // ── Now pool is correct for this round ─────────────────────────
+          const isByeRound  = roundIdx === 0 && byeCount > 0;
+          const poolByes    = isByeRound ? byeCount : 0;
+          const competitors = pool.length - poolByes;
+          const advFromComp = isFinal ? 1
+            : round.advanceMethod === "pct"
+              ? Math.round(competitors * (round.advancePct || 50) / 100)
+              : (round.advanceCount || 0);
+          const totalAdvancing = poolByes + advFromComp;
+          const eliminated     = pool.length - totalAdvancing;
+
+          // Annotate each team with this week's score and blend components
+          const regWeeks = regSeasonWeeks || 1;
+          const poolScored = pool.map(tm => {
+            const wkScore   = _weekScore(tm, weekNum);
+            const regAvgPW  = (tm.pf || 0) / regWeeks;
+            const bScore    = !blendEnabled || wkScore == null ? null
               : blendMode === "weighted"
-                ? weekScore * (1 - blendWeight/100) + regAvgPerWk * (blendWeight/100)
-                : weekScore + regAvgPerWk * (blendWeight/100);
-            return { ...tm, weekScore, regAvgPerWk, blendScore };
+                ? wkScore * (1 - blendWeight/100) + regAvgPW * (blendWeight/100)
+                : wkScore + regAvgPW * (blendWeight/100);
+            return { ...tm, wkScore, regAvgPW, bScore };
           });
 
-          // Sort competing teams by blend/week score desc; byes stay at top
-          const byeTeams_  = poolWithScores.slice(0, poolByes);
-          const compTeams_ = poolWithScores.slice(poolByes)
-            .sort((a, b) => {
-              const sa = blendEnabled ? (b.blendScore ?? b.weekScore ?? b.pf)
-                                       : (b.weekScore ?? b.pf);
-              const sb = blendEnabled ? (a.blendScore ?? a.weekScore ?? a.pf)
-                                       : (a.weekScore ?? a.pf);
-              return sa - sb;
-            });
-          const sortedPool = [...byeTeams_, ...compTeams_];
+          // Sort: byes stay at top (position 0..poolByes-1);
+          // competing section sorted by blend score (or week score) desc
+          const byeSection_  = poolScored.slice(0, poolByes);
+          const compSection_ = poolScored.slice(poolByes).sort((a, b) => {
+            const sa = blendEnabled ? (b.bScore ?? b.wkScore ?? b.pf)
+                                    : (b.wkScore ?? b.pf);
+            const sb = blendEnabled ? (a.bScore ?? a.wkScore ?? a.pf)
+                                    : (a.wkScore ?? a.pf);
+            return sa - sb;
+          });
+          const sortedPool = [...byeSection_, ...compSection_];
 
+          const summary = isByeRound
+            ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
+            : `${pool.length} competing · ${advFromComp} advance · ${eliminated} eliminated`;
+
+          // Update the header meta text
+          const headerEl = document.querySelector(`#${tableId}`)?.closest(".trn-po-table-wrap")
+            ?.previousElementSibling?.querySelector(".trn-po-round-header");
+          if (headerEl) {
+            const existing = headerEl.querySelector(".trn-po-round-meta");
+            if (existing) existing.textContent = summary;
+            else {
+              const m = document.createElement("span");
+              m.className = "trn-po-round-meta";
+              m.textContent = summary;
+              headerEl.appendChild(m);
+            }
+          }
+
+          // Build rows
           const rows = sortedPool.map((tm, i) => {
-            const isByeTeam  = isByeRound && i < poolByes;
-            const isCompAdv  = !isByeTeam && (i - poolByes) < advFromComp;
-            const isChamp    = isFinal && i === poolByes;
-            const rowCls     = isChamp ? "trn-po-row--champion"
+            const isByeTeam = isByeRound && i < poolByes;
+            const compIdx   = i - poolByes;
+            const isCompAdv = !isByeTeam && compIdx < advFromComp;
+            const isChamp   = isFinal && i === poolByes;
+            const rowCls    = isChamp ? "trn-po-row--champion"
               : isByeTeam ? "trn-po-row--bye-seed"
-              : isCompAdv ? "trn-po-row--advance" : "trn-po-row--cut";
+              : isCompAdv ? "trn-po-row--advance"
+              : "trn-po-row--cut";
             const badge = isChamp
               ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
               : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
               : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
               : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-            const compIdx  = i - poolByes;
             const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
-            const wkCell = isByeTeam ? `<td class="trn-po-num dim">—</td>` + (blendEnabled ? `<td class="trn-po-num dim">—</td><td class="trn-po-num dim">—</td>` : "")
+            const wkCell = isByeTeam
+              ? `<td class="trn-po-num dim">—</td>${blendEnabled ? `<td class="trn-po-num dim">—</td><td class="trn-po-num dim">—</td>` : ""}`
               : blendEnabled
-                ? `<td class="trn-po-num trn-po-pf">${tm.weekScore != null ? tm.weekScore.toFixed(2) : "—"}</td>
-                   <td class="trn-po-num">${tm.regAvgPerWk.toFixed(2)}</td>
-                   <td class="trn-po-num trn-po-pf">${tm.blendScore != null ? tm.blendScore.toFixed(2) : "—"}</td>`
-                : `<td class="trn-po-num trn-po-pf">${tm.weekScore != null ? tm.weekScore.toFixed(2) : "—"}</td>`;
-
+                ? `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
+                   <td class="trn-po-num">${tm.regAvgPW.toFixed(2)}</td>
+                   <td class="trn-po-num trn-po-pf">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
+                : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
             return `<tr class="${rowCls}">
               <td class="trn-po-rank">${i+1}</td>
               <td class="trn-po-team-name">${_esc(_displayName(tm))}</td>
               <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
               ${wkCell}
               <td>${badge}</td>
-            </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${blendEnabled?7:5}"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
+            </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
           }).join("");
 
           const table  = document.getElementById(tableId);
           const loader = document.getElementById(loaderId);
-          if (table) {
-            table.querySelector("tbody").innerHTML = rows;
-            table.style.display = "";
-          }
+          if (table) { table.querySelector("tbody").innerHTML = rows; table.style.display = ""; }
           if (loader) loader.style.display = "none";
-        }).catch(() => {
+
+        } catch(e) {
           const loader = document.getElementById(loaderId);
-          if (loader) loader.textContent = "Could not load week scores.";
-        });
-      }
+          if (loader) loader.textContent = "⚠️ Could not load round data: " + e.message;
+          console.error("[Playoffs] Round render error:", e);
+        }
+      })();
 
       return shell;
     };
+
 
     // ── H2H bracket ──────────────────────────────────────
     const _renderBracket = () => {
