@@ -1088,14 +1088,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const advCount   = round.advanceCount  || 4;
     const advPct     = round.advancePct    || 50;
     const isFinal    = idx === total - 1;
-    // Per-round bye config
-    const rByes      = round.byes || {};
-    const rByeType   = rByes.type   || "none";
-    const rByeCount  = rByes.count  || 2;
-    const rByeScope  = rByes.scope  || "overall";
-    const rByeMethod = rByes.method || "record";
-    const showRBye   = rByeType !== "none";
-    const _ssel = (v,opt) => opt===v?"selected":"";
+
     return `
       <div class="trn-pr-round-row" data-round-idx="${idx}">
         <div class="trn-pr-round-header">
@@ -1120,36 +1113,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                   min="1" max="99" value="${advPct}"
                   style="width:46px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;${advMethod!=="pct"?"display:none;":""}" />
               </div>
-              <!-- Per-round byes -->
-              <div class="trn-pr-bye-section" style="margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-border)">
-                <div class="trn-pr-advance-row">
-                  <span class="trn-pr-field-label">Byes this round</span>
-                  <div class="trn-yn-toggle">
-                    <button class="trn-yn-btn trn-pr-bye-none-btn ${rByeType==="none"?"trn-yn-btn--active":""}" data-round-idx="${idx}">None</button>
-                    <button class="trn-yn-btn trn-pr-bye-topn-btn ${rByeType==="top_n"?"trn-yn-btn--active":""}" data-round-idx="${idx}">Top N</button>
-                  </div>
-                </div>
-                <div class="trn-pr-bye-details" data-round-idx="${idx}" ${showRBye?"":'style="display:none"'}>
-                  <div class="trn-pr-advance-row" style="flex-wrap:wrap;gap:var(--space-2)">
-                    <span class="trn-pr-field-label">Ranked by</span>
-                    <select class="trn-pr-bye-method" data-round-idx="${idx}"
-                      style="font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                      <option value="record" ${_ssel(rByeMethod,"record")}>H2H Record</option>
-                      <option value="pf"     ${_ssel(rByeMethod,"pf")}>Points For</option>
-                    </select>
-                    <span class="trn-pr-field-label">Count</span>
-                    <input type="number" class="trn-pr-bye-count" data-round-idx="${idx}"
-                      min="1" max="9999" value="${rByeCount}"
-                      style="width:64px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                    <span class="trn-pr-field-label">Scope</span>
-                    <div class="trn-qs-scope-pills trn-pr-bye-scope-pills" data-round-idx="${idx}">
-                      <button class="trn-qs-scope-pill ${rByeScope==="overall"?"trn-qs-scope-pill--active":""}" data-scope="overall">Overall</button>
-                      <button class="trn-qs-scope-pill ${rByeScope==="division"?"trn-qs-scope-pill--active":""}" data-scope="division">Div</button>
-                      <button class="trn-qs-scope-pill ${rByeScope==="conference"?"trn-qs-scope-pill--active":""}" data-scope="conference">Conf</button>
-                    </div>
-                  </div>
-                </div>
-              </div>`}
+`}
           ${_blendRowHTML(`trn-pr-r${idx}`, round.blend)}
         </div>
       </div>`;
@@ -1162,14 +1126,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const apg       = round.advPerGroup   || 2;
     const advMethod = round.advMethod     || "top_score";
     const isFinal   = idx === total - 1;
-    // Per-round bye config (same as points rounds)
-    const rByes      = round.byes   || {};
-    const rByeType   = rByes.type   || "none";
-    const rByeCount  = rByes.count  || 2;
-    const rByeScope  = rByes.scope  || "overall";
-    const rByeMethod = rByes.method || "record";
-    const showRBye   = rByeType !== "none";
-    const _ssel = (v,opt) => opt===v?"selected":"";
+
     return `
       <div class="trn-cr-round-row" data-round-idx="${idx}">
         <div class="trn-pr-round-header">
@@ -1202,36 +1159,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <div class="trn-cr-summary" data-round-idx="${idx}">
             <span class="trn-cr-summary-text">${_crRoundSummary(groups,tpg,apg)}</span>
           </div>
-          <!-- Per-round byes: teams that skip into this round from a higher seed group -->
-          <div class="trn-pr-bye-section" style="margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-border)">
-            <div class="trn-pr-advance-row">
-              <span class="trn-pr-field-label">Teams entering with bye</span>
-              <div class="trn-yn-toggle">
-                <button class="trn-yn-btn trn-cr-bye-none-btn ${rByeType==="none"?"trn-yn-btn--active":""}" data-round-idx="${idx}">None</button>
-                <button class="trn-yn-btn trn-cr-bye-topn-btn ${rByeType==="top_n"?"trn-yn-btn--active":""}" data-round-idx="${idx}">Top N</button>
-              </div>
-            </div>
-            <div class="trn-cr-bye-details" data-round-idx="${idx}" ${showRBye?"":'style="display:none"'}>
-              <div class="trn-pr-advance-row" style="flex-wrap:wrap;gap:var(--space-2)">
-                <span class="trn-pr-field-label">Ranked by</span>
-                <select class="trn-cr-bye-method" data-round-idx="${idx}"
-                  style="font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                  <option value="record" ${_ssel(rByeMethod,"record")}>H2H Record</option>
-                  <option value="pf"     ${_ssel(rByeMethod,"pf")}>Points For</option>
-                </select>
-                <span class="trn-pr-field-label">Count</span>
-                <input type="number" class="trn-cr-bye-count" data-round-idx="${idx}"
-                  min="1" max="9999" value="${rByeCount}"
-                  style="width:64px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                <span class="trn-pr-field-label">Scope</span>
-                <div class="trn-qs-scope-pills trn-cr-bye-scope-pills" data-round-idx="${idx}">
-                  <button class="trn-qs-scope-pill ${rByeScope==="overall"?"trn-qs-scope-pill--active":""}" data-scope="overall">Overall</button>
-                  <button class="trn-qs-scope-pill ${rByeScope==="division"?"trn-qs-scope-pill--active":""}" data-scope="division">Div</button>
-                  <button class="trn-qs-scope-pill ${rByeScope==="conference"?"trn-qs-scope-pill--active":""}" data-scope="conference">Conf</button>
-                </div>
-              </div>
-            </div>
-          </div>
+
           ${_blendRowHTML(`trn-cr-r${idx}`, round.blend)}
         </div>
       </div>`;
@@ -2109,40 +2037,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // ── Custom Rounds ───────────────────────────────────
     const crList=document.getElementById("trn-cr-rounds-list");
-    const _getCRRounds=()=>Array.from(crList?.querySelectorAll(".trn-cr-round-row")||[]).map(row=>{
-      const byeTypeBtn = row.querySelector(".trn-cr-bye-topn-btn.trn-yn-btn--active");
-      const byeType_   = byeTypeBtn ? "top_n" : "none";
-      const byeCount_  = parseInt(row.querySelector(".trn-cr-bye-count")?.value)||2;
-      const byeScope_  = row.querySelector(".trn-cr-bye-scope-pills .trn-qs-scope-pill--active")?.dataset.scope||"overall";
-      const byeMethod_ = row.querySelector(".trn-cr-bye-method")?.value||"record";
-      return {
-        groups:parseInt(row.querySelector(".trn-cr-groups")?.value)||1,
-        teamsPerGroup:parseInt(row.querySelector(".trn-cr-per-group")?.value)||8,
-        advPerGroup:parseInt(row.querySelector(".trn-cr-adv-per-group")?.value)||2,
-        advMethod:row.querySelector(".trn-cr-adv-method")?.value||"top_score",
-        byes: byeType_==="none" ? {type:"none"} : {type:byeType_,count:byeCount_,scope:byeScope_,method:byeMethod_},
-        blend:_readBlend(row)
-      };
-    });
+    const _getCRRounds=()=>Array.from(crList?.querySelectorAll(".trn-cr-round-row")||[]).map(row=>({
+      groups:parseInt(row.querySelector(".trn-cr-groups")?.value)||1,
+      teamsPerGroup:parseInt(row.querySelector(".trn-cr-per-group")?.value)||8,
+      advPerGroup:parseInt(row.querySelector(".trn-cr-adv-per-group")?.value)||2,
+      advMethod:row.querySelector(".trn-cr-adv-method")?.value||"top_score",
+      blend:_readBlend(row)
+    }));
     const _rebuildCR=(rounds)=>{ if(!crList)return; crList.innerHTML=rounds.map((r,i)=>_crRoundRowHTML(r,i,rounds.length)).join(""); _wireCREvents(); };
     const _wireCREvents=()=>{
       _wireBlendRow(crList);
       crList?.querySelectorAll(".trn-cr-round-row").forEach(row=>{
-        // Bye toggle
-        row.querySelectorAll(".trn-cr-bye-none-btn,.trn-cr-bye-topn-btn").forEach(btn=>{
-          btn.addEventListener("click",()=>{
-            const isTopN=btn.classList.contains("trn-cr-bye-topn-btn");
-            row.querySelector(".trn-cr-bye-none-btn")?.classList.toggle("trn-yn-btn--active",!isTopN);
-            row.querySelector(".trn-cr-bye-topn-btn")?.classList.toggle("trn-yn-btn--active",isTopN);
-            const det=row.querySelector(".trn-cr-bye-details");
-            if(det) det.style.display=isTopN?"":"none";
-          });
-        });
-        row.querySelectorAll(".trn-cr-bye-scope-pills .trn-qs-scope-pill").forEach(p=>{
-          p.addEventListener("click",()=>{
-            row.querySelectorAll(".trn-cr-bye-scope-pills .trn-qs-scope-pill").forEach(pp=>pp.classList.toggle("trn-qs-scope-pill--active",pp===p));
-          });
-        });
         row.querySelectorAll(".trn-cr-groups,.trn-cr-per-group,.trn-cr-adv-per-group").forEach(inp=>{
           inp.addEventListener("input",()=>{
             const idx=parseInt(row.dataset.roundIdx);
@@ -7183,17 +7088,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             const r         = rounds[ri];
             const rWeekNum  = po.startWeek ? po.startWeek + ri : null;
 
-            // Per-round bye count: use round.byes config if set, else global byeCount for round 0
-            const rByeCfg    = r.byes || {};
-            const rByeType_  = rByeCfg.type || "none";
-            const rByeRaw_   = rByeType_ !== "none" ? (rByeCfg.count || 0) : (ri === 0 ? byeCount : 0);
-            const rByeScope_ = rByeCfg.scope || byeScope;
-            const rByeMet_   = rByeCfg.method || byeMetric;
-            const rPoolByes  = rByeRaw_ > 0
-              ? (rByeScope_ === "division"   ? rByeRaw_ * numDivisions
-               : rByeScope_ === "conference" ? rByeRaw_ * numConferences
-               : rByeRaw_)
-              : (ri === 0 && !rByeCfg.type ? byeCount : 0);
+            // Byes only apply to round 0 (global bye config)
+            const rPoolByes = ri === 0 ? byeCount : 0;
 
             const byeSection  = pool.slice(0, rPoolByes);
             const compSection = pool.slice(rPoolByes);
@@ -7215,18 +7111,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
 
           // ── Now pool is correct for this round ─────────────────────────
-          // Per-round bye count for the current round
-          const rCurBye_    = round.byes || {};
-          const rCurByeType = rCurBye_.type || "none";
-          const rCurByeRaw  = rCurByeType !== "none" ? (rCurBye_.count || 0) : (roundIdx === 0 ? byeCount : 0);
-          const rCurScope   = rCurBye_.scope || byeScope;
-          const rCurByeCount= rCurByeRaw > 0
-            ? (rCurScope === "division"   ? rCurByeRaw * numDivisions
-             : rCurScope === "conference" ? rCurByeRaw * numConferences
-             : rCurByeRaw)
-            : (roundIdx === 0 && !rCurBye_.type ? byeCount : 0);
-          const isByeRound  = rCurByeCount > 0;
-          const poolByes    = rCurByeCount;
+          const isByeRound  = roundIdx === 0 && byeCount > 0;
+          const poolByes    = isByeRound ? byeCount : 0;
           const competitors = pool.length - poolByes;
           const advFromComp = isFinal ? 1
             : round.advanceMethod === "pct"
