@@ -3805,7 +3805,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const users   = await rU.json();
     const rosters = await rR.json();
     const uMap = {};
-    (users || []).forEach(u => { uMap[u.user_id] = u.display_name || u.username || u.user_id; });
+    const sleeperUsernameMap = {}; // user_id -> username (stable handle)
+    (users || []).forEach(u => {
+      uMap[u.user_id] = u.display_name || u.username || u.user_id;
+      if (u.username) sleeperUsernameMap[u.user_id] = u.username.toLowerCase();
+    });
 
     // Parse league info to determine if playoffs ran and who won
     const leagueInfo = rL.ok ? await rL.json().catch(() => null) : null;
@@ -3871,9 +3875,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const teams = (rosters || []).map(r => {
         const s = stats[r.roster_id] || { wins:0, losses:0, ties:0, pf:0, pa:0 };
         return {
-          teamId:   String(r.roster_id),
-          userId:   String(r.owner_id || ""),
-          teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
+          teamId:          String(r.roster_id),
+          userId:          String(r.owner_id || ""),
+          sleeperUsername: sleeperUsernameMap[r.owner_id] || "",
+          teamName:        uMap[r.owner_id] || ("Team " + r.roster_id),
           wins:     s.wins,
           losses:   s.losses,
           ties:     s.ties,
@@ -3905,9 +3910,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     }
 
     const teams = (rosters || []).map(r => ({
-      teamId:   String(r.roster_id),
-      userId:   String(r.owner_id || ""),
-      teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
+      teamId:          String(r.roster_id),
+      userId:          String(r.owner_id || ""),
+      sleeperUsername: sleeperUsernameMap[r.owner_id] || "",
+      teamName:        uMap[r.owner_id] || ("Team " + r.roster_id),
       wins:     r.settings?.wins    || 0,
       losses:   r.settings?.losses  || 0,
       ties:     r.settings?.ties    || 0,
@@ -6501,23 +6507,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const _skPo = (s) => String(s||'').trim().toLowerCase().replace(/[.#$\/\[\]]/g, '_');
     const genderMap      = {};
     const displayNameMap = {};
-    // Also build userId → gender/displayName map for stable cross-year matching
-    const userIdGenderMap      = {};
-    const userIdDisplayNameMap = {};
+    // Build sleeperUsername → gender/displayName (most stable cross-year key)
+    const sleeperUsernameGenderMap      = {};
+    const sleeperUsernameDisplayNameMap = {};
     Object.values(t.participants || {}).forEach(p => {
       [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(name => {
         const k = _skPo(name);
         if (p.gender)       genderMap[k]      = p.gender;
         if (p.displayName)  displayNameMap[k] = p.displayName;
       });
-      // userId is the most stable identifier across years
-      if (p.sleeperUserId) {
-        if (p.gender)      userIdGenderMap[String(p.sleeperUserId)]      = p.gender;
-        if (p.displayName) userIdDisplayNameMap[String(p.sleeperUserId)] = p.displayName;
+      // sleeperUsername is a stable login handle that doesn't change when display name changes
+      if (p.sleeperUsername) {
+        const k = p.sleeperUsername.toLowerCase();
+        if (p.gender)      sleeperUsernameGenderMap[k]      = p.gender;
+        if (p.displayName) sleeperUsernameDisplayNameMap[k] = p.displayName;
       }
     });
     const _displayName = (tm) =>
-      (tm.userId ? userIdDisplayNameMap[String(tm.userId)] : null) ||
+      (tm.sleeperUsername ? sleeperUsernameDisplayNameMap[tm.sleeperUsername.toLowerCase()] : null) ||
       displayNameMap[_skPo(tm.teamName)] ||
       displayNameMap[_skPo(tm.rawTeamName)] ||
       tm.teamName || '—';
@@ -6527,10 +6534,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
       (lc.teams || []).forEach(tm => {
-        // Try userId first (stable across years), then fall back to name-based lookup
-        const gender      = (tm.userId ? userIdGenderMap[String(tm.userId)] : null)
+        // Try sleeperUsername first (stable login handle, doesn't change with display name)
+        // then fall back to display-name based lookup
+        const gender      = (tm.sleeperUsername ? sleeperUsernameGenderMap[tm.sleeperUsername.toLowerCase()] : null)
           || genderMap[_skPo(tm.teamName)] || genderMap[_skPo(tm.rawTeamName)] || '';
-        const displayName = (tm.userId ? userIdDisplayNameMap[String(tm.userId)] : null)
+        const displayName = (tm.sleeperUsername ? sleeperUsernameDisplayNameMap[tm.sleeperUsername.toLowerCase()] : null)
           || displayNameMap[_skPo(tm.teamName)] || displayNameMap[_skPo(tm.rawTeamName)] || tm.teamName || '';
         allTeams.push({
           ...tm,
@@ -6709,6 +6717,97 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       });
       return new Set(byeTeams.map(_teamKey));
     })();
+
+    // ── Qualification diagnostic tool ──────────────────────
+    // Call window.diagQual("partial name") in the browser console to see
+    // why a team did or didn't qualify, what gender was resolved, what step picked them.
+    window._poQualDiag = {
+      year: activeY,
+      allTeams: allTeams.map(tm => ({
+        teamName:       tm.teamName,
+        displayName:    _displayName(tm),
+        leagueName:     tm.leagueName,
+        gender:         tm.gender,
+        sleeperUsername:tm.sleeperUsername || "",
+        wins:           tm.wins,
+        losses:         tm.losses,
+        pf:             tm.pf,
+        qualified:      qualSet.has(_teamKey(tm)),
+        bye:            byeSet.has(_teamKey(tm)),
+        teamKey:        _teamKey(tm)
+      })),
+      steps: (po.qualification?.steps || []),
+      stepResults: (() => {
+        if (po.qualification?.method !== "composite") return null;
+        const pool = sortedTeams;
+        const qualified = new Set();
+        const eligibleIndices = pool.map((_, i) => i);
+        let eli = [...eligibleIndices];
+        return (po.qualification.steps || []).map(step => {
+          if (step.type === "wins_threshold") {
+            const before = eli.length;
+            eli = eli.filter(i => (pool[i].wins||0) >= (step.minWins||13));
+            return { step, type: "gate", removed: before - eli.length, remaining: eli.length };
+          }
+          const scope   = step.scope || "overall";
+          const count   = step.type === "top_subgroup" ? (step.subCount||2) : (step.count||2);
+          const metric  = step.type === "top_record" ? "record" : step.type === "top_subgroup" ? (step.subMetric||"pf") : "pf";
+          const cands   = eli.filter(i => !qualified.has(i));
+          const groups  = {};
+          cands.forEach(i => {
+            const g = _groupKey(pool[i], scope) || "__none__";
+            if (!groups[g]) groups[g] = [];
+            groups[g].push(i);
+          });
+          const picked = [];
+          Object.entries(groups).forEach(([g, gis]) => {
+            let filtered = gis;
+            if (step.type === "top_subgroup") {
+              filtered = gis.filter(i => {
+                const val = step.subField === "gender" ? pool[i].gender : pool[i][step.subField]||"";
+                return String(val).toLowerCase() === String(step.subValue||"").toLowerCase();
+              });
+            }
+            const sorted = _sortByMetric(filtered.map(i => ({...pool[i], _idx:i})), metric);
+            sorted.slice(0, count).forEach(tm => { qualified.add(tm._idx); picked.push({group:g, team:pool[tm._idx]}); });
+          });
+          return { step, type: "qual", groups: Object.keys(groups).length, picked: picked.length, pickedTeams: picked.map(p => `${p.group}: ${p.team.teamName} (gender=${p.team.gender}, pf=${p.team.pf})`), candidateCount: cands.length };
+        });
+      })()
+    };
+    window.diagQual = (name) => {
+      const d = window._poQualDiag;
+      if (!d) { console.log("No diag data — open the playoffs tab first"); return; }
+      const q = name.toLowerCase();
+      const matches = d.allTeams.filter(tm =>
+        (tm.teamName||"").toLowerCase().includes(q) ||
+        (tm.displayName||"").toLowerCase().includes(q) ||
+        (tm.leagueName||"").toLowerCase().includes(q) ||
+        (tm.sleeperUsername||"").toLowerCase().includes(q)
+      );
+      if (!matches.length) { console.log("No teams found matching:", name); return; }
+      console.group(`diagQual("${name}") — Year ${d.year}`);
+      matches.forEach(tm => {
+        console.group(`${tm.displayName} (${tm.teamName})`);
+        console.log("League:", tm.leagueName);
+        console.log("Gender:", tm.gender || "(empty — no match found)");
+        console.log("SleeperUsername:", tm.sleeperUsername || "(not stored — re-sync standings)");
+        console.log("Record:", tm.wins + "–" + tm.losses, "| PF:", tm.pf);
+        console.log("Qualified:", tm.qualified, "| Bye:", tm.bye);
+        console.log("TeamKey:", tm.teamKey);
+        console.groupEnd();
+      });
+      if (d.stepResults) {
+        console.group("Step-by-step qualification");
+        d.stepResults.forEach((sr, i) => {
+          if (sr.type === "gate") console.log(`Step ${i+1} [Gate]: removed ${sr.removed} teams, ${sr.remaining} eligible`);
+          else console.log(`Step ${i+1} [${sr.step.type} scope=${sr.step.scope||"overall"}]: ${sr.picked} picked from ${sr.candidateCount} candidates across ${sr.groups} groups`, sr.pickedTeams);
+        });
+        console.groupEnd();
+      }
+      console.groupEnd();
+    };
+    console.log("[GMD Playoffs] Diagnostic ready — call diagQual('name') in console");
 
     // Build tab list based on mode
     const _buildTabs = () => {
@@ -7495,7 +7594,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const snapshot = _buildPlayoffSnapshot();
         snapshot.computedRounds = _computedRounds;
         if (btn) btn.textContent = "Writing…";
-        await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
+        await GMD.child(`publicTournaments/${tid}/playoffs/${activeY}`).set(snapshot);
         showToast("Playoffs published ✓");
       } catch(e) { showToast("Publish failed: "+e.message, "error"); }
       finally { if (btn) { btn.disabled=false; btn.textContent="📢 Publish"; } }
