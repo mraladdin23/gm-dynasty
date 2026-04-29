@@ -6478,18 +6478,120 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     });
     const sortedTeams = _sortTeams(allTeams);
 
-    // Qualification + bye counts from config
-    const byeCount = po.byes?.type !== "none" ? (po.byes?.count || 0) : 0;
+    // ── Qualification engine ──────────────────────────────
+    // Computes which teams qualify based on composite steps, respecting scope.
+    // scope:"overall"    → top N across the full field
+    // scope:"division"   → top N from each distinct division
+    // scope:"conference" → top N from each distinct conference
+
+    const allDivisions   = [...new Set(allTeams.map(tm => tm.division).filter(Boolean))];
+    const allConferences = [...new Set(allTeams.map(tm => tm.conference).filter(Boolean))];
+    const numDivisions   = allDivisions.length || 1;
+    const numConferences = allConferences.length || 1;
+
+    // Sort helper: by metric desc
+    const _sortByMetric = (teams, metric) => [...teams].sort((a, b) =>
+      metric === "record"
+        ? ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0)
+        : (b.pf||0) - (a.pf||0)
+    );
+
+    // Run composite steps sequentially; each fills slots from not-yet-qualified teams
+    const _runCompositeQual = (steps, pool) => {
+      const qualified = new Set(); // using index in pool to track
+      let eligibleIndices = pool.map((_, i) => i); // indices into pool
+
+      for (const step of steps) {
+        if (step.type === "wins_threshold") {
+          // Gate: remove ineligible teams from future steps
+          eligibleIndices = eligibleIndices.filter(i => (pool[i].wins||0) >= (step.minWins||13));
+          continue;
+        }
+
+        const scope  = step.scope || "overall";
+        const count  = step.type === "top_subgroup" ? (step.subCount||2) : (step.count||2);
+        const metric = step.type === "top_record" ? "record"
+          : step.type === "top_subgroup" ? (step.subMetric || "pf") : "pf";
+
+        // Eligible unqualified teams for this step
+        const candidates = eligibleIndices.filter(i => !qualified.has(i));
+
+        if (scope === "overall") {
+          // Take top N from entire candidate pool
+          const sorted = _sortByMetric(candidates.map(i => ({...pool[i], _idx:i})), metric);
+          sorted.slice(0, count).forEach(tm => qualified.add(tm._idx));
+
+        } else {
+          // Take top N per group (division or conference)
+          const groupKey = scope === "division" ? "division" : "conference";
+          const groups = {};
+          candidates.forEach(i => {
+            const g = pool[i][groupKey] || "__none__";
+            if (!groups[g]) groups[g] = [];
+            groups[g].push(i);
+          });
+          Object.values(groups).forEach(groupIndices => {
+            // Apply subgroup filter if applicable
+            let filtered = groupIndices;
+            if (step.type === "top_subgroup") {
+              filtered = groupIndices.filter(i => {
+                const val = step.subField === "gender" ? pool[i].gender
+                  : pool[i][step.subField] || "";
+                return String(val).toLowerCase() === String(step.subValue||"").toLowerCase();
+              });
+            }
+            const sorted = _sortByMetric(filtered.map(i => ({...pool[i], _idx:i})), metric);
+            sorted.slice(0, count).forEach(tm => qualified.add(tm._idx));
+          });
+        }
+      }
+      return [...qualified].map(i => pool[i]);
+    };
+
+    // Compute actual qualifiers based on method
+    const _computeQualifiers = () => {
+      const q = po.qualification || {};
+      if (q.method === "manual") return sortedTeams; // admin picks manually
+      if (q.method === "top_record") return _sortByMetric(sortedTeams, "record").slice(0, q.count||8);
+      if (q.method === "top_pf")     return _sortByMetric(sortedTeams, "pf").slice(0, q.count||8);
+      if (q.method === "top_per_group") {
+        const n = q.perGroup || 2;
+        const groups = {};
+        sortedTeams.forEach(tm => {
+          const g = tm.division || tm.conference || "__all__";
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(tm);
+        });
+        return Object.values(groups).flatMap(g => _sortByMetric(g,"pf").slice(0,n));
+      }
+      if (q.method === "composite") {
+        return _runCompositeQual(q.steps || [], sortedTeams);
+      }
+      return sortedTeams;
+    };
+
+    // Count qualifiers for display (used in notes and publish snapshot)
     const _qualCount = () => {
       const q = po.qualification || {};
-      if (q.method === "composite")
-        return (q.steps || []).filter(s => s.type !== "wins_threshold")
-          .reduce((s, st) => s + (st.type === "top_subgroup" ? (st.subCount||2) : (st.count||2)), 0);
-      if (q.method === "top_per_group") return (q.perGroup||2) * 4;
+      if (q.method === "composite") {
+        return (q.steps || []).filter(s => s.type !== "wins_threshold").reduce((sum, st) => {
+          const scope = st.scope || "overall";
+          const n = st.type === "top_subgroup" ? (st.subCount||2) : (st.count||2);
+          if (scope === "division")   return sum + n * numDivisions;
+          if (scope === "conference") return sum + n * numConferences;
+          return sum + n;
+        }, 0);
+      }
+      if (q.method === "top_per_group") return (q.perGroup||2) * Math.max(numDivisions, numConferences, 1);
       return q.count || (mode === "h2h_bracket" ? (po.bracketSize || 8) : sortedTeams.length);
     };
-    const qualCount  = _qualCount();
-    const qualifiers = sortedTeams.slice(0, qualCount);
+
+    const qualifiers = _computeQualifiers();
+    const qualCount  = qualifiers.length || _qualCount();
+    // Build a Set for O(1) qualified lookup by teamId or teamName
+    const qualSet = new Set(qualifiers.map(tm => tm.teamId || tm.rawTeamName || tm.teamName));
+
+    const byeCount = po.byes?.type !== "none" ? (po.byes?.count || 0) : 0;
 
     // Build tab list based on mode
     const _buildTabs = () => {
@@ -6527,7 +6629,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const sw = po.startWeek, ew = po.endWeek;
       const note = mode === "total_points"
         ? `Champion = highest PF${ew ? ` through Week ${ew}` : ""}.`
-        : `Top ${qualCount} qualify${byeCount ? ` · ${byeCount} bye${byeCount!==1?"s":""}` : ""}${sw ? ` · Playoffs Wk ${sw}` : ""}`;
+        : `${qualCount} teams qualify${byeCount ? ` · ${byeCount} bye${byeCount!==1?"s":""}` : ""}${sw ? ` · Playoffs Wk ${sw}` : ""}`;
+      // Track cut line — first non-qualified team
+      let cutShown = false;
       return `
         <div class="trn-po-tp-note">${note}</div>
         <div class="trn-po-table-wrap">
@@ -6540,24 +6644,28 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             </tr></thead>
             <tbody>
               ${sortedTeams.map((tm, i) => {
-                const isQ   = i < qualCount;
-                const isBye = isQ && i < byeCount;
+                const teamKey = tm.teamId || tm.rawTeamName || tm.teamName;
+                const isQ     = qualSet.has(teamKey);
+                const isBye   = isQ && i < byeCount;
                 const isChamp = mode === "total_points" && i === 0;
-                const rowCls = isChamp ? "trn-po-row--champion"
+                const rowCls  = isChamp ? "trn-po-row--champion"
                   : isBye ? "trn-po-row--bye-seed"
-                  : isQ ? "trn-po-row--qualified"
+                  : isQ   ? "trn-po-row--qualified"
                   : "trn-po-row--eliminated";
-                const badge = isChamp
+                const badge   = isChamp
                   ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
                   : isBye
                   ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
                   : isQ
                   ? `<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>`
-                  : i === qualCount
-                  ? `<span class="trn-po-badge trn-po-badge--eliminated" style="background:transparent;border-color:transparent;color:var(--color-text-dim)">— Cut —</span>`
                   : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-                const cutRow = (i === qualCount) ? `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line —</div></td></tr>` : "";
-                return `${i === qualCount ? cutRow : ""}<tr class="${rowCls}">
+                // Show cut line once, before the first eliminated team
+                let cutRow = "";
+                if (!isQ && !cutShown) {
+                  cutShown = true;
+                  cutRow = `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line —</div></td></tr>`;
+                }
+                return `${cutRow}<tr class="${rowCls}">
                   <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
                   <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
                   <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
@@ -6825,11 +6933,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
           seeding: po.seeding||null,
           byes: po.byes||null,
-          standings: sortedTeams.slice(0, Math.max(qualCount+10, 30)).map((tm,i) => ({
-            rank:i+1, teamName:tm.teamName, leagueName:tm.leagueName,
-            wins:tm.wins, losses:tm.losses, pf:tm.pf,
-            qualified:i<qualCount, bye:i<byeCount
-          })),
+          standings: sortedTeams.slice(0, Math.max(qualCount+10, 50)).map((tm,i) => {
+            const teamKey = tm.teamId || tm.rawTeamName || tm.teamName;
+            return {
+              rank:i+1, teamName:tm.teamName, leagueName:tm.leagueName,
+              wins:tm.wins, losses:tm.losses, pf:tm.pf,
+              qualified: qualSet.has(teamKey), bye:i<byeCount
+            };
+          }),
           publishedAt: Date.now()
         };
         await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
