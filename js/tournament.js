@@ -1084,10 +1084,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   // Points-round row
   function _prRoundRowHTML(round, idx, total) {
-    const advMethod = round.advanceMethod || "count";
-    const advCount  = round.advanceCount  || 4;
-    const advPct    = round.advancePct    || 50;
-    const isFinal   = idx === total - 1;
+    const advMethod  = round.advanceMethod || "count";
+    const advCount   = round.advanceCount  || 4;
+    const advPct     = round.advancePct    || 50;
+    const isFinal    = idx === total - 1;
+    // Per-round bye config
+    const rByes      = round.byes || {};
+    const rByeType   = rByes.type   || "none";
+    const rByeCount  = rByes.count  || 2;
+    const rByeScope  = rByes.scope  || "overall";
+    const rByeMethod = rByes.method || "record";
+    const showRBye   = rByeType !== "none";
+    const _ssel = (v,opt) => opt===v?"selected":"";
     return `
       <div class="trn-pr-round-row" data-round-idx="${idx}">
         <div class="trn-pr-round-header">
@@ -1111,6 +1119,36 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 <input type="number" class="trn-pr-adv-pct-input" data-round-idx="${idx}"
                   min="1" max="99" value="${advPct}"
                   style="width:46px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;${advMethod!=="pct"?"display:none;":""}" />
+              </div>
+              <!-- Per-round byes -->
+              <div class="trn-pr-bye-section" style="margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-border)">
+                <div class="trn-pr-advance-row">
+                  <span class="trn-pr-field-label">Byes this round</span>
+                  <div class="trn-yn-toggle">
+                    <button class="trn-yn-btn trn-pr-bye-none-btn ${rByeType==="none"?"trn-yn-btn--active":""}" data-round-idx="${idx}">None</button>
+                    <button class="trn-yn-btn trn-pr-bye-topn-btn ${rByeType==="top_n"?"trn-yn-btn--active":""}" data-round-idx="${idx}">Top N</button>
+                  </div>
+                </div>
+                <div class="trn-pr-bye-details" data-round-idx="${idx}" ${showRBye?"":'style="display:none"'}>
+                  <div class="trn-pr-advance-row" style="flex-wrap:wrap;gap:var(--space-2)">
+                    <span class="trn-pr-field-label">Ranked by</span>
+                    <select class="trn-pr-bye-method" data-round-idx="${idx}"
+                      style="font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                      <option value="record" ${_ssel(rByeMethod,"record")}>H2H Record</option>
+                      <option value="pf"     ${_ssel(rByeMethod,"pf")}>Points For</option>
+                    </select>
+                    <span class="trn-pr-field-label">Count</span>
+                    <input type="number" class="trn-pr-bye-count" data-round-idx="${idx}"
+                      min="1" max="9999" value="${rByeCount}"
+                      style="width:64px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                    <span class="trn-pr-field-label">Scope</span>
+                    <div class="trn-qs-scope-pills trn-pr-bye-scope-pills" data-round-idx="${idx}">
+                      <button class="trn-qs-scope-pill ${rByeScope==="overall"?"trn-qs-scope-pill--active":""}" data-scope="overall">Overall</button>
+                      <button class="trn-qs-scope-pill ${rByeScope==="division"?"trn-qs-scope-pill--active":""}" data-scope="division">Div</button>
+                      <button class="trn-qs-scope-pill ${rByeScope==="conference"?"trn-qs-scope-pill--active":""}" data-scope="conference">Conf</button>
+                    </div>
+                  </div>
+                </div>
               </div>`}
           ${_blendRowHTML(`trn-pr-r${idx}`, round.blend)}
         </div>
@@ -1124,6 +1162,14 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const apg       = round.advPerGroup   || 2;
     const advMethod = round.advMethod     || "top_score";
     const isFinal   = idx === total - 1;
+    // Per-round bye config (same as points rounds)
+    const rByes      = round.byes   || {};
+    const rByeType   = rByes.type   || "none";
+    const rByeCount  = rByes.count  || 2;
+    const rByeScope  = rByes.scope  || "overall";
+    const rByeMethod = rByes.method || "record";
+    const showRBye   = rByeType !== "none";
+    const _ssel = (v,opt) => opt===v?"selected":"";
     return `
       <div class="trn-cr-round-row" data-round-idx="${idx}">
         <div class="trn-pr-round-header">
@@ -1155,6 +1201,36 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
           <div class="trn-cr-summary" data-round-idx="${idx}">
             <span class="trn-cr-summary-text">${_crRoundSummary(groups,tpg,apg)}</span>
+          </div>
+          <!-- Per-round byes: teams that skip into this round from a higher seed group -->
+          <div class="trn-pr-bye-section" style="margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-border)">
+            <div class="trn-pr-advance-row">
+              <span class="trn-pr-field-label">Teams entering with bye</span>
+              <div class="trn-yn-toggle">
+                <button class="trn-yn-btn trn-cr-bye-none-btn ${rByeType==="none"?"trn-yn-btn--active":""}" data-round-idx="${idx}">None</button>
+                <button class="trn-yn-btn trn-cr-bye-topn-btn ${rByeType==="top_n"?"trn-yn-btn--active":""}" data-round-idx="${idx}">Top N</button>
+              </div>
+            </div>
+            <div class="trn-cr-bye-details" data-round-idx="${idx}" ${showRBye?"":'style="display:none"'}>
+              <div class="trn-pr-advance-row" style="flex-wrap:wrap;gap:var(--space-2)">
+                <span class="trn-pr-field-label">Ranked by</span>
+                <select class="trn-cr-bye-method" data-round-idx="${idx}"
+                  style="font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                  <option value="record" ${_ssel(rByeMethod,"record")}>H2H Record</option>
+                  <option value="pf"     ${_ssel(rByeMethod,"pf")}>Points For</option>
+                </select>
+                <span class="trn-pr-field-label">Count</span>
+                <input type="number" class="trn-cr-bye-count" data-round-idx="${idx}"
+                  min="1" max="9999" value="${rByeCount}"
+                  style="width:64px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                <span class="trn-pr-field-label">Scope</span>
+                <div class="trn-qs-scope-pills trn-cr-bye-scope-pills" data-round-idx="${idx}">
+                  <button class="trn-qs-scope-pill ${rByeScope==="overall"?"trn-qs-scope-pill--active":""}" data-scope="overall">Overall</button>
+                  <button class="trn-qs-scope-pill ${rByeScope==="division"?"trn-qs-scope-pill--active":""}" data-scope="division">Div</button>
+                  <button class="trn-qs-scope-pill ${rByeScope==="conference"?"trn-qs-scope-pill--active":""}" data-scope="conference">Conf</button>
+                </div>
+              </div>
+            </div>
           </div>
           ${_blendRowHTML(`trn-cr-r${idx}`, round.blend)}
         </div>
@@ -1347,6 +1423,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const byeType    = byes.type      || "none";
     const byeCount   = byes.count     || 2;
     const byeScope   = byes.scope     || "overall";
+    const byeMethod  = byes.method    || "record"; // how to rank teams for bye eligibility
     const bracketSize= po.bracketSize || null;
     const effectiveQ = qualMethod==="composite"
       ? qualSteps.filter(s=>s.type!=="wins_threshold")
@@ -1523,18 +1600,30 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               </div>
             </span>
           </div>
+          <div class="trn-detail-row" id="trn-bye-method-row" ${byeType!=="none"?"":'style="display:none"'}>
+            <span style="display:flex;align-items:center;gap:5px">Bye Eligibility Ranked By
+              <button class="trn-help-btn" title="How to rank qualified teams to determine who earns a bye. Independent of the seeding method.">?</button>
+            </span>
+            <span>
+              <select id="trn-bye-method"
+                style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                <option value="record" ${byeMethod==="record"?"selected":""}>H2H Record (wins, then PF)</option>
+                <option value="pf"     ${byeMethod==="pf"?"selected":""}>Points For (total PF)</option>
+              </select>
+            </span>
+          </div>
           <div class="trn-detail-row" id="trn-bye-count-row" ${byeType!=="none"?"":'style="display:none"'}>
             <span>Number of Byes
               <span class="trn-bye-scope-label" id="trn-bye-count-scope-label">
                 ${byeScope==="overall"?"(overall)":byeScope==="conference"?"(per conference)":"(per division)"}
               </span>
             </span>
-            <span><input type="number" id="trn-bye-count" min="1" max="16" value="${byeCount}"
-              style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" /></span>
+            <span><input type="number" id="trn-bye-count" min="1" max="9999" value="${byeCount}"
+              style="width:72px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" /></span>
           </div>
           <div class="trn-detail-row" id="trn-bye-scope-row" ${byeType!=="none"?"":'style="display:none"'}>
             <span style="display:flex;align-items:center;gap:5px">Bye Scope
-              <button class="trn-help-btn" title="Overall = top N across all teams. Per Conference = top N from each conf. Per Division = top N from each division.">?</button>
+              <button class="trn-help-btn" title="Overall = top N across all qualified teams. Per Division = top N from each division (most common for BOTS-style). Per Conference = top N from each conference.">?</button>
             </span>
             <span>
               <div class="trn-qs-scope-pills" id="trn-bye-scope-pills">
@@ -1919,8 +2008,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ?.classList.toggle("trn-yn-btn--active", val===v);
       });
       const showBye = val!=="none";
-      document.getElementById("trn-bye-count-row")?.style.setProperty("display", showBye?"":"none");
-      document.getElementById("trn-bye-scope-row")?.style.setProperty("display", showBye?"":"none");
+      ["trn-bye-method-row","trn-bye-count-row","trn-bye-scope-row"].forEach(id => {
+        document.getElementById(id)?.style.setProperty("display", showBye?"":"none");
+      });
     };
     document.getElementById("trn-bye-scope-pills")?.querySelectorAll(".trn-qs-scope-pill").forEach(pill=>{
       pill.addEventListener("click", () => {
@@ -1940,10 +2030,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byeType     = byeTypeEl?.id==="trn-bye-topn"?"top_n":byeTypeEl?.id==="trn-bye-manual"?"manual":"none";
       const byeCount    = parseInt(document.getElementById("trn-bye-count")?.value)||2;
       const byeScope    = document.querySelector("#trn-bye-scope-pills .trn-qs-scope-pill--active")?.dataset.scope||"overall";
+      const byeMethod   = document.getElementById("trn-bye-method")?.value || "record";
       const bracketSize = parseInt(document.getElementById("trn-bracket-size")?.value)||null;
       if (bracketSize&&(bracketSize&(bracketSize-1))!==0) { showToast("Bracket size must be a power of 2","error"); return; }
       try {
-        const updates={seeding:{method:seedMethod},byes:{type:byeType,count:byeType!=="none"?byeCount:0,scope:byeScope},bracketSize};
+        const updates={seeding:{method:seedMethod},byes:{type:byeType,count:byeType!=="none"?byeCount:0,scope:byeScope,method:byeMethod},bracketSize};
         await _poSave(updates); Object.assign(_poLocal(),updates);
         showToast("Byes & seeding saved ✓");
       } catch(e) { showToast("Failed","error"); }
@@ -2018,17 +2109,40 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // ── Custom Rounds ───────────────────────────────────
     const crList=document.getElementById("trn-cr-rounds-list");
-    const _getCRRounds=()=>Array.from(crList?.querySelectorAll(".trn-cr-round-row")||[]).map(row=>({
-      groups:parseInt(row.querySelector(".trn-cr-groups")?.value)||1,
-      teamsPerGroup:parseInt(row.querySelector(".trn-cr-per-group")?.value)||8,
-      advPerGroup:parseInt(row.querySelector(".trn-cr-adv-per-group")?.value)||2,
-      advMethod:row.querySelector(".trn-cr-adv-method")?.value||"top_score",
-      blend:_readBlend(row)
-    }));
+    const _getCRRounds=()=>Array.from(crList?.querySelectorAll(".trn-cr-round-row")||[]).map(row=>{
+      const byeTypeBtn = row.querySelector(".trn-cr-bye-topn-btn.trn-yn-btn--active");
+      const byeType_   = byeTypeBtn ? "top_n" : "none";
+      const byeCount_  = parseInt(row.querySelector(".trn-cr-bye-count")?.value)||2;
+      const byeScope_  = row.querySelector(".trn-cr-bye-scope-pills .trn-qs-scope-pill--active")?.dataset.scope||"overall";
+      const byeMethod_ = row.querySelector(".trn-cr-bye-method")?.value||"record";
+      return {
+        groups:parseInt(row.querySelector(".trn-cr-groups")?.value)||1,
+        teamsPerGroup:parseInt(row.querySelector(".trn-cr-per-group")?.value)||8,
+        advPerGroup:parseInt(row.querySelector(".trn-cr-adv-per-group")?.value)||2,
+        advMethod:row.querySelector(".trn-cr-adv-method")?.value||"top_score",
+        byes: byeType_==="none" ? {type:"none"} : {type:byeType_,count:byeCount_,scope:byeScope_,method:byeMethod_},
+        blend:_readBlend(row)
+      };
+    });
     const _rebuildCR=(rounds)=>{ if(!crList)return; crList.innerHTML=rounds.map((r,i)=>_crRoundRowHTML(r,i,rounds.length)).join(""); _wireCREvents(); };
     const _wireCREvents=()=>{
       _wireBlendRow(crList);
       crList?.querySelectorAll(".trn-cr-round-row").forEach(row=>{
+        // Bye toggle
+        row.querySelectorAll(".trn-cr-bye-none-btn,.trn-cr-bye-topn-btn").forEach(btn=>{
+          btn.addEventListener("click",()=>{
+            const isTopN=btn.classList.contains("trn-cr-bye-topn-btn");
+            row.querySelector(".trn-cr-bye-none-btn")?.classList.toggle("trn-yn-btn--active",!isTopN);
+            row.querySelector(".trn-cr-bye-topn-btn")?.classList.toggle("trn-yn-btn--active",isTopN);
+            const det=row.querySelector(".trn-cr-bye-details");
+            if(det) det.style.display=isTopN?"":"none";
+          });
+        });
+        row.querySelectorAll(".trn-cr-bye-scope-pills .trn-qs-scope-pill").forEach(p=>{
+          p.addEventListener("click",()=>{
+            row.querySelectorAll(".trn-cr-bye-scope-pills .trn-qs-scope-pill").forEach(pp=>pp.classList.toggle("trn-qs-scope-pill--active",pp===p));
+          });
+        });
         row.querySelectorAll(".trn-cr-groups,.trn-cr-per-group,.trn-cr-adv-per-group").forEach(inp=>{
           inp.addEventListener("input",()=>{
             const idx=parseInt(row.dataset.roundIdx);
@@ -6695,9 +6809,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
        : byeRaw)
       : 0;
 
-    // Compute which teams have a bye — respects bye scope (overall / division / conference)
-    const seedMetric = po.seeding?.method === "record" ? "record" : "pf";
-    const seededQualifiers = _sortByMetric([...qualifiers], seedMetric);
+    // Compute which teams have a bye — ranked by byes.method (independent of seeding method)
+    const byeMetric = (po.byes?.method || "record") === "record" ? "record" : "pf";
+    const seedMetric = po.seeding?.method === "record" ? "record" : "pf"; // bracket seeding only
+    const seededQualifiers = _sortByMetric([...qualifiers], byeMetric);
     const byeSet = (() => {
       if (!byeCount) return new Set();
       if (byeScope === "overall") {
@@ -7058,8 +7173,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // Re-order qualifiers so bye teams always come first, then non-byes sorted
           // by seeding metric. This ensures pool.slice(0, poolByes) == bye teams.
           const _byeFirst = (teams) => {
-            const byes_ = _sortByMetric(teams.filter(tm => byeSet.has(_teamKey(tm))), seedMetric);
-            const rest_  = _sortByMetric(teams.filter(tm => !byeSet.has(_teamKey(tm))), seedMetric);
+            const byes_ = _sortByMetric(teams.filter(tm => byeSet.has(_teamKey(tm))), byeMetric);
+            const rest_  = _sortByMetric(teams.filter(tm => !byeSet.has(_teamKey(tm))), byeMetric);
             return [...byes_, ...rest_];
           };
           let pool = _byeFirst([...qualifiers]);
@@ -7067,8 +7182,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           for (let ri = 0; ri < roundIdx; ri++) {
             const r         = rounds[ri];
             const rWeekNum  = po.startWeek ? po.startWeek + ri : null;
-            const isByeRi   = ri === 0 && byeCount > 0;
-            const rPoolByes = isByeRi ? byeCount : 0;
+
+            // Per-round bye count: use round.byes config if set, else global byeCount for round 0
+            const rByeCfg    = r.byes || {};
+            const rByeType_  = rByeCfg.type || "none";
+            const rByeRaw_   = rByeType_ !== "none" ? (rByeCfg.count || 0) : (ri === 0 ? byeCount : 0);
+            const rByeScope_ = rByeCfg.scope || byeScope;
+            const rByeMet_   = rByeCfg.method || byeMetric;
+            const rPoolByes  = rByeRaw_ > 0
+              ? (rByeScope_ === "division"   ? rByeRaw_ * numDivisions
+               : rByeScope_ === "conference" ? rByeRaw_ * numConferences
+               : rByeRaw_)
+              : (ri === 0 && !rByeCfg.type ? byeCount : 0);
 
             const byeSection  = pool.slice(0, rPoolByes);
             const compSection = pool.slice(rPoolByes);
@@ -7090,8 +7215,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
 
           // ── Now pool is correct for this round ─────────────────────────
-          const isByeRound  = roundIdx === 0 && byeCount > 0;
-          const poolByes    = isByeRound ? byeCount : 0;
+          // Per-round bye count for the current round
+          const rCurBye_    = round.byes || {};
+          const rCurByeType = rCurBye_.type || "none";
+          const rCurByeRaw  = rCurByeType !== "none" ? (rCurBye_.count || 0) : (roundIdx === 0 ? byeCount : 0);
+          const rCurScope   = rCurBye_.scope || byeScope;
+          const rCurByeCount= rCurByeRaw > 0
+            ? (rCurScope === "division"   ? rCurByeRaw * numDivisions
+             : rCurScope === "conference" ? rCurByeRaw * numConferences
+             : rCurByeRaw)
+            : (roundIdx === 0 && !rCurBye_.type ? byeCount : 0);
+          const isByeRound  = rCurByeCount > 0;
+          const poolByes    = rCurByeCount;
           const competitors = pool.length - poolByes;
           const advFromComp = isFinal ? 1
             : round.advanceMethod === "pct"
@@ -7503,8 +7638,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           // Build bye-first pool (same as _renderPointsRound)
           const _byeFirst_ = (teams) => {
-            const b = _sortByMetric(teams.filter(tm => byeSet.has(_teamKey(tm))), seedMetric);
-            const r = _sortByMetric(teams.filter(tm => !byeSet.has(_teamKey(tm))), seedMetric);
+            const b = _sortByMetric(teams.filter(tm => byeSet.has(_teamKey(tm))), byeMetric);
+            const r = _sortByMetric(teams.filter(tm => !byeSet.has(_teamKey(tm))), byeMetric);
             return [...b, ...r];
           };
 
