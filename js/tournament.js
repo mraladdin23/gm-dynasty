@@ -6603,10 +6603,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     const qualifiers = _computeQualifiers();
     const qualCount  = qualifiers.length || _qualCount();
-    // Build a Set for O(1) qualified lookup by teamId or teamName
-    const qualSet = new Set(qualifiers.map(tm => tm.teamId || tm.rawTeamName || tm.teamName));
+    // League-scoped key: roster IDs like "1","2" are only unique within a league,
+    // so we must prefix with leagueName to avoid cross-league collisions.
+    const _teamKey = tm => (tm.leagueName || "") + "|" + (tm.teamId || tm.rawTeamName || tm.teamName);
+    const qualSet  = new Set(qualifiers.map(_teamKey));
 
-    const byeCount = po.byes?.type !== "none" ? (po.byes?.count || 0) : 0;
+    // byeCount respects scope — "top 2 per division" with 28 divisions = 56 byes total
+    const byeType  = po.byes?.type  || "none";
+    const byeScope = po.byes?.scope || "overall";
+    const byeRaw   = (byeType !== "none") ? (po.byes?.count || 0) : 0;
+    const byeCount = byeRaw > 0
+      ? (byeScope === "division"   ? byeRaw * numDivisions
+       : byeScope === "conference" ? byeRaw * numConferences
+       : byeRaw)
+      : 0;
+
+    // Compute which teams have a bye: top byeCount of the qualifiers sorted by seeding metric
+    const seedMetric = po.seeding?.method === "record" ? "record" : "pf";
+    const seededQualifiers = _sortByMetric([...qualifiers], seedMetric);
+    const byeSet = new Set(seededQualifiers.slice(0, byeCount).map(_teamKey));
 
     // Build tab list based on mode
     const _buildTabs = () => {
@@ -6649,7 +6664,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // Single cut line: appears after the last qualified row in sorted order
       let lastQualIdx = -1;
       sortedTeams.forEach((tm, i) => {
-        if (qualSet.has(tm.teamId || tm.rawTeamName || tm.teamName)) lastQualIdx = i;
+        if (qualSet.has(_teamKey(tm))) lastQualIdx = i;
       });
       return `
         <div class="trn-po-tp-note">${note}</div>
@@ -6664,8 +6679,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             <tbody>
               ${sortedTeams.map((tm, i) => {
                 const teamKey = tm.teamId || tm.rawTeamName || tm.teamName;
-                const isQ     = qualSet.has(teamKey);
-                const isBye   = isQ && i < byeCount;
+                const isQ     = qualSet.has(_teamKey(tm));
+                const isBye   = byeSet.has(_teamKey(tm));
                 const isChamp = mode === "total_points" && i === 0;
                 const rowCls  = isChamp ? "trn-po-row--champion"
                   : isBye ? "trn-po-row--bye-seed"
@@ -6724,43 +6739,62 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const rounds = po.pointsRounds?.rounds || [];
       const round  = rounds[roundIdx];
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
-      const isFinal = roundIdx === rounds.length - 1;
-      const weekNum = po.startWeek ? po.startWeek + roundIdx : null;
+      const isFinal  = roundIdx === rounds.length - 1;
+      const weekNum  = po.startWeek ? po.startWeek + roundIdx : null;
 
-      // Simulate pool after previous rounds
-      let pool = [...qualifiers];
-      for (let i = 0; i < roundIdx; i++) {
-        const r = rounds[i];
-        const adv = r.advanceMethod==="pct"
-          ? Math.round(pool.length*(r.advancePct||50)/100)
-          : (r.advanceCount||0);
-        const byeSlots = i===0 ? byeCount : 0;
-        pool = pool.slice(0, adv + byeSlots);
+      // ── Pool simulation ──────────────────────────────────
+      // Round 0 pool = all qualifiers (byes are IN the pool, they just skip competition)
+      // Round N pool = bye teams + competitive advancers from round N-1
+      let pool = [...qualifiers]; // starts as full qualifier list
+
+      for (let ri = 0; ri < roundIdx; ri++) {
+        const r = rounds[ri];
+        const poolByes = ri === 0 ? byeCount : 0; // only round 0 has byes
+        const competitors = pool.length - poolByes; // teams actually competing
+        const advFromComp = r.advanceMethod === "pct"
+          ? Math.round(competitors * (r.advancePct || 50) / 100)
+          : (r.advanceCount || 0);
+        // Next round pool: bye teams + competitive advancers
+        // Byes are the top byeCount by seed (already at front of pool from _sortByMetric)
+        pool = [...pool.slice(0, poolByes), ...pool.slice(poolByes, poolByes + advFromComp)];
       }
 
       const isByeRound = roundIdx === 0 && byeCount > 0;
-      const advCount = isFinal ? 1
-        : round.advanceMethod==="pct"
-          ? Math.round(pool.length*(round.advancePct||50)/100)
-          : (round.advanceCount||0);
-      const totalAdv = isByeRound ? advCount + byeCount : advCount;
+      const poolByes   = isByeRound ? byeCount : 0;
+      const competitors = pool.length - poolByes; // teams actually playing this round
+
+      // How many competitive teams advance (byes always advance, counted separately)
+      const advFromComp = isFinal ? 1
+        : round.advanceMethod === "pct"
+          ? Math.round(competitors * (round.advancePct || 50) / 100)
+          : (round.advanceCount || 0);
+
+      const totalAdvancing = poolByes + advFromComp; // byes + competitive advancers
+      const eliminated     = pool.length - totalAdvancing;
+
       const blend = round.blend;
       const blendNote = blend?.enabled
-        ? `Scoring: ${blend.mode==="weighted"
+        ? `Scoring: ${blend.mode === "weighted"
             ? `week × ${100-(blend.weight||30)}% + avg × ${blend.weight||30}%`
             : `week + avg × ${blend.weight||30}%`}`
         : "Scoring: weekly score";
+
+      const summary = isByeRound
+        ? `${pool.length} total · ${poolByes} byes auto-advance · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
+        : `${pool.length} competing · ${advFromComp} advance · ${eliminated} eliminated`;
 
       return `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
             ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
-            <span class="trn-po-round-meta">${pool.length} teams · ${blendNote}</span>
+            <span class="trn-po-round-meta">${summary}</span>
           </div>
           ${isByeRound?`<div class="trn-po-bye-row">
             <span class="trn-po-badge trn-po-badge--bye">BYE</span>
-            <span style="font-size:.82rem;color:var(--color-text-dim)">Top ${byeCount} seed${byeCount!==1?"s":""} advance automatically</span>
+            <span style="font-size:.82rem;color:var(--color-text-dim)">
+              Top ${byeCount} seed${byeCount!==1?"s":""} advance automatically — not competing this week
+            </span>
           </div>`:""}
         </div>
         <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
@@ -6772,24 +6806,32 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             </tr></thead>
             <tbody>
               ${pool.map((tm, i) => {
-                const isByeTeam = isByeRound && i < byeCount;
-                const adv = isByeTeam || i < (isByeRound ? advCount+byeCount : advCount);
-                const rowCls = isFinal&&i===0 ? "trn-po-row--champion"
+                const isByeTeam  = isByeRound && i < poolByes;
+                const isCompAdv  = !isByeTeam && (i - poolByes) < advFromComp;
+                const isChamp    = isFinal && i === poolByes; // first competitor in final
+                const adv        = isByeTeam || isCompAdv;
+                const rowCls     = isChamp ? "trn-po-row--champion"
                   : isByeTeam ? "trn-po-row--bye-seed"
-                  : adv ? "trn-po-row--advance" : "trn-po-row--cut";
-                const badge = isFinal&&i===0
+                  : isCompAdv ? "trn-po-row--advance"
+                  : "trn-po-row--cut";
+                const badge = isChamp
                   ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
-                  : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-                  : adv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+                  : isByeTeam
+                  ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+                  : isCompAdv
+                  ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
                   : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-                const cutAfter = !isFinal && i === (isByeRound?advCount+byeCount-1:advCount-1);
+                // Cut line: between last competitive advancer and first eliminated
+                // Byes are above cut (they auto-advance), do NOT count toward cut position
+                const compIdx  = i - poolByes; // position within the competitive pool
+                const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
                 return `<tr class="${rowCls}">
                   <td class="trn-po-rank">${i+1}</td>
                   <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
                   <td class="trn-po-league">${_esc(tm.leagueName||"—")}</td>
                   <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
                   <td>${badge}</td>
-                </tr>${cutAfter?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line — ${pool.length-totalAdv} eliminated</div></td></tr>`:""}`;
+                </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
               }).join("")}
             </tbody>
           </table>
@@ -6951,12 +6993,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           seeding: po.seeding||null,
           byes: po.byes||null,
           standings: sortedTeams.map((tm, i) => {
-            const teamKey = tm.teamId || tm.rawTeamName || tm.teamName;
             return {
               rank:i+1, teamName:tm.teamName, leagueName:tm.leagueName,
               division:tm.division||"", conference:tm.conference||"",
               wins:tm.wins, losses:tm.losses, pf:tm.pf,
-              qualified: qualSet.has(teamKey), bye:i<byeCount
+              qualified: qualSet.has(_teamKey(tm)), bye: byeSet.has(_teamKey(tm))
             };
           }),
           publishedAt: Date.now()
