@@ -6942,9 +6942,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           };
 
           // ── Simulate advancement through previous rounds using actual scores ──
-          // Start with full qualifier pool. For each previous round, sort the
-          // competitive section by that round's actual week score and keep top N.
-          let pool = [...qualifiers];
+          // Re-order qualifiers so bye teams always come first, then non-byes sorted
+          // by seeding metric. This ensures pool.slice(0, poolByes) == bye teams.
+          const _byeFirst = (teams) => {
+            const byes_ = _sortByMetric(teams.filter(tm => byeSet.has(_teamKey(tm))), seedMetric);
+            const rest_  = _sortByMetric(teams.filter(tm => !byeSet.has(_teamKey(tm))), seedMetric);
+            return [...byes_, ...rest_];
+          };
+          let pool = _byeFirst([...qualifiers]);
 
           for (let ri = 0; ri < roundIdx; ri++) {
             const r         = rounds[ri];
@@ -7315,6 +7320,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           };
         }).filter(Boolean);
 
+      // Include per-team weekly scores from cache so public site can sort rounds
+      // correctly without needing live Sleeper API access.
+      // Structure: weeklyScores[leagueId][week][rosterId] = points
+      const weeklyScores = {};
+      Object.entries(_weekScoreCache || {}).forEach(([key, scoreMap]) => {
+        const [lid, wk] = key.split("|");
+        if (!lid || !wk) return;
+        if (!weeklyScores[lid]) weeklyScores[lid] = {};
+        weeklyScores[lid][wk] = scoreMap;
+      });
+
+      // Also include leagueId on each standing entry so public site can look up scores
+      const _leagueIdForTeam = (tm) => leagueIdByTeamKey[_teamKey(tm)] || "";
+
       return {
         mode, year:activeY, qualCount, byeCount,
         startWeek: po.startWeek||null, endWeek: po.endWeek||null,
@@ -7324,6 +7343,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         seeding: po.seeding||null, byes: po.byes||null,
         recognizeLeagueChampions: !!(po.recognizeLeagueChampions),
         leagueChamps,
+        weeklyScores,
         standings: orderedTeams.map((tm, i) => ({
           rank:        i+1,
           teamName:    tm.teamName,
@@ -7334,6 +7354,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           wins:        tm.wins,
           losses:      tm.losses,
           pf:          tm.pf,
+          teamId:      tm.teamId    || "",
+          leagueId:    _leagueIdForTeam(tm),
           qualified:   qualSet.has(_teamKey(tm)),
           bye:         byeSet.has(_teamKey(tm))
         })),
