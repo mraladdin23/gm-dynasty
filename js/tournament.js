@@ -7282,58 +7282,39 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
       document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
     });
+    // Shared snapshot builder — single source of truth for both manual + auto publish
+    const _buildPlayoffSnapshot = () => ({
+      mode, year:activeY, qualCount, byeCount,
+      startWeek: po.startWeek||null, endWeek: po.endWeek||null,
+      rounds: mode==="points_rounds" ? (po.pointsRounds?.rounds||[])
+        : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
+      bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
+      seeding: po.seeding||null, byes: po.byes||null,
+      standings: sortedTeams.map((tm, i) => ({
+        rank:i+1,
+        teamName:    tm.teamName,
+        displayName: _displayName(tm),      // registration display name
+        leagueName:  tm.leagueName,
+        division:    tm.division   || "",
+        conference:  tm.conference || "",
+        wins:    tm.wins,
+        losses:  tm.losses,
+        pf:      tm.pf,
+        qualified: qualSet.has(_teamKey(tm)),
+        bye:       byeSet.has(_teamKey(tm))
+      })),
+      publishedAt: Date.now()
+    });
+
     document.getElementById("trn-po-publish-btn")?.addEventListener("click", async () => {
       const btn = document.getElementById("trn-po-publish-btn");
       if (btn) { btn.disabled=true; btn.textContent="Publishing…"; }
       try {
-        const snapshot = {
-          mode, year:activeY, qualCount, byeCount,
-          startWeek: po.startWeek||null, endWeek: po.endWeek||null,
-          rounds: mode==="points_rounds" ? (po.pointsRounds?.rounds||[])
-            : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
-          bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
-          seeding: po.seeding||null, byes: po.byes||null,
-          standings: sortedTeams.map((tm,i) => ({
-            rank:i+1, teamName:tm.teamName, displayName:_displayName(tm),
-            leagueName:tm.leagueName, division:tm.division||"", conference:tm.conference||"",
-            wins:tm.wins, losses:tm.losses, pf:tm.pf,
-            qualified: qualSet.has(_teamKey(tm)), bye: byeSet.has(_teamKey(tm))
-          })),
-          publishedAt: Date.now()
-        };
-        await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
+        await GMD.child(`publicTournaments/${tid}/playoffs`).set(_buildPlayoffSnapshot());
         showToast("Playoffs published ✓");
       } catch(e) { showToast("Publish failed: "+e.message, "error"); }
       finally { if (btn) { btn.disabled=false; btn.textContent="📢 Publish"; } }
     });
-
-    // Auto-publish playoffs snapshot whenever the tab is rendered
-    // This keeps the public site current without a manual step
-    ;(async () => {
-      if (!tid) return;
-      try {
-        const snapshot = {
-          mode, year:activeY, qualCount, byeCount,
-          startWeek: po.startWeek||null, endWeek: po.endWeek||null,
-          rounds: mode==="points_rounds" ? (po.pointsRounds?.rounds||[])
-            : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
-          bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
-          seeding: po.seeding||null,
-          byes: po.byes||null,
-          standings: sortedTeams.map((tm, i) => {
-            return {
-              rank:i+1, teamName:tm.teamName, leagueName:tm.leagueName,
-              division:tm.division||"", conference:tm.conference||"",
-              wins:tm.wins, losses:tm.losses, pf:tm.pf,
-              qualified: qualSet.has(_teamKey(tm)), bye: byeSet.has(_teamKey(tm))
-            };
-          }),
-          publishedAt: Date.now()
-        };
-        await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
-        showToast("Playoffs published to public site ✓");
-      } catch(e) { console.warn("[Playoffs] Auto-publish failed:", e.message); }
-    })();
   }
 
   function _renderInfoTab(t, body, tid) {

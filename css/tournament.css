@@ -2283,7 +2283,7 @@
   letter-spacing: .04em; color: var(--color-text-dim); padding: 5px 8px;
   border-bottom: 1px solid var(--color-border);
 }
-.trn-po-th-num { text-align: center; }
+.trn-po-table th.trn-po-th-num { text-align: center; }
 .trn-po-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
 .trn-po-table tr:last-child td { border-bottom: none; }
 .trn-po-rank     { font-weight: 700; color: var(--color-text-dim); min-width: 28px; }
@@ -2674,9 +2674,9 @@
   border-radius: var(--radius-sm);
   background: rgba(212,175,55,.06);
 }
-.trn-po-champ-name   { font-weight: 700; font-size: .82rem; }
-.trn-po-champ-league { font-size: .7rem; color: var(--color-text-dim); }
-.trn-po-champ-record { font-size: .72rem; color: var(--color-text-dim); margin-top: 2px; }
+.trn-po-champ-name   { font-weight: 700; font-size: .82rem; white-space: normal; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.trn-po-champ-league { font-size: .7rem; color: var(--color-text-dim); text-align: center; }
+.trn-po-champ-record { font-size: .72rem; color: var(--color-text-dim); margin-top: 2px; text-align: center; }
 /* Remove old trophy column from card */
 .trn-po-champ-trophy { display: none; }
 
