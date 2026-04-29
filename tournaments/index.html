@@ -795,7 +795,7 @@
               const cutRow=(!tm.qualified&&standings[i-1]?.qualified)?`<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line —</div></td></tr>`:"";
               return `${cutRow}<tr class="${rowCls}">
                 <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
-                <td class="trn-po-team-name">${esc(tm.teamName||"—")}</td>
+                <td class="trn-po-team-name">${esc(tm.displayName||tm.teamName||"—")}</td>
                 <td class="trn-po-league">${esc(tm.leagueName||"—")}</td>
                 <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
                 <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
@@ -809,7 +809,7 @@
           <thead><tr><th>#</th><th>Team</th><th>League</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th></tr></thead>
           <tbody>${standings.slice(0,20).map((tm,i)=>`<tr class="${i===0?"trn-po-row--champion":""}">
             <td class="trn-po-rank">${i===0?"🏆":i+1}</td>
-            <td class="trn-po-team-name">${esc(tm.teamName||"—")}</td>
+            <td class="trn-po-team-name">${esc(tm.displayName||tm.teamName||"—")}</td>
             <td class="trn-po-league">${esc(tm.leagueName||"—")}</td>
             <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
             <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
@@ -855,7 +855,7 @@
                 :adv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
                 :`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
               const cutAfter=!isFinal&&i===totalAdv-1;
-              return `<tr class="${rowCls}"><td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name">${esc(tm.teamName||"—")}</td><td class="trn-po-league">${esc(tm.leagueName||"—")}</td><td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td><td>${badge}</td></tr>
+              return `<tr class="${rowCls}"><td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name">${esc(tm.displayName||tm.teamName||"—")}</td><td class="trn-po-league">${esc(tm.leagueName||"—")}</td><td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td><td>${badge}</td></tr>
               ${cutAfter?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line —</div></td></tr>`:""}`;
             }).join("")}</tbody>
           </table></div>`;
@@ -876,13 +876,13 @@
             <div class="trn-po-bracket-round-title">${rName(0,numRounds)}</div>
             ${r1Byes.map(tm=>`<div class="trn-po-matchup trn-po-matchup--bye"><div class="trn-po-matchup-row">
               <span class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</span>
-              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${esc(tm.teamName||"—")}</span>
+              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${esc(tm.displayName||tm.teamName||"—")}</span>
               <span class="trn-po-badge trn-po-badge--bye" style="margin-left:auto">BYE</span>
             </div></div>`).join("")}
             ${r1Matchups.map(m=>`<div class="trn-po-matchup">
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${esc(m.a?.teamName||"TBD")}</span><span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span></div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${esc(m.a ? (m.a.displayName||m.a.teamName||"TBD") : "TBD")}</span><span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span></div>
               <div class="trn-po-matchup-vs">vs</div>
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${esc(m.b?.teamName||"TBD")}</span><span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span></div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${esc(m.b ? (m.b.displayName||m.b.teamName||"TBD") : "TBD")}</span><span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span></div>
             </div>`).join("")}
           </div>
           ${Array.from({length:numRounds-1},(_,ri)=>`<div class="trn-po-bracket-round">
@@ -897,7 +897,7 @@
         <div class="trn-po-seed-list"><div class="trn-po-section-title">Seedings</div>
           ${seeds.map((tm,i)=>`<div class="trn-po-seed-row ${i<byeCount?"trn-po-seed-row--bye":""}">
             <span class="trn-po-seed-num">#${i+1}</span>
-            <span class="trn-po-seed-name">${esc(tm.teamName||"—")}</span>
+            <span class="trn-po-seed-name">${esc(tm.displayName||tm.teamName||"—")}</span>
             <span class="trn-po-seed-league">${esc(tm.leagueName||"")}</span>
             <span class="trn-po-seed-record">${tm.wins??0}–${tm.losses??0}</span>
             <span class="trn-po-seed-pf">${(tm.pf||0).toFixed(1)} pts</span>

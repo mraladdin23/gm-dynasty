@@ -6880,9 +6880,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       const tableId  = `trn-po-round-table-${roundIdx}`;
       const loaderId = `trn-po-round-loader-${roundIdx}`;
+      // trn-po-col-wk/avg/blend classes only hide on mobile when blend IS active
+      // (table gets class trn-po-table--blend so CSS can scope the rule)
       const headerCols = blendEnabled
         ? `<th class="trn-po-th-num trn-po-col-wk">Wk Score</th><th class="trn-po-th-num trn-po-col-avg">Avg/Wk</th><th class="trn-po-th-num trn-po-col-blend">Blend</th>`
-        : `<th class="trn-po-th-num trn-po-col-wk">Week Score</th>`;
+        : `<th class="trn-po-th-num">Week Score</th>`;
+      const tableClass = blendEnabled ? "trn-po-table trn-po-table--blend" : "trn-po-table";
       const colSpan = blendEnabled ? 7 : 5;
 
       // Shell renders synchronously; pool/scores filled async
@@ -6899,7 +6902,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             ⏳ Loading scores…
           </div>
           <div id="${tableId}-bye-bar" style="display:none"></div>
-          <table class="trn-po-table" id="${tableId}" style="display:none">
+          <table class="${tableClass}" id="${tableId}" style="display:none">
             <thead><tr>
               <th>#</th><th>Team</th>
               ${headerCols}
@@ -7041,7 +7044,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 ? `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
                    <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
                    <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
-                : `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
+                : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
             return `<tr class="${rowCls}">
               <td class="trn-po-rank">${i+1}</td>
               <td class="trn-po-team-name">
@@ -7191,39 +7194,51 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── League champs ────────────────────────────────────
     const _renderLeagueChamps = () => {
-      // champion is now stored on each lc during sync:
-      //   lc.champion.isPlayoffChampion=true  → league ran its own playoffs, this is the bracket winner
-      //   lc.champion.isPlayoffChampion=false → regular season leader (no playoffs ran yet)
-      // If lc.champion is absent (pre-sync data), fall back to deriving from lc.teams.
       const _getChamp = (lc) => {
         if (lc.champion) return lc.champion;
-        // Legacy fallback: derive from stored teams (wins desc, then pf desc)
         if (!lc.teams?.length) return null;
-        return [...lc.teams].sort((a,b) =>
-          (b.wins||0)-(a.wins||0) || (b.pf||0)-(a.pf||0))[0] || null;
+        return [...lc.teams].sort((a,b)=>(b.wins||0)-(a.wins||0)||(b.pf||0)-(a.pf||0))[0]||null;
       };
-      const rows = Object.entries(t.standingsCache||{})
+      const entries = Object.entries(t.standingsCache||{})
         .filter(([,lc]) => String(lc.year) === String(activeY))
         .sort(([,a],[,b]) => (a.leagueName||"").localeCompare(b.leagueName||""))
         .map(([,lc]) => {
           const champ = _getChamp(lc);
-          if (!champ) return "";
-          const isPlayoffChamp = champ.isPlayoffChampion === true;
-          const champLabel = isPlayoffChamp
-            ? `🏆 <span style="font-size:.68rem;color:var(--color-text-dim)">(playoff)</span>`
-            : `🏆 <span style="font-size:.68rem;color:var(--color-text-dim)">(reg. season leader)</span>`;
-          return `<div class="trn-po-champ-card">
-            <div class="trn-po-champ-trophy">${champLabel}</div>
-            <div class="trn-po-champ-info">
-              <div class="trn-po-champ-name">${_esc(displayNameMap[_skPo(champ.teamName)] || champ.teamName||"Unknown")}</div>
-              <div class="trn-po-champ-league">${_esc(lc.leagueName||"")}</div>
-            </div>
-            <div class="trn-po-champ-record">${champ.wins??0}–${champ.losses??0} · ${(champ.pf||0).toFixed(1)} pts</div>
-          </div>`;
-        }).filter(Boolean).join("");
-      return rows
-        ? `<div class="trn-po-champ-list">${rows}</div>`
-        : `<div class="trn-po-empty">No standings data yet. Run Sync Standings first.</div>`;
+          if (!champ) return null;
+          return {
+            isPlayoff: champ.isPlayoffChampion === true,
+            name: _esc(displayNameMap[_skPo(champ.teamName)] || champ.teamName || "Unknown"),
+            league: _esc(lc.leagueName || ""),
+            record: `${champ.wins??0}–${champ.losses??0} · ${(champ.pf||0).toFixed(1)} pts`
+          };
+        }).filter(Boolean);
+
+      if (!entries.length)
+        return `<div class="trn-po-empty">No standings data yet. Run Sync Standings first.</div>`;
+
+      // Split into two groups
+      const playoffChamps = entries.filter(e => e.isPlayoff);
+      const regLeaders    = entries.filter(e => !e.isPlayoff);
+
+      const _card = (e) => `
+        <div class="trn-po-champ-card">
+          <div class="trn-po-champ-info">
+            <div class="trn-po-champ-name">${e.name}</div>
+            <div class="trn-po-champ-league">${e.league}</div>
+          </div>
+          <div class="trn-po-champ-record">${e.record}</div>
+        </div>`;
+
+      const _section = (title, icon, items) => items.length === 0 ? "" : `
+        <div class="trn-po-champ-section">
+          <div class="trn-po-champ-section-title">${icon} ${title}</div>
+          <div class="trn-po-champ-grid">
+            ${items.map(_card).join("")}
+          </div>
+        </div>`;
+
+      return _section("League Champions (Playoff Winners)", "🏆", playoffChamps)
+           + _section("Regular Season Leaders", "📊", regLeaders);
     }
 
     // ── Render active tab ─────────────────────────────────
