@@ -313,7 +313,12 @@
 
       const isDraft      = (t.status || "draft") === "draft";
       const hasStandings = t.standingsCache && Object.keys(t.standingsCache).length > 0;
-      const hasPlayoffs  = !!(t.playoffs && t.playoffs.mode);
+      // playoffs is now year-keyed: {2025: {...}, 2024: {...}}
+      // Fall back to flat .mode for legacy snapshots
+      const hasPlayoffs = !!(t.playoffs && (
+        t.playoffs.mode ||
+        Object.keys(t.playoffs).some(k => /^\d{4}$/.test(k) && t.playoffs[k]?.mode)
+      ));
       const regOpen      = ["registration_open", "active"].includes(t.status);
 
       // Build sorted year list from standingsCache
@@ -757,15 +762,29 @@
       // the latest publish without requiring a full page reload.
       body.innerHTML = `<div class="trn-po-container" style="padding:var(--space-4) 0;color:var(--color-text-dim);font-size:.85rem">Loading playoffs…</div>`;
       try {
-        const snap = await tRef(_currentTid).child("playoffs").once("value");
-        if (snap.exists()) _currentT.playoffs = snap.val();
+        // Fetch the year-keyed playoffs node for the selected year
+        const year = _selectedYear || new Date().getFullYear();
+        const snap = await tRef(_currentTid).child(`playoffs/${year}`).once("value");
+        if (snap.exists()) {
+          if (!_currentT.playoffs) _currentT.playoffs = {};
+          _currentT.playoffs[year] = snap.val();
+        } else {
+          // Legacy fallback: try flat node
+          const flatSnap = await tRef(_currentTid).child("playoffs").once("value");
+          if (flatSnap.exists()) _currentT.playoffs = flatSnap.val();
+        }
       } catch(e) { /* use cached value on error */ }
 
       const t   = _currentT;
-      const po  = t.playoffs || {};
+      const year = _selectedYear || new Date().getFullYear();
+      // Get year-keyed playoff data, falling back to flat legacy format
+      const playoffs_ = t.playoffs || {};
+      const po = (playoffs_[year] && playoffs_[year].mode)
+        ? playoffs_[year]
+        : (playoffs_.mode ? playoffs_ : {});
 
       if (!po.mode) {
-        body.innerHTML = `<div class="trn-po-container"><div class="trn-po-empty">Playoff information has not been published yet.</div></div>`;
+        body.innerHTML = `<div class="trn-po-container"><div class="trn-po-empty">Playoff information has not been published yet for ${year}. Click 📢 Publish from the admin Playoffs tab.</div></div>`;
         return;
       }
 
