@@ -2283,13 +2283,13 @@
   letter-spacing: .04em; color: var(--color-text-dim); padding: 5px 8px;
   border-bottom: 1px solid var(--color-border);
 }
-.trn-po-th-num { text-align: right; }
+.trn-po-th-num { text-align: center; }
 .trn-po-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
 .trn-po-table tr:last-child td { border-bottom: none; }
 .trn-po-rank     { font-weight: 700; color: var(--color-text-dim); min-width: 28px; }
 .trn-po-team-name{ font-weight: 600; }
 .trn-po-league   { font-size: .75rem; color: var(--color-text-dim); }
-.trn-po-num, .trn-po-pf { text-align: right; font-variant-numeric: tabular-nums; }
+.trn-po-num, .trn-po-pf { text-align: center; font-variant-numeric: tabular-nums; }
 .trn-po-pf { font-weight: 600; }
 .trn-po-more { font-size: .75rem; color: var(--color-text-dim); text-align: center; }
 
@@ -2626,11 +2626,10 @@
   .trn-po-subtab-bar   { display: none; }
   .trn-po-tab-select   { display: block; }
 
-  /* Hide wk-score and avg columns on mobile when blend is active */
-  .trn-po-col-wk,
-  .trn-po-col-avg  { display: none; }
-  /* Only keep blend column */
-  .trn-po-col-blend { display: table-cell; }
+  /* Hide wk/avg cols only when blend IS active (table has --blend class) */
+  .trn-po-table--blend .trn-po-col-wk,
+  .trn-po-table--blend .trn-po-col-avg  { display: none; }
+  .trn-po-table--blend .trn-po-col-blend { display: table-cell; }
 
   /* Tighten table padding */
   .trn-po-table th,
@@ -2645,4 +2644,45 @@
   .trn-po-col-wk,
   .trn-po-col-avg,
   .trn-po-col-blend { display: table-cell; }
+}
+
+/* ── League champs section + 4-per-row grid ─────────── */
+.trn-po-champ-section { margin-bottom: var(--space-4); }
+.trn-po-champ-section-title {
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-gold, #d4af37);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-po-champ-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+/* Override old flex list layout */
+.trn-po-champ-list { display: block; }
+.trn-po-champ-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-gold, #d4af37);
+  border-radius: var(--radius-sm);
+  background: rgba(212,175,55,.06);
+}
+.trn-po-champ-name   { font-weight: 700; font-size: .82rem; }
+.trn-po-champ-league { font-size: .7rem; color: var(--color-text-dim); }
+.trn-po-champ-record { font-size: .72rem; color: var(--color-text-dim); margin-top: 2px; }
+/* Remove old trophy column from card */
+.trn-po-champ-trophy { display: none; }
+
+@media (max-width: 900px) {
+  .trn-po-champ-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 500px) {
+  .trn-po-champ-grid { grid-template-columns: 1fr 1fr; }
 }
