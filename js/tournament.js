@@ -6465,7 +6465,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const allTeams = [];
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
-      (lc.teams || []).forEach(tm => allTeams.push({ ...tm, leagueName: lc.leagueName || ck }));
+      (lc.teams || []).forEach(tm => allTeams.push({
+        ...tm,
+        leagueName: lc.leagueName || ck,
+        // division/conference live on the league entry, not the individual team object
+        division:   lc.division   || "",
+        conference: lc.conference || "",
+      }));
     });
 
     // Sort teams
@@ -6484,10 +6490,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // scope:"division"   → top N from each distinct division
     // scope:"conference" → top N from each distinct conference
 
-    const allDivisions   = [...new Set(allTeams.map(tm => tm.division).filter(Boolean))];
-    const allConferences = [...new Set(allTeams.map(tm => tm.conference).filter(Boolean))];
+    // If explicit division/conference fields aren't set, each league = one division
+    const _groupKey = (tm, scope) => {
+      if (scope === "conference") {
+        return (tm.conference && tm.conference !== "") ? tm.conference : null;
+      }
+      // division scope: use explicit division, fall back to leagueName
+      return (tm.division && tm.division !== "") ? tm.division : (tm.leagueName || "__none__");
+    };
+    const allDivisions   = [...new Set(allTeams.map(tm => _groupKey(tm, "division")).filter(Boolean))];
+    const allConferences = [...new Set(allTeams.map(tm => _groupKey(tm, "conference")).filter(Boolean))];
+    // If no explicit conferences, conferences scope falls back to leagues too
     const numDivisions   = allDivisions.length || 1;
-    const numConferences = allConferences.length || 1;
+    const numConferences = allConferences.length || allDivisions.length || 1;
 
     // Sort helper: by metric desc
     const _sortByMetric = (teams, metric) => [...teams].sort((a, b) =>
@@ -6523,10 +6538,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         } else {
           // Take top N per group (division or conference)
-          const groupKey = scope === "division" ? "division" : "conference";
+          // Uses _groupKey which falls back to leagueName when explicit fields are empty
           const groups = {};
           candidates.forEach(i => {
-            const g = pool[i][groupKey] || "__none__";
+            const g = _groupKey(pool[i], scope) || "__none__";
             if (!groups[g]) groups[g] = [];
             groups[g].push(i);
           });
@@ -6558,7 +6573,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const n = q.perGroup || 2;
         const groups = {};
         sortedTeams.forEach(tm => {
-          const g = tm.division || tm.conference || "__all__";
+          const g = _groupKey(tm, "division") || "__all__";
           if (!groups[g]) groups[g] = [];
           groups[g].push(tm);
         });
@@ -6627,17 +6642,21 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // ── Standings view (all modes) ───────────────────────
     const _renderStandingsView = () => {
       const sw = po.startWeek, ew = po.endWeek;
+      const elimCount = sortedTeams.length - qualifiers.length;
       const note = mode === "total_points"
         ? `Champion = highest PF${ew ? ` through Week ${ew}` : ""}.`
-        : `${qualCount} teams qualify${byeCount ? ` · ${byeCount} bye${byeCount!==1?"s":""}` : ""}${sw ? ` · Playoffs Wk ${sw}` : ""}`;
-      // Track cut line — first non-qualified team
-      let cutShown = false;
+        : `${qualifiers.length} qualified · ${elimCount} eliminated${byeCount ? ` · ${byeCount} bye${byeCount!==1?"s":""}` : ""}${sw ? ` · Playoffs Wk ${sw}` : ""}`;
+      // Single cut line: appears after the last qualified row in sorted order
+      let lastQualIdx = -1;
+      sortedTeams.forEach((tm, i) => {
+        if (qualSet.has(tm.teamId || tm.rawTeamName || tm.teamName)) lastQualIdx = i;
+      });
       return `
         <div class="trn-po-tp-note">${note}</div>
         <div class="trn-po-table-wrap">
           <table class="trn-po-table">
             <thead><tr>
-              <th>#</th><th>Team</th><th>League</th>
+              <th>#</th><th>Team</th><th>League / Div</th>
               <th class="trn-po-th-num">W–L</th>
               <th class="trn-po-th-num">Points For</th>
               <th>Status</th>
@@ -6659,12 +6678,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                   : isQ
                   ? `<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>`
                   : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-                // Show cut line once, before the first eliminated team
-                let cutRow = "";
-                if (!isQ && !cutShown) {
-                  cutShown = true;
-                  cutRow = `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line —</div></td></tr>`;
-                }
+                // Cut line appears once, right after the last qualified team
+                const cutRow = (i === lastQualIdx + 1 && lastQualIdx >= 0)
+                  ? `<tr class="trn-po-cut-row"><td colspan="6"><div class="trn-po-cut-divider">— Qualification Cut Line — ${qualifiers.length} qualified · ${elimCount} eliminated —</div></td></tr>`
+                  : "";
                 return `${cutRow}<tr class="${rowCls}">
                   <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
                   <td class="trn-po-team-name">${_esc(tm.teamName||"—")}</td>
@@ -6933,10 +6950,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
           seeding: po.seeding||null,
           byes: po.byes||null,
-          standings: sortedTeams.slice(0, Math.max(qualCount+10, 50)).map((tm,i) => {
+          standings: sortedTeams.map((tm, i) => {
             const teamKey = tm.teamId || tm.rawTeamName || tm.teamName;
             return {
               rank:i+1, teamName:tm.teamName, leagueName:tm.leagueName,
+              division:tm.division||"", conference:tm.conference||"",
               wins:tm.wins, losses:tm.losses, pf:tm.pf,
               qualified: qualSet.has(teamKey), bye:i<byeCount
             };
