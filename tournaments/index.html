@@ -733,6 +733,19 @@
     let _adpPos     = "all";
     const ADP_PAGE_SIZE = 25;
 
+    function _ensureAdpTabOption() {
+      const sel = document.getElementById("pub-tab-select");
+      if (!sel) return;
+      if (sel.querySelector('option[value="adp"]')) return; // already there
+      const opt = document.createElement("option");
+      opt.value = "adp";
+      opt.textContent = "📊 ADP";
+      // Insert before Rules if it exists, otherwise append
+      const rulesOpt = sel.querySelector('option[value="rules"]');
+      if (rulesOpt) sel.insertBefore(opt, rulesOpt);
+      else sel.appendChild(opt);
+    }
+
     function _clearAdpRefresh() {
       if (_adpRefreshTimer) { clearInterval(_adpRefreshTimer); _adpRefreshTimer = null; }
     }

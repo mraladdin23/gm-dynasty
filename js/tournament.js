@@ -1629,7 +1629,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Wire playoff config ──────────────────────────────────────────────────────
-  function _wirePlayoffConfigListeners(tid, t) {
+  function _wirePlayoffConfigListeners(tid, t, initialYear) {
     const MODE_DESC = {
       total_points:  "Champion = highest cumulative PF through season end week.",
       points_rounds: "Teams qualify, then advance each week by top score. One pool per round.",
@@ -1638,7 +1638,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     };
     const currentNFLYear = String(new Date().getMonth() >= 8
       ? new Date().getFullYear() : new Date().getFullYear() - 1);
-    let _activePoYear = _playoffYears(t).length ? _playoffYears(t)[0] : currentNFLYear;
+    // Use initialYear if provided (passed from _rerender to preserve selection across re-wires)
+    let _activePoYear = initialYear
+      || (_playoffYears(t).length ? _playoffYears(t)[0] : currentNFLYear);
 
     const _rerender = async (yearOverride) => {
       const yearToShow = yearOverride || _activePoYear;
@@ -1650,7 +1652,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (!card) return;
       const newT = _tournaments[tid] || t;
       card.outerHTML = _renderPlayoffConfigHTML(tid, newT, yearToShow);
-      _wirePlayoffConfigListeners(tid, newT);
+      // Pass yearToShow so re-wire preserves the currently selected year
+      _wirePlayoffConfigListeners(tid, newT, yearToShow);
       // Restore section selection
       const sel = document.getElementById("trn-pc-section-select");
       if (sel && _activePoSection) { sel.value = _activePoSection; _showPCSection(_activePoSection); }
