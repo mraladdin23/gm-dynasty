@@ -7282,28 +7282,61 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
     });
     // Shared snapshot builder — single source of truth for both manual + auto publish
-    const _buildPlayoffSnapshot = () => ({
-      mode, year:activeY, qualCount, byeCount,
-      startWeek: po.startWeek||null, endWeek: po.endWeek||null,
-      rounds: mode==="points_rounds" ? (po.pointsRounds?.rounds||[])
-        : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
-      bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
-      seeding: po.seeding||null, byes: po.byes||null,
-      standings: sortedTeams.map((tm, i) => ({
-        rank:i+1,
-        teamName:    tm.teamName,
-        displayName: _displayName(tm),      // registration display name
-        leagueName:  tm.leagueName,
-        division:    tm.division   || "",
-        conference:  tm.conference || "",
-        wins:    tm.wins,
-        losses:  tm.losses,
-        pf:      tm.pf,
-        qualified: qualSet.has(_teamKey(tm)),
-        bye:       byeSet.has(_teamKey(tm))
-      })),
-      publishedAt: Date.now()
-    });
+    const _buildPlayoffSnapshot = () => {
+      // Standings: qualified-first (sorted by PF desc), then eliminated (by PF desc)
+      // This matches the internal display order
+      const qualTeams = sortedTeams.filter(tm => qualSet.has(_teamKey(tm)));
+      const elimTeams = sortedTeams.filter(tm => !qualSet.has(_teamKey(tm)));
+      const orderedTeams = [...qualTeams, ...elimTeams];
+
+      // Build league champs array from standingsCache (same logic as _renderLeagueChamps)
+      const _getChamp = (lc) => {
+        if (lc.champion) return lc.champion;
+        if (!lc.teams?.length) return null;
+        return [...lc.teams].sort((a,b)=>(b.wins||0)-(a.wins||0)||(b.pf||0)-(a.pf||0))[0]||null;
+      };
+      const leagueChamps = Object.entries(t.standingsCache||{})
+        .filter(([,lc]) => String(lc.year) === String(activeY))
+        .sort(([,a],[,b]) => (a.leagueName||"").localeCompare(b.leagueName||""))
+        .map(([,lc]) => {
+          const champ = _getChamp(lc);
+          if (!champ) return null;
+          return {
+            isPlayoff:   champ.isPlayoffChampion === true,
+            teamName:    champ.teamName || "",
+            displayName: displayNameMap[_skPo(champ.teamName)] || champ.teamName || "Unknown",
+            leagueName:  lc.leagueName || "",
+            wins:        champ.wins  ?? 0,
+            losses:      champ.losses ?? 0,
+            pf:          champ.pf    || 0
+          };
+        }).filter(Boolean);
+
+      return {
+        mode, year:activeY, qualCount, byeCount,
+        startWeek: po.startWeek||null, endWeek: po.endWeek||null,
+        rounds: mode==="points_rounds" ? (po.pointsRounds?.rounds||[])
+          : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
+        bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
+        seeding: po.seeding||null, byes: po.byes||null,
+        recognizeLeagueChampions: !!(po.recognizeLeagueChampions),
+        leagueChamps,
+        standings: orderedTeams.map((tm, i) => ({
+          rank:        i+1,
+          teamName:    tm.teamName,
+          displayName: _displayName(tm),
+          leagueName:  tm.leagueName,
+          division:    tm.division   || "",
+          conference:  tm.conference || "",
+          wins:        tm.wins,
+          losses:      tm.losses,
+          pf:          tm.pf,
+          qualified:   qualSet.has(_teamKey(tm)),
+          bye:         byeSet.has(_teamKey(tm))
+        })),
+        publishedAt: Date.now()
+      };
+    };
 
     document.getElementById("trn-po-publish-btn")?.addEventListener("click", async () => {
       const btn = document.getElementById("trn-po-publish-btn");
