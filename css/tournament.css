@@ -2688,3 +2688,298 @@
 @media (max-width: 500px) {
   .trn-po-champ-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Players Tab — Participant Career History (F-H)
+   Used on both internal app (tournament.js) and public site (index.html)
+   ═══════════════════════════════════════════════════════════ */
+
+.trn-players-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.trn-players-empty {
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-text-dim);
+  font-size: .88rem;
+}
+
+/* ── Player card grid ──────────────────────────────────── */
+.trn-ph-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.trn-ph-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  cursor: pointer;
+  transition: box-shadow .15s, border-color .15s;
+  outline: none;
+}
+
+.trn-ph-card:hover,
+.trn-ph-card:focus {
+  box-shadow: 0 2px 14px rgba(0,0,0,.18);
+  border-color: var(--color-accent, #6c63ff);
+}
+
+.trn-ph-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.trn-ph-avatar {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-accent, #6c63ff) 0%, #8b5cf6 100%);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: .03em;
+}
+
+.trn-ph-card-info    { min-width: 0; flex: 1; }
+.trn-ph-card-name    { font-weight: 700; font-size: .88rem; line-height: 1.3; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.trn-ph-card-meta    { font-size: .72rem; color: var(--color-text-dim); margin-top: 1px; }
+
+.trn-ph-champ-badge {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(212,175,55,.18);
+  color: var(--color-gold, #d4af37);
+  border: 1px solid rgba(212,175,55,.35);
+  border-radius: 999px;
+  font-size: .65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* ── Stats row ──────────────────────────────────────────── */
+.trn-ph-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-1);
+}
+
+.trn-ph-stat      { text-align: center; }
+.trn-ph-stat-val  { font-size: .82rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.trn-ph-stat-lbl  { font-size: .6rem; color: var(--color-text-dim); margin-top: 1px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* ── Year pills row ─────────────────────────────────────── */
+.trn-ph-years { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.trn-ph-year-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 600;
+  background: rgba(99,102,241,.12);
+  color: #a78bfa;
+  border: 1px solid rgba(99,102,241,.25);
+}
+
+.trn-ph-year-pill--champ {
+  background: rgba(212,175,55,.15);
+  color: var(--color-gold, #d4af37);
+  border-color: rgba(212,175,55,.35);
+}
+
+/* ── Career detail modal ────────────────────────────────── */
+.trn-ph-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 400;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.trn-ph-modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 580px;
+  max-height: 88vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.trn-ph-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  background: var(--color-surface);
+  z-index: 1;
+}
+
+.trn-ph-modal-title { font-size: 1.05rem; font-weight: 700; }
+
+.trn-ph-modal-body { padding: var(--space-4); overflow-y: auto; }
+
+/* ── Modal summary totals ─────────────────────────────── */
+.trn-ph-modal-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  min-height: 20px;
+}
+
+.trn-ph-modal-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.trn-ph-modal-totals .trn-ph-stat     { min-width: 56px; }
+.trn-ph-modal-totals .trn-ph-stat-val { font-size: .95rem; }
+
+/* ── Per-year section ─────────────────────────────────── */
+.trn-ph-year-section { margin-bottom: var(--space-4); }
+
+.trn-ph-year-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: var(--space-2);
+  font-size: .85rem;
+}
+
+.trn-ph-career-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+
+.trn-ph-career-table th {
+  text-align: left;
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-text-dim);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.trn-ph-career-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  vertical-align: middle;
+}
+
+.trn-ph-tbl-league {
+  font-size: .8rem;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trn-ph-tbl-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  width: 60px;
+}
+
+/* ── Cross-platform sync warning banner (F-X) ─────────── */
+.trn-xplat-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  background: rgba(234,179,8,.1);
+  border: 1px solid rgba(234,179,8,.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.trn-xplat-banner-icon  { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.trn-xplat-banner-body  { flex: 1; min-width: 0; }
+.trn-xplat-banner-title { font-weight: 700; margin-bottom: 2px; color: #facc15; }
+.trn-xplat-banner-items { color: var(--color-text-dim); margin: 0; padding-left: var(--space-4); }
+.trn-xplat-banner-items li { margin-top: 2px; }
+
+.trn-xplat-scoring-diffs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.trn-xplat-diff-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(234,179,8,.12);
+  border: 1px solid rgba(234,179,8,.25);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  font-size: .72rem;
+  color: #fde68a;
+  font-variant-numeric: tabular-nums;
+}
+
+.trn-xplat-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: .9rem;
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .trn-ph-grid          { grid-template-columns: 1fr 1fr; }
+  .trn-ph-card-name     { font-size: .82rem; }
+  .trn-ph-stats-row     { padding: var(--space-1); gap: 2px; }
+  .trn-ph-stat-val      { font-size: .75rem; }
+  .trn-ph-modal         { max-height: 95vh; }
+  .trn-ph-modal-totals  { gap: var(--space-2); }
+  .trn-ph-tbl-league    { max-width: 120px; }
+}
+
+@media (max-width: 360px) {
+  .trn-ph-grid { grid-template-columns: 1fr; }
+}
