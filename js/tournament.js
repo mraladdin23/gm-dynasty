@@ -433,7 +433,8 @@ const DLRTournament = (() => {
       <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>👥 Participants${Object.keys(t.participants||{}).length ? " (" + Object.keys(t.participants).length + ")" : ""}</option>
       <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>🏆 Standings</option>
       <option value="playoffs"      ${_activeAdminTab === "playoffs"      ? "selected" : ""}>🥇 Playoffs</option>
-      <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>`;
+      <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>
+      <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>`;
 
     const userOpts = `
       <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
@@ -442,7 +443,8 @@ const DLRTournament = (() => {
       ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
       <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>📋 Draft</option>
       <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>🏈 Matchups</option>
-      <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>🗂 Rosters</option>`;
+      <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>🗂 Rosters</option>
+      <option value="players"   ${_activeUserTab === "players"   ? "selected" : ""}>👥 Players</option>`;
     const regOpen = ["registration_open","active"].includes(meta.status);
     const regBtnHtml = (!showAdminNav && regOpen) ? `<button class="btn-primary btn-sm trn-reg-pill" id="trn-register-pill-btn">📬 Register</button>` : "";
 
@@ -559,6 +561,7 @@ const DLRTournament = (() => {
         case "matchups":      return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":       return _renderAnalyticsRosters(tid, t, body);
         case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
+        case "players":       return _renderPlayersTab(tid, t, body);
         default:              return _renderAdminOverview(tid, t, body);
       }
     } else {
@@ -571,6 +574,7 @@ const DLRTournament = (() => {
         case "draft":      return _renderAnalyticsDraft(tid, t, body);
         case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
+        case "players":    return _renderPlayersTab(tid, t, body);
         default:           return _renderInfoTab(t, body, tid);
       }
     }
@@ -3716,6 +3720,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const mfls     = toSync.filter(l => l.platform === "mfl");
     const yahoos   = toSync.filter(l => l.platform === "yahoo");
     const cacheUpdates = {};
+    const syncWarnings = []; // { platform, message } accumulated during sync
 
     // Cache key: year_leagueId prevents cross-year collision for same leagueId
     const ck = (l) => l.year + "_" + l.leagueId;
@@ -3763,7 +3768,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         try {
           const data = await _fetchMFLStandings(l.leagueId, l.year);
           if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
-        } catch(e) { console.warn("[Standings] MFL", l.leagueId, e.message); }
+          else syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" returned no data — MFL may require authentication via the worker.` });
+        } catch(e) {
+          console.warn("[Standings] MFL", l.leagueId, e.message);
+          syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
+        }
         done++; setP("Syncing " + done + "/" + total + "...");
       }));
       if (i + 3 < mfls.length) await new Promise(r => setTimeout(r, 300));
@@ -3773,6 +3782,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
     if (yahoos.length && !yahooToken) {
       showToast("Yahoo standings skipped — connect Yahoo in your profile first", "info");
+      syncWarnings.push({ platform: "yahoo", message: `${yahoos.length} Yahoo league${yahoos.length !== 1 ? "s" : ""} skipped — connect Yahoo in your profile first.` });
       done += yahoos.length;
     } else {
       for (let i = 0; i < yahoos.length; i += 2) {
@@ -3780,7 +3790,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           try {
             const data = await _fetchYahooStandings(l.leagueId, yahooToken);
             if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
-          } catch(e) { console.warn("[Standings] Yahoo", l.leagueId, e.message); }
+            else syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" returned no data — Yahoo token may be expired.` });
+          } catch(e) {
+            console.warn("[Standings] Yahoo", l.leagueId, e.message);
+            syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
+          }
           done++; setP("Syncing " + done + "/" + total + "...");
         }));
         if (i + 2 < yahoos.length) await new Promise(r => setTimeout(r, 600));
@@ -3804,6 +3818,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
       showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
       _writePublicSummary(tid, _tournaments[tid]);
+      // Show cross-platform warning banner if anything was skipped/failed,
+      // or if scoring settings differ across platforms
+      const scoringDiffs = _getScoringDiffs(_tournaments[tid], toSync[0]?.year || new Date().getFullYear());
+      if (syncWarnings.length || scoringDiffs.length) {
+        _showSyncWarningBanner(syncWarnings, scoringDiffs);
+      }
       const body = document.getElementById("trn-tab-body");
       if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
     } catch(err) {
@@ -3813,6 +3833,86 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Platform fetchers ──────────────────────────────────
+
+  // ── Cross-platform warning banner (F-X) ────────────────────────────────────
+  // Shown after sync if platforms were skipped/failed, or if scoring differs.
+  // Inserts a dismissible amber banner above the current tab body.
+  function _showSyncWarningBanner(warnings, scoringDiffs) {
+    document.getElementById("trn-xplat-banner")?.remove();
+
+    const platLabel = { mfl: "🔵 MFL", yahoo: "🟣 Yahoo", sleeper: "🟢 Sleeper" };
+    const warnItems = (warnings || []).map(w =>
+      `<li><strong>${platLabel[w.platform] || w.platform}:</strong> ${_esc(w.message)}</li>`
+    ).join("");
+
+    const diffChips = (scoringDiffs || []).map(d =>
+      `<span class="trn-xplat-diff-chip">⚡ ${_esc(d.label)}: ${d.vals.join(" vs ")}</span>`
+    ).join("");
+
+    const hasDiffs = diffChips.length > 0;
+
+    const banner = document.createElement("div");
+    banner.id        = "trn-xplat-banner";
+    banner.className = "trn-xplat-banner";
+    banner.innerHTML = `
+      <span class="trn-xplat-banner-icon">⚠️</span>
+      <div class="trn-xplat-banner-body">
+        ${warnings?.length ? `
+          <div class="trn-xplat-banner-title">Cross-platform sync issues</div>
+          <ul class="trn-xplat-banner-items">${warnItems}</ul>` : ""}
+        ${hasDiffs ? `
+          <div class="trn-xplat-banner-title" style="${warnings?.length ? "margin-top:var(--space-2)" : ""}">
+            Scoring differences detected between platforms
+          </div>
+          <div class="trn-xplat-scoring-diffs">${diffChips}</div>
+          <div style="font-size:.74rem;color:var(--color-text-dim);margin-top:var(--space-1)">
+            These may affect cross-platform fairness. Review in Info / Rules → Scoring Settings.
+          </div>` : ""}
+      </div>
+      <button class="trn-xplat-banner-dismiss" id="trn-xplat-dismiss" title="Dismiss">✕</button>`;
+
+    const tabBody = document.getElementById("trn-tab-body");
+    tabBody?.parentNode?.insertBefore(banner, tabBody);
+    document.getElementById("trn-xplat-dismiss")?.addEventListener("click", () => banner.remove());
+  }
+
+  // Returns array of {label, vals} for scoring fields that differ across platforms.
+  // Reads from t.scoringSettings[year]. Returns [] if single-platform or no diffs.
+  function _getScoringDiffs(t, year) {
+    const scoring   = (t?.scoringSettings || {})[String(year)] || {};
+    const platforms = Object.keys(scoring).filter(k => !k.startsWith("_"));
+    if (platforms.length < 2) return [];
+
+    const CHECK_FIELDS = [
+      { key: "pass_yd",      label: "Pass Yd/pt" },
+      { key: "pass_td",      label: "Pass TD"    },
+      { key: "pass_int",     label: "INT"         },
+      { key: "rush_yd",      label: "Rush Yd/pt" },
+      { key: "rush_td",      label: "Rush TD"    },
+      { key: "rec",          label: "Rec (PPR)"  },
+      { key: "rec_yd",       label: "Rec Yd/pt"  },
+      { key: "rec_td",       label: "Rec TD"     },
+      { key: "bonus_rec_te", label: "TE Bonus"   },
+      { key: "fum_lost",     label: "Fum Lost"   },
+      { key: "_format",      label: "Format"     },
+    ];
+
+    return CHECK_FIELDS.reduce((acc, f) => {
+      const vals = platforms.map(p => {
+        const v = scoring[p]?.[f.key];
+        return v !== undefined && v !== null ? String(v) : null;
+      }).filter(v => v !== null);
+      if (vals.length < 2) return acc;
+      const unique = [...new Set(vals)];
+      if (unique.length > 1) {
+        acc.push({
+          label: f.label,
+          vals:  platforms.map(p => `${p.toUpperCase()}:${scoring[p]?.[f.key] ?? "?"}`)
+        });
+      }
+      return acc;
+    }, []);
+  }
 
   async function _fetchSleeperStandings(leagueId, playoffStartWeek) {
     const [rU, rR, rL] = await Promise.all([
@@ -6508,6 +6608,267 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="roster-positions">${posHTML}</div>
         </div>
       </div>`;
+  }
+
+  // ── User: Info tab ─────────────────────────────────────
+
+  // ── Players Tab — Participant Career History ────────────────────────────────
+  // Shared between admin and user modes. Year-agnostic: shows career across ALL
+  // years regardless of _tournamentYear. Reads entirely from t.standingsCache
+  // and t.participants — no Firebase calls needed.
+  //
+  // Matching priority: sleeperUsername (stable across name changes) → teamName
+  // Both internal app and public site call the same data shape; the public site
+  // re-implements a parallel version using _currentT instead of t.
+
+  let _phSearch = ""; // persists within a session
+
+  function _renderPlayersTab(tid, t, body) {
+    const _sk    = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const cache  = t.standingsCache  || {};
+    const parts  = t.participants    || {};
+
+    // ── Build participant lookup: sanitizedKey → {displayName, gender, twitter} ──
+    // Multiple keys per participant (sleeperUsername, displayName, teamName)
+    const pLookup = {}; // sanitizedKey → participant obj
+    Object.values(parts).forEach(p => {
+      [p.sleeperUsername, p.displayName, p.teamName]
+        .filter(Boolean)
+        .map(_sk)
+        .forEach(k => { pLookup[k] = p; });
+    });
+
+    const _findPart = (tm) => {
+      if (tm.sleeperUsername) {
+        const p = pLookup[_sk(tm.sleeperUsername)];
+        if (p) return p;
+      }
+      if (tm.teamName) {
+        const p = pLookup[_sk(tm.teamName)];
+        if (p) return p;
+      }
+      return null;
+    };
+
+    // ── Build careers map: displayName → careerObj ──────────
+    const careers = {}; // careerKey → obj
+
+    for (const lc of Object.values(cache)) {
+      const year     = String(lc.year || "Unknown");
+      const lgName   = lc.leagueName || "Unknown League";
+      const champion = lc.champion || null;
+      const champKey = champion
+        ? (_sk(champion.sleeperUsername || "") || _sk(champion.teamName || ""))
+        : null;
+
+      for (const tm of (lc.teams || [])) {
+        const part        = _findPart(tm);
+        const displayName = part?.displayName || tm.teamName || "Unknown";
+        const careerKey   = _sk(displayName);
+
+        if (!careers[careerKey]) {
+          careers[careerKey] = {
+            displayName,
+            gender:  part?.gender        || "",
+            twitter: part?.twitterHandle || "",
+            seasons: {}
+          };
+        }
+
+        if (!careers[careerKey].seasons[year]) careers[careerKey].seasons[year] = [];
+
+        // Is this team the champion for this league?
+        const isChamp = !!(champKey && (
+          (tm.sleeperUsername && _sk(tm.sleeperUsername) === champKey) ||
+          (tm.teamName        && _sk(tm.teamName)        === champKey)
+        ));
+
+        careers[careerKey].seasons[year].push({
+          leagueName: lgName,
+          teamName:   tm.teamName || displayName,
+          wins:       tm.wins    || 0,
+          losses:     tm.losses  || 0,
+          ties:       tm.ties    || 0,
+          pf:         tm.pf      || 0,
+          isChamp,
+          platform:   lc.platform || "sleeper"
+        });
+      }
+    }
+
+    // ── Compute aggregates ───────────────────────────────────
+    const playerList = Object.values(careers).map(c => {
+      const yearKeys = Object.keys(c.seasons).sort((a, b) => b - a);
+      let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
+      yearKeys.forEach(yr => {
+        c.seasons[yr].forEach(s => {
+          totalLeagues++;
+          totalWins   += s.wins;
+          totalLosses += s.losses;
+          totalPF     += s.pf;
+          if (s.isChamp) totalChamps++;
+        });
+      });
+      const winPct = (totalWins + totalLosses) > 0
+        ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
+      return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues, totalWins, totalLosses, totalPF, totalChamps, winPct };
+    }).sort((a, b) => b.totalYears - a.totalYears || b.totalWins - a.totalWins);
+
+    if (!playerList.length) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">👥</div>
+          <div class="trn-empty-title">No player history yet</div>
+          <div class="trn-empty-sub">Sync standings to populate participant career data.</div>
+        </div>`;
+      return;
+    }
+
+    // ── Build a single player card HTML ─────────────────────
+    const _card = (p) => {
+      const champBadge  = p.totalChamps > 0
+        ? `<span class="trn-ph-champ-badge">🏆 ×${p.totalChamps}</span>` : "";
+      const genderBadge = p.gender === "Male"
+        ? `<span class="trn-gender-m">M</span>`
+        : p.gender === "Female" ? `<span class="trn-gender-f">F</span>` : "";
+      const twitterLink = p.twitter
+        ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.72rem">@${_esc(p.twitter.replace(/^@/,""))}</a>` : "";
+      const yearPills = p.yearKeys.map(yr => {
+        const hasChamp = p.seasons[yr].some(s => s.isChamp);
+        return `<span class="trn-ph-year-pill${hasChamp ? " trn-ph-year-pill--champ" : ""}">${_esc(yr)}${hasChamp ? " 🏆" : ""}</span>`;
+      }).join("");
+      return `
+        <div class="trn-ph-card" data-ph-key="${_esc(_sk(p.displayName))}" role="button" tabindex="0">
+          <div class="trn-ph-card-header">
+            <span class="trn-ph-avatar">${_esc((p.displayName || "?").slice(0, 2).toUpperCase())}</span>
+            <div class="trn-ph-card-info">
+              <div class="trn-ph-card-name">${_esc(p.displayName)} ${genderBadge} ${champBadge}</div>
+              <div class="trn-ph-card-meta">${twitterLink}</div>
+            </div>
+          </div>
+          <div class="trn-ph-stats-row">
+            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Yr${p.totalYears !== 1 ? "s" : ""}</div></div>
+            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Lgue${p.totalLeagues !== 1 ? "s" : ""}</div></div>
+            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">W–L</div></div>
+            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
+          </div>
+          <div class="trn-ph-years">${yearPills}</div>
+        </div>`;
+    };
+
+    const _renderGrid = (q) => {
+      const filtered = q
+        ? playerList.filter(p => p.displayName.toLowerCase().includes(q.toLowerCase()))
+        : playerList;
+      if (!filtered.length) return `<div class="trn-players-empty">No players match "${_esc(q)}"</div>`;
+      return filtered.map(_card).join("");
+    };
+
+    body.innerHTML = `
+      <div class="trn-players-toolbar">
+        <input type="text" id="trn-ph-search" class="trn-st-search"
+          placeholder="Search by name…" value="${_esc(_phSearch)}" />
+        <span style="font-size:.8rem;color:var(--color-text-dim);white-space:nowrap">${playerList.length} player${playerList.length !== 1 ? "s" : ""} · all years</span>
+      </div>
+      <div class="trn-ph-grid" id="trn-ph-grid">
+        ${_renderGrid(_phSearch)}
+      </div>`;
+
+    // ── Search ───────────────────────────────────────────────
+    document.getElementById("trn-ph-search")?.addEventListener("input", function() {
+      _phSearch = this.value;
+      const grid = document.getElementById("trn-ph-grid");
+      if (grid) grid.innerHTML = _renderGrid(_phSearch);
+      _wirePhCards(playerList, body);
+    });
+
+    // ── Wire card clicks → modal ─────────────────────────────
+    const _openPhModal = (p) => {
+      // Remove any existing modal
+      document.getElementById("trn-ph-modal-root")?.remove();
+
+      const modalRoot = document.createElement("div");
+      modalRoot.id        = "trn-ph-modal-root";
+      modalRoot.className = "trn-ph-modal-backdrop";
+      modalRoot.style.display = "flex";
+
+      const twitterLink = p.twitter
+        ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:var(--space-2)">@${_esc(p.twitter.replace(/^@/,""))}</a>` : "";
+      const genderBadge = p.gender === "Male"
+        ? ` <span class="trn-gender-m">M</span>`
+        : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
+
+      const yearSections = p.yearKeys.map(yr => {
+        const leagueRows = p.seasons[yr].map(s => {
+          const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
+          const platIcon = { sleeper: "🟢", mfl: "🔵", yahoo: "🟣" }[s.platform] || "⚪";
+          const result   = s.isChamp
+            ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>` : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
+          return `<tr>
+            <td class="trn-ph-tbl-league">${platIcon} ${_esc(s.leagueName)}</td>
+            <td class="trn-ph-tbl-num">${s.wins}–${s.losses}${tiesStr}</td>
+            <td class="trn-ph-tbl-num">${(s.pf || 0).toFixed(1)}</td>
+            <td style="padding:5px 6px">${result}</td>
+          </tr>`;
+        }).join("");
+        const yrWins   = p.seasons[yr].reduce((a, s) => a + s.wins, 0);
+        const yrLoss   = p.seasons[yr].reduce((a, s) => a + s.losses, 0);
+        const yrPF     = p.seasons[yr].reduce((a, s) => a + s.pf, 0);
+        const yrChamp  = p.seasons[yr].some(s => s.isChamp);
+        return `
+          <div class="trn-ph-year-section">
+            <div class="trn-ph-year-label">
+              <strong>${_esc(yr)}</strong>
+              <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:var(--space-2)">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""} · ${yrWins}–${yrLoss} · ${yrPF.toFixed(1)} pts</span>
+              ${yrChamp ? `<span class="trn-ph-champ-badge" style="margin-left:var(--space-2);font-size:.7rem">🏆 League Champ</span>` : ""}
+            </div>
+            <table class="trn-ph-career-table">
+              <thead><tr><th>League</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th><th>Result</th></tr></thead>
+              <tbody>${leagueRows}</tbody>
+            </table>
+          </div>`;
+      }).join("");
+
+      modalRoot.innerHTML = `
+        <div class="trn-ph-modal">
+          <div class="trn-ph-modal-header">
+            <span class="trn-ph-modal-title">${_esc(p.displayName)}</span>
+            <button class="modal-close" id="trn-ph-modal-close">✕</button>
+          </div>
+          <div class="trn-ph-modal-body">
+            <div class="trn-ph-modal-identity">${genderBadge}${twitterLink}</div>
+            <div class="trn-ph-modal-totals">
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Leagues</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(1)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
+              ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆 ×${p.totalChamps}</div><div class="trn-ph-stat-lbl">Champ${p.totalChamps !== 1 ? "s" : ""}</div></div>` : ""}
+            </div>
+            ${yearSections}
+          </div>
+        </div>`;
+
+      document.body.appendChild(modalRoot);
+      document.body.style.overflow = "hidden";
+
+      const _close = () => { modalRoot.remove(); document.body.style.overflow = ""; };
+      document.getElementById("trn-ph-modal-close")?.addEventListener("click", _close);
+      modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
+    };
+
+    const _wirePhCards = (list, ctx) => {
+      (ctx || body).querySelectorAll(".trn-ph-card").forEach(card => {
+        const key = card.dataset.phKey;
+        const p   = list.find(pl => _sk(pl.displayName) === key);
+        if (!p) return;
+        const open = () => _openPhModal(p);
+        card.addEventListener("click", open);
+        card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
+      });
+    };
+
+    _wirePhCards(playerList, body);
   }
 
   // ── User: Info tab ─────────────────────────────────────

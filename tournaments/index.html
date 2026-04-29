@@ -365,6 +365,7 @@
             ${hasPlayoffs  ? `<option value="playoffs"  ${_activeTab === "playoffs"  ? "selected" : ""}>🥇 Playoffs</option>`  : ""}
             ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
             ${Object.keys(t.rulesByYear || {}).length ? `<option value="rules" ${_activeTab === "rules" ? "selected" : ""}>📋 Rules</option>` : ""}
+            ${hasStandings ? `<option value="players" ${_activeTab === "players" ? "selected" : ""}>👥 Players</option>` : ""}
           </select>
         </div>
 
@@ -441,6 +442,7 @@
       else if (tab === "register")  renderRegisterTab(body);
       else if (tab === "adp")       renderAdpTab(body);
       else if (tab === "rules")     renderRulesTab(body);
+      else if (tab === "players")   renderPlayersTab(body);
     }
 
     // ── Info tab ────────────────────────────────────────────
@@ -510,6 +512,240 @@
         if (sel) sel.value = "rules";
         renderTab("rules");
       });
+    }
+
+    // ── Players tab — career history (public site) ──────────────────────────
+    // Reads from _currentT.standingsCache + _currentT.participantMap.
+    // participantMap keys are sanitized by _writePublicSummary in tournament.js.
+    // Year-agnostic: shows all years regardless of _selectedYear.
+    let _pubPhSearch = "";
+
+    function renderPlayersTab(body) {
+      const t    = _currentT;
+      const cache = t.standingsCache || {};
+      const pMap  = t.participantMap || {};
+      const _sk   = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+
+      // ── Build career data ──────────────────────────────────
+      const careers = {};
+
+      for (const lc of Object.values(cache)) {
+        const year     = String(lc.year || "Unknown");
+        const lgName   = lc.leagueName || "Unknown League";
+        const champion = lc.champion || null;
+        const champKey = champion
+          ? (_sk(champion.sleeperUsername || "") || _sk(champion.teamName || ""))
+          : null;
+
+        for (const tm of (lc.teams || [])) {
+          // Resolve participant: try sleeperUsername then teamName against participantMap
+          let part = null;
+          if (tm.sleeperUsername) part = pMap[_sk(tm.sleeperUsername)];
+          if (!part && tm.teamName) part = pMap[_sk(tm.teamName)];
+
+          const displayName = part?.displayName || tm.teamName || "Unknown";
+          const careerKey   = _sk(displayName);
+
+          if (!careers[careerKey]) {
+            careers[careerKey] = {
+              displayName,
+              gender:  part?.gender        || "",
+              twitter: part?.twitterHandle || "",
+              seasons: {}
+            };
+          }
+
+          if (!careers[careerKey].seasons[year]) careers[careerKey].seasons[year] = [];
+
+          const isChamp = !!(champKey && (
+            (tm.sleeperUsername && _sk(tm.sleeperUsername) === champKey) ||
+            (tm.teamName        && _sk(tm.teamName)        === champKey)
+          ));
+
+          careers[careerKey].seasons[year].push({
+            leagueName: lgName,
+            teamName:   tm.teamName || displayName,
+            wins:       tm.wins    || 0,
+            losses:     tm.losses  || 0,
+            ties:       tm.ties    || 0,
+            pf:         tm.pf      || 0,
+            isChamp,
+            platform:   lc.platform || "sleeper"
+          });
+        }
+      }
+
+      // ── Aggregate ──────────────────────────────────────────
+      const playerList = Object.values(careers).map(c => {
+        const yearKeys = Object.keys(c.seasons).sort((a, b) => b - a);
+        let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
+        yearKeys.forEach(yr => {
+          c.seasons[yr].forEach(s => {
+            totalLeagues++;
+            totalWins   += s.wins;
+            totalLosses += s.losses;
+            totalPF     += s.pf;
+            if (s.isChamp) totalChamps++;
+          });
+        });
+        const winPct = (totalWins + totalLosses) > 0
+          ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
+        return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues, totalWins, totalLosses, totalPF, totalChamps, winPct };
+      }).sort((a, b) => b.totalYears - a.totalYears || b.totalWins - a.totalWins);
+
+      if (!playerList.length) {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">👥</div>
+            <div class="trn-empty-title">No player history yet</div>
+            <div class="trn-empty-sub">Standings have not been synced for this tournament.</div>
+          </div>`;
+        return;
+      }
+
+      // ── Render helpers ─────────────────────────────────────
+      const _card = (p) => {
+        const champBadge  = p.totalChamps > 0 ? `<span class="trn-ph-champ-badge">🏆 ×${p.totalChamps}</span>` : "";
+        const genderBadge = p.gender === "Male"
+          ? `<span class="trn-gender-m">M</span>`
+          : p.gender === "Female" ? `<span class="trn-gender-f">F</span>` : "";
+        const twitterLink = p.twitter
+          ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.72rem">@${esc(p.twitter.replace(/^@/,""))}</a>` : "";
+        const yearPills = p.yearKeys.map(yr => {
+          const hasChamp = p.seasons[yr].some(s => s.isChamp);
+          return `<span class="trn-ph-year-pill${hasChamp ? " trn-ph-year-pill--champ" : ""}">${esc(yr)}${hasChamp ? " 🏆" : ""}</span>`;
+        }).join("");
+        return `
+          <div class="trn-ph-card" data-ph-key="${esc(_sk(p.displayName))}" role="button" tabindex="0">
+            <div class="trn-ph-card-header">
+              <span class="trn-ph-avatar">${esc((p.displayName || "?").slice(0, 2).toUpperCase())}</span>
+              <div class="trn-ph-card-info">
+                <div class="trn-ph-card-name">${esc(p.displayName)} ${genderBadge} ${champBadge}</div>
+                <div class="trn-ph-card-meta">${twitterLink}</div>
+              </div>
+            </div>
+            <div class="trn-ph-stats-row">
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Yr${p.totalYears !== 1 ? "s" : ""}</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Lgue${p.totalLeagues !== 1 ? "s" : ""}</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">W–L</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
+            </div>
+            <div class="trn-ph-years">${yearPills}</div>
+          </div>`;
+      };
+
+      const _renderGrid = (q) => {
+        const filtered = q
+          ? playerList.filter(p => p.displayName.toLowerCase().includes(q.toLowerCase()))
+          : playerList;
+        if (!filtered.length) return `<div class="trn-players-empty">No players match "${esc(q)}"</div>`;
+        return filtered.map(_card).join("");
+      };
+
+      body.innerHTML = `
+        <div class="trn-players-toolbar">
+          <input type="text" id="pub-ph-search" class="trn-st-search"
+            placeholder="Search by name…" value="${esc(_pubPhSearch)}" />
+          <span style="font-size:.8rem;color:var(--color-text-dim);white-space:nowrap">${playerList.length} player${playerList.length !== 1 ? "s" : ""} · all years</span>
+        </div>
+        <div class="trn-ph-grid" id="pub-ph-grid">
+          ${_renderGrid(_pubPhSearch)}
+        </div>`;
+
+      // ── Search ─────────────────────────────────────────────
+      document.getElementById("pub-ph-search")?.addEventListener("input", function() {
+        _pubPhSearch = this.value;
+        const grid = document.getElementById("pub-ph-grid");
+        if (grid) grid.innerHTML = _renderGrid(_pubPhSearch);
+        _wirePubPhCards(playerList);
+      });
+
+      // ── Card click → modal ─────────────────────────────────
+      const _openModal = (p) => {
+        document.getElementById("pub-ph-modal-root")?.remove();
+
+        const twitterLink = p.twitter
+          ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:var(--space-2)">@${esc(p.twitter.replace(/^@/,""))}</a>` : "";
+        const genderBadge = p.gender === "Male"
+          ? ` <span class="trn-gender-m">M</span>`
+          : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
+
+        const yearSections = p.yearKeys.map(yr => {
+          const leagueRows = p.seasons[yr].map(s => {
+            const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
+            const platIcon = { sleeper: "🟢", mfl: "🔵", yahoo: "🟣" }[s.platform] || "⚪";
+            const result   = s.isChamp
+              ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>`
+              : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
+            return `<tr>
+              <td class="trn-ph-tbl-league">${platIcon} ${esc(s.leagueName)}</td>
+              <td class="trn-ph-tbl-num">${s.wins}–${s.losses}${tiesStr}</td>
+              <td class="trn-ph-tbl-num">${(s.pf || 0).toFixed(1)}</td>
+              <td style="padding:5px 6px">${result}</td>
+            </tr>`;
+          }).join("");
+          const yrWins  = p.seasons[yr].reduce((a, s) => a + s.wins, 0);
+          const yrLoss  = p.seasons[yr].reduce((a, s) => a + s.losses, 0);
+          const yrPF    = p.seasons[yr].reduce((a, s) => a + s.pf, 0);
+          const yrChamp = p.seasons[yr].some(s => s.isChamp);
+          return `
+            <div class="trn-ph-year-section">
+              <div class="trn-ph-year-label">
+                <strong>${esc(yr)}</strong>
+                <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""} · ${yrWins}–${yrLoss} · ${yrPF.toFixed(1)} pts</span>
+                ${yrChamp ? `<span class="trn-ph-champ-badge" style="margin-left:8px;font-size:.7rem">🏆 League Champ</span>` : ""}
+              </div>
+              <table class="trn-ph-career-table">
+                <thead><tr><th>League</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th><th>Result</th></tr></thead>
+                <tbody>${leagueRows}</tbody>
+              </table>
+            </div>`;
+        }).join("");
+
+        const modalRoot = document.createElement("div");
+        modalRoot.id        = "pub-ph-modal-root";
+        modalRoot.className = "trn-ph-modal-backdrop";
+        modalRoot.style.display = "flex";
+        modalRoot.innerHTML = `
+          <div class="trn-ph-modal">
+            <div class="trn-ph-modal-header">
+              <span class="trn-ph-modal-title">${esc(p.displayName)}</span>
+              <button class="modal-close" id="pub-ph-close">✕</button>
+            </div>
+            <div class="trn-ph-modal-body">
+              <div class="trn-ph-modal-identity">${genderBadge}${twitterLink}</div>
+              <div class="trn-ph-modal-totals">
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Leagues</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(1)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
+                ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆 ×${p.totalChamps}</div><div class="trn-ph-stat-lbl">Champ${p.totalChamps !== 1 ? "s" : ""}</div></div>` : ""}
+              </div>
+              ${yearSections}
+            </div>
+          </div>`;
+
+        document.body.appendChild(modalRoot);
+        document.body.style.overflow = "hidden";
+
+        const _close = () => { modalRoot.remove(); document.body.style.overflow = ""; };
+        document.getElementById("pub-ph-close")?.addEventListener("click", _close);
+        modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
+      };
+
+      const _wirePubPhCards = (list) => {
+        document.querySelectorAll(".trn-ph-card").forEach(card => {
+          const key = card.dataset.phKey;
+          const p   = list.find(pl => _sk(pl.displayName) === key);
+          if (!p) return;
+          const open = () => _openModal(p);
+          card.addEventListener("click", open);
+          card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
+        });
+      };
+
+      _wirePubPhCards(playerList);
     }
 
     // ── Rules tab (public) ──────────────────────────────────
