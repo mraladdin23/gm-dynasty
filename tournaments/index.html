@@ -427,12 +427,12 @@
       renderTab(_activeTab);
     }
 
-    function renderTab(tab) {
+    async function renderTab(tab) {
       const body = document.getElementById("pub-tab-body");
       if (!body) return;
       if (tab === "info")           renderInfoTab(body);
       else if (tab === "standings") renderStandingsTab(body);
-      else if (tab === "playoffs")  renderPlayoffsTab(body);
+      else if (tab === "playoffs")  await renderPlayoffsTab(body);
       else if (tab === "register")  renderRegisterTab(body);
       else if (tab === "adp")       renderAdpTab(body);
       else if (tab === "rules")     renderRulesTab(body);
@@ -680,8 +680,7 @@
             <thead><tr>
               <th class="standings-rank" data-col="overallRank" style="${thStyle}">#${si("overallRank")}</th>
               <th data-col="teamName" style="${thStyle}">Team${si("teamName")}</th>
-              <th data-col="leagueName" class="trn-col-league" style="${thStyle}">League${si("leagueName")}</th>
-              ${hasConf ? `<th data-col="conference" class="trn-col-conf" style="${thStyle}">Conf${si("conference")}</th>` : ""}
+
               <th class="standings-win"  data-col="wins"   style="${thStyle}">W${si("wins")}</th>
               <th class="standings-loss" data-col="losses" style="${thStyle}">L${si("losses")}</th>
               <th class="standings-num"  data-col="pf"     style="${thStyle}">PF${si("pf")}</th>
@@ -695,12 +694,11 @@
                       <span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>
                       <span class="trn-st-name-wrap">
                         <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}${r.twitterHandle ? `<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter">@${esc(r.twitterHandle.replace(/^@/,""))}</a>` : ""}</span>
-                        <span class="trn-st-league trn-st-league--mobile">${esc(r.leagueName)}</span>
+                        ${hasConf && r.conference ? `<span class="trn-st-sub">${esc(r.conference)}</span>` : ""}
+                        <span class="trn-st-sub trn-st-sub--league">${esc(r.leagueName)}</span>
                       </span>
                     </span>
                   </td>
-                  <td class="trn-col-league">${esc(r.leagueName)}</td>
-                  ${hasConf ? `<td class="trn-col-conf">${esc(r.conference)}</td>` : ""}
                   <td class="standings-win">${r.wins}</td>
                   <td class="standings-loss">${r.losses}</td>
                   <td class="standings-num">${r.pf.toFixed(2)}</td>

@@ -3590,9 +3590,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const thead = "<thead><tr>" +
       '<th class="standings-rank" data-sort-col="overallRank" style="' + thBase + ';width:32px">#' + si("overallRank") + "</th>" +
       '<th data-sort-col="teamName" style="' + thBase + '">Team' + si("teamName") + "</th>" +
-      '<th data-sort-col="leagueName" class="trn-col-league" style="' + thBase + '">League' + si("leagueName") + "</th>" +
-      (hasConf ? '<th data-sort-col="conference" class="trn-col-conf" style="' + thBase + ';width:52px">Conf' + si("conference") + "</th>" : "") +
-      (hasDiv  ? '<th data-sort-col="division"   class="trn-col-conf" style="' + thBase + ';width:52px">Div'  + si("division")   + "</th>" : "") +
+
       extra.map(col => '<th data-sort-col="' + col.key + '" style="' + thBase + '">' + col.label + si(col.key) + "</th>").join("") +
       '<th class="standings-win"  data-sort-col="wins"   style="' + thBase + ';width:36px">W'  + si("wins")   + "</th>" +
       '<th class="standings-loss" data-sort-col="losses" style="' + thBase + ';width:36px">L'  + si("losses") + "</th>" +
@@ -3615,10 +3613,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const rowHtml = (r) =>
       "<tr>" +
       '<td class="standings-rank">' + r.overallRank + "</td>" +
-      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + "</span><span class=\"trn-st-name-wrap\"><span class=\"trn-st-name\">" + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + "</span><span class=\"trn-st-league trn-st-league--mobile\">" + _esc(r.leagueName) + "</span></span></span></td>" +
-      '<td class="trn-col-league">' + _esc(r.leagueName) + "</td>" +
-      (hasConf ? '<td class="trn-col-conf">' + _esc(r.conference) + "</td>" : "") +
-      (hasDiv  ? '<td class="trn-col-conf">' + _esc(r.division)   + "</td>" : "") +
+      '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + '</span>' +
+      (hasConf && r.conference ? '<span class="trn-st-sub">' + _esc(r.conference) + "</span>" : "") +
+      (hasDiv  && r.division   ? '<span class="trn-st-sub">' + _esc(r.division)   + "</span>" : "") +
+      '<span class="trn-st-sub trn-st-sub--league">' + _esc(r.leagueName) + "</span>" +
+      "</span></span></td>" +
       extra.map(col => {
         if (col.key === "twitterHandle") {
           const h = r.twitterHandle || "";
