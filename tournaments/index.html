@@ -877,7 +877,10 @@
         ${standings.length>20?`<div class="trn-po-more">+ ${standings.length-20} more teams</div>`:""}`;
 
       // ── Round view (points_rounds / custom_rounds) ─────────
-      // weeklyScores from snapshot: {leagueId: {week: {rosterId: pts}}}
+      // computedRounds: pre-computed at publish time with actual scores and blend values
+      const computedRounds = po.computedRounds || [];
+
+      // Fallback: derive from weeklyScores if computedRounds not present (legacy snapshots)
       const weeklyScores = po.weeklyScores || {};
       const _weekPts = (tm, week) => {
         if (!week || !tm.leagueId || !tm.teamId) return null;
@@ -890,6 +893,86 @@
         if (!round) return `<div class="trn-po-empty">Round data not available.</div>`;
         const isFinal  = roundIdx === rounds.length-1;
         const weekNum  = sw ? sw+roundIdx : null;
+
+        // ── Fast path: use pre-computed results from publish snapshot ────
+        const computed = computedRounds[roundIdx];
+        if (computed && computed.results?.length) {
+          const { blendEnabled, blendWeight, blendMode, poolByes, advCount, results } = computed;
+          const histLabel = roundIdx===0 ? "reg avg" : `avg (reg + ${roundIdx} playoff wk${roundIdx!==1?"s":""})`;
+          const blendNote = !blendEnabled ? "Score = this week's points"
+            : blendMode==="weighted"
+              ? `Score = week × ${100-blendWeight}% + ${histLabel} × ${blendWeight}%`
+              : `Score = week pts + ${histLabel} × ${blendWeight}%`;
+          const competitors = results.length - poolByes;
+          const summary = poolByes > 0
+            ? `${results.length} total · ${poolByes} byes · ${competitors} competing · ${advCount} advance · ${competitors-advCount} eliminated`
+            : `${results.length} competing · ${advCount} advance · ${results.length-advCount} eliminated`;
+          const tableId_  = `pub-round-table-${roundIdx}`;
+          const byeBarId_ = `pub-round-bye-bar-${roundIdx}`;
+          const headerCols_ = blendEnabled
+            ? `<th class="trn-po-th-num trn-po-col-wk">Wk Score</th><th class="trn-po-th-num trn-po-col-avg">Avg/Wk</th><th class="trn-po-th-num trn-po-col-blend">Blend</th>`
+            : `<th class="trn-po-th-num">Wk Score</th>`;
+          const colSpan_ = blendEnabled ? 6 : 4;
+          const tableClass_ = blendEnabled ? "trn-po-table trn-po-table--blend" : "trn-po-table";
+          const rows_ = results.map((tm, i) => {
+            const isByeTeam = tm.isBye;
+            const compIdx   = i - poolByes;
+            const rowCls    = tm.isChamp ? "trn-po-row--champion"
+              : isByeTeam ? "trn-po-row--bye-seed"
+              : tm.advances && !isByeTeam ? "trn-po-row--advance" : "trn-po-row--cut";
+            const badge = tm.isChamp
+              ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
+              : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+              : tm.advances ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+            const cutAfter = !isFinal && !isByeTeam && compIdx === advCount-1;
+            const scoreCell = isByeTeam
+              ? (blendEnabled ? `<td class="trn-po-num dim trn-po-col-wk">—</td><td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : `<td class="trn-po-num dim">—</td>`)
+              : blendEnabled
+                ? `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
+                   <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
+                   <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
+                : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
+            return `<tr class="${rowCls}${isByeTeam?" pub-bye-row":""}" ${isByeTeam?'style="display:none"':""}>
+              <td class="trn-po-rank">${i+1}</td>
+              <td class="trn-po-team-name">
+                <div>${esc(tm.displayName||tm.teamName||"—")}</div>
+                <div class="trn-st-sub trn-st-sub--league">${esc(tm.leagueName||"")}</div>
+              </td>
+              ${scoreCell}
+              <td>${badge}</td>
+            </tr>${cutAfter?`<tr class="trn-po-cut-row"><td colspan="${colSpan_}"><div class="trn-po-cut-divider">— Cut Line — ${advCount} advance · ${competitors-advCount} eliminated</div></td></tr>`:""}`;
+          }).join("");
+          setTimeout(() => {
+            const byeBar_ = document.getElementById(byeBarId_);
+            const table_  = document.getElementById(tableId_);
+            if (!byeBar_ || !table_ || poolByes === 0) return;
+            let vis = false;
+            const upd = () => {
+              byeBar_.innerHTML = `<button class="trn-po-bye-toggle">${vis?"▼ Hide":"▶ Show"} ${poolByes} bye${poolByes!==1?"s":""} (auto-advance)</button>`;
+              table_.querySelectorAll(".pub-bye-row").forEach(tr => { tr.style.display = vis ? "" : "none"; });
+              byeBar_.querySelector("button").onclick = () => { vis = !vis; upd(); };
+            };
+            upd();
+          }, 0);
+          return `
+            <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
+              <div class="trn-po-round-header">
+                <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
+                ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
+                <span class="trn-po-round-meta">${summary}</span>
+              </div>
+              <div class="trn-po-round-blend-note">${blendNote}</div>
+            </div>
+            <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
+              <div id="${byeBarId_}"></div>
+              <table class="${tableClass_}" id="${tableId_}">
+                <thead><tr><th>#</th><th>Team</th>${headerCols_}<th>Status</th></tr></thead>
+                <tbody>${rows_}</tbody>
+              </table>
+            </div>`;
+        }
+        // ── Fallback: derive from weeklyScores / PF (legacy snapshots) ──
 
         const blend        = round.blend;
         const blendEnabled = !!(blend?.enabled);

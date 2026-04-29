@@ -3872,6 +3872,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const s = stats[r.roster_id] || { wins:0, losses:0, ties:0, pf:0, pa:0 };
         return {
           teamId:   String(r.roster_id),
+          userId:   String(r.owner_id || ""),
           teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
           wins:     s.wins,
           losses:   s.losses,
@@ -3905,6 +3906,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const teams = (rosters || []).map(r => ({
       teamId:   String(r.roster_id),
+      userId:   String(r.owner_id || ""),
       teamName: uMap[r.owner_id] || ("Team " + r.roster_id),
       wins:     r.settings?.wins    || 0,
       losses:   r.settings?.losses  || 0,
@@ -6499,14 +6501,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const _skPo = (s) => String(s||'').trim().toLowerCase().replace(/[.#$\/\[\]]/g, '_');
     const genderMap      = {};
     const displayNameMap = {};
+    // Also build userId → gender/displayName map for stable cross-year matching
+    const userIdGenderMap      = {};
+    const userIdDisplayNameMap = {};
     Object.values(t.participants || {}).forEach(p => {
       [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(name => {
         const k = _skPo(name);
         if (p.gender)       genderMap[k]      = p.gender;
         if (p.displayName)  displayNameMap[k] = p.displayName;
       });
+      // userId is the most stable identifier across years
+      if (p.sleeperUserId) {
+        if (p.gender)      userIdGenderMap[String(p.sleeperUserId)]      = p.gender;
+        if (p.displayName) userIdDisplayNameMap[String(p.sleeperUserId)] = p.displayName;
+      }
     });
     const _displayName = (tm) =>
+      (tm.userId ? userIdDisplayNameMap[String(tm.userId)] : null) ||
       displayNameMap[_skPo(tm.teamName)] ||
       displayNameMap[_skPo(tm.rawTeamName)] ||
       tm.teamName || '—';
@@ -6516,8 +6527,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
       (lc.teams || []).forEach(tm => {
-        const gender      = genderMap[_skPo(tm.teamName)]      || genderMap[_skPo(tm.rawTeamName)]      || '';
-        const displayName = displayNameMap[_skPo(tm.teamName)] || displayNameMap[_skPo(tm.rawTeamName)] || tm.teamName || '';
+        // Try userId first (stable across years), then fall back to name-based lookup
+        const gender      = (tm.userId ? userIdGenderMap[String(tm.userId)] : null)
+          || genderMap[_skPo(tm.teamName)] || genderMap[_skPo(tm.rawTeamName)] || '';
+        const displayName = (tm.userId ? userIdDisplayNameMap[String(tm.userId)] : null)
+          || displayNameMap[_skPo(tm.teamName)] || displayNameMap[_skPo(tm.rawTeamName)] || tm.teamName || '';
         allTeams.push({
           ...tm,
           displayName,
@@ -7365,9 +7379,123 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     document.getElementById("trn-po-publish-btn")?.addEventListener("click", async () => {
       const btn = document.getElementById("trn-po-publish-btn");
-      if (btn) { btn.disabled=true; btn.textContent="Publishing…"; }
+      if (btn) { btn.disabled=true; btn.textContent="Fetching scores…"; }
       try {
-        await GMD.child(`publicTournaments/${tid}/playoffs`).set(_buildPlayoffSnapshot());
+        // Fetch all playoff weeks for all leagues before building snapshot
+        // This ensures _weekScoreCache is populated even if round tabs weren't visited
+        if (mode === "points_rounds" && po.startWeek) {
+          const rounds_ = po.pointsRounds?.rounds || [];
+          const weeksNeeded = rounds_.map((_, i) => po.startWeek + i);
+          const allLeagueIds = [...new Set(
+            qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean)
+          )];
+          if (btn) btn.textContent = `Fetching ${allLeagueIds.length} leagues × ${weeksNeeded.length} weeks…`;
+          await Promise.all(
+            weeksNeeded.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)))
+          );
+        }
+
+        // Build pre-computed round results: each round gets a sorted results array
+        // ready to display on the public site — no re-derivation needed
+        const _computedRounds = (() => {
+          if (mode !== "points_rounds") return [];
+          const rounds_ = po.pointsRounds?.rounds || [];
+          const regWeeks_ = po.startWeek ? po.startWeek - 1 : 14;
+
+          // Build bye-first pool (same as _renderPointsRound)
+          const _byeFirst_ = (teams) => {
+            const b = _sortByMetric(teams.filter(tm => byeSet.has(_teamKey(tm))), seedMetric);
+            const r = _sortByMetric(teams.filter(tm => !byeSet.has(_teamKey(tm))), seedMetric);
+            return [...b, ...r];
+          };
+
+          // Helper: get week score from cache
+          const _ws_ = (tm, week) => {
+            const lid = leagueIdByTeamKey[_teamKey(tm)];
+            if (!lid || !week) return null;
+            return _weekScoreCache[lid + "|" + week]?.[String(tm.teamId)] ?? null;
+          };
+
+          return rounds_.map((round, roundIdx) => {
+            const isFinal   = roundIdx === rounds_.length - 1;
+            const weekNum_  = po.startWeek + roundIdx;
+            const blend_    = round.blend;
+            const blendEn_  = !!(blend_?.enabled);
+            const blendWt_  = blend_?.weight ?? 30;
+            const blendMd_  = blend_?.mode || "weighted";
+
+            // Simulate pool through previous rounds
+            let pool_ = _byeFirst_([...qualifiers]);
+            for (let ri = 0; ri < roundIdx; ri++) {
+              const r_ = rounds_[ri];
+              const rWk_ = po.startWeek + ri;
+              const rByes_ = ri === 0 ? byeCount : 0;
+              const byeSec_ = pool_.slice(0, rByes_);
+              const compSec_ = pool_.slice(rByes_);
+              const adv_ = r_.advanceMethod === "pct"
+                ? Math.round(compSec_.length * (r_.advancePct || 50) / 100)
+                : (r_.advanceCount || 0);
+              const sorted_ = [...compSec_].sort((a, b) => {
+                const sa = _ws_(a, rWk_) ?? -1;
+                const sb = _ws_(b, rWk_) ?? -1;
+                return sb !== sa ? sb - sa : (b.pf||0) - (a.pf||0);
+              });
+              pool_ = [...byeSec_, ...sorted_.slice(0, adv_)];
+            }
+
+            const poolByes_   = roundIdx === 0 ? byeCount : 0;
+            const competitors_ = pool_.length - poolByes_;
+            const advCount_   = isFinal ? 1
+              : round.advanceMethod === "pct"
+                ? Math.round(competitors_ * (round.advancePct || 50) / 100)
+                : (round.advanceCount || 0);
+
+            // Score and sort
+            const byeSec2_ = pool_.slice(0, poolByes_);
+            const compSec2_ = pool_.slice(poolByes_).map(tm => {
+              const wkScore   = _ws_(tm, weekNum_);
+              const regAvgPW  = (tm.pf || 0) / Math.max(1, regWeeks_);
+              const bScore    = !blendEn_ || wkScore == null ? null
+                : blendMd_ === "weighted"
+                  ? wkScore * (1 - blendWt_/100) + regAvgPW * (blendWt_/100)
+                  : wkScore + regAvgPW * (blendWt_/100);
+              return { ...tm, wkScore, regAvgPW, bScore };
+            }).sort((a, b) => {
+              const sa = blendEn_ ? (b.bScore ?? b.wkScore ?? b.pf) : (b.wkScore ?? b.pf);
+              const sb = blendEn_ ? (a.bScore ?? a.wkScore ?? a.pf) : (a.wkScore ?? a.pf);
+              return sa - sb;
+            });
+
+            const sorted2_ = [...byeSec2_.map(tm => ({
+              ...tm, wkScore: null, regAvgPW: (tm.pf||0)/Math.max(1,regWeeks_), bScore: null
+            })), ...compSec2_];
+
+            return {
+              roundIdx, weekNum: weekNum_,
+              blendEnabled: blendEn_, blendWeight: blendWt_, blendMode: blendMd_,
+              poolByes: poolByes_, advCount: advCount_,
+              results: sorted2_.map((tm, i) => ({
+                teamName:    tm.teamName,
+                displayName: _displayName(tm),
+                leagueName:  tm.leagueName,
+                teamId:      tm.teamId || "",
+                leagueId:    leagueIdByTeamKey[_teamKey(tm)] || "",
+                pf:          tm.pf,
+                wkScore:     tm.wkScore,
+                regAvgPW:    parseFloat((tm.regAvgPW||0).toFixed(2)),
+                bScore:      tm.bScore != null ? parseFloat(tm.bScore.toFixed(2)) : null,
+                isBye:       i < poolByes_,
+                advances:    i < poolByes_ || (i - poolByes_) < advCount_,
+                isChamp:     isFinal && i === poolByes_
+              }))
+            };
+          });
+        })();
+
+        const snapshot = _buildPlayoffSnapshot();
+        snapshot.computedRounds = _computedRounds;
+        if (btn) btn.textContent = "Writing…";
+        await GMD.child(`publicTournaments/${tid}/playoffs`).set(snapshot);
         showToast("Playoffs published ✓");
       } catch(e) { showToast("Publish failed: "+e.message, "error"); }
       finally { if (btn) { btn.disabled=false; btn.textContent="📢 Publish"; } }
