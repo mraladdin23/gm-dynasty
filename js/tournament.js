@@ -1226,9 +1226,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             ${type === "wins_threshold"
               ? `<span class="trn-qs-gate-badge">GATE</span>`
               : isScoped
-                ? `<span class="trn-qs-total-chip trn-qs-total-chip--scoped" title="Total depends on number of ${scope}s">${chipText} <span style="font-size:.6rem">*</span></span>`
+                ? `<span class="trn-qs-total-chip trn-qs-total-chip--scoped" title="Total depends on number of ${scope}s">${chipText}</span>`
                 : `<span class="trn-qs-total-chip">+${slotsAdded} → ${runningTotal}</span>`}
           </div>
+          ${type !== "wins_threshold" ? _scopePills() : ""}
           <button class="trn-qs-remove btn-secondary btn-xs" data-step-idx="${idx}">✕</button>
         </div>
         <div class="trn-qual-step-card-body">
@@ -1237,8 +1238,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <input type="number" class="trn-qs-count" data-step-idx="${idx}"
                 min="1" max="999" value="${count}"
                 style="width:54px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;margin:0 4px" />
-              ${_scopePills()}
-              <span style="font-size:.8rem;color:var(--color-text-dim);margin-left:4px">by H2H record (not yet qualified)</span>
+              <span style="font-size:.8rem;color:var(--color-text-dim)">by H2H record (not yet qualified)</span>
             </div>
           </div>
           <div class="trn-qs-body-pf" ${type==="top_pf"?"":"style=\"display:none\""}>
@@ -1246,8 +1246,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <input type="number" class="trn-qs-count" data-step-idx="${idx}"
                 min="1" max="999" value="${count}"
                 style="width:54px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;margin:0 4px" />
-              ${_scopePills()}
-              <span style="font-size:.8rem;color:var(--color-text-dim);margin-left:4px">by Points For (not yet qualified)</span>
+              <span style="font-size:.8rem;color:var(--color-text-dim)">by Points For (not yet qualified)</span>
             </div>
           </div>
           <div class="trn-qs-body-wins" ${type==="wins_threshold"?"":"style=\"display:none\""}>
@@ -1281,9 +1280,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 <option value="pf"     ${subMetric==="pf"?"selected":""}>Points For</option>
                 <option value="record" ${subMetric==="record"?"selected":""}>H2H Record</option>
               </select>
-              ${_scopePills()}
             </div>
-            <div class="trn-qs-subgroup-hint">Value must match registration data exactly (case-sensitive). Scope: overall tournament, per conference, or per division.</div>
+            <div class="trn-qs-subgroup-hint">Value must match registration data exactly (case-sensitive).</div>
           </div>
         </div>
       </div>`;
@@ -1596,7 +1594,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span style="font-size:.78rem;color:var(--color-text-dim)">
             Syncs from your leagues for the active year. Edit inline, then publish.
           </span>
-          <button class="btn-secondary btn-xs" id="trn-scoring-sync-btn">↺ Sync Scoring</button>
+          <div style="display:flex;gap:var(--space-1)">
+            <button class="btn-secondary btn-xs" id="trn-scoring-clear-btn" title="Delete stored scoring data for this year and re-sync from scratch">🗑 Clear &amp; Re-sync</button>
+            <button class="btn-secondary btn-xs" id="trn-scoring-sync-btn">↺ Sync Scoring</button>
+          </div>
         </div>
         <div id="trn-scoring-admin-body">
           ${_renderScoringAdminBody((t.scoringSettings || {})[activeYear] || null)}
@@ -1945,6 +1946,37 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       } catch(e) { showToast("Failed","error"); }
     });
 
+    // ── Blend helpers (defined before PR/CR events that call them) ────────────
+    const _wireBlendRow=(container)=>{
+      if(!container) return;
+      container.querySelectorAll(".trn-blend-check").forEach(cb=>{
+        cb.addEventListener("change",()=>{ const wrap=cb.closest(".trn-round-blend-row")?.querySelector(".trn-blend-weight-wrap"); if(wrap) wrap.style.display=cb.checked?"":"none"; });
+      });
+      container.querySelectorAll(".trn-blend-mode-btn").forEach(btn=>{
+        btn.addEventListener("click",()=>{
+          const row=btn.closest(".trn-round-blend-row"); const isW=btn.classList.contains("trn-blend-mode-weighted");
+          row?.querySelectorAll(".trn-blend-mode-btn").forEach(b=>b.classList.toggle("trn-yn-btn--active",b.classList.contains(isW?"trn-blend-mode-weighted":"trn-blend-mode-additive")));
+          const pct=row?.querySelector(".trn-blend-pct"); const fml=row?.querySelector(".trn-blend-formula");
+          const _upd=()=>{ const w=parseInt(pct?.value)||30; if(fml) fml.textContent=isW?`week × ${100-w}% + avg × ${w}%`:`week score + avg × ${w}%`; };
+          pct?.addEventListener("input",_upd); _upd();
+        });
+      });
+      container.querySelectorAll(".trn-blend-pct").forEach(inp=>{
+        inp.addEventListener("input",()=>{
+          const row=inp.closest(".trn-round-blend-row"); const fml=row?.querySelector(".trn-blend-formula");
+          const isW=row?.querySelector(".trn-blend-mode-weighted")?.classList.contains("trn-yn-btn--active");
+          const w=parseInt(inp.value)||30; if(fml) fml.textContent=isW?`week × ${100-w}% + avg × ${w}%`:`week score + avg × ${w}%`;
+        });
+      });
+    };
+
+    const _readBlend=(container)=>{
+      const cb=container.querySelector(".trn-blend-check"); const pct=container.querySelector(".trn-blend-pct");
+      const isW=container.querySelector(".trn-blend-mode-weighted")?.classList.contains("trn-yn-btn--active");
+      if(!cb?.checked) return null;
+      return { enabled:true, mode:isW?"weighted":"additive", weight:parseInt(pct?.value)||30 };
+    };
+
     // ── Points Rounds ───────────────────────────────────
     const prList = document.getElementById("trn-pr-rounds-list");
     const _getPRRounds = () => Array.from(prList?.querySelectorAll(".trn-pr-round-row")||[]).map(row=>{
@@ -2019,53 +2051,48 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       catch(e) { showToast("Failed","error"); }
     });
 
-    // ── Blend helper ────────────────────────────────────
-    const _wireBlendRow=(container)=>{
-      if(!container) return;
-      container.querySelectorAll(".trn-blend-check").forEach(cb=>{
-        cb.addEventListener("change",()=>{ const wrap=cb.closest(".trn-round-blend-row")?.querySelector(".trn-blend-weight-wrap"); if(wrap) wrap.style.display=cb.checked?"":"none"; });
-      });
-      container.querySelectorAll(".trn-blend-mode-btn").forEach(btn=>{
-        btn.addEventListener("click",()=>{
-          const row=btn.closest(".trn-round-blend-row"); const isW=btn.classList.contains("trn-blend-mode-weighted");
-          row?.querySelectorAll(".trn-blend-mode-btn").forEach(b=>b.classList.toggle("trn-yn-btn--active",b.classList.contains(isW?"trn-blend-mode-weighted":"trn-blend-mode-additive")));
-          const pct=row?.querySelector(".trn-blend-pct"); const fml=row?.querySelector(".trn-blend-formula");
-          const _upd=()=>{ const w=parseInt(pct?.value)||30; if(fml) fml.textContent=isW?`week × ${100-w}% + avg × ${w}%`:`week score + avg × ${w}%`; };
-          pct?.addEventListener("input",_upd); _upd();
-        });
-      });
-      container.querySelectorAll(".trn-blend-pct").forEach(inp=>{
-        inp.addEventListener("input",()=>{
-          const row=inp.closest(".trn-round-blend-row"); const fml=row?.querySelector(".trn-blend-formula");
-          const isW=row?.querySelector(".trn-blend-mode-weighted")?.classList.contains("trn-yn-btn--active");
-          const w=parseInt(inp.value)||30; if(fml) fml.textContent=isW?`week × ${100-w}% + avg × ${w}%`:`week score + avg × ${w}%`;
-        });
-      });
-    };
-
-    const _readBlend=(container)=>{
-      const cb=container.querySelector(".trn-blend-check"); const pct=container.querySelector(".trn-blend-pct");
-      const isW=container.querySelector(".trn-blend-mode-weighted")?.classList.contains("trn-yn-btn--active");
-      if(!cb?.checked) return null;
-      return { enabled:true, mode:isW?"weighted":"additive", weight:parseInt(pct?.value)||30 };
-    };
-
     // ── Scoring settings ────────────────────────────────
+    const _buildScoringToSync = () => {
+      const tData = _tournaments[tid] || t;
+      const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
+      const toSync = [];
+      Object.entries(tData.leagues || {}).filter(([, v]) => isBatch(v)).forEach(([, batch]) => {
+        if (String(batch.year) !== String(_activePoYear)) return;
+        Object.entries(batch.leagues || {}).forEach(([leagueId, leagueData]) => {
+          toSync.push({ leagueId, platform: batch.platform || "sleeper",
+            year: batch.year || new Date().getFullYear(),
+            leagueName: leagueData?.name || leagueData?.leagueName || leagueId });
+        });
+      });
+      return toSync;
+    };
+
+    document.getElementById("trn-scoring-clear-btn")?.addEventListener("click", async () => {
+      if (!confirm(`Delete all stored scoring data for ${_activePoYear} and re-sync from your leagues?`)) return;
+      const btn = document.getElementById("trn-scoring-clear-btn");
+      if (btn) { btn.disabled = true; btn.textContent = "Clearing…"; }
+      try {
+        await _tScoringRef(tid).child(String(_activePoYear)).remove();
+        if (_tournaments[tid]?.scoringSettings) delete _tournaments[tid].scoringSettings[_activePoYear];
+        const toSync = _buildScoringToSync();
+        if (!toSync.length) { showToast(`No leagues found for year ${_activePoYear}.`, "info"); return; }
+        showToast(`Cleared. Re-syncing from ${toSync.length} leagues…`);
+        await _syncScoringSettings(tid, toSync, _activePoYear);
+        const snap = await _tRef(tid).once("value");
+        if (snap.exists()) _tournaments[tid] = snap.val();
+        const bodyEl = document.getElementById("trn-scoring-admin-body");
+        if (bodyEl) bodyEl.innerHTML = _renderScoringAdminBody((_tournaments[tid].scoringSettings||{})[_activePoYear]||null);
+        _wireScoringPublish();
+        showToast("Scoring re-synced ✓");
+      } catch(e) { showToast("Failed: "+e.message, "error"); }
+      finally { if (btn) { btn.disabled=false; btn.textContent="🗑 Clear & Re-sync"; } }
+    });
+
     document.getElementById("trn-scoring-sync-btn")?.addEventListener("click", async () => {
       const btn = document.getElementById("trn-scoring-sync-btn");
       if (btn) { btn.disabled = true; btn.textContent = "Syncing…"; }
       try {
-        const tData = _tournaments[tid] || t;
-        const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
-        const toSync  = [];
-        Object.entries(tData.leagues || {}).filter(([, v]) => isBatch(v)).forEach(([, batch]) => {
-          if (String(batch.year) !== String(_activePoYear)) return;
-          Object.entries(batch.leagues || {}).forEach(([leagueId, leagueData]) => {
-            toSync.push({ leagueId, platform: batch.platform || "sleeper",
-              year: batch.year || new Date().getFullYear(),
-              leagueName: leagueData?.name || leagueData?.leagueName || leagueId });
-          });
-        });
+        const toSync = _buildScoringToSync();
         if (!toSync.length) { showToast(`No leagues found for year ${_activePoYear}.`, "info"); return; }
         await _syncScoringSettings(tid, toSync, _activePoYear);
         const snap = await _tRef(tid).once("value");
