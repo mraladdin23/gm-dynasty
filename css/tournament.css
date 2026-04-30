@@ -3270,22 +3270,36 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-3);
-  min-width: 180px;
-  max-width: 220px;
-  flex: 1 1 180px;
+  min-width: 200px;
+  max-width: 240px;
+  flex: 1 1 200px;
 }
 .trn-wc-group-header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+/* ── Advance-to-bracket row ───────────────────────────── */
+.trn-wc-adv-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: 4px 6px;
+  background: rgba(79,142,247,.08);
+  border: 1px solid rgba(79,142,247,.25);
+  border-radius: var(--radius-sm);
   flex-wrap: wrap;
 }
 .trn-wc-adv-label {
   font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
   color: var(--color-text-dim);
   white-space: nowrap;
-  margin-left: auto;
 }
 .trn-wc-members-list {
   display: flex;
@@ -3321,6 +3335,9 @@
   background: var(--color-surface);
   color: var(--color-text);
 }
+/* optgroup labels bold, options normal weight */
+.trn-wc-add-row select optgroup { font-weight: 700; }
+.trn-wc-add-row select option   { font-weight: 400; padding-left: 4px; }
 
 /* ── Schedule section ─────────────────────────────────── */
 .trn-wc-group-tabs {

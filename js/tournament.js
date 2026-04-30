@@ -1615,20 +1615,46 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // wcSchedule: { [gi]: { [weekIndex]: [{home, away}, ...] } }
     const wcSchedule       = po.worldcupSchedule       || {};
 
-    // Helper: build all team names assigned in any group (for dropdowns)
-    const _wcAllGroupTeams = () => {
-      const names = new Set();
-      wcGroups.forEach(g => (g.members||[]).forEach(n => names.add(n)));
-      // Also pull from standingsCache so admin can assign before standings exist
+    // Build team list grouped by league for <optgroup> dropdowns.
+    // Returns array of { leagueName, teams:[{value, label}] } sorted by league name,
+    // teams alpha-sorted within each league.
+    // label = "Fantasy Team Name (sleeper_handle)" so admins can identify by either.
+    const _wcBuildLeagueGroups = (excludeSet) => {
+      const byLeague = {};
       Object.values(t.standingsCache||{}).forEach(lc => {
         if (String(lc.year) !== String(activeYear)) return;
-        (lc.teams||[]).forEach(tm => { if (tm.teamName) names.add(tm.teamName); });
+        const lgName = lc.leagueName || "Unknown League";
+        if (!byLeague[lgName]) byLeague[lgName] = [];
+        (lc.teams||[]).forEach(tm => {
+          if (!tm.teamName) return;
+          if (excludeSet && excludeSet.has(tm.teamName)) return;
+          if (byLeague[lgName].some(e => e.value === tm.teamName)) return; // dedupe
+          // Show Sleeper handle if it differs from team name (could be username or displayName)
+          const handle = tm.sleeperUsername || tm.sleeperDisplayName || "";
+          const label  = handle && handle.toLowerCase() !== tm.teamName.toLowerCase()
+            ? `${tm.teamName} (${handle})`
+            : tm.teamName;
+          byLeague[lgName].push({ value: tm.teamName, label });
+        });
+        byLeague[lgName].sort((a, b) => a.label.localeCompare(b.label));
       });
-      return [...names].sort();
+      return Object.entries(byLeague)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .map(([leagueName, teams]) => ({ leagueName, teams }));
     };
-    const wcAllTeams = _wcAllGroupTeams();
 
-    // Render one group card (groups list, no schedule here)
+    // Render <optgroup> HTML for a dropdown, excluding the given members array
+    const _wcOptgroupHTML = (excludeMembers) => {
+      const excluded = new Set(excludeMembers || []);
+      return _wcBuildLeagueGroups(excluded)
+        .map(({ leagueName, teams }) => {
+          if (!teams.length) return "";
+          const opts = teams.map(t => `<option value="${_esc(t.value)}">${_esc(t.label)}</option>`).join("");
+          return `<optgroup label="${_esc(leagueName)}">${opts}</optgroup>`;
+        }).join("");
+    };
+
+    // Render one group card
     const _wcGroupCardHTML = (group, gi) => {
       const members  = group.members || [];
       const advance  = group.advanceCount ?? wcAdvanceCount;
@@ -1642,19 +1668,22 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <div class="trn-wc-group-header">
             <input class="trn-wc-group-name" type="text" value="${_esc(group.name||('Group '+(gi+1)))}"
               data-gi="${gi}" placeholder="Group name"
-              style="font-weight:700;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid var(--color-border);color:var(--color-text);padding:2px 4px;width:110px" />
-            <span class="trn-wc-adv-label">
-              Top <input type="number" class="trn-wc-adv-count" data-gi="${gi}"
-                value="${advance}" min="1" max="${Math.max(1,members.length)}"
-                style="width:32px;font-size:.75rem;padding:1px 4px;text-align:center;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" /> adv.
-            </span>
+              style="font-weight:700;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid var(--color-border);color:var(--color-text);padding:2px 4px;flex:1;min-width:0" />
             <button class="trn-wc-del-group btn-secondary btn-xs" data-gi="${gi}" title="Delete group">🗑</button>
+          </div>
+          <div class="trn-wc-adv-row">
+            <span class="trn-wc-adv-label">Advance to bracket:</span>
+            <input type="number" class="trn-wc-adv-count" data-gi="${gi}"
+              value="${advance}" min="1" max="${Math.max(1,members.length||8)}"
+              title="How many teams from this group advance to the knockout bracket"
+              style="width:38px;font-size:.85rem;padding:2px 5px;text-align:center;border:1px solid var(--color-accent,#4f8ef7);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);font-weight:700" />
+            <span style="font-size:.72rem;color:var(--color-text-dim)">of ${members.length||"?"}</span>
           </div>
           <div class="trn-wc-members-list" id="trn-wc-members-${gi}">${memberRows || '<div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>'}</div>
           <div class="trn-wc-add-row">
             <select class="trn-wc-add-select" data-gi="${gi}">
               <option value="">— Add team —</option>
-              ${wcAllTeams.filter(n => !(members.includes(n))).map(n => `<option value="${_esc(n)}">${_esc(n)}</option>`).join("")}
+              ${_wcOptgroupHTML(members)}
             </select>
           </div>
         </div>`;
@@ -1737,6 +1766,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <button class="btn-primary btn-sm"   id="trn-cr-save">Save Rounds</button>
             </div>`
           : /* worldcup */ `
+            <!-- ── WC info note ── -->
+            <div class="trn-section-help" style="margin-bottom:var(--space-3)">
+              <strong>ℹ️ World Cup qualification is set per group.</strong>
+              Each group card below has an "Advance to bracket" field — that controls how many teams from each group move on.
+              The Qualification Rules and Seeding &amp; Byes sections don't apply in this mode.
+            </div>
             <!-- ── WC Global Settings ── -->
             <div class="trn-wc-settings-row">
               <div class="trn-wc-setting">
@@ -1816,8 +1851,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${yearBarHTML}
           <select class="trn-pc-section-select" id="trn-pc-section-select">
             <option value="format">⚙️ Playoff Format</option>
-            <option value="qual"   ${(!showQual||showWC)?"disabled":""}>📋 Qualification Rules${(!showQual||showWC)?" (n/a)":""}</option>
-            <option value="seeding" ${(!showSeeding||showWC)?"disabled":""}>🏅 Seeding &amp; Byes${(!showSeeding||showWC)?" (n/a)":""}</option>
+            <option value="qual"   ${(!showQual||showWC)?"disabled":""} title="${showWC?"World Cup: set advance count on each group card instead":""}">📋 Qualification Rules${(!showQual||showWC)?" (n/a)":""}</option>
+            <option value="seeding" ${(!showSeeding||showWC)?"disabled":""} title="${showWC?"World Cup: bracket seeding is done manually in the Playoffs → Bracket tab":""}">🏅 Seeding &amp; Byes${(!showSeeding||showWC)?" (n/a)":""}</option>
             <option value="rounds" ${(!showRounds&&!showWC)?"disabled":""}>🔄 Group &amp; Schedule Config${(!showRounds&&!showWC)?" (n/a)":""}</option>
             <option value="scoring">📊 Scoring Settings</option>
           </select>
@@ -2296,18 +2331,62 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return sched;
       };
 
-      // Re-render a member list for a group card in-place
+      // Re-render a member list for a group card in-place and refresh its dropdown
       const _wcRenderMembers = (gi, members) => {
+        // Update member list
         const listEl = document.getElementById(`trn-wc-members-${gi}`);
-        if (!listEl) return;
-        listEl.innerHTML = members.length
-          ? members.map((name, mi) => `
-              <div class="trn-wc-member-row" data-gi="${gi}" data-mi="${mi}">
-                <span class="trn-wc-member-name">${_esc(name)}</span>
-                <button class="trn-wc-remove-member btn-ghost btn-xs" data-gi="${gi}" data-mi="${mi}" title="Remove">✕</button>
-              </div>`).join("")
-          : '<div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>';
+        if (listEl) {
+          listEl.innerHTML = members.length
+            ? members.map((name, mi) => `
+                <div class="trn-wc-member-row" data-gi="${gi}" data-mi="${mi}">
+                  <span class="trn-wc-member-name">${_esc(name)}</span>
+                  <button class="trn-wc-remove-member btn-ghost btn-xs" data-gi="${gi}" data-mi="${mi}" title="Remove">✕</button>
+                </div>`).join("")
+            : '<div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>';
+        }
+        // Refresh dropdown — rebuild with optgroups excluding current members
+        const sel = document.querySelector(`.trn-wc-add-select[data-gi="${gi}"]`);
+        if (sel) {
+          sel.innerHTML = `<option value="">— Add team —</option>` + _wcBuildDropdownOptgroups(members);
+        }
+        // Update "of N" count label
+        const card = document.querySelector(`.trn-wc-group-card[data-gi="${gi}"]`);
+        const ofSpan = card?.querySelector(".trn-wc-adv-row span:last-child");
+        if (ofSpan) ofSpan.textContent = `of ${members.length||"?"}`;
+        // Update max on the advance input
+        const advInput = card?.querySelector(".trn-wc-adv-count");
+        if (advInput && members.length) advInput.max = members.length;
         _wcWireGroupCard(gi);
+      };
+
+      // Build <optgroup> innerHTML for a dropdown, excluding the given member names.
+      // Reads live from standingsCache so it's always up to date.
+      const _wcBuildDropdownOptgroups = (excludeMembers) => {
+        const excluded = new Set(excludeMembers || []);
+        const tData    = _tournaments[_activeTournamentId] || t;
+        const byLeague = {};
+        Object.values(tData.standingsCache||{}).forEach(lc => {
+          if (String(lc.year) !== String(_activePoYear)) return;
+          const lgName = lc.leagueName || "Unknown League";
+          if (!byLeague[lgName]) byLeague[lgName] = [];
+          (lc.teams||[]).forEach(tm => {
+            if (!tm.teamName || excluded.has(tm.teamName)) return;
+            if (byLeague[lgName].some(e => e.value === tm.teamName)) return;
+            const handle = tm.sleeperUsername || tm.sleeperDisplayName || "";
+            const label  = handle && handle.toLowerCase() !== tm.teamName.toLowerCase()
+              ? `${tm.teamName} (${handle})`
+              : tm.teamName;
+            byLeague[lgName].push({ value: tm.teamName, label });
+          });
+          byLeague[lgName].sort((a, b) => a.label.localeCompare(b.label));
+        });
+        return Object.entries(byLeague)
+          .sort(([a],[b]) => a.localeCompare(b))
+          .map(([lgName, teams]) => {
+            if (!teams.length) return "";
+            const opts = teams.map(e => `<option value="${_esc(e.value)}">${_esc(e.label)}</option>`).join("");
+            return `<optgroup label="${_esc(lgName)}">${opts}</optgroup>`;
+          }).join("");
       };
 
       // Wire remove-member + add-select for one group card
@@ -2363,35 +2442,34 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const listEl = document.getElementById("trn-wc-groups-list");
         if (!listEl) return;
         listEl.querySelector(".trn-po-empty")?.remove();
-        const gi      = listEl.querySelectorAll(".trn-wc-group-card").length;
-        const defAdv  = parseInt(document.getElementById("trn-wc-default-adv")?.value) || 2;
-        const allT    = Array.from(document.querySelectorAll(".trn-wc-member-name")).map(el=>el.textContent.trim());
-        const card    = document.createElement("div");
+        const gi     = listEl.querySelectorAll(".trn-wc-group-card").length;
+        const defAdv = parseInt(document.getElementById("trn-wc-default-adv")?.value) || 2;
+        const card   = document.createElement("div");
         card.className = "trn-wc-group-card"; card.dataset.gi = gi;
         card.innerHTML = `
           <div class="trn-wc-group-header">
             <input class="trn-wc-group-name" type="text" value="Group ${gi+1}" data-gi="${gi}"
-              style="font-weight:700;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid var(--color-border);color:var(--color-text);padding:2px 4px;width:110px" />
-            <span class="trn-wc-adv-label">Top <input type="number" class="trn-wc-adv-count" data-gi="${gi}"
-              value="${defAdv}" min="1" max="8" style="width:32px;font-size:.75rem;padding:1px 4px;text-align:center;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" /> adv.</span>
+              style="font-weight:700;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid var(--color-border);color:var(--color-text);padding:2px 4px;flex:1;min-width:0" />
             <button class="trn-wc-del-group btn-secondary btn-xs" data-gi="${gi}" title="Delete group">🗑</button>
           </div>
-          <div class="trn-wc-members-list" id="trn-wc-members-${gi}"><div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div></div>
+          <div class="trn-wc-adv-row">
+            <span class="trn-wc-adv-label">Advance to bracket:</span>
+            <input type="number" class="trn-wc-adv-count" data-gi="${gi}"
+              value="${defAdv}" min="1" max="8"
+              title="How many teams from this group advance to the knockout bracket"
+              style="width:38px;font-size:.85rem;padding:2px 5px;text-align:center;border:1px solid var(--color-accent,#4f8ef7);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);font-weight:700" />
+            <span style="font-size:.72rem;color:var(--color-text-dim)">of ?</span>
+          </div>
+          <div class="trn-wc-members-list" id="trn-wc-members-${gi}">
+            <div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>
+          </div>
           <div class="trn-wc-add-row">
             <select class="trn-wc-add-select" data-gi="${gi}">
               <option value="">— Add team —</option>
+              ${_wcBuildDropdownOptgroups([])}
             </select>
           </div>`;
         listEl.appendChild(card);
-        // Populate the add-select with available teams from standingsCache (minus already-assigned)
-        const assignedNames = new Set(Array.from(document.querySelectorAll(".trn-wc-member-name")).map(el=>el.textContent.trim()));
-        const sel = card.querySelector(".trn-wc-add-select");
-        Object.values(_tournaments[_activeTournamentId]?.standingsCache||{}).forEach(lc => {
-          if (String(lc.year) !== String(_activePoYear)) return;
-          (lc.teams||[]).forEach(tm => { if (tm.teamName && !assignedNames.has(tm.teamName)) {
-            const o = document.createElement("option"); o.value = tm.teamName; o.textContent = tm.teamName; sel?.appendChild(o);
-          }});
-        });
         _wcWireGroupCard(gi);
       });
 
@@ -4406,12 +4484,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     if (!rU.ok || !rR.ok) return null;
     const users   = await rU.json();
     const rosters = await rR.json();
-    const uMap = {};
+    // teamNameMap: the fantasy team name shown in league standings (metadata.team_name preferred)
+    // displayNameMap_u: the Sleeper account display name — stored separately so dropdown labels
+    //   can show "Team Name (sleeper_handle)" for easier identification.
+    const teamNameMap      = {};
+    const displayNameMap_u = {};
     const sleeperUsernameMap = {}; // user_id -> username (stable handle)
     (users || []).forEach(u => {
-      uMap[u.user_id] = u.display_name || u.username || u.user_id;
+      const fantasyName = (u.metadata?.team_name || "").trim();
+      const displayName = (u.display_name || u.username || u.user_id || "").trim();
+      teamNameMap[u.user_id]      = fantasyName || displayName;  // prefer league team name
+      displayNameMap_u[u.user_id] = displayName;
       if (u.username) sleeperUsernameMap[u.user_id] = u.username.toLowerCase();
     });
+    const uMap = teamNameMap; // alias — rest of function uses uMap unchanged
 
     // Parse league info to determine if playoffs ran and who won
     const leagueInfo = rL.ok ? await rL.json().catch(() => null) : null;
@@ -4477,10 +4563,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const teams = (rosters || []).map(r => {
         const s = stats[r.roster_id] || { wins:0, losses:0, ties:0, pf:0, pa:0 };
         return {
-          teamId:          String(r.roster_id),
-          userId:          String(r.owner_id || ""),
-          sleeperUsername: sleeperUsernameMap[r.owner_id] || "",
-          teamName:        uMap[r.owner_id] || ("Team " + r.roster_id),
+          teamId:             String(r.roster_id),
+          userId:             String(r.owner_id || ""),
+          sleeperUsername:    sleeperUsernameMap[r.owner_id] || "",
+          sleeperDisplayName: displayNameMap_u[r.owner_id]   || "",
+          teamName:           uMap[r.owner_id] || ("Team " + r.roster_id),
           wins:     s.wins,
           losses:   s.losses,
           ties:     s.ties,
@@ -4512,10 +4599,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     }
 
     const teams = (rosters || []).map(r => ({
-      teamId:          String(r.roster_id),
-      userId:          String(r.owner_id || ""),
-      sleeperUsername: sleeperUsernameMap[r.owner_id] || "",
-      teamName:        uMap[r.owner_id] || ("Team " + r.roster_id),
+      teamId:             String(r.roster_id),
+      userId:             String(r.owner_id || ""),
+      sleeperUsername:    sleeperUsernameMap[r.owner_id] || "",
+      sleeperDisplayName: displayNameMap_u[r.owner_id]   || "",
+      teamName:           uMap[r.owner_id] || ("Team " + r.roster_id),
       wins:     r.settings?.wins    || 0,
       losses:   r.settings?.losses  || 0,
       ties:     r.settings?.ties    || 0,
@@ -9326,21 +9414,35 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         return `
           <div class="trn-po-tp-note">
-            🌍 Seed the knockout bracket from group results. Seed 1 plays Seed N, Seed 2 plays Seed N−1, etc.
-            ${wcWPR > 1 ? `Each round spans <strong>${wcWPR} weeks</strong>.` : ""}
-            ${startWeekPo ? `Bracket begins Week <strong>${startWeekPo}</strong>.` : ""}
+            <strong>Step 1:</strong> Confirm which teams advance in each group (set "Advance to bracket" on each group card in Group &amp; Schedule Config).<br>
+            <strong>Step 2:</strong> Once group play ends, come back here and arrange the seed order below.<br>
+            <strong>Step 3:</strong> Hit "Save &amp; Lock Bracket" — this creates the knockout bracket.
+            ${wcWPR > 1 ? `<br><strong>Each round spans ${wcWPR} weeks</strong> — scores are combined.` : ""}
+            ${startWeekPo ? `<br><strong>Bracket begins Week ${startWeekPo}.</strong>` : `<br><em>Tip: Set a Playoff Start Week in Playoff Format so live scores are tracked.</em>`}
           </div>
-          ${groups.length ? `<div class="trn-section-card" style="margin-bottom:var(--space-3)"><div class="trn-section-card-title">Group Advancers (reference)</div>${groupRef}</div>` : ""}
+          ${groups.length ? `
+            <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+              <div class="trn-section-card-title">Group Advancers — reference</div>
+              <div style="font-size:.74rem;color:var(--color-text-dim);margin-bottom:var(--space-2)">Based on saved advance counts. Edit seed order below to set actual bracket matchups.</div>
+              ${groupRef}
+            </div>` : `
+            <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+              <div class="trn-po-empty" style="padding:var(--space-4) 0">No groups configured yet. Go to Group &amp; Schedule Config to set up groups and assign teams.</div>
+            </div>`}
           <div class="trn-section-card">
-            <div class="trn-section-card-title">Bracket Seeds — edit order to adjust matchups</div>
-            <div id="trn-wc-seed-list" style="display:flex;flex-direction:column;gap:var(--space-2)">
-              ${seedRows || `<div style="color:var(--color-text-dim);font-size:.82rem">No group advancers configured yet.</div>`}
+            <div class="trn-section-card-title">Bracket Seeds</div>
+            <div style="font-size:.74rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+              Edit the team names in seed order. Matchup pairing: <strong>Seed 1 vs Seed ${advancers.length || "N"}</strong>, <strong>Seed 2 vs Seed ${advancers.length ? advancers.length-1 : "N−1"}</strong>, etc.
+              Add rows for any additional teams (wildcards, extra advancers, etc.).
             </div>
-            ${advancers.length ? `
-              <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
-                <button class="btn-primary btn-sm" id="trn-wc-seed-save">💾 Save &amp; Lock Bracket</button>
-                <button class="btn-secondary btn-xs" id="trn-wc-seed-add">+ Add Seed</button>
-              </div>` : ""}
+            <div id="trn-wc-seed-list" style="display:flex;flex-direction:column;gap:var(--space-2)">
+              ${seedRows || `<div style="color:var(--color-text-dim);font-size:.82rem;font-style:italic">No group advancers yet — add groups and set advance counts first, then return here.</div>`}
+            </div>
+            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3);flex-wrap:wrap;align-items:center">
+              <button class="btn-primary btn-sm" id="trn-wc-seed-save">🔒 Save &amp; Lock Bracket</button>
+              <button class="btn-secondary btn-xs" id="trn-wc-seed-add">+ Add Row</button>
+              <span style="font-size:.74rem;color:var(--color-text-dim)">After locking, use "✏ Adjust Seeding" to unlock and change the order.</span>
+            </div>
           </div>`;
       }
 
@@ -9362,12 +9464,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           ${numSeeds}-team bracket
           ${wcByeCount > 0 ? ` · ${wcByeCount} first-round bye${wcByeCount!==1?"s":""}` : ""}
           · ${wcWPR} week${wcWPR!==1?"s":""}/round
-          ${startWeekPo ? ` · Bracket starts Week ${startWeekPo}` : ""}
+          ${startWeekPo
+            ? ` · Round 1: Week${wcWPR > 1 ? `s ${startWeekPo}–${startWeekPo+wcWPR-1}` : " "+startWeekPo}`
+            : " · Set Playoff Start Week in Playoff Format to enable live scores"}
         </div>
         ${tid ? `<div style="text-align:right;margin-bottom:var(--space-2)"><button class="btn-secondary btn-xs" id="trn-wc-reseed-btn">✏ Adjust Seeding</button></div>` : ""}
         <div class="trn-po-bracket-wrap"><div class="trn-po-bracket">
           <div class="trn-po-bracket-round">
-            <div class="trn-po-bracket-round-title">${getRoundName(0,numRounds)}</div>
+            <div class="trn-po-bracket-round-title">
+              ${getRoundName(0,numRounds)}
+              ${startWeekPo ? `<span class="trn-po-week-tag">${wcWPR>1?`Wks ${startWeekPo}–${startWeekPo+wcWPR-1}`:`Wk ${startWeekPo}`}</span>` : ""}
+            </div>
             ${r1Byes.map(tm=>`<div class="trn-po-matchup trn-po-matchup--bye"><div class="trn-po-matchup-row">
               <span class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</span>
               <span class="trn-po-matchup-team trn-po-matchup-team--bye">${_esc(tm.displayName)}</span>
@@ -9379,14 +9486,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${_esc(m.b.displayName)}</span><span class="trn-po-matchup-pf">${m.b.pf.toFixed(1)}</span></div>
             </div>`).join("")}
           </div>
-          ${Array.from({length:numRounds-1},(_,ri)=>`<div class="trn-po-bracket-round">
-            <div class="trn-po-bracket-round-title">${getRoundName(ri+1,numRounds)}</div>
-            ${Array.from({length:Math.pow(2,numRounds-ri-2)},()=>`<div class="trn-po-matchup trn-po-matchup--tbd">
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
-              <div class="trn-po-matchup-vs">vs</div>
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
-            </div>`).join("")}
-          </div>`).join("")}
+          ${Array.from({length:numRounds-1},(_,ri)=>{
+            const rStartWk = startWeekPo ? startWeekPo + (ri+1)*wcWPR : null;
+            const weekTag  = rStartWk
+              ? `<span class="trn-po-week-tag">${wcWPR>1?`Wks ${rStartWk}–${rStartWk+wcWPR-1}`:`Wk ${rStartWk}`}</span>`
+              : "";
+            return `<div class="trn-po-bracket-round">
+              <div class="trn-po-bracket-round-title">${getRoundName(ri+1,numRounds)} ${weekTag}</div>
+              ${Array.from({length:Math.pow(2,numRounds-ri-2)},()=>`<div class="trn-po-matchup trn-po-matchup--tbd">
+                <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+                <div class="trn-po-matchup-vs">vs</div>
+                <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+              </div>`).join("")}
+            </div>`;
+          }).join("")}
         </div></div>
         <div class="trn-po-seed-list">
           <div class="trn-po-section-title">Bracket Seeds</div>
