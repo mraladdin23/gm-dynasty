@@ -3018,8 +3018,12 @@
 /* ── Column widths ─────────────────────────────────────── */
 .trn-ph-col-rank  { width: 32px; text-align: right; padding: 8px 6px 8px 8px; color: var(--color-text-dim); font-size: .78rem; }
 .trn-ph-col-name  { padding: 8px; min-width: 140px; }
-.trn-ph-col-num   { width: 52px; text-align: right; padding: 8px 8px 8px 4px; font-variant-numeric: tabular-nums; font-size: .82rem; }
-.trn-ph-col-champ { width: 90px; padding: 8px; }
+.trn-ph-col-num   { width: 52px; text-align: center; padding: 8px 4px; font-variant-numeric: tabular-nums; font-size: .82rem; }
+.trn-ph-col-champ { width: 90px; padding: 8px; text-align: center; }
+
+/* Override the generic left-align on thead th for numeric/champ columns */
+.trn-ph-list-table thead th.trn-ph-col-num,
+.trn-ph-list-table thead th.trn-ph-col-champ { text-align: center; }
 
 /* ── Row states ────────────────────────────────────────── */
 .trn-ph-row {
@@ -3080,11 +3084,13 @@
 /* .trn-ph-grid, .trn-ph-card remain defined for backward compat       */
 
 @media (max-width: 500px) {
-  .trn-ph-col-num   { width: 42px; padding: 6px 4px; font-size: .78rem; }
-  .trn-ph-col-champ { width: 70px; }
+  .trn-ph-col-num   { width: 36px; padding: 6px 2px; font-size: .75rem; }
+  .trn-ph-col-champ { width: 60px; padding: 6px 4px; }
   .trn-ph-col-rank  { width: 24px; }
-  .trn-ph-list-table { font-size: .8rem; }
+  .trn-ph-list-table { font-size: .78rem; }
 }
+
+/* NOTE: bump tournament.css version in index.html <link> tag on deploy */
 
 /* ═══════════════════════════════════════════════════════════
    F-AZ Part 2 — Analytics: PO Rate, Most Rostered, ADP vs Finish
