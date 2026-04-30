@@ -435,7 +435,6 @@ const DLRTournament = (() => {
       <option value="playoffs"      ${_activeAdminTab === "playoffs"      ? "selected" : ""}>🥇 Playoffs</option>
       <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>
       <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>
-      <option value="poapprate"     ${_activeAdminTab === "poapprate"     ? "selected" : ""}>📈 PO Appearance Rate</option>
       <option value="mostrostered"  ${_activeAdminTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
       <option value="adpvsfinish"   ${_activeAdminTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>`;
 
@@ -448,7 +447,6 @@ const DLRTournament = (() => {
       <option value="matchups"      ${_activeUserTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
       <option value="rosters"       ${_activeUserTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
       <option value="players"       ${_activeUserTab === "players"       ? "selected" : ""}>👥 Players</option>
-      <option value="poapprate"     ${_activeUserTab === "poapprate"     ? "selected" : ""}>📈 PO Appearance Rate</option>
       <option value="mostrostered"  ${_activeUserTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
       <option value="adpvsfinish"   ${_activeUserTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>`;
     const regOpen = ["registration_open","active"].includes(meta.status);
@@ -568,7 +566,6 @@ const DLRTournament = (() => {
         case "rosters":       return _renderAnalyticsRosters(tid, t, body);
         case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
         case "players":       return _renderPlayersTab(tid, t, body);
-        case "poapprate":     return _renderAnalyticsPORate(tid, t, body);
         case "mostrostered":  return _renderAnalyticsMostRostered(tid, t, body);
         case "adpvsfinish":   return _renderAnalyticsADPvFinish(tid, t, body);
         default:              return _renderAdminOverview(tid, t, body);
@@ -584,7 +581,6 @@ const DLRTournament = (() => {
         case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
         case "players":    return _renderPlayersTab(tid, t, body);
-        case "poapprate":  return _renderAnalyticsPORate(tid, t, body);
         case "mostrostered": return _renderAnalyticsMostRostered(tid, t, body);
         case "adpvsfinish":  return _renderAnalyticsADPvFinish(tid, t, body);
         default:           return _renderInfoTab(t, body, tid);
@@ -6934,7 +6930,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       return { ...c, allYears, totalSeasons: allYears.length, poApps, tChamps, bestRank, rate: parseInt(rate), streak };
     }).filter(r => r.totalSeasons > 0);
 
-    rows.sort((a, b) => b.rate - a.rate || b.totalSeasons - a.totalSeasons || b.poApps - a.poApps);
+    rows.sort((a, b) => {
+      if (b.rate !== a.rate) return b.rate - a.rate;
+      // Secondary: best finish (lower rank number = better)
+      if (a.bestRank !== b.bestRank) {
+        if (a.bestRank === null) return 1;
+        if (b.bestRank === null) return -1;
+        return a.bestRank - b.bestRank;
+      }
+      return b.totalSeasons - a.totalSeasons;
+    });
 
     if (!rows.length) {
       body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">📈</div><div class="trn-empty-title">No data yet</div><div class="trn-empty-sub">Sync standings and publish playoffs to see appearance rates.</div></div>`;
@@ -7255,15 +7260,32 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const poYr     = poByYear[String(year)] || {};
     const hasPoData = Object.keys(poYr).length > 0;
 
-    // Build teamName → qualified boolean for this year
-    const scEntries = Object.values(t.standingsCache || {}).filter(lc => lc.year === year);
-    const teamQualMap = {}; // sanitizedTeamName → true/false
+    // Build participant displayName lookup for draft pick teamName resolution
+    const pLookup = {};
+    Object.values(t.participants || {}).forEach(p => {
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).map(_sk)
+        .forEach(k => { pLookup[k] = p; });
+    });
+
+    // Build teamName/displayName → qualified boolean for this year.
+    // Draft picks use teamName resolved via standingsCache+participant map.
+    // poByYear keys on sanitized displayName AND teamName AND sleeperUsername,
+    // so we try all three for each team in standingsCache.
+    const scEntries = Object.values(t.standingsCache || {}).filter(lc => String(lc.year) === String(year));
+    const teamQualMap = {}; // sanitized teamName → true/false
     scEntries.forEach(lc => {
       (lc.teams || []).forEach(tm => {
-        const byUser = tm.sleeperUsername ? poYr[_sk(tm.sleeperUsername)] : null;
-        const byName = poYr[_sk(tm.teamName || "")];
-        const entry  = byUser || byName;
-        teamQualMap[_sk(tm.teamName || "")] = !!(entry?.qualified);
+        // Try all keys that _buildPoByYear may have stored under
+        const tryKeys = [
+          tm.teamName, tm.sleeperUsername,
+          // Also try the participant displayName for this team
+          ...(tm.sleeperUsername ? [pLookup?.[_sk(tm.sleeperUsername)]?.displayName] : []),
+          ...(tm.teamName        ? [pLookup?.[_sk(tm.teamName)]?.displayName]        : [])
+        ].filter(Boolean);
+
+        const entry = tryKeys.reduce((found, k) => found || poYr[_sk(k)], null);
+        // Store under sanitized teamName (what draft picks use)
+        if (tm.teamName) teamQualMap[_sk(tm.teamName)] = !!(entry?.qualified);
       });
     });
 
@@ -7412,7 +7434,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const cache  = t.standingsCache  || {};
     const parts  = t.participants    || {};
 
-    // ── Build participant lookup ─────────────────────────────
+    // ── Participant lookup ───────────────────────────────────
     const pLookup = {};
     Object.values(parts).forEach(p => {
       [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).map(_sk)
@@ -7427,25 +7449,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // ── Build careers from standingsCache ────────────────────
     const careers = {};
     for (const lc of Object.values(cache)) {
-      const year     = String(lc.year || "Unknown");
-      const lgName   = lc.leagueName || "Unknown League";
-      const champion = lc.champion || null;
-      const champKey = champion
-        ? (_sk(champion.sleeperUsername || "") || _sk(champion.teamName || "")) : null;
+      const year   = String(lc.year || "Unknown");
+      const lgName = lc.leagueName || "Unknown League";
+      const champKey = lc.champion
+        ? (_sk(lc.champion.sleeperUsername || "") || _sk(lc.champion.teamName || "")) : null;
 
       for (const tm of (lc.teams || [])) {
         const part        = _findPart(tm);
         const displayName = part?.displayName || tm.teamName || "Unknown";
-        const careerKey   = _sk(displayName);
-        if (!careers[careerKey]) {
-          careers[careerKey] = { displayName, gender: part?.gender || "", twitter: part?.twitterHandle || "", seasons: {} };
+        const ck          = _sk(displayName);
+        if (!careers[ck]) {
+          careers[ck] = { displayName, gender: part?.gender || "", twitter: part?.twitterHandle || "", seasons: {} };
         }
-        if (!careers[careerKey].seasons[year]) careers[careerKey].seasons[year] = [];
+        if (!careers[ck].seasons[year]) careers[ck].seasons[year] = [];
         const isChamp = !!(champKey && (
           (tm.sleeperUsername && _sk(tm.sleeperUsername) === champKey) ||
           (tm.teamName        && _sk(tm.teamName)        === champKey)
         ));
-        careers[careerKey].seasons[year].push({
+        careers[ck].seasons[year].push({
           leagueName: lgName, teamName: tm.teamName || displayName,
           wins: tm.wins || 0, losses: tm.losses || 0, ties: tm.ties || 0,
           pf: tm.pf || 0, isChamp, platform: lc.platform || "sleeper"
@@ -7453,47 +7474,62 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       }
     }
 
-    // ── Join playoff data from t.playoffs (year-keyed) ───────
-    // t.playoffs[year].standings[] has {displayName, teamName, qualified, bye}
-    const poByYear = {};
-    const poData = t.playoffs || {};
-    for (const [yr, po] of Object.entries(poData)) {
-      if (!/^\d{4}$/.test(String(yr))) continue;
-      if (!po?.standings) continue;
-      poByYear[String(yr)] = {};
-      po.standings.forEach((tm, idx) => {
-        const isTournamentChamp = (po.mode === "total_points" && idx === 0) || !!(tm.isChamp);
-        [tm.displayName, tm.teamName].filter(Boolean).map(_sk).forEach(k => {
-          poByYear[String(yr)][k] = { qualified: !!(tm.qualified), bye: !!(tm.bye), isTournamentChamp };
-        });
-      });
-    }
+    // ── Playoff data via shared helper (_buildPoByYear) ──────
+    // Uses finalRankings if published, otherwise qual-engine fallback.
+    const poByYear  = _buildPoByYear(t);
+    const hasPoData = Object.keys(poByYear).length > 0;
 
-    // ── Aggregate ────────────────────────────────────────────
+    // All years across standings + playoff data, newest first
+    const allYearsSet = [...new Set([
+      ...Object.values(cache).map(lc => lc.year).filter(Boolean),
+      ...Object.keys(poByYear)
+    ])].sort((a, b) => String(b).localeCompare(String(a)));
+
+    // ── Aggregate career stats ───────────────────────────────
     const playerList = Object.values(careers).map(c => {
-      const yearKeys = Object.keys(c.seasons).sort((a, b) => b - a);
-      let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
-      let playoffApps = 0, tournamentChamps = 0;
+      const yearKeys = Object.keys(c.seasons).sort((a, b) => String(b).localeCompare(String(a)));
       const cKey = _sk(c.displayName);
+      let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
+      let playoffApps = 0, tournamentChamps = 0, bestRank = null;
+      const yearData = {};
+
       yearKeys.forEach(yr => {
         c.seasons[yr].forEach(s => {
           totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
           if (s.isChamp) totalChamps++;
         });
         const poEntry = (poByYear[yr] || {})[cKey];
-        if (poEntry?.qualified) playoffApps++;
-        if (poEntry?.isTournamentChamp) tournamentChamps++;
+        yearData[yr] = poEntry || { qualified: false, bye: false, rank: null, isTChamp: false };
+        if (poEntry?.qualified)  playoffApps++;
+        if (poEntry?.isTChamp)   tournamentChamps++;
+        if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
       });
+
+      // Streak: consecutive most-recent seasons qualified
+      let streak = 0;
+      for (const yr of yearKeys) {
+        if (yearData[yr]?.qualified) streak++;
+        else break;
+      }
+
       const winPct = (totalWins + totalLosses) > 0
         ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
-      return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues,
-        totalWins, totalLosses, totalPF, totalChamps, playoffApps, tournamentChamps, winPct };
+
+      return { ...c, yearKeys, yearData,
+        totalYears: yearKeys.length, totalLeagues,
+        totalWins, totalLosses, totalPF, totalChamps,
+        playoffApps, tournamentChamps, bestRank, winPct, streak };
     });
 
-    // Sort: tournament champs first, then years desc, then win% desc
+    // ── Sort: tourn champs → years desc → bestRank asc → winPct desc ─────
     playerList.sort((a, b) => {
       if (b.tournamentChamps !== a.tournamentChamps) return b.tournamentChamps - a.tournamentChamps;
       if (b.totalYears !== a.totalYears) return b.totalYears - a.totalYears;
+      if (a.bestRank !== b.bestRank) {
+        if (a.bestRank === null) return 1;
+        if (b.bestRank === null) return -1;
+        return a.bestRank - b.bestRank;
+      }
       return (parseFloat(b.winPct) || 0) - (parseFloat(a.winPct) || 0);
     });
 
@@ -7509,7 +7545,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     const PH_PAGE_SIZE = 25;
 
-    // ── Build paginated list HTML ────────────────────────────
+    // ── Build list row HTML ──────────────────────────────────
     const _renderList = (q, pg) => {
       const filtered = q
         ? playerList.filter(p => p.displayName.toLowerCase().includes(q.toLowerCase()))
@@ -7521,11 +7557,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const slice     = filtered.slice((curPg - 1) * PH_PAGE_SIZE, curPg * PH_PAGE_SIZE);
       const startRank = (curPg - 1) * PH_PAGE_SIZE + 1;
 
+      const pipHeaders = allYearsSet.map(y =>
+        `<span style="font-size:.62rem;font-weight:600;display:inline-block;width:14px;text-align:center">${String(y).slice(2)}</span>`
+      ).join("");
+
       const rows = slice.map((p, i) => {
         const rank        = startRank + i;
         const isTChamp    = p.tournamentChamps > 0;
         const isLChamp    = p.totalChamps > 0 && !isTChamp;
-        const rowCls      = isTChamp ? "trn-ph-row trn-ph-row--tchamp" : isLChamp ? "trn-ph-row trn-ph-row--lchamp" : "trn-ph-row";
+        const rowCls      = isTChamp ? "trn-ph-row trn-ph-row--tchamp"
+          : isLChamp ? "trn-ph-row trn-ph-row--lchamp" : "trn-ph-row";
         const genderBadge = p.gender === "Male"
           ? `<span class="trn-gender-m" style="font-size:.65rem">M</span>`
           : p.gender === "Female" ? `<span class="trn-gender-f" style="font-size:.65rem">F</span>` : "";
@@ -7534,28 +7575,53 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           : p.totalChamps > 0
             ? `<span class="trn-ph-champ-badge" style="background:rgba(99,102,241,.15);color:#a78bfa;border-color:rgba(99,102,241,.3)">🥇 ×${p.totalChamps}</span>`
             : `<span style="color:var(--color-text-dim)">—</span>`;
-        const poCell = p.playoffApps > 0
-          ? `<span style="color:var(--color-green,#4ade80);font-weight:600">${p.playoffApps}</span>/<span style="color:var(--color-text-dim)">${p.totalYears}</span>`
-          : `<span style="color:var(--color-text-dim)">0/${p.totalYears}</span>`;
+        const poCell = hasPoData
+          ? (p.playoffApps > 0
+              ? `<span style="color:#4ade80;font-weight:600">${p.playoffApps}</span><span style="color:var(--color-text-dim)">/${p.totalYears}</span>`
+              : `<span style="color:var(--color-text-dim)">0/${p.totalYears}</span>`)
+          : `<span style="color:var(--color-text-dim)">—</span>`;
+        const bestCell = p.bestRank
+          ? (p.bestRank === 1
+              ? `<span style="color:var(--color-gold,#d4af37);font-weight:700">1 🏆</span>`
+              : `<span style="font-weight:600">${p.bestRank}</span>`)
+          : `<span style="color:var(--color-text-dim)">—</span>`;
+        const yearPips = allYearsSet.map(yr => {
+          const e   = p.yearData[yr];
+          const inS = !!(p.seasons[yr]);
+          if (!e && !inS) return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: did not play"></span>`;
+          const cls = !e ? "trn-az-yr-pip--absent"
+            : e.isTChamp  ? "trn-az-yr-pip--champ"
+            : e.qualified ? "trn-az-yr-pip--qual"
+            : "trn-az-yr-pip--elim";
+          const tip = !e ? `${yr}: played, no PO data`
+            : e.isTChamp  ? `${yr}: 🏆 Champion`
+            : e.qualified ? `${yr}: ✓ Qualified${e.bye ? " (BYE)" : ""}${e.rank ? " · Rank " + e.rank : ""}`
+            : `${yr}: Eliminated`;
+          return `<span class="trn-az-yr-pip ${cls}" title="${tip}"></span>`;
+        }).join("");
+
         return `
           <tr class="${rowCls}" data-ph-key="${_esc(_sk(p.displayName))}" role="button" tabindex="0" style="cursor:pointer">
             <td class="trn-ph-col-rank">${rank}</td>
             <td class="trn-ph-col-name">
               <span style="font-weight:600">${_esc(p.displayName)}</span>
               ${genderBadge}
+              ${p.streak >= 2 ? `<span class="trn-az-streak-badge">🔥 ${p.streak}</span>` : ""}
               ${p.twitter ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.68rem" onclick="event.stopPropagation()">@${_esc(p.twitter.replace(/^@/,""))}</a>` : ""}
             </td>
-            <td class="trn-ph-col-num">${p.totalYears}</td>
-            <td class="trn-ph-col-num">${p.totalWins}–${p.totalLosses}</td>
-            <td class="trn-ph-col-num">${p.winPct !== null ? p.winPct + "%" : "—"}</td>
-            <td class="trn-ph-col-num">${poCell}</td>
-            <td class="trn-ph-col-champ">${champCell}</td>
+            <td class="trn-ph-col-num" style="text-align:center">${p.totalYears}</td>
+            <td class="trn-ph-col-num" style="text-align:center">${p.totalWins}–${p.totalLosses}</td>
+            <td class="trn-ph-col-num" style="text-align:center">${p.winPct !== null ? p.winPct + "%" : "—"}</td>
+            <td class="trn-ph-col-num" style="text-align:center">${poCell}</td>
+            <td class="trn-ph-col-num" style="text-align:center">${bestCell}</td>
+            <td class="trn-ph-col-champ" style="text-align:center">${champCell}</td>
+            <td class="trn-az-pips-cell">${yearPips}</td>
           </tr>`;
       }).join("");
 
       const pagination = totalPgs > 1 ? `
         <tr class="trn-ph-pagination-row">
-          <td colspan="7">
+          <td colspan="9">
             <div class="trn-ph-pagination">
               <button class="draft-toggle-btn" id="trn-ph-prev" ${curPg <= 1 ? "disabled" : ""}>‹ Prev</button>
               <span style="font-size:.82rem;color:var(--color-text-dim)">Page ${curPg} of ${totalPgs} · ${filtered.length} players</span>
@@ -7566,15 +7632,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       return `
         <div class="trn-ph-list-wrap">
+          ${hasPoData ? `<div class="trn-az-legend" style="margin-bottom:var(--space-2)">
+            <span class="trn-az-yr-pip trn-az-yr-pip--champ"></span> Champion &nbsp;
+            <span class="trn-az-yr-pip trn-az-yr-pip--qual"></span> Qualified &nbsp;
+            <span class="trn-az-yr-pip trn-az-yr-pip--elim"></span> Eliminated &nbsp;
+            <span class="trn-az-yr-pip trn-az-yr-pip--absent"></span> No play &nbsp;
+            🔥 = active streak
+          </div>` : ""}
           <table class="trn-ph-list-table">
             <thead><tr>
               <th class="trn-ph-col-rank">#</th>
               <th class="trn-ph-col-name">Player</th>
-              <th class="trn-ph-col-num trn-ph-th-tip" title="Seasons played">Yrs</th>
-              <th class="trn-ph-col-num trn-ph-th-tip" title="Career wins–losses">W–L</th>
-              <th class="trn-ph-col-num trn-ph-th-tip" title="Win percentage">Win%</th>
-              <th class="trn-ph-col-num trn-ph-th-tip" title="Playoff appearances / seasons played">PO</th>
-              <th class="trn-ph-col-champ trn-ph-th-tip" title="🏆 Tournament Champion · 🥇 League Champion">Titles</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Seasons played">Yrs</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Career wins–losses">W–L</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Win percentage">Win%</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Playoff appearances / seasons played">PO</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Best tournament finish rank">Best</th>
+              <th class="trn-ph-col-champ trn-ph-th-tip" style="text-align:center" title="🏆 Tournament Champion · 🥇 League Champion">Titles</th>
+              <th class="trn-az-pips-cell trn-ph-th-tip" title="Year-by-year playoff history (hover for detail)">${pipHeaders}</th>
             </tr></thead>
             <tbody>${rows}</tbody>
             ${pagination}
@@ -7583,8 +7658,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     };
 
     const _refresh = () => {
-      const wrap = document.getElementById("trn-ph-list-wrap");
-      if (wrap) wrap.outerHTML = _renderList(_phSearch, _phPage);
+      const outer = document.getElementById("trn-ph-list-outer");
+      if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
       _wirePhRows(playerList);
     };
 
@@ -7598,24 +7673,21 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     document.getElementById("trn-ph-search")?.addEventListener("input", function() {
       _phSearch = this.value; _phPage = 1;
-      const outer = document.getElementById("trn-ph-list-outer");
-      if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
-      _wirePhRows(playerList);
+      _refresh();
     });
 
     // ── Career modal ─────────────────────────────────────────
     const _openPhModal = (p) => {
       document.getElementById("trn-ph-modal-root")?.remove();
-      const cKey = _sk(p.displayName);
       const twitterLink = p.twitter
         ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:6px">@${_esc(p.twitter.replace(/^@/,""))}</a>` : "";
       const genderBadge = p.gender === "Male" ? ` <span class="trn-gender-m">M</span>`
         : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
 
       const yearSections = p.yearKeys.map(yr => {
-        const poEntry  = (poByYear[yr] || {})[cKey];
+        const poEntry  = p.yearData[yr] || {};
         const leagueRows = p.seasons[yr].map(s => {
-          const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
+          const tiesStr  = s.ties > 0 ? `-${s.ties}` : "";
           const platIcon = { sleeper:"🟢", mfl:"🔵", yahoo:"🟣" }[s.platform] || "⚪";
           const result   = s.isChamp
             ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>`
@@ -7628,24 +7700,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </tr>`;
         }).join("");
 
-        const yrWins  = p.seasons[yr].reduce((a, s) => a + s.wins, 0);
-        const yrLoss  = p.seasons[yr].reduce((a, s) => a + s.losses, 0);
-        const yrPF    = p.seasons[yr].reduce((a, s) => a + s.pf, 0);
         const yrLChamp = p.seasons[yr].some(s => s.isChamp);
-
-        const poBlock = poEntry ? `
+        const poBlock  = poEntry.qualified ? `
           <div class="trn-ph-po-block">
-            <div class="trn-ph-po-label">🥇 Playoff Result</div>
+            <div class="trn-ph-po-label">🏆 Playoff Result</div>
             <div style="margin-top:4px">
-              ${poEntry.isTournamentChamp
+              ${poEntry.isTChamp
                 ? `<span class="trn-ph-champ-badge">🏆 Tournament Champion</span>`
                 : poEntry.bye
-                  ? `<span class="trn-ph-champ-badge" style="background:rgba(59,130,246,.15);color:#60a5fa;border-color:rgba(59,130,246,.3)">🌟 Qualified (BYE)</span>`
-                  : `<span class="trn-ph-champ-badge" style="background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)">✓ Qualified</span>`}
+                  ? `<span class="trn-ph-champ-badge" style="background:rgba(59,130,246,.15);color:#60a5fa;border-color:rgba(59,130,246,.3)">🌟 Qualified (BYE)${poEntry.rank ? " · Rank " + poEntry.rank : ""}</span>`
+                  : `<span class="trn-ph-champ-badge" style="background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)">✓ Qualified${poEntry.rank ? " · Rank " + poEntry.rank : ""}</span>`}
             </div>
           </div>` : "";
 
-        const lchampNote = yrLChamp && !poEntry?.isTournamentChamp
+        const lchampNote = yrLChamp && !poEntry.isTChamp
           ? `<div class="trn-ph-po-block" style="background:rgba(212,175,55,.07);border-color:rgba(212,175,55,.25)">
                <div class="trn-ph-po-label">League</div>
                <span class="trn-ph-champ-badge" style="font-size:.7rem;margin-top:4px;display:inline-flex">🥇 League Champion</span>
@@ -7687,7 +7755,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.playoffApps}/${p.totalYears}</div><div class="trn-ph-stat-lbl">PO Apps</div></div>
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(0)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.bestRank ?? "—"}</div><div class="trn-ph-stat-lbl">Best Rank</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF ? p.totalPF.toFixed(0) : "—"}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
               ${p.tournamentChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆×${p.tournamentChamps}</div><div class="trn-ph-stat-lbl">Tourn.</div></div>` : ""}
               ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🥇×${p.totalChamps}</div><div class="trn-ph-stat-lbl">League</div></div>` : ""}
             </div>
@@ -7711,18 +7780,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         row.addEventListener("click", open);
         row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
       });
-      body.querySelector("#trn-ph-prev")?.addEventListener("click", () => {
-        _phPage--;
-        const outer = document.getElementById("trn-ph-list-outer");
-        if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
-        _wirePhRows(list);
-      });
-      body.querySelector("#trn-ph-next")?.addEventListener("click", () => {
-        _phPage++;
-        const outer = document.getElementById("trn-ph-list-outer");
-        if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
-        _wirePhRows(list);
-      });
+      body.querySelector("#trn-ph-prev")?.addEventListener("click", () => { _phPage--; _refresh(); });
+      body.querySelector("#trn-ph-next")?.addEventListener("click", () => { _phPage++; _refresh(); });
     };
 
     _wirePhRows(playerList);
