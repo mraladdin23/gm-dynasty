@@ -1099,6 +1099,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const advMethod  = round.advanceMethod || "count";
     const advCount   = round.advanceCount  || 4;
     const advPct     = round.advancePct    || 50;
+    const wpr        = round.weeksPerRound || 1;
     const isFinal    = idx === total - 1;
 
     return `
@@ -1108,8 +1109,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${!isFinal ? `<button class="trn-pr-round-remove btn-secondary btn-xs" data-round-idx="${idx}">✕</button>` : ""}
         </div>
         <div class="trn-pr-round-body">
+          <div class="trn-pr-advance-row" style="margin-bottom:4px">
+            <span class="trn-pr-field-label">Weeks</span>
+            <input type="number" class="trn-pr-wpr-input" data-round-idx="${idx}"
+              min="1" max="4" value="${wpr}"
+              style="width:46px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+            <span style="font-size:.75rem;color:var(--color-text-dim)">per round (scores summed)</span>
+          </div>
           ${isFinal
-            ? `<div style="font-size:.78rem;color:var(--color-text-dim)">Highest scorer wins.</div>`
+            ? `<div style="font-size:.78rem;color:var(--color-text-dim)">Highest combined score wins.</div>`
             : `<div class="trn-pr-advance-row">
                 <span class="trn-pr-field-label">Advance</span>
                 <div class="trn-yn-toggle">
@@ -2016,8 +2024,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const _getPRRounds = () => Array.from(prList?.querySelectorAll(".trn-pr-round-row")||[]).map(row=>{
       const idx=row.dataset.roundIdx;
       const byPct=row.querySelector(`.trn-pr-adv-pct-btn[data-round-idx="${idx}"]`)?.classList.contains("trn-yn-btn--active");
-      return { advanceMethod:byPct?"pct":"count", advanceCount:parseInt(row.querySelector(".trn-pr-adv-count-input")?.value)||0,
+      const wpr=parseInt(row.querySelector(".trn-pr-wpr-input")?.value)||1;
+      const entry={ advanceMethod:byPct?"pct":"count", advanceCount:parseInt(row.querySelector(".trn-pr-adv-count-input")?.value)||0,
         advancePct:parseInt(row.querySelector(".trn-pr-adv-pct-input")?.value)||50, blend:_readBlend(row) };
+      if(wpr>1) entry.weeksPerRound=wpr;
+      return entry;
     });
     const _rebuildPR=(rounds)=>{ if(!prList)return; prList.innerHTML=rounds.map((r,i)=>_prRoundRowHTML(r,i,rounds.length)).join(""); _wirePREvents(); };
     const _wirePREvents=()=>{
@@ -8274,7 +8285,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const round  = rounds[roundIdx];
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
       const isFinal = roundIdx === rounds.length - 1;
-      const weekNum = po.startWeek ? po.startWeek + roundIdx : null;
+      // Compute absolute start week for this round (accounting for weeksPerRound of prior rounds)
+      let roundStartWeek = po.startWeek || null;
+      if (roundStartWeek) { for (let ri = 0; ri < roundIdx; ri++) roundStartWeek += (rounds[ri].weeksPerRound || 1); }
+      const wpr     = round.weeksPerRound || 1;
+      const weekNum = roundStartWeek; // first week of this round
 
       // Blend config for this round
       const blend        = round.blend;
@@ -8306,7 +8321,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
-            ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
+            ${weekNum?`<span class="trn-po-week-tag">${wpr > 1 ? `Weeks ${weekNum}–${weekNum+wpr-1}` : `Week ${weekNum}`}</span>`:""}
           </div>
           <div class="trn-po-round-blend-note">${blendNote}</div>
         </div>
@@ -8330,14 +8345,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         try {
           // We need weekly scores for:
           //   - All previous rounds (to correctly simulate who advanced into this round)
-          //   - This round (to show/sort by current week score)
+          //   - This round (to show/sort by current week combined score)
           const weeksNeeded = [];
           if (po.startWeek) {
-            for (let w = po.startWeek; w <= (weekNum || po.startWeek); w++) {
-              weeksNeeded.push(w);
+            let cursor = po.startWeek;
+            for (let ri = 0; ri <= roundIdx; ri++) {
+              const rWpr = rounds[ri].weeksPerRound || 1;
+              for (let w = 0; w < rWpr; w++) weeksNeeded.push(cursor + w);
+              cursor += rWpr;
             }
           } else if (weekNum) {
-            weeksNeeded.push(weekNum);
+            for (let w = 0; w < wpr; w++) weeksNeeded.push(weekNum + w);
           }
 
           // Fetch all needed weeks for all leagues in the full qualifier pool
@@ -8345,11 +8363,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const fetchAll = weeksNeeded.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)));
           await Promise.all(fetchAll);
 
-          // Helper: get a team's score for a given week
-          const _weekScore = (tm, week) => {
+          // Helper: get a team's combined score for a round (one or more consecutive weeks)
+          const _weekScore = (tm, startWk, numWks) => {
             const lid = leagueIdByTeamKey[_teamKey(tm)];
-            if (!lid || !week) return null;
-            return _weekScoreCache[lid + "|" + week]?.[String(tm.teamId)] ?? null;
+            if (!lid || !startWk) return null;
+            let total = 0, hasAny = false;
+            for (let w = 0; w < numWks; w++) {
+              const v = _weekScoreCache[lid + "|" + (startWk + w)]?.[String(tm.teamId)];
+              if (v != null) { total += v; hasAny = true; }
+            }
+            return hasAny ? total : null;
           };
 
           // ── Simulate advancement through previous rounds using actual scores ──
@@ -8362,9 +8385,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           };
           let pool = _byeFirst([...qualifiers]);
 
+          // Build cumulative start weeks for each prior round
+          let rCursor = po.startWeek || 0;
           for (let ri = 0; ri < roundIdx; ri++) {
             const r         = rounds[ri];
-            const rWeekNum  = po.startWeek ? po.startWeek + ri : null;
+            const rWpr      = r.weeksPerRound || 1;
+            const rWeekNum  = rCursor;
+            rCursor += rWpr;
 
             // Byes only apply to round 0 (global bye config)
             const rPoolByes = ri === 0 ? byeCount : 0;
@@ -8376,10 +8403,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               ? Math.round(competitors * (r.advancePct || 50) / 100)
               : (r.advanceCount || 0);
 
-            // Sort competing section by that week's score (desc), then by pf as tiebreak
+            // Sort competing section by combined round score (desc), then by pf as tiebreak
             const sorted = [...compSection].sort((a, b) => {
-              const sa = _weekScore(a, rWeekNum) ?? -1;
-              const sb = _weekScore(b, rWeekNum) ?? -1;
+              const sa = _weekScore(a, rWeekNum, rWpr) ?? -1;
+              const sb = _weekScore(b, rWeekNum, rWpr) ?? -1;
               if (sb !== sa) return sb - sa;
               return (b.pf||0) - (a.pf||0);
             });
@@ -8402,7 +8429,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // Annotate each team with this week's score and blend components
           const regWeeks = regSeasonWeeks || 1;
           const poolScored = pool.map(tm => {
-            const wkScore   = _weekScore(tm, weekNum);
+            const wkScore   = _weekScore(tm, weekNum, wpr);
             const regAvgPW  = (tm.pf || 0) / regWeeks;
             const bScore    = !blendEnabled || wkScore == null ? null
               : blendMode === "weighted"
@@ -8783,13 +8810,33 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         // This ensures _weekScoreCache is populated even if round tabs weren't visited
         if (mode === "points_rounds" && po.startWeek) {
           const rounds_ = po.pointsRounds?.rounds || [];
-          const weeksNeeded = rounds_.map((_, i) => po.startWeek + i);
+          // Compute which actual NFL weeks each round spans (weeksPerRound support)
+          const weeksNeeded = new Set();
+          let weekCursor = po.startWeek;
+          for (const r_ of rounds_) {
+            const wpr_ = r_.weeksPerRound || 1;
+            for (let w = 0; w < wpr_; w++) weeksNeeded.add(weekCursor + w);
+            weekCursor += wpr_;
+          }
           const allLeagueIds = [...new Set(
             qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean)
           )];
-          if (btn) btn.textContent = `Fetching ${allLeagueIds.length} leagues × ${weeksNeeded.length} weeks…`;
+          if (btn) btn.textContent = `Fetching ${allLeagueIds.length} leagues × ${weeksNeeded.size} weeks…`;
           await Promise.all(
-            weeksNeeded.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)))
+            [...weeksNeeded].flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)))
+          );
+        }
+
+        if (mode === "h2h_bracket" && po.startWeek) {
+          const bracketSize_ = po.bracketSize || qualifiers.length;
+          const numRounds_   = Math.ceil(Math.log2(bracketSize_));
+          const weeksNeeded_ = Array.from({length: numRounds_}, (_, i) => po.startWeek + i);
+          const allLeagueIds = [...new Set(
+            qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean)
+          )];
+          if (btn) btn.textContent = `Fetching ${allLeagueIds.length} leagues × ${weeksNeeded_.length} bracket weeks…`;
+          await Promise.all(
+            weeksNeeded_.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)))
           );
         }
 
@@ -8807,26 +8854,42 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return [...b, ...r];
           };
 
-          // Helper: get week score from cache
-          const _ws_ = (tm, week) => {
+          // Helper: get combined score across one or more consecutive weeks from cache
+          const _wsCombined_ = (tm, startWk, numWks) => {
             const lid = leagueIdByTeamKey[_teamKey(tm)];
-            if (!lid || !week) return null;
-            return _weekScoreCache[lid + "|" + week]?.[String(tm.teamId)] ?? null;
+            if (!lid || !startWk) return null;
+            let total = 0, hasAny = false;
+            for (let w = 0; w < numWks; w++) {
+              const v = _weekScoreCache[lid + "|" + (startWk + w)]?.[String(tm.teamId)];
+              if (v != null) { total += v; hasAny = true; }
+            }
+            return hasAny ? total : null;
           };
 
-          return rounds_.map((round, roundIdx) => {
-            const isFinal   = roundIdx === rounds_.length - 1;
-            const weekNum_  = po.startWeek + roundIdx;
-            const blend_    = round.blend;
-            const blendEn_  = !!(blend_?.enabled);
-            const blendWt_  = blend_?.weight ?? 30;
-            const blendMd_  = blend_?.mode || "weighted";
+          // Pre-compute cumulative week offsets so each round knows its absolute start week
+          const _roundStartWeeks_ = (() => {
+            const starts = [];
+            let cur = po.startWeek || 0;
+            for (const r_ of rounds_) { starts.push(cur); cur += (r_.weeksPerRound || 1); }
+            return starts;
+          })();
 
-            // Simulate pool through previous rounds
+          return rounds_.map((round, roundIdx) => {
+            const isFinal    = roundIdx === rounds_.length - 1;
+            const startWk_   = _roundStartWeeks_[roundIdx];
+            const wpr_       = round.weeksPerRound || 1;
+            const weekNum_   = startWk_; // first (or only) week — shown as display week
+            const blend_     = round.blend;
+            const blendEn_   = !!(blend_?.enabled);
+            const blendWt_   = blend_?.weight ?? 30;
+            const blendMd_   = blend_?.mode || "weighted";
+
+            // Simulate pool through previous rounds (each using its own startWk + wpr)
             let pool_ = _byeFirst_([...qualifiers]);
             for (let ri = 0; ri < roundIdx; ri++) {
-              const r_ = rounds_[ri];
-              const rWk_ = po.startWeek + ri;
+              const r_    = rounds_[ri];
+              const rWk_  = _roundStartWeeks_[ri];
+              const rWpr_ = r_.weeksPerRound || 1;
               const rByes_ = ri === 0 ? byeCount : 0;
               const byeSec_ = pool_.slice(0, rByes_);
               const compSec_ = pool_.slice(rByes_);
@@ -8834,24 +8897,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 ? Math.round(compSec_.length * (r_.advancePct || 50) / 100)
                 : (r_.advanceCount || 0);
               const sorted_ = [...compSec_].sort((a, b) => {
-                const sa = _ws_(a, rWk_) ?? -1;
-                const sb = _ws_(b, rWk_) ?? -1;
+                const sa = _wsCombined_(a, rWk_, rWpr_) ?? -1;
+                const sb = _wsCombined_(b, rWk_, rWpr_) ?? -1;
                 return sb !== sa ? sb - sa : (b.pf||0) - (a.pf||0);
               });
               pool_ = [...byeSec_, ...sorted_.slice(0, adv_)];
             }
 
-            const poolByes_   = roundIdx === 0 ? byeCount : 0;
+            const poolByes_    = roundIdx === 0 ? byeCount : 0;
             const competitors_ = pool_.length - poolByes_;
-            const advCount_   = isFinal ? 1
+            const advCount_    = isFinal ? 1
               : round.advanceMethod === "pct"
                 ? Math.round(competitors_ * (round.advancePct || 50) / 100)
                 : (round.advanceCount || 0);
 
-            // Score and sort
-            const byeSec2_ = pool_.slice(0, poolByes_);
+            // Score and sort (combined score across wpr_ weeks)
+            const byeSec2_  = pool_.slice(0, poolByes_);
             const compSec2_ = pool_.slice(poolByes_).map(tm => {
-              const wkScore   = _ws_(tm, weekNum_);
+              const wkScore   = _wsCombined_(tm, startWk_, wpr_);
               const regAvgPW  = (tm.pf || 0) / Math.max(1, regWeeks_);
               const bScore    = !blendEn_ || wkScore == null ? null
                 : blendMd_ === "weighted"
@@ -8869,7 +8932,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             })), ...compSec2_];
 
             return {
-              roundIdx, weekNum: weekNum_,
+              roundIdx, weekNum: weekNum_, weeksPerRound: wpr_ > 1 ? wpr_ : undefined,
               blendEnabled: blendEn_, blendWeight: blendWt_, blendMode: blendMd_,
               poolByes: poolByes_, advCount: advCount_,
               results: sorted2_.map((tm, i) => ({
@@ -8990,9 +9053,227 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               pf:          tm.pf || 0
             }));
 
+          } else if (mode === "custom_rounds") {
+            // Simulate custom rounds using PF-based group advancement.
+            // Each round: split pool into groups, top advPerGroup from each advance.
+            // Works backwards: final survivors first, then each round's eliminated sorted by PF.
+            const crRounds = po.customRounds?.rounds || [];
+            if (!crRounds.length) {
+              // No round config — fall back to qual/non-qual by PF
+              const qual    = sortedTeams.filter(tm =>  qualSet.has(_teamKey(tm)));
+              const nonQual = sortedTeams.filter(tm => !qualSet.has(_teamKey(tm)));
+              return [...qual, ...nonQual].map((tm, i) => ({
+                finalRank:   i + 1,
+                teamName:    tm.teamName    || "",
+                displayName: _displayName(tm),
+                leagueId:    _leagueIdForTeam(tm),
+                teamId:      String(tm.teamId || ""),
+                qualified:   qualSet.has(_teamKey(tm)),
+                bye:         byeSet.has(_teamKey(tm)),
+                isTChamp:    i === 0,
+                pf:          tm.pf || 0
+              }));
+            }
+
+            // Simulate each round, track who advances and who was eliminated in which round
+            // roundPools[i] = pool entering round i; roundElim[i] = teams eliminated in round i
+            const roundPools = [];
+            const roundElims = [];
+
+            let crPool = _sortByMetric([...qualifiers], byeMetric); // seeded order
+            roundPools.push([...crPool]);
+
+            for (let ri = 0; ri < crRounds.length; ri++) {
+              const cr      = crRounds[ri];
+              const isFin   = ri === crRounds.length - 1;
+              const groups  = cr.groups  || 1;
+              const tpg     = cr.teamsPerGroup || Math.ceil(crPool.length / groups);
+              const apg     = isFin ? 1 : (cr.advPerGroup || 1);
+
+              // Byes pass round 0
+              const byeSec   = ri === 0 ? crPool.slice(0, byeCount) : [];
+              const compSec  = ri === 0 ? crPool.slice(byeCount) : [...crPool];
+
+              const advancers = [...byeSec];
+              const eliminated = [];
+
+              for (let gi = 0; gi < groups; gi++) {
+                const groupTeams = compSec.slice(gi * tpg, (gi + 1) * tpg);
+                // Sort group by PF descending
+                const sorted = [...groupTeams].sort((a, b) => (b.pf||0) - (a.pf||0));
+                advancers.push(...sorted.slice(0, apg));
+                eliminated.push(...sorted.slice(apg));
+              }
+
+              roundElims.push(eliminated);
+              crPool = advancers;
+              if (ri < crRounds.length - 1) roundPools.push([...crPool]);
+            }
+
+            // Build final rankings working backwards
+            const crAllRanked = [];
+            const crPlaced    = new Set();
+
+            // Final pool survivors: sorted by PF desc, champion = top
+            const finalPool = [...crPool].sort((a, b) => (b.pf||0) - (a.pf||0));
+            finalPool.forEach((tm, i) => {
+              const tk = _teamKey(tm);
+              if (!crPlaced.has(tk)) {
+                crAllRanked.push({ ...tm, isTChamp: i === 0 });
+                crPlaced.add(tk);
+              }
+            });
+
+            // Eliminated teams, from last round to first, sorted by PF desc within each round
+            for (let ri = crRounds.length - 1; ri >= 0; ri--) {
+              const elim = [...(roundElims[ri] || [])].sort((a, b) => (b.pf||0) - (a.pf||0));
+              elim.forEach(tm => {
+                const tk = _teamKey(tm);
+                if (!crPlaced.has(tk)) { crAllRanked.push({ ...tm, isTChamp: false }); crPlaced.add(tk); }
+              });
+            }
+
+            // Non-qualifiers last
+            sortedTeams.filter(tm => !qualSet.has(_teamKey(tm))).forEach(tm => {
+              const tk = _teamKey(tm);
+              if (!crPlaced.has(tk)) { crAllRanked.push({ ...tm, isTChamp: false }); crPlaced.add(tk); }
+            });
+
+            const standingsLookup2 = {};
+            snapshot.standings.forEach(s => { standingsLookup2[`${s.teamName}|${s.leagueId}`] = s; });
+
+            return crAllRanked.map((tm, i) => {
+              const sl = standingsLookup2[`${tm.teamName}|${_leagueIdForTeam(tm)}`] || {};
+              return {
+                finalRank:   i + 1,
+                teamName:    tm.teamName    || "",
+                displayName: tm.displayName || _displayName(tm),
+                leagueId:    _leagueIdForTeam(tm),
+                teamId:      String(tm.teamId || ""),
+                qualified:   !!(sl.qualified ?? qualSet.has(_teamKey(tm))),
+                bye:         !!(sl.bye       ?? byeSet.has(_teamKey(tm))),
+                isTChamp:    !!(tm.isTChamp),
+                pf:          tm.pf || sl.pf || 0
+              };
+            });
+
+          } else if (mode === "h2h_bracket") {
+            // Simulate single-elimination bracket using weekly scores from _weekScoreCache.
+            // Seeds: qualifiers sorted by seeding metric. Standard bracket pairing:
+            //   #1 vs #bracketSize, #2 vs #(bracketSize-1), etc.
+            // If no scores available, falls back to seeding order (higher seed wins).
+            const bracketSize = po.bracketSize || qualifiers.length;
+            const seeds = _sortByMetric([...qualifiers], (mode === "h2h_bracket" || po.seeding?.method === "record") ? "record" : "pf")
+              .slice(0, bracketSize);
+
+            const numRounds = Math.ceil(Math.log2(bracketSize));
+
+            // Helper: score for a team in a specific playoff week
+            const _bktScore = (tm, weekNum_) => {
+              if (!po.startWeek || !weekNum_) return null;
+              const lid = leagueIdByTeamKey[_teamKey(tm)];
+              if (!lid) return null;
+              return _weekScoreCache[lid + "|" + weekNum_]?.[String(tm.teamId)] ?? null;
+            };
+
+            // Simulate bracket: track survivors and elimination order
+            // elimRound[n] = array of teams eliminated in bracket round n (0-indexed)
+            const elimRound = Array.from({length: numRounds}, () => []);
+
+            // Build round 1 matchups: bye teams advance automatically,
+            // then remaining seeds pair as #1 vs last, #2 vs 2nd-last, etc.
+            let currentRound = [...seeds]; // ordered by seed
+            const byeTeams   = currentRound.slice(0, byeCount);
+            const r1Players  = currentRound.slice(byeCount);
+
+            // For each subsequent bracket round
+            for (let ri = 0; ri < numRounds; ri++) {
+              const weekNum_ = po.startWeek ? po.startWeek + ri : null;
+              const nextRound = [];
+
+              if (ri === 0) {
+                // Byes auto-advance
+                nextRound.push(...byeTeams);
+                // Pair remaining: top vs bottom
+                const half = Math.floor(r1Players.length / 2);
+                for (let mi = 0; mi < half; mi++) {
+                  const a = r1Players[mi];
+                  const b = r1Players[r1Players.length - 1 - mi];
+                  const sa = _bktScore(a, weekNum_) ?? (seeds.indexOf(a) !== -1 ? bracketSize - seeds.indexOf(a) : 0);
+                  const sb = _bktScore(b, weekNum_) ?? (seeds.indexOf(b) !== -1 ? bracketSize - seeds.indexOf(b) : 0);
+                  if (sa >= sb) { nextRound.push(a); elimRound[ri].push(b); }
+                  else          { nextRound.push(b); elimRound[ri].push(a); }
+                }
+                // Odd team out (if bracketSize not a power of 2): advances automatically
+                if (r1Players.length % 2 !== 0) nextRound.push(r1Players[Math.floor(r1Players.length / 2)]);
+              } else {
+                // Subsequent rounds: pair adjacent teams in current bracket order
+                const half = Math.floor(currentRound.length / 2);
+                for (let mi = 0; mi < half; mi++) {
+                  const a = currentRound[mi * 2];
+                  const b = currentRound[mi * 2 + 1];
+                  const sa = _bktScore(a, weekNum_) ?? 0;
+                  const sb = _bktScore(b, weekNum_) ?? 0;
+                  if (sa >= sb) { nextRound.push(a); elimRound[ri].push(b); }
+                  else          { nextRound.push(b); elimRound[ri].push(a); }
+                }
+                if (currentRound.length % 2 !== 0)
+                  nextRound.push(currentRound[currentRound.length - 1]);
+              }
+
+              currentRound = nextRound;
+            }
+
+            // currentRound should now be just the champion(s); build rankings backwards
+            const bktAllRanked = [];
+            const bktPlaced    = new Set();
+
+            // Champion(s) from final round
+            [...currentRound].forEach(tm => {
+              const tk = _teamKey(tm);
+              if (!bktPlaced.has(tk)) { bktAllRanked.push({ ...tm, isTChamp: true }); bktPlaced.add(tk); }
+            });
+
+            // Eliminated teams from last round to first, sorted by score desc within each round
+            for (let ri = numRounds - 1; ri >= 0; ri--) {
+              const weekNum_ = po.startWeek ? po.startWeek + ri : null;
+              const elim = [...(elimRound[ri] || [])].sort((a, b) => {
+                const sa = _bktScore(a, weekNum_) ?? 0;
+                const sb = _bktScore(b, weekNum_) ?? 0;
+                return sb - sa;
+              });
+              elim.forEach(tm => {
+                const tk = _teamKey(tm);
+                if (!bktPlaced.has(tk)) { bktAllRanked.push({ ...tm, isTChamp: false }); bktPlaced.add(tk); }
+              });
+            }
+
+            // Non-qualifiers last by PF
+            sortedTeams.filter(tm => !qualSet.has(_teamKey(tm))).forEach(tm => {
+              const tk = _teamKey(tm);
+              if (!bktPlaced.has(tk)) { bktAllRanked.push({ ...tm, isTChamp: false }); bktPlaced.add(tk); }
+            });
+
+            const standingsLookupB = {};
+            snapshot.standings.forEach(s => { standingsLookupB[`${s.teamName}|${s.leagueId}`] = s; });
+
+            return bktAllRanked.map((tm, i) => {
+              const sl = standingsLookupB[`${tm.teamName}|${_leagueIdForTeam(tm)}`] || {};
+              return {
+                finalRank:   i + 1,
+                teamName:    tm.teamName    || "",
+                displayName: tm.displayName || _displayName(tm),
+                leagueId:    _leagueIdForTeam(tm),
+                teamId:      String(tm.teamId || ""),
+                qualified:   !!(sl.qualified ?? qualSet.has(_teamKey(tm))),
+                bye:         !!(sl.bye       ?? byeSet.has(_teamKey(tm))),
+                isTChamp:    !!(tm.isTChamp),
+                pf:          tm.pf || sl.pf || 0
+              };
+            });
+
           } else {
-            // Other modes (h2h_bracket, custom_rounds): qualified teams first by PF,
-            // then non-qualifiers by PF. isTChamp = first qualifier.
+            // Unknown mode: qual teams first by PF, then non-qualifiers by PF
             const qual    = sortedTeams.filter(tm =>  qualSet.has(_teamKey(tm)));
             const nonQual = sortedTeams.filter(tm => !qualSet.has(_teamKey(tm)));
             return [...qual, ...nonQual].map((tm, i) => ({
