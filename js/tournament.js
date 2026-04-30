@@ -6629,24 +6629,208 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // Three new analytics views sharing a common PO data helper.
   // ═══════════════════════════════════════════════════════
 
-  // ── Shared helper: build year → { sanitizedKey → {qualified,bye,rank,isTChamp} } ──
-  // Reads from t.playoffs (year-keyed). Used by all three F-AZ views.
+  // ── Shared qual engine: compute qualification for one year ──────────────────
+  // Pure function — reads from t.standingsCache + t.playoffs[year] config only.
+  // No Firebase reads. Returns { qualSet, byeSet, allTeams, qualifiers, mode,
+  // overallWinner, _teamKey } using the same logic as _renderPlayoffsTab.
+  // Called by _buildPoByYear so analytics tabs share identical qualification logic.
+
+  function _computeQualification(t, year) {
+    const yr  = String(year);
+    const po  = _playoffForYear(t, yr);
+    const mode = po.mode || "total_points";
+    const _skQ = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+
+    // Build participant name/gender maps (mirrors _renderPlayoffsTab)
+    const genderMap = {}, displayNameMap = {};
+    const slUGenderMap = {}, slUDisplayMap = {};
+    Object.values(t.participants || {}).forEach(p => {
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(n => {
+        const k = _skQ(n);
+        if (p.gender)      genderMap[k]     = p.gender;
+        if (p.displayName) displayNameMap[k] = p.displayName;
+      });
+      if (p.sleeperUsername) {
+        const k = p.sleeperUsername.toLowerCase();
+        if (p.gender)      slUGenderMap[k]  = p.gender;
+        if (p.displayName) slUDisplayMap[k] = p.displayName;
+      }
+    });
+
+    // Assemble allTeams for this year from standingsCache
+    const allTeams = [];
+    Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== yr) return;
+      (lc.teams || []).forEach(tm => {
+        const gender      = (tm.sleeperUsername ? slUGenderMap[tm.sleeperUsername.toLowerCase()] : null)
+          || genderMap[_skQ(tm.teamName)] || genderMap[_skQ(tm.rawTeamName)] || "";
+        const displayName = (tm.sleeperUsername ? slUDisplayMap[tm.sleeperUsername.toLowerCase()] : null)
+          || displayNameMap[_skQ(tm.teamName)] || displayNameMap[_skQ(tm.rawTeamName)] || tm.teamName || "";
+        allTeams.push({ ...tm, displayName,
+          leagueName:  lc.leagueName || ck,
+          division:    lc.division   || "",
+          conference:  lc.conference || "",
+          gender,
+        });
+      });
+    });
+
+    const _empty = { qualSet: new Set(), byeSet: new Set(), allTeams: [], qualifiers: [], mode, overallWinner: null, _teamKey: tm => "" };
+    if (!allTeams.length) return _empty;
+
+    const _sortByMetric = (teams, metric) => [...teams].sort((a, b) =>
+      metric === "record"
+        ? ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0)
+        : (b.pf||0) - (a.pf||0)
+    );
+    const _teamKey = tm => (tm.leagueName || "") + "|" + (tm.teamId || tm.rawTeamName || tm.teamName);
+
+    const sortedTeams = _sortByMetric(allTeams,
+      (mode === "h2h_bracket" || po.seeding?.method === "record") ? "record" : "pf");
+
+    const _groupKey = (tm, scope) => {
+      if (scope === "conference") return (tm.conference && tm.conference !== "") ? tm.conference : null;
+      return (tm.division && tm.division !== "") ? tm.division : (tm.leagueName || "__none__");
+    };
+    const allDivisions   = [...new Set(allTeams.map(tm => _groupKey(tm, "division")).filter(Boolean))];
+    const allConferences = [...new Set(allTeams.map(tm => _groupKey(tm, "conference")).filter(Boolean))];
+    const numDivisions   = allDivisions.length || 1;
+    const numConferences = allConferences.length || allDivisions.length || 1;
+
+    const _runCompositeQual = (steps, pool) => {
+      const qualified = new Set();
+      let eligibleIndices = pool.map((_, i) => i);
+      for (const step of steps) {
+        if (step.type === "wins_threshold") {
+          eligibleIndices = eligibleIndices.filter(i => (pool[i].wins||0) >= (step.minWins||13));
+          continue;
+        }
+        const scope  = step.scope || "overall";
+        const count  = step.type === "top_subgroup" ? (step.subCount||2) : (step.count||2);
+        const metric = step.type === "top_record" ? "record"
+          : step.type === "top_subgroup" ? (step.subMetric || "pf") : "pf";
+        const candidates = eligibleIndices.filter(i => !qualified.has(i));
+        if (scope === "overall") {
+          const sorted = _sortByMetric(candidates.map(i => ({...pool[i], _idx:i})), metric);
+          sorted.slice(0, count).forEach(tm => qualified.add(tm._idx));
+        } else {
+          const groups = {};
+          candidates.forEach(i => {
+            const g = _groupKey(pool[i], scope) || "__none__";
+            if (!groups[g]) groups[g] = [];
+            groups[g].push(i);
+          });
+          Object.values(groups).forEach(groupIndices => {
+            let filtered = groupIndices;
+            if (step.type === "top_subgroup") {
+              filtered = groupIndices.filter(i => {
+                const val = step.subField === "gender" ? pool[i].gender : pool[i][step.subField] || "";
+                return String(val).toLowerCase() === String(step.subValue||"").toLowerCase();
+              });
+            }
+            const sorted = _sortByMetric(filtered.map(i => ({...pool[i], _idx:i})), metric);
+            sorted.slice(0, count).forEach(tm => qualified.add(tm._idx));
+          });
+        }
+      }
+      return [...qualified].map(i => pool[i]);
+    };
+
+    const _computeQualifiers = () => {
+      const q = po.qualification || {};
+      if (q.method === "manual")        return sortedTeams;
+      if (q.method === "top_record")    return _sortByMetric(sortedTeams, "record").slice(0, q.count||8);
+      if (q.method === "top_pf")        return _sortByMetric(sortedTeams, "pf").slice(0, q.count||8);
+      if (q.method === "top_per_group") {
+        const n = q.perGroup || 2;
+        const groups = {};
+        sortedTeams.forEach(tm => {
+          const g = _groupKey(tm, "division") || "__all__";
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(tm);
+        });
+        return Object.values(groups).flatMap(g => _sortByMetric(g, "pf").slice(0, n));
+      }
+      if (q.method === "composite") return _runCompositeQual(q.steps || [], sortedTeams);
+      return sortedTeams; // total_points / unconfigured: all teams
+    };
+
+    const qualifiers = _computeQualifiers();
+    const qualSet    = new Set(qualifiers.map(_teamKey));
+
+    // Byes
+    const byeType  = po.byes?.type  || "none";
+    const byeScope = po.byes?.scope || "overall";
+    const byeRaw   = byeType !== "none" ? (po.byes?.count || 0) : 0;
+    const byeCount = byeRaw > 0
+      ? (byeScope === "division"   ? byeRaw * numDivisions
+       : byeScope === "conference" ? byeRaw * numConferences : byeRaw) : 0;
+    const byeMetric  = (po.byes?.method || "record") === "record" ? "record" : "pf";
+    const seededQ    = _sortByMetric([...qualifiers], byeMetric);
+    const byeSet = (() => {
+      if (!byeCount) return new Set();
+      if (byeScope === "overall") return new Set(seededQ.slice(0, byeCount).map(_teamKey));
+      const groups = {};
+      seededQ.forEach(tm => {
+        const g = _groupKey(tm, byeScope) || "__none__";
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(tm);
+      });
+      const byeTeams = [];
+      Object.values(groups).forEach(g => byeTeams.push(...g.slice(0, byeRaw)));
+      return new Set(byeTeams.map(_teamKey));
+    })();
+
+    // Overall winner: #1 PF team for total_points; first qualifier for other modes
+    const overallWinner = mode === "total_points"
+      ? (_sortByMetric(allTeams, "pf")[0] || null)
+      : (qualifiers[0] || null);
+
+    return { qualSet, byeSet, allTeams, qualifiers, mode, overallWinner, _teamKey };
+  }
+
+  // ── _buildPoByYear: year → { sanitizedKey → {qualified,bye,rank,isTChamp} } ──
+  // Uses _computeQualification — no Firebase reads, pure derivation from t.
+  // Also folds in lc.champion entries from standingsCache for league champs.
+
   function _buildPoByYear(t) {
+    const _sk = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
     const poByYear = {};
-    const poData   = t.playoffs || {};
-    for (const [yr, po] of Object.entries(poData)) {
-      if (!/^\d{4}$/.test(String(yr))) continue;
-      if (!po?.standings?.length) continue;
-      const _sk = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+
+    for (const yr of _playoffYears(t)) {
+      const { qualSet, byeSet, allTeams, overallWinner, _teamKey } = _computeQualification(t, yr);
+      if (!allTeams.length) continue;
       poByYear[String(yr)] = {};
-      po.standings.forEach((tm, idx) => {
-        const isTChamp = (po.mode === "total_points" && idx === 0) || !!(tm.isChamp);
-        [tm.displayName, tm.teamName].filter(Boolean).map(_sk).forEach(k => {
-          poByYear[String(yr)][k] = {
-            qualified: !!(tm.qualified), bye: !!(tm.bye),
-            rank: idx + 1, isTChamp,
-            leagueId: tm.leagueId || "", teamId: tm.teamId || ""
-          };
+
+      const sorted = [...allTeams].sort((a, b) => (b.pf||0) - (a.pf||0));
+      sorted.forEach((tm, idx) => {
+        const isQual   = qualSet.has(_teamKey(tm));
+        const isBye    = byeSet.has(_teamKey(tm));
+        const isTChamp = overallWinner ? (_teamKey(tm) === _teamKey(overallWinner)) : (isQual && idx === 0);
+        const keys = [tm.displayName, tm.teamName, tm.sleeperUsername].filter(Boolean).map(_sk);
+        keys.forEach(k => {
+          if (!poByYear[String(yr)][k]) {
+            poByYear[String(yr)][k] = {
+              qualified: isQual, bye: isBye, rank: idx + 1, isTChamp,
+              leagueId: String(tm.leagueId || ""), teamId: String(tm.teamId || "")
+            };
+          }
+        });
+      });
+
+      // Fold in lc.champion (league champs not already in the map)
+      Object.values(t.standingsCache || {}).forEach(lc => {
+        if (String(lc.year) !== String(yr)) return;
+        const champ = lc.champion;
+        if (!champ) return;
+        [champ.teamName, champ.sleeperUsername, champ.displayName].filter(Boolean).map(_sk).forEach(k => {
+          if (!poByYear[String(yr)][k]) {
+            poByYear[String(yr)][k] = {
+              qualified: true, bye: false, rank: null, isTChamp: false,
+              leagueId: String(lc.leagueId || lc.league_id || ""),
+              teamId:   String(champ.teamId || "")
+            };
+          }
         });
       });
     }
@@ -6831,7 +7015,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     });
 
     if (!qualPairs.length) {
-      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏈</div><div class="trn-empty-title">No playoff teams found for ${year}</div><div class="trn-empty-sub">Publish playoffs from the admin Playoffs tab first. Only Sleeper leagues support roster detail.</div></div>`;
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏈</div><div class="trn-empty-title">No playoff teams found for ${year}</div><div class="trn-empty-sub">Publish playoffs from the admin Playoffs tab first. Make sure standings are synced for ${year}.</div></div>`;
       return;
     }
 
@@ -6846,7 +7030,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     try {
       // Group qual pairs by leagueId — fetch each league's roster once
       const byLeague = {};
-      qualPairs.filter(p => p.platform === "sleeper").forEach(p => {
+      qualPairs.forEach(p => {
         if (!byLeague[p.leagueId]) byLeague[p.leagueId] = [];
         byLeague[p.leagueId].push(p);
       });
@@ -6855,16 +7039,57 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const playerMap = {};
 
       await Promise.allSettled(Object.entries(byLeague).map(async ([lid, teams]) => {
+        const platform = teams[0]?.platform || "sleeper";
         try {
-          const rosters = await fetch(`https://api.sleeper.app/v1/league/${lid}/rosters`).then(r => r.ok ? r.json() : []);
+          let playerIds_by_teamId = {}; // teamId → [playerId, ...]
+
+          if (platform === "sleeper") {
+            const rosters = await fetch(`https://api.sleeper.app/v1/league/${lid}/rosters`).then(r => r.ok ? r.json() : []);
+            (rosters || []).forEach(r => {
+              playerIds_by_teamId[String(r.roster_id)] = [...new Set([...(r.starters||[]), ...(r.players||[])])];
+            });
+          } else if (platform === "mfl") {
+            const mflCreds = _getMFLCreds();
+            if (!mflCreds?.cookie) return; // skip — not authenticated
+            const year = teams[0]?.year || _tournamentYear || new Date().getFullYear();
+            const resp = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/rosters", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ leagueId: lid, platform: "mfl", year, mflCookie: mflCreds.cookie })
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            // Worker returns { rosters: [{teamId, playerIds:[]}] }
+            (data.rosters || []).forEach(r => {
+              playerIds_by_teamId[String(r.teamId)] = r.playerIds || [];
+            });
+          } else if (platform === "yahoo") {
+            const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
+            if (!yahooToken) return; // skip — not authenticated
+            const year = teams[0]?.year || _tournamentYear || new Date().getFullYear();
+            const resp = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/rosters", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ leagueId: lid, platform: "yahoo", year, yahooToken })
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            (data.rosters || []).forEach(r => {
+              playerIds_by_teamId[String(r.teamId)] = r.playerIds || [];
+            });
+          }
+
           teams.forEach(tm => {
-            const roster = (rosters || []).find(r => String(r.roster_id) === tm.teamId);
-            if (!roster) return;
-            const playerIds = [...new Set([...(roster.starters || []), ...(roster.players || [])])];
-            playerIds.forEach(pid => {
+            const pids = playerIds_by_teamId[String(tm.teamId)] || [];
+            pids.forEach(pid => {
               if (!pid || pid === "0") return;
-              const dp = DLRPlayers.get(pid);
-              if (!dp?.first_name) return; // skip unresolved
+              // For Sleeper use DLRPlayers.get; for MFL/Yahoo try both
+              let dp = typeof DLRPlayers !== "undefined" ? DLRPlayers.get(String(pid)) : null;
+              if (!dp?.first_name && platform === "yahoo") {
+                const map = typeof DLRPlayers !== "undefined" ? DLRPlayers.getByYahooId(String(pid)) : null;
+                if (map?.sleeper_id) dp = DLRPlayers.get(map.sleeper_id);
+              }
+              if (!dp?.first_name) return;
               if (!playerMap[pid]) {
                 playerMap[pid] = {
                   pid, count: 0, teamNames: [],
@@ -6877,7 +7102,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               playerMap[pid].teamNames.push(tm.teamName || tm.teamId);
             });
           });
-        } catch(e) { /* skip league on error */ }
+        } catch(e) { console.warn("[MostRostered]", platform, lid, e.message); }
       }));
 
       // Group by position, sort by count desc
@@ -6941,7 +7166,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         <select id="trn-mr-pos" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">${posOpts}</select>
         <button class="btn-secondary btn-sm" id="trn-mr-refresh">↺ Refresh</button>
       </div>
-      <div class="trn-az-meta">${qualCount} playoff team${qualCount !== 1 ? "s" : ""} · ${year} season · top ${players.length} players shown (Sleeper leagues only)</div>
+      <div class="trn-az-meta">${qualCount} playoff team${qualCount !== 1 ? "s" : ""} · ${year} season · top ${players.length} players shown · MFL requires cookie, Yahoo requires token</div>
       ${players.length ? `
         <div style="overflow-x:auto">
           <table class="trn-ph-list-table trn-az-stat-table">
