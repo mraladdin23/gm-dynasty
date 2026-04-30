@@ -434,17 +434,23 @@ const DLRTournament = (() => {
       <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>🏆 Standings</option>
       <option value="playoffs"      ${_activeAdminTab === "playoffs"      ? "selected" : ""}>🥇 Playoffs</option>
       <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>
-      <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>`;
+      <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>
+      <option value="poapprate"     ${_activeAdminTab === "poapprate"     ? "selected" : ""}>📈 PO Appearance Rate</option>
+      <option value="mostrostered"  ${_activeAdminTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
+      <option value="adpvsfinish"   ${_activeAdminTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>`;
 
     const userOpts = `
       <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
       <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>📋 Rules</option>
       <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
       ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
-      <option value="draft"     ${_activeUserTab === "draft"     ? "selected" : ""}>📋 Draft</option>
-      <option value="matchups"  ${_activeUserTab === "matchups"  ? "selected" : ""}>🏈 Matchups</option>
-      <option value="rosters"   ${_activeUserTab === "rosters"   ? "selected" : ""}>🗂 Rosters</option>
-      <option value="players"   ${_activeUserTab === "players"   ? "selected" : ""}>👥 Players</option>`;
+      <option value="draft"         ${_activeUserTab === "draft"         ? "selected" : ""}>📋 Draft</option>
+      <option value="matchups"      ${_activeUserTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
+      <option value="rosters"       ${_activeUserTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
+      <option value="players"       ${_activeUserTab === "players"       ? "selected" : ""}>👥 Players</option>
+      <option value="poapprate"     ${_activeUserTab === "poapprate"     ? "selected" : ""}>📈 PO Appearance Rate</option>
+      <option value="mostrostered"  ${_activeUserTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
+      <option value="adpvsfinish"   ${_activeUserTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>`;
     const regOpen = ["registration_open","active"].includes(meta.status);
     const regBtnHtml = (!showAdminNav && regOpen) ? `<button class="btn-primary btn-sm trn-reg-pill" id="trn-register-pill-btn">📬 Register</button>` : "";
 
@@ -562,6 +568,9 @@ const DLRTournament = (() => {
         case "rosters":       return _renderAnalyticsRosters(tid, t, body);
         case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
         case "players":       return _renderPlayersTab(tid, t, body);
+        case "poapprate":     return _renderAnalyticsPORate(tid, t, body);
+        case "mostrostered":  return _renderAnalyticsMostRostered(tid, t, body);
+        case "adpvsfinish":   return _renderAnalyticsADPvFinish(tid, t, body);
         default:              return _renderAdminOverview(tid, t, body);
       }
     } else {
@@ -575,6 +584,9 @@ const DLRTournament = (() => {
         case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
         case "players":    return _renderPlayersTab(tid, t, body);
+        case "poapprate":  return _renderAnalyticsPORate(tid, t, body);
+        case "mostrostered": return _renderAnalyticsMostRostered(tid, t, body);
+        case "adpvsfinish":  return _renderAnalyticsADPvFinish(tid, t, body);
         default:           return _renderInfoTab(t, body, tid);
       }
     }
@@ -6612,7 +6624,524 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
   // ── User: Info tab ─────────────────────────────────────
 
-  // ── Players Tab — Participant Career History ────────────────────────────────
+  // ═══════════════════════════════════════════════════════
+  // ANALYTICS: F-AZ Part 2
+  // Three new analytics views sharing a common PO data helper.
+  // ═══════════════════════════════════════════════════════
+
+  // ── Shared helper: build year → { sanitizedKey → {qualified,bye,rank,isTChamp} } ──
+  // Reads from t.playoffs (year-keyed). Used by all three F-AZ views.
+  function _buildPoByYear(t) {
+    const poByYear = {};
+    const poData   = t.playoffs || {};
+    for (const [yr, po] of Object.entries(poData)) {
+      if (!/^\d{4}$/.test(String(yr))) continue;
+      if (!po?.standings?.length) continue;
+      const _sk = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+      poByYear[String(yr)] = {};
+      po.standings.forEach((tm, idx) => {
+        const isTChamp = (po.mode === "total_points" && idx === 0) || !!(tm.isChamp);
+        [tm.displayName, tm.teamName].filter(Boolean).map(_sk).forEach(k => {
+          poByYear[String(yr)][k] = {
+            qualified: !!(tm.qualified), bye: !!(tm.bye),
+            rank: idx + 1, isTChamp,
+            leagueId: tm.leagueId || "", teamId: tm.teamId || ""
+          };
+        });
+      });
+    }
+    return poByYear;
+  }
+
+  // ── ANALYTICS: Playoff Appearance Rate ──────────────────────────────────────
+  // Cross-year leaderboard. For each participant who has played ≥1 season, shows:
+  // seasons played, playoff appearances, appearance rate %, best finish rank,
+  // streak (consecutive seasons qualified), total championships.
+  // Sorted: appearance rate desc, then seasons desc.
+  // Data: standingsCache (seasons) + t.playoffs (qualification). No network calls.
+
+  function _renderAnalyticsPORate(tid, t, body) {
+    const _sk    = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const cache  = t.standingsCache || {};
+    const parts  = t.participants   || {};
+    const poByYear = _buildPoByYear(t);
+
+    // Build participant lookup
+    const pLookup = {};
+    Object.values(parts).forEach(p => {
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).map(_sk)
+        .forEach(k => { pLookup[k] = p; });
+    });
+
+    // Build all-time seasons per participant
+    const careers = {};
+    for (const lc of Object.values(cache)) {
+      const year = String(lc.year || "Unknown");
+      for (const tm of (lc.teams || [])) {
+        let part = null;
+        if (tm.sleeperUsername) part = pLookup[_sk(tm.sleeperUsername)];
+        if (!part && tm.teamName) part = pLookup[_sk(tm.teamName)];
+        const displayName = part?.displayName || tm.teamName || "Unknown";
+        const ck = _sk(displayName);
+        if (!careers[ck]) careers[ck] = { displayName, gender: part?.gender || "", seasons: new Set(), yearData: {} };
+        careers[ck].seasons.add(year);
+        if (!careers[ck].yearData[year]) careers[ck].yearData[year] = { qualified: false, bye: false, rank: null, isTChamp: false };
+      }
+    }
+
+    // Join playoff data
+    for (const [yr, entries] of Object.entries(poByYear)) {
+      for (const [k, entry] of Object.entries(entries)) {
+        if (careers[k]) {
+          careers[k].seasons.add(yr);
+          if (!careers[k].yearData[yr]) careers[k].yearData[yr] = { qualified: false, bye: false, rank: null, isTChamp: false };
+          Object.assign(careers[k].yearData[yr], entry);
+        }
+      }
+    }
+
+    // Compute stats
+    const rows = Object.values(careers).map(c => {
+      const allYears   = [...c.seasons].sort((a, b) => b - a);
+      const poApps     = allYears.filter(yr => c.yearData[yr]?.qualified).length;
+      const tChamps    = allYears.filter(yr => c.yearData[yr]?.isTChamp).length;
+      const bestRank   = allYears.reduce((best, yr) => {
+        const r = c.yearData[yr]?.rank;
+        return (r && (!best || r < best)) ? r : best;
+      }, null);
+      const rate = allYears.length > 0 ? (poApps / allYears.length * 100).toFixed(0) : 0;
+
+      // Streak: count consecutive most-recent seasons with qualification
+      let streak = 0;
+      for (const yr of allYears) {
+        if (c.yearData[yr]?.qualified) streak++;
+        else break;
+      }
+
+      return { ...c, allYears, totalSeasons: allYears.length, poApps, tChamps, bestRank, rate: parseInt(rate), streak };
+    }).filter(r => r.totalSeasons > 0);
+
+    rows.sort((a, b) => b.rate - a.rate || b.totalSeasons - a.totalSeasons || b.poApps - a.poApps);
+
+    if (!rows.length) {
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">📈</div><div class="trn-empty-title">No data yet</div><div class="trn-empty-sub">Sync standings and publish playoffs to see appearance rates.</div></div>`;
+      return;
+    }
+
+    const allYearsSet = [...new Set(Object.values(cache).map(lc => lc.year).filter(Boolean))].sort((a, b) => b - a);
+    const hasPoData   = Object.keys(poByYear).length > 0;
+
+    const tableRows = rows.map((r, i) => {
+      const medal     = ["🥇","🥈","🥉"][i] || "";
+      const gBadge    = r.gender === "Male" ? `<span class="trn-gender-m" style="font-size:.65rem">M</span>`
+        : r.gender === "Female" ? `<span class="trn-gender-f" style="font-size:.65rem">F</span>` : "";
+      const rateColor = r.rate >= 80 ? "#4ade80" : r.rate >= 50 ? "#fbbf24" : "var(--color-text-dim)";
+      const streakBadge = r.streak >= 2
+        ? `<span class="trn-az-streak-badge">🔥 ${r.streak}</span>` : "";
+      const champCell = r.tChamps > 0
+        ? `<span class="trn-ph-champ-badge">🏆×${r.tChamps}</span>` : `<span style="color:var(--color-text-dim)">—</span>`;
+      const yearPips = allYearsSet.map(yr => {
+        const e = r.yearData[yr];
+        const cls = !e ? "trn-az-yr-pip--absent"
+          : e.isTChamp ? "trn-az-yr-pip--champ"
+          : e.qualified ? "trn-az-yr-pip--qual"
+          : "trn-az-yr-pip--elim";
+        const tip = !e ? `${yr}: did not play`
+          : e.isTChamp ? `${yr}: 🏆 Champion`
+          : e.qualified ? `${yr}: ✓ Qualified${e.bye ? " (BYE)" : ""}`
+          : `${yr}: Eliminated`;
+        return `<span class="trn-az-yr-pip ${cls}" title="${tip}"></span>`;
+      }).join("");
+
+      return `<tr>
+        <td class="trn-ph-col-rank" style="font-size:.8rem">${medal || i + 1}</td>
+        <td class="trn-ph-col-name">${_esc(r.displayName)} ${gBadge} ${streakBadge}</td>
+        <td class="trn-az-num-cell">${r.totalSeasons}</td>
+        <td class="trn-az-num-cell" style="color:${rateColor};font-weight:700">${hasPoData ? r.rate + "%" : "—"}</td>
+        <td class="trn-az-num-cell">${hasPoData ? `${r.poApps}/${r.totalSeasons}` : "—"}</td>
+        <td class="trn-az-num-cell">${r.bestRank ?? "—"}</td>
+        <td>${champCell}</td>
+        <td class="trn-az-pips-cell">${yearPips}</td>
+      </tr>`;
+    }).join("");
+
+    const poNote = !hasPoData
+      ? `<div class="trn-xplat-banner" style="margin-bottom:var(--space-3)"><span class="trn-xplat-banner-icon">ℹ️</span><div class="trn-xplat-banner-body"><div class="trn-xplat-banner-title">Playoff data not published</div><div class="trn-xplat-banner-items" style="list-style:none;padding:0">Publish playoffs from the admin Playoffs tab to see qualification rates. Seasons played column is based on standings sync only.</div></div></div>` : "";
+
+    body.innerHTML = `
+      ${poNote}
+      <div class="trn-az-meta">${rows.length} participant${rows.length !== 1 ? "s" : ""} · ${allYearsSet.length} season${allYearsSet.length !== 1 ? "s" : ""}${hasPoData ? " · " + Object.keys(poByYear).length + " with playoff data" : ""}</div>
+      <div class="trn-az-legend">
+        <span class="trn-az-yr-pip trn-az-yr-pip--champ"></span> Champion
+        <span class="trn-az-yr-pip trn-az-yr-pip--qual"></span> Qualified
+        <span class="trn-az-yr-pip trn-az-yr-pip--elim"></span> Eliminated
+        <span class="trn-az-yr-pip trn-az-yr-pip--absent"></span> Did not play
+        &nbsp;🔥 = active qual. streak
+      </div>
+      <div style="overflow-x:auto">
+        <table class="trn-ph-list-table trn-az-stat-table">
+          <thead><tr>
+            <th class="trn-ph-col-rank">#</th>
+            <th class="trn-ph-col-name">Player</th>
+            <th class="trn-az-num-cell trn-ph-th-tip" title="Seasons played">Yrs</th>
+            <th class="trn-az-num-cell trn-ph-th-tip" title="Playoff appearance rate">Rate</th>
+            <th class="trn-az-num-cell trn-ph-th-tip" title="Appearances / Seasons">Apps</th>
+            <th class="trn-az-num-cell trn-ph-th-tip" title="Best playoff seeding rank">Best</th>
+            <th class="trn-ph-th-tip" title="Tournament championships">🏆</th>
+            <th class="trn-az-pips-cell trn-ph-th-tip" title="Year-by-year history">${allYearsSet.map(y => `<span style="font-size:.65rem;font-weight:600">${String(y).slice(2)}</span>`).join("")}</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  // ── ANALYTICS: Most Rostered on Playoff Teams ────────────────────────────────
+  // For a given year: among all teams that qualified for playoffs, what players
+  // appeared on the most of their rosters?
+  // Data: t.playoffs[year].standings (qualified teams) + Sleeper /rosters endpoint.
+  // Reuses _rostersCache if already fetched for the same year; otherwise fetches fresh.
+  // Filterable by position.
+
+  let _mrCache = null; // { data:{pos:{players:[]}}, year, tid, fetchedAt }
+  let _mrPos   = "all";
+
+  async function _renderAnalyticsMostRostered(tid, t, body) {
+    await DLRPlayers.load().catch(() => {});
+    const year     = _tournamentYear || new Date().getFullYear();
+    const poByYear = _buildPoByYear(t);
+    const poYr     = poByYear[String(year)] || {};
+
+    // Identify playoff-qualified teams this year from standingsCache
+    const _sk     = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const scEntries = Object.values(t.standingsCache || {}).filter(lc => lc.year === year);
+
+    // Build set of qualified {leagueId, teamId} pairs
+    const qualPairs = []; // { leagueId, teamId, teamName, platform }
+    scEntries.forEach(lc => {
+      const lid = String(lc.leagueId || lc.league_id || "");
+      (lc.teams || []).forEach(tm => {
+        const cKey = _sk(tm.teamName || "");
+        const byUsername = tm.sleeperUsername ? poYr[_sk(tm.sleeperUsername)] : null;
+        const byName     = poYr[cKey];
+        const entry      = byUsername || byName;
+        if (entry?.qualified) {
+          qualPairs.push({ leagueId: lid, teamId: String(tm.teamId), teamName: tm.teamName, platform: lc.platform || "sleeper" });
+        }
+      });
+    });
+
+    if (!qualPairs.length) {
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏈</div><div class="trn-empty-title">No playoff teams found for ${year}</div><div class="trn-empty-sub">Publish playoffs from the admin Playoffs tab first. Only Sleeper leagues support roster detail.</div></div>`;
+      return;
+    }
+
+    body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching playoff rosters…</div>`;
+
+    // Check cache
+    if (_mrCache && _mrCache.tid === tid && _mrCache.year === year && (Date.now() - _mrCache.fetchedAt) < 300000) {
+      _renderMostRosteredView(body, _mrCache.data, qualPairs.length, year);
+      return;
+    }
+
+    try {
+      // Group qual pairs by leagueId — fetch each league's roster once
+      const byLeague = {};
+      qualPairs.filter(p => p.platform === "sleeper").forEach(p => {
+        if (!byLeague[p.leagueId]) byLeague[p.leagueId] = [];
+        byLeague[p.leagueId].push(p);
+      });
+
+      // player occurrence map: playerId → { name, position, nflTeam, count, teamNames[] }
+      const playerMap = {};
+
+      await Promise.allSettled(Object.entries(byLeague).map(async ([lid, teams]) => {
+        try {
+          const rosters = await fetch(`https://api.sleeper.app/v1/league/${lid}/rosters`).then(r => r.ok ? r.json() : []);
+          teams.forEach(tm => {
+            const roster = (rosters || []).find(r => String(r.roster_id) === tm.teamId);
+            if (!roster) return;
+            const playerIds = [...new Set([...(roster.starters || []), ...(roster.players || [])])];
+            playerIds.forEach(pid => {
+              if (!pid || pid === "0") return;
+              const dp = DLRPlayers.get(pid);
+              if (!dp?.first_name) return; // skip unresolved
+              if (!playerMap[pid]) {
+                playerMap[pid] = {
+                  pid, count: 0, teamNames: [],
+                  name:     `${dp.first_name} ${dp.last_name}`.trim(),
+                  position: (dp.position || "?").toUpperCase(),
+                  nflTeam:  dp.team || "FA"
+                };
+              }
+              playerMap[pid].count++;
+              playerMap[pid].teamNames.push(tm.teamName || tm.teamId);
+            });
+          });
+        } catch(e) { /* skip league on error */ }
+      }));
+
+      // Group by position, sort by count desc
+      const byPos = {};
+      Object.values(playerMap).forEach(p => {
+        if (!byPos[p.position]) byPos[p.position] = [];
+        byPos[p.position].push(p);
+      });
+      Object.values(byPos).forEach(arr => arr.sort((a, b) => b.count - a.count));
+
+      // Also build flat "all" list
+      const allPlayers = Object.values(playerMap).sort((a, b) => b.count - a.count);
+      const data = { all: allPlayers, ...byPos };
+
+      _mrCache = { data, year, tid, fetchedAt: Date.now() };
+      _renderMostRosteredView(body, data, qualPairs.length, year);
+    } catch(e) {
+      body.innerHTML = `<div class="trn-empty">Failed to load rosters: ${_esc(e.message)}</div>`;
+    }
+  }
+
+  function _renderMostRosteredView(body, data, qualCount, year) {
+    const positions  = ["all", ...Object.keys(data).filter(k => k !== "all").sort()];
+    const posOpts    = positions.map(p =>
+      `<option value="${_esc(p)}" ${_mrPos === p ? "selected" : ""}>${p === "all" ? "All Positions" : _esc(p)}</option>`
+    ).join("");
+
+    const players    = (data[_mrPos] || data["all"] || []).slice(0, 50);
+    const maxCount   = players[0]?.count || 1;
+
+    const rows = players.map((p, i) => {
+      const col      = POS_COLOR[p.position] || "#9ca3af";
+      const pct      = Math.round(p.count / qualCount * 100);
+      const barW     = Math.round(p.count / maxCount * 100);
+      const teamList = [...new Set(p.teamNames)].slice(0, 6).map(n => `<span class="trn-az-team-chip">${_esc(n)}</span>`).join("");
+      return `
+        <tr>
+          <td class="trn-ph-col-rank" style="font-size:.8rem">${i + 1}</td>
+          <td style="padding:8px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;font-size:.65rem;padding:1px 5px;border-radius:4px;border:1px solid;flex-shrink:0">${_esc(p.position)}</span>
+              <span style="font-weight:600;font-size:.88rem">${_esc(p.name)}</span>
+              <span style="font-size:.72rem;color:var(--color-text-dim)">${_esc(p.nflTeam)}</span>
+            </div>
+            <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px">${teamList}</div>
+          </td>
+          <td class="trn-az-num-cell" style="font-weight:700">${p.count}</td>
+          <td class="trn-az-num-cell" style="color:var(--color-text-dim)">${pct}%</td>
+          <td style="padding:8px;min-width:80px">
+            <div class="trn-az-bar-wrap">
+              <div class="trn-az-bar" style="width:${barW}%;background:${col}88"></div>
+            </div>
+          </td>
+        </tr>`;
+    }).join("");
+
+    const nonSleeper = qualCount === 0;
+
+    body.innerHTML = `
+      <div class="trn-az-toolbar">
+        <select id="trn-mr-pos" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">${posOpts}</select>
+        <button class="btn-secondary btn-sm" id="trn-mr-refresh">↺ Refresh</button>
+      </div>
+      <div class="trn-az-meta">${qualCount} playoff team${qualCount !== 1 ? "s" : ""} · ${year} season · top ${players.length} players shown (Sleeper leagues only)</div>
+      ${players.length ? `
+        <div style="overflow-x:auto">
+          <table class="trn-ph-list-table trn-az-stat-table">
+            <thead><tr>
+              <th class="trn-ph-col-rank">#</th>
+              <th>Player</th>
+              <th class="trn-az-num-cell trn-ph-th-tip" title="Number of playoff teams rostering this player">Teams</th>
+              <th class="trn-az-num-cell trn-ph-th-tip" title="% of playoff teams">%</th>
+              <th class="trn-ph-th-tip" title="Ownership bar">Ownership</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>` : `<div class="trn-empty"><div class="trn-empty-icon">🤷</div><div class="trn-empty-title">No roster data for this position</div></div>`}`;
+
+    document.getElementById("trn-mr-pos")?.addEventListener("change", function() {
+      _mrPos = this.value;
+      _renderMostRosteredView(body, _mrCache?.data || data, qualCount, year);
+    });
+    document.getElementById("trn-mr-refresh")?.addEventListener("click", () => {
+      _mrCache = null;
+      _renderAnalyticsMostRostered(_activeTournamentId, _tournaments[_activeTournamentId], body);
+    });
+  }
+
+  // ── ANALYTICS: ADP vs Finish ─────────────────────────────────────────────────
+  // For each drafted player, compare their draft ADP (from _draftCache) against
+  // how the team that drafted them finished in the regular season standings.
+  // Groups players into buckets: drafted by playoff teams vs eliminated teams.
+  // Highlights players who were heavily concentrated on one side.
+  // Requires draft data — prompts to load it if not available.
+
+  let _avfPos  = "all";
+  let _avfView = "po"; // "po" = sorted by playoff-team ownership%, "elim" = by elim-team%, "diff" = by swing
+
+  async function _renderAnalyticsADPvFinish(tid, t, body) {
+    await DLRPlayers.load().catch(() => {});
+
+    if (!_draftCache || _draftCache.tid !== tid) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">🎯</div>
+          <div class="trn-empty-title">Draft data not loaded</div>
+          <div class="trn-empty-sub">Load the Draft tab first to fetch pick data, then return here.</div>
+          <button class="btn-secondary btn-sm" id="trn-avf-load-draft" style="margin-top:var(--space-4)">Load Draft Data</button>
+        </div>`;
+      document.getElementById("trn-avf-load-draft")?.addEventListener("click", async () => {
+        body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading draft data…</div>`;
+        await _renderAnalyticsDraft(tid, t, { innerHTML: "" }); // warm the cache silently
+        _renderAnalyticsADPvFinish(tid, t, body);
+      });
+      return;
+    }
+
+    const year     = _tournamentYear || new Date().getFullYear();
+    const _sk      = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const poByYear = _buildPoByYear(t);
+    const poYr     = poByYear[String(year)] || {};
+    const hasPoData = Object.keys(poYr).length > 0;
+
+    // Build teamName → qualified boolean for this year
+    const scEntries = Object.values(t.standingsCache || {}).filter(lc => lc.year === year);
+    const teamQualMap = {}; // sanitizedTeamName → true/false
+    scEntries.forEach(lc => {
+      (lc.teams || []).forEach(tm => {
+        const byUser = tm.sleeperUsername ? poYr[_sk(tm.sleeperUsername)] : null;
+        const byName = poYr[_sk(tm.teamName || "")];
+        const entry  = byUser || byName;
+        teamQualMap[_sk(tm.teamName || "")] = !!(entry?.qualified);
+      });
+    });
+
+    // Walk draft picks — for each player tally: poTeamPicks, elimTeamPicks, adpSum, count
+    const picks = _draftCache.picks.filter(p => !p.cost); // exclude auction (cost-based) picks
+    const playerData = {}; // playerId → { name, position, nflTeam, adp, poCount, elimCount, overalls[] }
+
+    picks.forEach(pk => {
+      const pid = pk.playerId || pk.name;
+      if (!pid) return;
+      const isQual = teamQualMap[_sk(pk.teamName || "")] ?? false;
+
+      if (!playerData[pid]) {
+        playerData[pid] = { pid, name: pk.name, position: pk.position, nflTeam: pk.nflTeam || "FA", poCount: 0, elimCount: 0, overalls: [] };
+      }
+      if (isQual) playerData[pid].poCount++;
+      else        playerData[pid].elimCount++;
+      playerData[pid].overalls.push(pk.overall || 999);
+    });
+
+    // Compute ADP and swing score for each player
+    const adp = _draftCache.adp; // pre-computed adp array [{playerId, adp, name, position}]
+    const adpMap = {};
+    adp.forEach(a => { adpMap[String(a.playerId)] = a.adp; });
+
+    const totalPoTeams   = new Set(picks.filter(pk => teamQualMap[_sk(pk.teamName || "")]).map(pk => pk.teamId)).size;
+    const totalElimTeams = new Set(picks.filter(pk => !teamQualMap[_sk(pk.teamName || "")]).map(pk => pk.teamId)).size;
+
+    const allRows = Object.values(playerData).map(p => {
+      const playerAdp = adpMap[String(p.pid)] || (p.overalls.reduce((s, v) => s + v, 0) / (p.overalls.length || 1));
+      const poPct     = totalPoTeams   > 0 ? +(p.poCount   / totalPoTeams   * 100).toFixed(1) : 0;
+      const elimPct   = totalElimTeams > 0 ? +(p.elimCount / totalElimTeams * 100).toFixed(1) : 0;
+      const swing     = poPct - elimPct; // positive = PO teams preferred, negative = elim teams preferred
+      return { ...p, adp: +playerAdp.toFixed(1), poPct, elimPct, swing, total: p.poCount + p.elimCount };
+    }).filter(p => p.total >= 2); // need ≥2 picks to be meaningful
+
+    if (!allRows.length) {
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🎯</div><div class="trn-empty-title">Not enough data</div><div class="trn-empty-sub">Need draft picks for ${year} and published playoff standings to compute ADP vs Finish.</div></div>`;
+      return;
+    }
+
+    const positions  = ["all", ...new Set(allRows.map(p => p.position).filter(Boolean)).values()].sort((a, b) => a === "all" ? -1 : b === "all" ? 1 : a.localeCompare(b));
+    const posOpts    = positions.map(p =>
+      `<option value="${_esc(p)}" ${_avfPos === p ? "selected" : ""}>${p === "all" ? "All Positions" : _esc(p)}</option>`
+    ).join("");
+
+    const viewPills = [
+      { v: "po",   label: "🏆 PO-Heavy" },
+      { v: "elim", label: "💀 Elim-Heavy" },
+      { v: "diff", label: "📊 By Swing" },
+    ].map(x =>
+      `<button class="trn-az-pill${_avfView === x.v ? " active" : ""}" data-avf-view="${x.v}">${x.label}</button>`
+    ).join("");
+
+    // Filter and sort
+    const filtered = (_avfPos === "all" ? allRows : allRows.filter(p => p.position === _avfPos))
+      .sort((a, b) => _avfView === "po" ? b.poPct - a.poPct : _avfView === "elim" ? b.elimPct - a.elimPct : b.swing - a.swing)
+      .slice(0, 40);
+
+    const tableRows = filtered.map((p, i) => {
+      const col       = POS_COLOR[p.position] || "#9ca3af";
+      const swingColor = p.swing > 15 ? "#4ade80" : p.swing < -15 ? "#f87171" : "var(--color-text-dim)";
+      const swingStr  = (p.swing >= 0 ? "+" : "") + p.swing.toFixed(1) + "%";
+      const poBar     = Math.round(p.poPct);
+      const elimBar   = Math.round(p.elimPct);
+      return `
+        <tr>
+          <td class="trn-ph-col-rank" style="font-size:.8rem">${i + 1}</td>
+          <td style="padding:8px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;font-size:.65rem;padding:1px 5px;border-radius:4px;border:1px solid;flex-shrink:0">${_esc(p.position)}</span>
+              <span style="font-weight:600;font-size:.88rem">${_esc(p.name)}</span>
+              <span style="font-size:.72rem;color:var(--color-text-dim)">${_esc(p.nflTeam)}</span>
+            </div>
+          </td>
+          <td class="trn-az-num-cell trn-ph-th-tip" title="Average draft position">${p.adp}</td>
+          <td class="trn-az-num-cell" style="color:#4ade80">${p.poPct}%</td>
+          <td class="trn-az-num-cell" style="color:#f87171">${p.elimPct}%</td>
+          <td class="trn-az-num-cell" style="color:${swingColor};font-weight:700">${swingStr}</td>
+          <td style="padding:6px 8px;min-width:80px">
+            <div class="trn-az-split-bar-wrap">
+              <div class="trn-az-split-bar-po"   style="width:${poBar}%"></div>
+              <div class="trn-az-split-bar-elim" style="width:${elimBar}%"></div>
+            </div>
+          </td>
+        </tr>`;
+    }).join("");
+
+    const noPoNote = !hasPoData
+      ? `<div class="trn-xplat-banner" style="margin-bottom:var(--space-3)"><span class="trn-xplat-banner-icon">ℹ️</span><div class="trn-xplat-banner-body"><div class="trn-xplat-banner-title">No playoff data</div><div class="trn-xplat-banner-items" style="list-style:none;padding:0">Publish playoffs to split picks into playoff vs eliminated teams. All picks are treated as "eliminated" without this data.</div></div></div>` : "";
+
+    body.innerHTML = `
+      ${noPoNote}
+      <div class="trn-az-toolbar">
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
+          <select id="trn-avf-pos" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">${posOpts}</select>
+          <div class="trn-az-view-pills">${viewPills}</div>
+        </div>
+      </div>
+      <div class="trn-az-meta">${allRows.length} players drafted · ${totalPoTeams} playoff teams · ${totalElimTeams} eliminated teams · ${year}</div>
+      <div style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+        <span style="color:#4ade80">●</span> PO% = % of playoff teams that rostered this player &nbsp;
+        <span style="color:#f87171">●</span> Elim% = % of eliminated teams &nbsp;
+        Swing = PO% − Elim% (positive = playoff teams preferred)
+      </div>
+      ${filtered.length ? `
+        <div style="overflow-x:auto">
+          <table class="trn-ph-list-table trn-az-stat-table">
+            <thead><tr>
+              <th class="trn-ph-col-rank">#</th>
+              <th>Player</th>
+              <th class="trn-az-num-cell trn-ph-th-tip" title="Average draft position">ADP</th>
+              <th class="trn-az-num-cell trn-ph-th-tip" title="% of playoff teams that drafted this player" style="color:#4ade80">PO%</th>
+              <th class="trn-az-num-cell trn-ph-th-tip" title="% of eliminated teams that drafted this player" style="color:#f87171">Elim%</th>
+              <th class="trn-az-num-cell trn-ph-th-tip" title="PO% minus Elim% — positive means playoff teams preferred this player">Swing</th>
+              <th class="trn-ph-th-tip" title="PO (green) vs Elim (red) ownership split">Split</th>
+            </tr></thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>` : `<div class="trn-empty"><div class="trn-empty-icon">🤷</div><div class="trn-empty-title">No players for this position filter</div></div>`}`;
+
+    document.getElementById("trn-avf-pos")?.addEventListener("change", function() {
+      _avfPos = this.value;
+      _renderAnalyticsADPvFinish(tid, t, body);
+    });
+    body.querySelectorAll("[data-avf-view]").forEach(btn => {
+      btn.addEventListener("click", function() {
+        _avfView = this.dataset.avfView;
+        _renderAnalyticsADPvFinish(tid, t, body);
+      });
+    });
+  }
   // Shared between admin and user modes. Year-agnostic: shows career across ALL
   // years regardless of _tournamentYear. Reads entirely from t.standingsCache
   // and t.participants — no Firebase calls needed.
