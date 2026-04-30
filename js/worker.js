@@ -329,6 +329,18 @@ export default {
         return tournamentDraft(leagueId, platform, year, yahooToken, mflCookie);
       }
 
+      // ── Tournament: fetch rosters for one league ──────────────────────────────
+      // Returns { rosters: [{ teamId, playerIds:[] }] } — normalized across platforms.
+      // Used by the Most Rostered analytics tab to find which players are on playoff teams.
+      // Sleeper is handled client-side via the public API; this endpoint covers MFL + Yahoo.
+      if (path === "/tournament/rosters" && req.method === "POST") {
+        const { leagueId, platform, year, yahooToken, mflCookie } = await req.json();
+        if (!leagueId || !platform) {
+          return new Response(JSON.stringify({ error: "Missing leagueId or platform" }), { status: 400, headers: corsHeaders() });
+        }
+        return tournamentRosters(leagueId, platform, year, yahooToken, mflCookie);
+      }
+
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders() });
@@ -1212,7 +1224,120 @@ async function tournamentDraft(leagueId, platform, year, yahooToken, mflCookie) 
   return new Response(JSON.stringify({ picks: [], error: "Unsupported platform: " + platform }), { headers: corsHeaders() });
 }
 
-// ── Tournament: AI recap generator ────────────────────────────────────────────
+// ── Tournament: roster fetcher ────────────────────────────────────────────────
+// Returns { rosters: [{ teamId: string, playerIds: string[] }] }
+// Sleeper is handled client-side (public API, no auth needed).
+// MFL uses TYPE=rosters with the stored cookie.
+// Yahoo uses teams;out=roster with the stored access_token.
+// playerIds are bare numeric IDs matching DynastyProcess / DLRPlayers lookup keys.
+async function tournamentRosters(leagueId, platform, year, yahooToken, mflCookie) {
+  const season = year || new Date().getFullYear();
+
+  // ── MFL ─────────────────────────────────────────────────────────────────────
+  if (platform === "mfl") {
+    try {
+      const cookieHdr = mflCookie ? `MFL_USER_ID=${mflCookie}` : "";
+      const headers   = mflHeaders(cookieHdr ? { Cookie: cookieHdr } : {});
+
+      const r = await fetch(
+        `https://api.myfantasyleague.com/${season}/export?TYPE=rosters&L=${leagueId}&JSON=1`,
+        { headers }
+      );
+      if (!r.ok) return new Response(JSON.stringify({ rosters: [], error: "MFL API error" }), { headers: corsHeaders() });
+
+      const data = await r.json().catch(() => null);
+      // MFL rosters shape: data.rosters.franchise = [ { id, players: { player: [{id, …}] } } ]
+      // or players.player can be a single object (not array) when there's only one player.
+      const franchises = data?.rosters?.franchise || [];
+      const franchiseArr = Array.isArray(franchises) ? franchises : [franchises];
+
+      const rosters = franchiseArr.map(fr => {
+        const playerObj = fr.players?.player;
+        const playerArr = !playerObj ? []
+          : Array.isArray(playerObj) ? playerObj : [playerObj];
+        const playerIds = playerArr
+          .map(p => String(p.id || p.player_id || "").trim())
+          .filter(Boolean);
+        return { teamId: String(fr.id || ""), playerIds };
+      }).filter(r => r.teamId);
+
+      return new Response(JSON.stringify({ rosters }), { headers: corsHeaders() });
+    } catch(e) {
+      return new Response(JSON.stringify({ rosters: [], error: e.message }), { headers: corsHeaders() });
+    }
+  }
+
+  // ── Yahoo ────────────────────────────────────────────────────────────────────
+  if (platform === "yahoo") {
+    if (!yahooToken) {
+      return new Response(JSON.stringify({ rosters: [], error: "Yahoo token required" }), { headers: corsHeaders() });
+    }
+    try {
+      const base    = "https://fantasysports.yahooapis.com/fantasy/v2";
+      const authHdr = { Authorization: `Bearer ${yahooToken}`, Accept: "application/json" };
+
+      // leagueId may be a bare numeric ID or already a full league_key like "449.l.12345"
+      const leagueKey = leagueId.includes(".l.") ? leagueId : leagueId;
+
+      const r = await fetch(`${base}/league/${leagueKey}/teams;out=roster?format=json`, { headers: authHdr });
+      if (!r.ok) {
+        const msg = r.status === 401 ? "yahoo_token_expired" : `Yahoo API error ${r.status}`;
+        return new Response(JSON.stringify({ rosters: [], error: msg }), { headers: corsHeaders() });
+      }
+
+      const data = await r.json().catch(() => null);
+      // Yahoo roster shape: same as yahooLeagueBundle's rostersData parsing
+      function yahooPlayerId(rawId) {
+        if (!rawId) return null;
+        const parts = String(rawId).split(".");
+        return parts[parts.length - 1] || String(rawId);
+      }
+      function findVal(arr, key) {
+        if (!Array.isArray(arr)) return arr?.[key] ?? null;
+        for (const obj of arr) { if (obj && typeof obj === "object" && key in obj) return obj[key]; }
+        return null;
+      }
+
+      const rosLeague = data?.fantasy_content?.league;
+      const rosTeams  = rosLeague?.[1]?.teams || {};
+      const count     = rosTeams.count || 0;
+      const rosters   = [];
+
+      for (let i = 0; i < count; i++) {
+        const team = rosTeams[String(i)]?.team;
+        if (!team) continue;
+        const teamInfo = Array.isArray(team[0]) ? team[0] : [team[0]];
+        const teamId   = String(findVal(teamInfo, "team_id") || "");
+        const roster   = team[1]?.roster;
+        const players  = roster?.[0]?.players || {};
+        const pCount   = players.count || 0;
+        const playerIds = [];
+
+        for (let j = 0; j < pCount; j++) {
+          const p = players[String(j)]?.player;
+          if (!p) continue;
+          const pInfo = Array.isArray(p[0]) ? p[0] : [p[0]];
+          const rawId = findVal(pInfo, "player_id") || findVal(pInfo, "player_key");
+          const pid   = yahooPlayerId(rawId);
+          if (pid) playerIds.push(pid);
+        }
+
+        if (teamId) rosters.push({ teamId, playerIds });
+      }
+
+      return new Response(JSON.stringify({ rosters }), { headers: corsHeaders() });
+    } catch(e) {
+      return new Response(JSON.stringify({ rosters: [], error: e.message }), { headers: corsHeaders() });
+    }
+  }
+
+  return new Response(
+    JSON.stringify({ rosters: [], error: `Unsupported platform: ${platform}` }),
+    { headers: corsHeaders() }
+  );
+}
+
+
 // Calls Claude API with a structured weekly summary and returns markdown recap.
 async function tournamentRecap(body, env) {
   const { tournamentName, week, year, totalMatchups, closestGames, biggestBlowouts, highestScorer, avgScore } = body;
