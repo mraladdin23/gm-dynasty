@@ -1654,6 +1654,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         }).join("");
     };
 
+    // Count available teams for the re-sync notice
+    const wcTotalTeams = _wcBuildLeagueGroups(new Set()).reduce((s,g) => s + g.teams.length, 0);
+
     // Render one group card
     const _wcGroupCardHTML = (group, gi) => {
       const members  = group.members || [];
@@ -1771,6 +1774,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <strong>ℹ️ World Cup qualification is set per group.</strong>
               Each group card below has an "Advance to bracket" field — that controls how many teams from each group move on.
               The Qualification Rules and Seeding &amp; Byes sections don't apply in this mode.
+              ${wcTotalTeams === 0
+                ? `<br><strong style="color:var(--color-warning,#f59e0b)">⚠️ No teams found in standings for this year. Sync your leagues first (Standings → Sync), then return here.</strong>`
+                : `<br>${wcTotalTeams} team${wcTotalTeams!==1?"s":""} available across all synced leagues.
+                   If team names show Sleeper usernames instead of fantasy team names,
+                   go to <strong>Standings → Sync Leagues</strong> to re-sync — the system now reads the league team name (e.g. "Dezpacito") from Sleeper.`}
             </div>
             <!-- ── WC Global Settings ── -->
             <div class="trn-wc-settings-row">
@@ -2331,9 +2339,63 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return sched;
       };
 
-      // Re-render a member list for a group card in-place and refresh its dropdown
+      // ── Schedule: in-memory store ────────────────────────
+      // _wcSchedData[gi][weekIdx] = [{home, away}, ...]
+      // This is the single source of truth for the schedule. The DOM is just a view.
+      // We load from _poLocal().worldcupSchedule on init and write back on save.
+      const _wcSchedData = (() => {
+        const saved = _poLocal().worldcupSchedule || {};
+        // Convert from Firebase object-of-objects to our gi->week->matchups structure
+        const out = {};
+        Object.entries(saved).forEach(([gi, wkMap]) => {
+          out[String(gi)] = {};
+          Object.entries(wkMap).forEach(([wi, matchups]) => {
+            out[String(gi)][String(wi)] = Array.isArray(matchups) ? matchups : Object.values(matchups);
+          });
+        });
+        return out;
+      })();
+
+      // Flush current DOM schedule area into _wcSchedData for the given group
+      const _wcFlushSchedDOM = (gi) => {
+        const area = document.getElementById("trn-wc-sched-area");
+        if (!area) return;
+        if (!_wcSchedData[String(gi)]) _wcSchedData[String(gi)] = {};
+        area.querySelectorAll(`.trn-wc-sched-week[data-gi="${gi}"]`).forEach(weekEl => {
+          const wi = String(weekEl.dataset.week);
+          _wcSchedData[String(gi)][wi] = Array.from(weekEl.querySelectorAll(".trn-wc-matchup-row"))
+            .map(row => ({
+              home: row.querySelector(".trn-wc-matchup-home")?.value || "",
+              away: row.querySelector(".trn-wc-matchup-away")?.value || ""
+            }))
+            .filter(m => m.home && m.away && m.home !== m.away);
+        });
+      };
+
+      // ── Helper: get all currently-assigned team names across ALL groups ──
+      const _wcAllAssigned = () => {
+        const all = new Set();
+        document.querySelectorAll(".trn-wc-member-name").forEach(el => all.add(el.textContent.trim()));
+        return all;
+      };
+
+      // Refresh every group card's dropdown, excluding names assigned anywhere
+      const _wcRefreshAllDropdowns = () => {
+        const assigned = _wcAllAssigned();
+        document.querySelectorAll(".trn-wc-group-card").forEach(card => {
+          const gi = parseInt(card.dataset.gi);
+          // Members in THIS group are always available to their own group (only exclude cross-group)
+          const thisGroupMembers = Array.from(card.querySelectorAll(".trn-wc-member-name"))
+            .map(el => el.textContent.trim());
+          // Exclude everything assigned except to this group
+          const crossAssigned = new Set([...assigned].filter(n => !thisGroupMembers.includes(n)));
+          const sel = card.querySelector(".trn-wc-add-select");
+          if (sel) sel.innerHTML = `<option value="">— Add team —</option>` + _wcBuildDropdownOptgroups(crossAssigned);
+        });
+      };
+
+      // Re-render a member list for a group card in-place
       const _wcRenderMembers = (gi, members) => {
-        // Update member list
         const listEl = document.getElementById(`trn-wc-members-${gi}`);
         if (listEl) {
           listEl.innerHTML = members.length
@@ -2344,35 +2406,29 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 </div>`).join("")
             : '<div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>';
         }
-        // Refresh dropdown — rebuild with optgroups excluding current members
-        const sel = document.querySelector(`.trn-wc-add-select[data-gi="${gi}"]`);
-        if (sel) {
-          sel.innerHTML = `<option value="">— Add team —</option>` + _wcBuildDropdownOptgroups(members);
-        }
-        // Update "of N" count label
+        // Update "of N" count label and max
         const card = document.querySelector(`.trn-wc-group-card[data-gi="${gi}"]`);
         const ofSpan = card?.querySelector(".trn-wc-adv-row span:last-child");
         if (ofSpan) ofSpan.textContent = `of ${members.length||"?"}`;
-        // Update max on the advance input
         const advInput = card?.querySelector(".trn-wc-adv-count");
         if (advInput && members.length) advInput.max = members.length;
+        // Refresh ALL dropdowns so assigned teams disappear cross-group
+        _wcRefreshAllDropdowns();
         _wcWireGroupCard(gi);
       };
 
-      // Build <optgroup> innerHTML for a dropdown, excluding the given member names.
-      // Reads live from standingsCache so it's always up to date.
-      const _wcBuildDropdownOptgroups = (excludeMembers) => {
-        const excluded = new Set(excludeMembers || []);
-        const tData    = _tournaments[_activeTournamentId] || t;
+      // Build <optgroup> innerHTML for a dropdown, excluding given Set of names
+      const _wcBuildDropdownOptgroups = (excludedSet) => {
+        const tData = _tournaments[_activeTournamentId] || t;
         const byLeague = {};
         Object.values(tData.standingsCache||{}).forEach(lc => {
           if (String(lc.year) !== String(_activePoYear)) return;
           const lgName = lc.leagueName || "Unknown League";
           if (!byLeague[lgName]) byLeague[lgName] = [];
           (lc.teams||[]).forEach(tm => {
-            if (!tm.teamName || excluded.has(tm.teamName)) return;
+            if (!tm.teamName || excludedSet.has(tm.teamName)) return;
             if (byLeague[lgName].some(e => e.value === tm.teamName)) return;
-            const handle = tm.sleeperUsername || tm.sleeperDisplayName || "";
+            const handle = (tm.sleeperUsername || tm.sleeperDisplayName || "").trim();
             const label  = handle && handle.toLowerCase() !== tm.teamName.toLowerCase()
               ? `${tm.teamName} (${handle})`
               : tm.teamName;
@@ -2414,7 +2470,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           if (!confirm(`Delete ${document.querySelector(`.trn-wc-group-name[data-gi="${gi}"]`)?.value||("Group "+(parseInt(gi)+1))}?`)) return;
           const card = document.querySelector(`.trn-wc-group-card[data-gi="${gi}"]`);
           card?.remove();
-          // Re-index remaining cards
           document.querySelectorAll(".trn-wc-group-card").forEach((c, newGi) => {
             c.dataset.gi = newGi;
             c.querySelector(".trn-wc-group-name")?.setAttribute("data-gi", newGi);
@@ -2431,11 +2486,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           if (listEl && !listEl.querySelector(".trn-wc-group-card")) {
             listEl.innerHTML = `<div class="trn-po-empty" style="grid-column:1/-1">No groups yet.</div>`;
           }
+          _wcRefreshAllDropdowns();
         };
       };
 
-      // Wire all existing group cards
+      // Wire all existing group cards, then do an initial cross-group dropdown refresh
       document.querySelectorAll(".trn-wc-group-card").forEach(card => _wcWireGroupCard(parseInt(card.dataset.gi)));
+      _wcRefreshAllDropdowns();
 
       // ── Add Group button ────────────────────────────────
       document.getElementById("trn-wc-add-group")?.addEventListener("click", () => {
@@ -2466,7 +2523,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <div class="trn-wc-add-row">
             <select class="trn-wc-add-select" data-gi="${gi}">
               <option value="">— Add team —</option>
-              ${_wcBuildDropdownOptgroups([])}
+              ${_wcBuildDropdownOptgroups(_wcAllAssigned())}
             </select>
           </div>`;
         listEl.appendChild(card);
@@ -2486,20 +2543,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         } catch(e) { showToast("Failed: "+e.message, "error"); }
       });
 
-      // ── Group tabs (schedule area) ───────────────────────
-      // Build/render schedule HTML for a given group index
+      // ── Schedule area ────────────────────────────────────
+      // _wcSchedForGroup reads from _wcSchedData (in-memory), not _poLocal
       const _wcSchedForGroup = (gi) => {
         const groups  = _wcReadGroups();
         const group   = groups[gi] || (_poLocal().worldcupGroups||[])[gi];
-        if (!group || !(group.members||[]).length) return `<div class="trn-po-empty">Add teams to this group first, then build the schedule.</div>`;
+        if (!group || !(group.members||[]).length) return `<div class="trn-po-empty">Add teams to this group first (save groups), then build the schedule.</div>`;
         const members  = group.members;
         const regWeeks = parseInt(document.getElementById("trn-wc-reg-weeks")?.value) || (_poLocal().worldcupRegWeeks||6);
-        const savedSched = (_poLocal().worldcupSchedule||{})[String(gi)] || {};
+        const groupSched = _wcSchedData[String(gi)] || {};
 
         const memberOpts = (sel) => members.map(n => `<option value="${_esc(n)}" ${sel===n?"selected":""}>${_esc(n)}</option>`).join("");
 
         const weeksHTML = Array.from({length:regWeeks},(_,wi)=>{
-          const matchups = savedSched[String(wi)] || [];
+          const matchups = groupSched[String(wi)] || [];
           const matchupRows = matchups.map((m,mi)=>`
             <div class="trn-wc-matchup-row" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">
               <select class="trn-wc-matchup-home" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">${memberOpts(m.home)}</select>
@@ -2520,23 +2577,27 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <div class="trn-wc-sched-title">📅 ${_esc(group.name||("Group "+(gi+1)))} — ${members.length} teams, ${regWeeks} weeks</div>
           <div class="trn-wc-sched-autofill-row">
             <button class="btn-secondary btn-xs trn-wc-autofill-btn" data-gi="${gi}">⚡ Auto-fill double round-robin</button>
-            <span style="font-size:.72rem;color:var(--color-text-dim)">Each team plays every opponent twice (weeks may be added as needed)</span>
+            <span style="font-size:.72rem;color:var(--color-text-dim)">Each team plays every opponent twice across ${regWeeks} weeks</span>
           </div>
           <div class="trn-wc-weeks-grid">${weeksHTML}</div>
         </div>`;
       };
 
+      let _wcActiveSchedGi = 0; // track which group tab is shown
+
       const _wcRenderSchedArea = (gi) => {
+        // Flush current DOM into _wcSchedData before switching
+        _wcFlushSchedDOM(_wcActiveSchedGi);
+        _wcActiveSchedGi = gi;
         const area = document.getElementById("trn-wc-sched-area");
         if (!area) return;
         area.innerHTML = _wcSchedForGroup(gi);
         _wcWireScheduleArea(gi);
-        // update active tab
         document.querySelectorAll(".trn-wc-group-tab-btn").forEach(btn =>
           btn.classList.toggle("trn-wc-group-tab-btn--active", parseInt(btn.dataset.gi) === gi));
       };
 
-      // Wire schedule event listeners for a rendered schedule area
+      // Wire schedule event listeners
       const _wcWireScheduleArea = (gi) => {
         const area = document.getElementById("trn-wc-sched-area");
         if (!area) return;
@@ -2549,8 +2610,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             const members = _wcReadGroups()[gi]?.members || (_poLocal().worldcupGroups||[])[gi]?.members || [];
             if (members.length < 2) { showToast("Need at least 2 teams in this group","info"); return; }
             const mi   = listEl.querySelectorAll(".trn-wc-matchup-row").length;
-            const opts  = members.map(n=>`<option value="${_esc(n)}">${_esc(n)}</option>`).join("");
-            const row   = document.createElement("div");
+            const opts = members.map(n=>`<option value="${_esc(n)}">${_esc(n)}</option>`).join("");
+            const row  = document.createElement("div");
             row.className = "trn-wc-matchup-row"; row.dataset.gi=gi; row.dataset.week=wi; row.dataset.mi=mi;
             row.innerHTML = `<select class="trn-wc-matchup-home" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">${opts}</select>
               <span class="trn-wc-vs">vs</span>
@@ -2562,9 +2623,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         });
         // Delete matchup buttons
         area.querySelectorAll(".trn-wc-del-matchup").forEach(btn => {
-          btn.onclick = () => {
-            btn.closest(".trn-wc-matchup-row")?.remove();
-          };
+          btn.onclick = () => { btn.closest(".trn-wc-matchup-row")?.remove(); };
         });
         // Auto-fill button
         area.querySelectorAll(".trn-wc-autofill-btn").forEach(btn => {
@@ -2573,16 +2632,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             const groups  = _wcReadGroups();
             const members = groups[giBtn]?.members || (_poLocal().worldcupGroups||[])[giBtn]?.members || [];
             if (members.length < 2) { showToast("Need at least 2 teams to auto-fill","info"); return; }
-            const regWks  = parseInt(document.getElementById("trn-wc-reg-weeks")?.value) || 6;
-            // Generate double round-robin schedule
-            // Standard round-robin algorithm (circle method)
+            const regWks = parseInt(document.getElementById("trn-wc-reg-weeks")?.value) || 6;
+            // Circle-method double round-robin
             const _genRR = (teams) => {
-              const n    = teams.length % 2 === 0 ? teams.length : teams.length + 1; // pad to even
-              const all  = [...teams];
+              const all   = [...teams];
               if (all.length % 2 !== 0) all.push("__BYE__");
+              const n     = all.length;
+              const fixed = all[0];
+              const rot   = [...all.slice(1)];
               const rounds = [];
-              const fixed  = all[0];
-              const rot    = [...all.slice(1)];
               for (let r = 0; r < n - 1; r++) {
                 const week = [];
                 const circle = [fixed, ...rot];
@@ -2591,33 +2649,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                   if (h !== "__BYE__" && a !== "__BYE__") week.push({home:h, away:a});
                 }
                 rounds.push(week);
-                rot.unshift(rot.pop()); // rotate
+                rot.unshift(rot.pop());
               }
               return rounds;
             };
-            const single  = _genRR(members);
-            const dbl     = [...single, ...single.map(week => week.map(m => ({home:m.away, away:m.home})))];
-            // Truncate or pad to regWks
-            const schedule = {};
+            const single = _genRR(members);
+            const dbl    = [...single, ...single.map(wk => wk.map(m => ({home:m.away, away:m.home})))];
+            // Write directly to _wcSchedData
+            if (!_wcSchedData[String(giBtn)]) _wcSchedData[String(giBtn)] = {};
             for (let wi = 0; wi < regWks; wi++) {
-              schedule[String(wi)] = dbl[wi] || [];
+              _wcSchedData[String(giBtn)][String(wi)] = dbl[wi] || [];
             }
-            // Update stored local schedule for this group
-            const curSched = _poLocal().worldcupSchedule || {};
-            curSched[String(giBtn)] = schedule;
-            Object.assign(_poLocal(), { worldcupSchedule: curSched });
-            // Re-render
             _wcRenderSchedArea(giBtn);
-            showToast(`Schedule auto-filled for Group ${giBtn+1} ✓`);
+            showToast(`Schedule auto-filled for ${groups[giBtn]?.name || ("Group "+(giBtn+1))} ✓`);
           };
         });
       };
 
       // Wire group tabs
       document.querySelectorAll(".trn-wc-group-tab-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          _wcRenderSchedArea(parseInt(btn.dataset.gi));
-        });
+        btn.addEventListener("click", () => _wcRenderSchedArea(parseInt(btn.dataset.gi)));
       });
 
       // Wire initial schedule area (group 0)
@@ -2625,15 +2676,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         _wcWireScheduleArea(0);
       }
 
-      // ── Save Schedule button ─────────────────────────────
+      // ── Save Schedule button — reads from _wcSchedData, not DOM ─
       document.getElementById("trn-wc-save-schedule")?.addEventListener("click", async () => {
-        const sched = _wcReadSchedule();
+        // Flush currently-visible group's DOM first
+        _wcFlushSchedDOM(_wcActiveSchedGi);
+        // Convert _wcSchedData to a plain object safe to send to Firebase
+        // Firebase doesn't accept nested arrays as object keys — normalise to arrays
+        const sched = {};
+        Object.entries(_wcSchedData).forEach(([gi, wkMap]) => {
+          sched[gi] = {};
+          Object.entries(wkMap).forEach(([wi, matchups]) => {
+            sched[gi][wi] = matchups;
+          });
+        });
         try {
           await _poSave({ worldcupSchedule: sched });
           Object.assign(_poLocal(), { worldcupSchedule: sched });
-          const total = Object.values(sched).reduce((s,wkMap) => s + Object.values(wkMap).reduce((ss,mm) => ss + (mm||[]).length, 0), 0);
-          showToast(`Schedule saved ✓ — ${total} matchups across all groups`);
-        } catch(e) { showToast("Failed: "+e.message, "error"); }
+          const total = Object.values(sched).reduce((s,wkMap) =>
+            s + Object.values(wkMap).reduce((ss,mm) => ss + (Array.isArray(mm) ? mm.length : 0), 0), 0);
+          showToast(`Schedule saved ✓ — ${total} matchup${total!==1?"s":""} across all groups`);
+        } catch(e) { showToast("Failed to save schedule: "+e.message, "error"); }
       });
 
     } // end worldcup block
@@ -8688,10 +8750,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           tabs.push({ id:`cround_${i}`, label: isFinal ? "🏆 Championship" : `Round ${i+1}` });
         });
       } else if (mode === "worldcup") {
-        // One tab per group, then the bracket
+        // Group tabs only show once groups are saved; bracket tab always shows in worldcup mode
         (po.worldcupGroups || []).forEach((g, gi) => {
           tabs.push({ id:`wcgroup_${gi}`, label:`🌍 ${g.name || ("Group "+(gi+1))}` });
         });
+        // Bracket tab always present so admin can always reach the seeding UI
         tabs.push({ id:"wc_bracket", label:"🥊 Bracket" });
       }
       if (po.recognizeLeagueChampions) tabs.push({ id:"league_champs", label:"🏅 League Champs" });
