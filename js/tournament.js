@@ -1384,7 +1384,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       total_points:  "Champion = highest cumulative PF through season end week.",
       points_rounds: "Teams qualify, then advance each week by top score. One pool per round.",
       h2h_bracket:   "Standard single-elimination bracket. System manages draws and advancement.",
-      custom_rounds: "Author each round manually: groups, teams per group, advancement rules."
+      custom_rounds: "Author each round manually: groups, teams per group, advancement rules.",
+      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round)."
     };
 
     // ── Year bar HTML (rendered outside sections, always visible) ────────────
@@ -1418,7 +1419,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             { val:"total_points",  icon:"📊", label:"Total Points",  sub:"Highest PF wins"   },
             { val:"points_rounds", icon:"📈", label:"Points Rounds", sub:"Advance by score"  },
             { val:"h2h_bracket",   icon:"🥊", label:"H2H Bracket",   sub:"System bracket"    },
-            { val:"custom_rounds", icon:"⚙️", label:"Custom Rounds", sub:"Author each round" }
+            { val:"custom_rounds", icon:"⚙️", label:"Custom Rounds", sub:"Author each round" },
+            { val:"worldcup",      icon:"🌍", label:"World Cup",     sub:"Groups → bracket"  }
           ].map(m=>`
             <button class="trn-mode-card ${mode===m.val?"trn-mode-card--active":""}" data-mode="${m.val}">
               <span class="trn-mode-icon">${m.icon}</span>
@@ -1603,10 +1605,121 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // ── Section D: Round Config ───────────────────────────────────────────────
     const showRounds = ["points_rounds","custom_rounds"].includes(mode);
+    const showWC     = mode === "worldcup";
+
+    // ── World Cup config data ─────────────────────────────────────────────────
+    const wcGroups         = Array.isArray(po.worldcupGroups) ? po.worldcupGroups : [];
+    const wcAdvanceCount   = po.worldcupAdvanceCount  ?? 2;
+    const wcWeeksPerRound  = po.worldcupWeeksPerRound  ?? 2;
+    const wcRegWeeks       = po.worldcupRegWeeks       ?? 6;
+    // wcSchedule: { [gi]: { [weekIndex]: [{home, away}, ...] } }
+    const wcSchedule       = po.worldcupSchedule       || {};
+
+    // Helper: build all team names assigned in any group (for dropdowns)
+    const _wcAllGroupTeams = () => {
+      const names = new Set();
+      wcGroups.forEach(g => (g.members||[]).forEach(n => names.add(n)));
+      // Also pull from standingsCache so admin can assign before standings exist
+      Object.values(t.standingsCache||{}).forEach(lc => {
+        if (String(lc.year) !== String(activeYear)) return;
+        (lc.teams||[]).forEach(tm => { if (tm.teamName) names.add(tm.teamName); });
+      });
+      return [...names].sort();
+    };
+    const wcAllTeams = _wcAllGroupTeams();
+
+    // Render one group card (groups list, no schedule here)
+    const _wcGroupCardHTML = (group, gi) => {
+      const members  = group.members || [];
+      const advance  = group.advanceCount ?? wcAdvanceCount;
+      const memberRows = members.map((name, mi) => `
+        <div class="trn-wc-member-row" data-gi="${gi}" data-mi="${mi}">
+          <span class="trn-wc-member-name">${_esc(name)}</span>
+          <button class="trn-wc-remove-member btn-ghost btn-xs" data-gi="${gi}" data-mi="${mi}" title="Remove">✕</button>
+        </div>`).join("");
+      return `
+        <div class="trn-wc-group-card" data-gi="${gi}">
+          <div class="trn-wc-group-header">
+            <input class="trn-wc-group-name" type="text" value="${_esc(group.name||('Group '+(gi+1)))}"
+              data-gi="${gi}" placeholder="Group name"
+              style="font-weight:700;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid var(--color-border);color:var(--color-text);padding:2px 4px;width:110px" />
+            <span class="trn-wc-adv-label">
+              Top <input type="number" class="trn-wc-adv-count" data-gi="${gi}"
+                value="${advance}" min="1" max="${Math.max(1,members.length)}"
+                style="width:32px;font-size:.75rem;padding:1px 4px;text-align:center;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" /> adv.
+            </span>
+            <button class="trn-wc-del-group btn-secondary btn-xs" data-gi="${gi}" title="Delete group">🗑</button>
+          </div>
+          <div class="trn-wc-members-list" id="trn-wc-members-${gi}">${memberRows || '<div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>'}</div>
+          <div class="trn-wc-add-row">
+            <select class="trn-wc-add-select" data-gi="${gi}">
+              <option value="">— Add team —</option>
+              ${wcAllTeams.filter(n => !(members.includes(n))).map(n => `<option value="${_esc(n)}">${_esc(n)}</option>`).join("")}
+            </select>
+          </div>
+        </div>`;
+    };
+
+    // Render the schedule editor for one group
+    // Schedule format stored: wcSchedule[gi] = array of weeks, each week = array of {home, away}
+    const _wcScheduleForGroup = (gi) => {
+      const group   = wcGroups[gi];
+      if (!group || !(group.members||[]).length) return `<div class="trn-po-empty">Add teams to this group first, then build the schedule.</div>`;
+      const members = group.members;
+      const weeks   = wcSchedule[String(gi)] || [];
+
+      const _weekHTML = (weekIdx) => {
+        const matchups = (weeks[weekIdx] || []);
+        const matchupRows = matchups.map((m, mi) => {
+          const homeOpts = members.map(n => `<option value="${_esc(n)}" ${m.home===n?"selected":""}>${_esc(n)}</option>`).join("");
+          const awayOpts = members.map(n => `<option value="${_esc(n)}" ${m.away===n?"selected":""}>${_esc(n)}</option>`).join("");
+          return `<div class="trn-wc-matchup-row" data-gi="${gi}" data-week="${weekIdx}" data-mi="${mi}">
+            <select class="trn-wc-matchup-home" data-gi="${gi}" data-week="${weekIdx}" data-mi="${mi}">${homeOpts}</select>
+            <span class="trn-wc-vs">vs</span>
+            <select class="trn-wc-matchup-away" data-gi="${gi}" data-week="${weekIdx}" data-mi="${mi}">${awayOpts}</select>
+            <button class="trn-wc-del-matchup btn-ghost btn-xs" data-gi="${gi}" data-week="${weekIdx}" data-mi="${mi}" title="Remove">✕</button>
+          </div>`;
+        }).join("");
+        return `<div class="trn-wc-sched-week" data-gi="${gi}" data-week="${weekIdx}">
+          <div class="trn-wc-sched-week-header">
+            <span class="trn-wc-sched-week-label">Week ${weekIdx+1}</span>
+            <button class="trn-wc-add-matchup btn-secondary btn-xs" data-gi="${gi}" data-week="${weekIdx}">+ Game</button>
+          </div>
+          <div class="trn-wc-matchups-list" id="trn-wc-matchups-${gi}-${weekIdx}">${matchupRows}</div>
+        </div>`;
+      };
+
+      const weekHTML = Array.from({length: wcRegWeeks}, (_, wi) => _weekHTML(wi)).join("");
+
+      return `
+        <div class="trn-wc-sched-group" id="trn-wc-sched-group-${gi}">
+          <div class="trn-wc-sched-title">📅 ${_esc(group.name||("Group "+(gi+1)))} Schedule</div>
+          <div class="trn-wc-sched-hint">Each team should play every other team twice (${wcRegWeeks}-week regular season). The system uses this schedule to compute W–L records and H2H tiebreakers.</div>
+          <div class="trn-wc-sched-autofill-row">
+            <button class="btn-secondary btn-xs trn-wc-autofill-btn" data-gi="${gi}">⚡ Auto-fill round-robin</button>
+            <span style="font-size:.72rem;color:var(--color-text-dim)">Generates a full double round-robin schedule automatically (each team plays each opponent twice)</span>
+          </div>
+          <div class="trn-wc-weeks-grid">${weekHTML}</div>
+        </div>`;
+    };
+
+    // Initially show first group's schedule, or empty state
+    const wcFirstGroupSched = showWC && wcGroups.length > 0
+      ? _wcScheduleForGroup(0)
+      : `<div class="trn-po-empty">Add groups and teams first, then click a group tab to build its schedule.</div>`;
+
+    const wcGroupTabsHTML = showWC ? `
+      <div class="trn-wc-group-tabs" id="trn-wc-group-tabs">
+        ${wcGroups.map((g,gi) => `
+          <button class="trn-wc-group-tab-btn ${gi===0?"trn-wc-group-tab-btn--active":""}" data-gi="${gi}">
+            ${_esc(g.name||("Group "+(gi+1)))} <span class="trn-wc-tab-count">${(g.members||[]).length}</span>
+          </button>`).join("")}
+      </div>` : "";
+
     const sectionRounds = `
       <div class="trn-pc-section" id="trn-pc-rounds">
-        ${!showRounds
-          ? `<div class="trn-pc-na-note">Round configuration applies to Points Rounds and Custom Rounds modes only.</div>`
+        ${!showRounds && !showWC
+          ? `<div class="trn-pc-na-note">Round configuration applies to Points Rounds, Custom Rounds, and World Cup modes only.</div>`
           : mode==="points_rounds" ? `
             <div id="trn-pr-rounds-list" class="trn-rounds-list">
               ${prRounds.map((r,i)=>_prRoundRowHTML(r,i,prRounds.length)).join("")}
@@ -1614,13 +1727,67 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <div class="trn-rounds-actions">
               <button class="btn-secondary btn-sm" id="trn-pr-add-round">+ Add Round</button>
               <button class="btn-primary btn-sm"   id="trn-pr-save">Save Rounds</button>
-            </div>` : `
+            </div>`
+          : mode==="custom_rounds" ? `
             <div id="trn-cr-rounds-list" class="trn-rounds-list">
               ${crRounds.map((r,i)=>_crRoundRowHTML(r,i,crRounds.length)).join("")}
             </div>
             <div class="trn-rounds-actions">
               <button class="btn-secondary btn-sm" id="trn-cr-add-round">+ Add Round</button>
               <button class="btn-primary btn-sm"   id="trn-cr-save">Save Rounds</button>
+            </div>`
+          : /* worldcup */ `
+            <!-- ── WC Global Settings ── -->
+            <div class="trn-wc-settings-row">
+              <div class="trn-wc-setting">
+                <label>Regular season weeks</label>
+                <input type="number" id="trn-wc-reg-weeks" min="1" max="18" value="${wcRegWeeks}"
+                  style="width:54px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+              </div>
+              <div class="trn-wc-setting">
+                <label>Default advance per group</label>
+                <input type="number" id="trn-wc-default-adv" min="1" max="8" value="${wcAdvanceCount}"
+                  style="width:54px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+              </div>
+              <div class="trn-wc-setting">
+                <label>Bracket: weeks per round</label>
+                <input type="number" id="trn-wc-wpr" min="1" max="3" value="${wcWeeksPerRound}"
+                  style="width:54px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+              </div>
+            </div>
+
+            <!-- ── Groups Header ── -->
+            <div class="trn-wc-section-header">
+              <span class="trn-pc-row-label" style="margin:0">Groups
+                <span class="trn-wc-count-chip">${wcGroups.length} groups · ${wcGroups.reduce((s,g)=>s+(g.members||[]).length,0)} teams</span>
+              </span>
+              <div style="display:flex;gap:var(--space-2)">
+                <button class="btn-secondary btn-sm" id="trn-wc-add-group">+ Add Group</button>
+                <button class="btn-primary btn-sm" id="trn-wc-save-groups">💾 Save All</button>
+              </div>
+            </div>
+
+            <!-- ── Groups Grid ── -->
+            <div id="trn-wc-groups-list" class="trn-wc-groups-grid">
+              ${wcGroups.length === 0
+                ? `<div class="trn-po-empty" style="width:100%;grid-column:1/-1">No groups yet. Click "+ Add Group" to start.</div>`
+                : wcGroups.map((g,gi) => _wcGroupCardHTML(g,gi)).join("")}
+            </div>
+
+            <!-- ── Schedule Builder ── -->
+            <div class="trn-wc-section-header" style="margin-top:var(--space-5)">
+              <span class="trn-pc-row-label" style="margin:0">Weekly Schedule
+                <span class="trn-wc-count-chip">${wcRegWeeks} weeks</span>
+              </span>
+            </div>
+            <div class="trn-section-help" style="margin-bottom:var(--space-3)">
+              Define who plays who each week within each group. Scores are fetched from Sleeper using these matchup assignments — this is how W–L records and H2H tiebreakers are computed.
+              Teams play each opponent twice (double round-robin). Use "Auto-fill" to generate the full schedule automatically.
+            </div>
+            ${wcGroupTabsHTML}
+            <div id="trn-wc-sched-area">${wcFirstGroupSched}</div>
+            <div class="trn-rounds-actions" style="margin-top:var(--space-3)">
+              <button class="btn-primary btn-sm" id="trn-wc-save-schedule">💾 Save Schedule</button>
             </div>`}
       </div>`;
 
@@ -1649,9 +1816,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${yearBarHTML}
           <select class="trn-pc-section-select" id="trn-pc-section-select">
             <option value="format">⚙️ Playoff Format</option>
-            <option value="qual"   ${!showQual?"disabled":""}>📋 Qualification Rules${!showQual?" (n/a)":""}</option>
-            <option value="seeding" ${!showSeeding?"disabled":""}>🏅 Seeding &amp; Byes${!showSeeding?" (n/a)":""}</option>
-            <option value="rounds" ${!showRounds?"disabled":""}>🔄 Round Config${!showRounds?" (n/a)":""}</option>
+            <option value="qual"   ${(!showQual||showWC)?"disabled":""}>📋 Qualification Rules${(!showQual||showWC)?" (n/a)":""}</option>
+            <option value="seeding" ${(!showSeeding||showWC)?"disabled":""}>🏅 Seeding &amp; Byes${(!showSeeding||showWC)?" (n/a)":""}</option>
+            <option value="rounds" ${(!showRounds&&!showWC)?"disabled":""}>🔄 Group &amp; Schedule Config${(!showRounds&&!showWC)?" (n/a)":""}</option>
             <option value="scoring">📊 Scoring Settings</option>
           </select>
         </div>
@@ -1671,7 +1838,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       total_points:  "Champion = highest cumulative PF through season end week.",
       points_rounds: "Teams qualify, then advance each week by top score. One pool per round.",
       h2h_bracket:   "Standard single-elimination bracket. System manages draws and advancement.",
-      custom_rounds: "Author each round manually: groups, teams per group, advancement rules."
+      custom_rounds: "Author each round manually: groups, teams per group, advancement rules.",
+      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round)."
     };
     const currentNFLYear = String(new Date().getMonth() >= 8
       ? new Date().getFullYear() : new Date().getFullYear() - 1);
@@ -1768,9 +1936,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Update section-select options availability
       const sel = document.getElementById("trn-pc-section-select");
       if (sel) {
-        sel.querySelector('option[value="qual"]')?.toggleAttribute("disabled", mode==="total_points");
-        sel.querySelector('option[value="seeding"]')?.toggleAttribute("disabled", mode==="total_points");
-        sel.querySelector('option[value="rounds"]')?.toggleAttribute("disabled", !["points_rounds","custom_rounds"].includes(mode));
+        sel.querySelector('option[value="qual"]')?.toggleAttribute("disabled",    ["total_points","worldcup"].includes(mode));
+        sel.querySelector('option[value="seeding"]')?.toggleAttribute("disabled", ["total_points","worldcup"].includes(mode));
+        sel.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",  !["points_rounds","custom_rounds","worldcup"].includes(mode));
       }
       document.getElementById("trn-start-week-row")?.style.setProperty("display", mode==="total_points"?"none":"");
       document.getElementById("trn-seed-method-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
@@ -2095,6 +2263,302 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       try { await _poSave({customRounds:{rounds}}); Object.assign(_poLocal(),{customRounds:{rounds}}); showToast("Rounds saved ✓"); }
       catch(e) { showToast("Failed","error"); }
     });
+
+    // ── World Cup: Group Builder + Schedule Wiring ───────────────────────────
+    // Only wires if #trn-wc-groups-list exists (i.e. worldcup mode is active)
+    if (document.getElementById("trn-wc-groups-list")) {
+
+      // ── Helpers ────────────────────────────────────────
+      const _wcReadGroups = () => {
+        return Array.from(document.querySelectorAll("#trn-wc-groups-list .trn-wc-group-card"))
+          .map(card => {
+            const gi = card.dataset.gi;
+            return {
+              name:         card.querySelector(".trn-wc-group-name")?.value.trim() || ("Group "+(parseInt(gi)+1)),
+              advanceCount: parseInt(card.querySelector(".trn-wc-adv-count")?.value) || 2,
+              members:      Array.from(card.querySelectorAll(".trn-wc-member-name")).map(el => el.textContent.trim())
+            };
+          });
+      };
+
+      // Read the full schedule from the DOM (all weeks, all groups)
+      const _wcReadSchedule = () => {
+        const sched = {};
+        document.querySelectorAll(".trn-wc-sched-week").forEach(weekEl => {
+          const gi   = weekEl.dataset.gi;
+          const week = weekEl.dataset.week;
+          if (!sched[gi]) sched[gi] = {};
+          sched[gi][week] = Array.from(weekEl.querySelectorAll(".trn-wc-matchup-row")).map(row => ({
+            home: row.querySelector(".trn-wc-matchup-home")?.value || "",
+            away: row.querySelector(".trn-wc-matchup-away")?.value || ""
+          })).filter(m => m.home && m.away && m.home !== m.away);
+        });
+        return sched;
+      };
+
+      // Re-render a member list for a group card in-place
+      const _wcRenderMembers = (gi, members) => {
+        const listEl = document.getElementById(`trn-wc-members-${gi}`);
+        if (!listEl) return;
+        listEl.innerHTML = members.length
+          ? members.map((name, mi) => `
+              <div class="trn-wc-member-row" data-gi="${gi}" data-mi="${mi}">
+                <span class="trn-wc-member-name">${_esc(name)}</span>
+                <button class="trn-wc-remove-member btn-ghost btn-xs" data-gi="${gi}" data-mi="${mi}" title="Remove">✕</button>
+              </div>`).join("")
+          : '<div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div>';
+        _wcWireGroupCard(gi);
+      };
+
+      // Wire remove-member + add-select for one group card
+      const _wcWireGroupCard = (gi) => {
+        document.querySelectorAll(`.trn-wc-remove-member[data-gi="${gi}"]`).forEach(btn => {
+          btn.onclick = () => {
+            const mi     = parseInt(btn.dataset.mi);
+            const groups = _wcReadGroups();
+            if (!groups[gi]) return;
+            groups[gi].members.splice(mi, 1);
+            _wcRenderMembers(gi, groups[gi].members);
+          };
+        });
+        const addSel = document.querySelector(`.trn-wc-add-select[data-gi="${gi}"]`);
+        if (addSel) addSel.onchange = function() {
+          const name = this.value; if (!name) return; this.value = "";
+          const groups = _wcReadGroups();
+          if (!groups[gi]) return;
+          if (groups[gi].members.includes(name)) { showToast("Already in this group","info"); return; }
+          groups[gi].members.push(name);
+          _wcRenderMembers(gi, groups[gi].members);
+        };
+        const delBtn = document.querySelector(`.trn-wc-del-group[data-gi="${gi}"]`);
+        if (delBtn) delBtn.onclick = () => {
+          if (!confirm(`Delete ${document.querySelector(`.trn-wc-group-name[data-gi="${gi}"]`)?.value||("Group "+(parseInt(gi)+1))}?`)) return;
+          const card = document.querySelector(`.trn-wc-group-card[data-gi="${gi}"]`);
+          card?.remove();
+          // Re-index remaining cards
+          document.querySelectorAll(".trn-wc-group-card").forEach((c, newGi) => {
+            c.dataset.gi = newGi;
+            c.querySelector(".trn-wc-group-name")?.setAttribute("data-gi", newGi);
+            c.querySelector(".trn-wc-adv-count")?.setAttribute("data-gi", newGi);
+            c.querySelector(".trn-wc-del-group")?.setAttribute("data-gi", newGi);
+            c.querySelector(".trn-wc-add-select")?.setAttribute("data-gi", newGi);
+            c.querySelectorAll(".trn-wc-member-row").forEach((r,mi) => {
+              r.dataset.gi = newGi; r.querySelector(".trn-wc-remove-member")?.setAttribute("data-gi", newGi);
+            });
+            if (c.querySelector(".trn-wc-members-list")) c.querySelector(".trn-wc-members-list").id = `trn-wc-members-${newGi}`;
+            _wcWireGroupCard(newGi);
+          });
+          const listEl = document.getElementById("trn-wc-groups-list");
+          if (listEl && !listEl.querySelector(".trn-wc-group-card")) {
+            listEl.innerHTML = `<div class="trn-po-empty" style="grid-column:1/-1">No groups yet.</div>`;
+          }
+        };
+      };
+
+      // Wire all existing group cards
+      document.querySelectorAll(".trn-wc-group-card").forEach(card => _wcWireGroupCard(parseInt(card.dataset.gi)));
+
+      // ── Add Group button ────────────────────────────────
+      document.getElementById("trn-wc-add-group")?.addEventListener("click", () => {
+        const listEl = document.getElementById("trn-wc-groups-list");
+        if (!listEl) return;
+        listEl.querySelector(".trn-po-empty")?.remove();
+        const gi      = listEl.querySelectorAll(".trn-wc-group-card").length;
+        const defAdv  = parseInt(document.getElementById("trn-wc-default-adv")?.value) || 2;
+        const allT    = Array.from(document.querySelectorAll(".trn-wc-member-name")).map(el=>el.textContent.trim());
+        const card    = document.createElement("div");
+        card.className = "trn-wc-group-card"; card.dataset.gi = gi;
+        card.innerHTML = `
+          <div class="trn-wc-group-header">
+            <input class="trn-wc-group-name" type="text" value="Group ${gi+1}" data-gi="${gi}"
+              style="font-weight:700;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid var(--color-border);color:var(--color-text);padding:2px 4px;width:110px" />
+            <span class="trn-wc-adv-label">Top <input type="number" class="trn-wc-adv-count" data-gi="${gi}"
+              value="${defAdv}" min="1" max="8" style="width:32px;font-size:.75rem;padding:1px 4px;text-align:center;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" /> adv.</span>
+            <button class="trn-wc-del-group btn-secondary btn-xs" data-gi="${gi}" title="Delete group">🗑</button>
+          </div>
+          <div class="trn-wc-members-list" id="trn-wc-members-${gi}"><div style="font-size:.75rem;color:var(--color-text-dim);padding:4px 2px">No teams yet</div></div>
+          <div class="trn-wc-add-row">
+            <select class="trn-wc-add-select" data-gi="${gi}">
+              <option value="">— Add team —</option>
+            </select>
+          </div>`;
+        listEl.appendChild(card);
+        // Populate the add-select with available teams from standingsCache (minus already-assigned)
+        const assignedNames = new Set(Array.from(document.querySelectorAll(".trn-wc-member-name")).map(el=>el.textContent.trim()));
+        const sel = card.querySelector(".trn-wc-add-select");
+        Object.values(_tournaments[_activeTournamentId]?.standingsCache||{}).forEach(lc => {
+          if (String(lc.year) !== String(_activePoYear)) return;
+          (lc.teams||[]).forEach(tm => { if (tm.teamName && !assignedNames.has(tm.teamName)) {
+            const o = document.createElement("option"); o.value = tm.teamName; o.textContent = tm.teamName; sel?.appendChild(o);
+          }});
+        });
+        _wcWireGroupCard(gi);
+      });
+
+      // ── Save All Groups button ──────────────────────────
+      document.getElementById("trn-wc-save-groups")?.addEventListener("click", async () => {
+        const groups    = _wcReadGroups();
+        const defAdv    = parseInt(document.getElementById("trn-wc-default-adv")?.value) || 2;
+        const wpr       = parseInt(document.getElementById("trn-wc-wpr")?.value) || 2;
+        const regWeeks  = parseInt(document.getElementById("trn-wc-reg-weeks")?.value) || 6;
+        try {
+          await _poSave({ worldcupGroups: groups, worldcupAdvanceCount: defAdv, worldcupWeeksPerRound: wpr, worldcupRegWeeks: regWeeks });
+          Object.assign(_poLocal(), { worldcupGroups: groups, worldcupAdvanceCount: defAdv, worldcupWeeksPerRound: wpr, worldcupRegWeeks: regWeeks });
+          showToast(`Groups saved ✓ — ${groups.length} groups, ${groups.reduce((s,g)=>s+(g.members||[]).length,0)} teams`);
+        } catch(e) { showToast("Failed: "+e.message, "error"); }
+      });
+
+      // ── Group tabs (schedule area) ───────────────────────
+      // Build/render schedule HTML for a given group index
+      const _wcSchedForGroup = (gi) => {
+        const groups  = _wcReadGroups();
+        const group   = groups[gi] || (_poLocal().worldcupGroups||[])[gi];
+        if (!group || !(group.members||[]).length) return `<div class="trn-po-empty">Add teams to this group first, then build the schedule.</div>`;
+        const members  = group.members;
+        const regWeeks = parseInt(document.getElementById("trn-wc-reg-weeks")?.value) || (_poLocal().worldcupRegWeeks||6);
+        const savedSched = (_poLocal().worldcupSchedule||{})[String(gi)] || {};
+
+        const memberOpts = (sel) => members.map(n => `<option value="${_esc(n)}" ${sel===n?"selected":""}>${_esc(n)}</option>`).join("");
+
+        const weeksHTML = Array.from({length:regWeeks},(_,wi)=>{
+          const matchups = savedSched[String(wi)] || [];
+          const matchupRows = matchups.map((m,mi)=>`
+            <div class="trn-wc-matchup-row" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">
+              <select class="trn-wc-matchup-home" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">${memberOpts(m.home)}</select>
+              <span class="trn-wc-vs">vs</span>
+              <select class="trn-wc-matchup-away" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">${memberOpts(m.away)}</select>
+              <button class="trn-wc-del-matchup btn-ghost btn-xs" data-gi="${gi}" data-week="${wi}" data-mi="${mi}" title="Remove">✕</button>
+            </div>`).join("");
+          return `<div class="trn-wc-sched-week" data-gi="${gi}" data-week="${wi}">
+            <div class="trn-wc-sched-week-header">
+              <span class="trn-wc-sched-week-label">Week ${wi+1}</span>
+              <button class="trn-wc-add-matchup btn-secondary btn-xs" data-gi="${gi}" data-week="${wi}">+ Game</button>
+            </div>
+            <div class="trn-wc-matchups-list" id="trn-wc-matchups-${gi}-${wi}">${matchupRows}</div>
+          </div>`;
+        }).join("");
+
+        return `<div class="trn-wc-sched-group" id="trn-wc-sched-group-${gi}">
+          <div class="trn-wc-sched-title">📅 ${_esc(group.name||("Group "+(gi+1)))} — ${members.length} teams, ${regWeeks} weeks</div>
+          <div class="trn-wc-sched-autofill-row">
+            <button class="btn-secondary btn-xs trn-wc-autofill-btn" data-gi="${gi}">⚡ Auto-fill double round-robin</button>
+            <span style="font-size:.72rem;color:var(--color-text-dim)">Each team plays every opponent twice (weeks may be added as needed)</span>
+          </div>
+          <div class="trn-wc-weeks-grid">${weeksHTML}</div>
+        </div>`;
+      };
+
+      const _wcRenderSchedArea = (gi) => {
+        const area = document.getElementById("trn-wc-sched-area");
+        if (!area) return;
+        area.innerHTML = _wcSchedForGroup(gi);
+        _wcWireScheduleArea(gi);
+        // update active tab
+        document.querySelectorAll(".trn-wc-group-tab-btn").forEach(btn =>
+          btn.classList.toggle("trn-wc-group-tab-btn--active", parseInt(btn.dataset.gi) === gi));
+      };
+
+      // Wire schedule event listeners for a rendered schedule area
+      const _wcWireScheduleArea = (gi) => {
+        const area = document.getElementById("trn-wc-sched-area");
+        if (!area) return;
+        // Add matchup buttons
+        area.querySelectorAll(".trn-wc-add-matchup").forEach(btn => {
+          btn.onclick = () => {
+            const wi     = parseInt(btn.dataset.week);
+            const listEl = document.getElementById(`trn-wc-matchups-${gi}-${wi}`);
+            if (!listEl) return;
+            const members = _wcReadGroups()[gi]?.members || (_poLocal().worldcupGroups||[])[gi]?.members || [];
+            if (members.length < 2) { showToast("Need at least 2 teams in this group","info"); return; }
+            const mi   = listEl.querySelectorAll(".trn-wc-matchup-row").length;
+            const opts  = members.map(n=>`<option value="${_esc(n)}">${_esc(n)}</option>`).join("");
+            const row   = document.createElement("div");
+            row.className = "trn-wc-matchup-row"; row.dataset.gi=gi; row.dataset.week=wi; row.dataset.mi=mi;
+            row.innerHTML = `<select class="trn-wc-matchup-home" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">${opts}</select>
+              <span class="trn-wc-vs">vs</span>
+              <select class="trn-wc-matchup-away" data-gi="${gi}" data-week="${wi}" data-mi="${mi}">${opts}</select>
+              <button class="trn-wc-del-matchup btn-ghost btn-xs" data-gi="${gi}" data-week="${wi}" data-mi="${mi}" title="Remove">✕</button>`;
+            listEl.appendChild(row);
+            _wcWireScheduleArea(gi);
+          };
+        });
+        // Delete matchup buttons
+        area.querySelectorAll(".trn-wc-del-matchup").forEach(btn => {
+          btn.onclick = () => {
+            btn.closest(".trn-wc-matchup-row")?.remove();
+          };
+        });
+        // Auto-fill button
+        area.querySelectorAll(".trn-wc-autofill-btn").forEach(btn => {
+          btn.onclick = () => {
+            const giBtn   = parseInt(btn.dataset.gi);
+            const groups  = _wcReadGroups();
+            const members = groups[giBtn]?.members || (_poLocal().worldcupGroups||[])[giBtn]?.members || [];
+            if (members.length < 2) { showToast("Need at least 2 teams to auto-fill","info"); return; }
+            const regWks  = parseInt(document.getElementById("trn-wc-reg-weeks")?.value) || 6;
+            // Generate double round-robin schedule
+            // Standard round-robin algorithm (circle method)
+            const _genRR = (teams) => {
+              const n    = teams.length % 2 === 0 ? teams.length : teams.length + 1; // pad to even
+              const all  = [...teams];
+              if (all.length % 2 !== 0) all.push("__BYE__");
+              const rounds = [];
+              const fixed  = all[0];
+              const rot    = [...all.slice(1)];
+              for (let r = 0; r < n - 1; r++) {
+                const week = [];
+                const circle = [fixed, ...rot];
+                for (let i = 0; i < n / 2; i++) {
+                  const h = circle[i], a = circle[n - 1 - i];
+                  if (h !== "__BYE__" && a !== "__BYE__") week.push({home:h, away:a});
+                }
+                rounds.push(week);
+                rot.unshift(rot.pop()); // rotate
+              }
+              return rounds;
+            };
+            const single  = _genRR(members);
+            const dbl     = [...single, ...single.map(week => week.map(m => ({home:m.away, away:m.home})))];
+            // Truncate or pad to regWks
+            const schedule = {};
+            for (let wi = 0; wi < regWks; wi++) {
+              schedule[String(wi)] = dbl[wi] || [];
+            }
+            // Update stored local schedule for this group
+            const curSched = _poLocal().worldcupSchedule || {};
+            curSched[String(giBtn)] = schedule;
+            Object.assign(_poLocal(), { worldcupSchedule: curSched });
+            // Re-render
+            _wcRenderSchedArea(giBtn);
+            showToast(`Schedule auto-filled for Group ${giBtn+1} ✓`);
+          };
+        });
+      };
+
+      // Wire group tabs
+      document.querySelectorAll(".trn-wc-group-tab-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          _wcRenderSchedArea(parseInt(btn.dataset.gi));
+        });
+      });
+
+      // Wire initial schedule area (group 0)
+      if (document.querySelectorAll(".trn-wc-group-tab-btn").length > 0) {
+        _wcWireScheduleArea(0);
+      }
+
+      // ── Save Schedule button ─────────────────────────────
+      document.getElementById("trn-wc-save-schedule")?.addEventListener("click", async () => {
+        const sched = _wcReadSchedule();
+        try {
+          await _poSave({ worldcupSchedule: sched });
+          Object.assign(_poLocal(), { worldcupSchedule: sched });
+          const total = Object.values(sched).reduce((s,wkMap) => s + Object.values(wkMap).reduce((ss,mm) => ss + (mm||[]).length, 0), 0);
+          showToast(`Schedule saved ✓ — ${total} matchups across all groups`);
+        } catch(e) { showToast("Failed: "+e.message, "error"); }
+      });
+
+    } // end worldcup block
 
     // ── Scoring settings ────────────────────────────────
     const _buildScoringToSync = () => {
@@ -8135,6 +8599,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const isFinal = i === (po.customRounds.rounds.length - 1);
           tabs.push({ id:`cround_${i}`, label: isFinal ? "🏆 Championship" : `Round ${i+1}` });
         });
+      } else if (mode === "worldcup") {
+        // One tab per group, then the bracket
+        (po.worldcupGroups || []).forEach((g, gi) => {
+          tabs.push({ id:`wcgroup_${gi}`, label:`🌍 ${g.name || ("Group "+(gi+1))}` });
+        });
+        tabs.push({ id:"wc_bracket", label:"🥊 Bracket" });
       }
       if (po.recognizeLeagueChampions) tabs.push({ id:"league_champs", label:"🏅 League Champs" });
       return tabs;
@@ -8638,6 +9108,299 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>`;
     };
 
+    // ── World Cup: Group standings tab ───────────────────────────────────────
+    // Computes W–L records and H2H tiebreakers from the admin-defined schedule
+    // by fetching each team's score for the relevant Sleeper week.
+    // Groups are shown as a round-robin table with full tiebreaker chain.
+    const _renderWCGroup = (gi) => {
+      const groups  = po.worldcupGroups || [];
+      const group   = groups[gi];
+      if (!group) return `<div class="trn-po-empty">Group ${gi+1} not configured. Set it up in Admin → Playoffs → Group &amp; Schedule Config.</div>`;
+      const advCount= group.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
+      const members = group.members || [];
+      if (!members.length) return `<div class="trn-po-empty">No teams assigned to ${_esc(group.name||("Group "+(gi+1)))} yet.</div>`;
+
+      const schedule    = (po.worldcupSchedule || {})[String(gi)] || {};
+      const regWeeks    = po.worldcupRegWeeks || 6;
+      const startWeekPo = po.startWeek || null; // week 1 of the tournament maps to NFL week = startWeek (if set)
+
+      // tableId for async score loading
+      const tableId   = `trn-wc-group-table-${gi}`;
+      const loaderId  = `trn-wc-group-loader-${gi}`;
+
+      // Shell renders synchronously; scores loaded async
+      const shell = `
+        <div class="trn-po-round-card">
+          <div class="trn-po-round-header">
+            <span>🌍 ${_esc(group.name||("Group "+(gi+1)))}</span>
+            <span class="trn-po-round-meta">${members.length} teams · ${advCount} advance · ${regWeeks}-week regular season</span>
+          </div>
+        </div>
+        <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
+          <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">
+            ⏳ Loading scores…
+          </div>
+          <table class="trn-po-table trn-wc-group-table" id="${tableId}" style="display:none">
+            <thead><tr>
+              <th>#</th><th>Team</th>
+              <th class="trn-po-th-num" title="Wins in group">W</th>
+              <th class="trn-po-th-num" title="Losses in group">L</th>
+              <th class="trn-po-th-num" title="Points scored in group games">PF</th>
+              <th class="trn-po-th-num" title="Points against in group games">PA</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="${tableId}-tiebreak-note" style="font-size:.72rem;color:var(--color-text-dim);margin-top:4px;display:none"></div>
+        </div>`;
+
+      // ── Async: fetch scores, compute standings with tiebreakers ─────────────
+      (async () => {
+        try {
+          // Build record map per member: { wins, losses, pf, pa }
+          const records = {};
+          members.forEach(name => { records[name] = { wins:0, losses:0, pf:0, pa:0, h2h:{} }; });
+
+          // Map from team display name → { teamId, leagueId } via standingsCache
+          const _sk = (s) => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+          const teamInfoMap = {}; // displayName -> { teamId, leagueId }
+          Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+            if (String(lc.year) !== String(activeY)) return;
+            const lid = lc.leagueId || ck.replace(/^\d+_/,"");
+            (lc.teams||[]).forEach(tm => {
+              const dn = tm.teamName || "";
+              if (dn) teamInfoMap[dn] = { teamId: String(tm.teamId||""), leagueId: lid };
+            });
+          });
+
+          // Fetch scores for each scheduled week
+          // The schedule week index maps to NFL week: scheduleWeekIndex + 1 (if no startWeek),
+          // or startWeek - regWeeks + scheduleWeekIndex (so week 0 = week (startWeek-regWeeks))
+          // Most flexible: just use week index + 1 as NFL week offset unless startWeek tells us where group play begins.
+          // If startWeek is set, group week 0 = NFL week (startWeek - regWeeks), assuming playoff starts right after group stage.
+          const _nflWeek = (wi) => startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
+
+          // Collect all unique weeks and leagueIds needed
+          const weeksNeeded = new Set();
+          const leagueIds   = new Set();
+          for (let wi = 0; wi < regWeeks; wi++) {
+            const wkMatchups = schedule[String(wi)] || [];
+            if (wkMatchups.length) {
+              weeksNeeded.add(_nflWeek(wi));
+              members.forEach(name => {
+                const info = teamInfoMap[name];
+                if (info?.leagueId) leagueIds.add(info.leagueId);
+              });
+            }
+          }
+
+          // Fetch all needed weekly score maps
+          await Promise.all([...leagueIds].flatMap(lid => [...weeksNeeded].map(w => _fetchWeekScores(lid, w))));
+
+          // Now compute W–L from schedule
+          let tiebreakUsed = false;
+          for (let wi = 0; wi < regWeeks; wi++) {
+            const wkMatchups = schedule[String(wi)] || [];
+            const nflWk = _nflWeek(wi);
+            wkMatchups.forEach(({ home, away }) => {
+              if (!home || !away || home === away) return;
+              if (!records[home] || !records[away]) return;
+              const homeInfo = teamInfoMap[home];
+              const awayInfo = teamInfoMap[away];
+              const homeScore = homeInfo ? (_weekScoreCache[homeInfo.leagueId+"|"+nflWk]?.[homeInfo.teamId] ?? null) : null;
+              const awayScore = awayInfo ? (_weekScoreCache[awayInfo.leagueId+"|"+nflWk]?.[awayInfo.teamId] ?? null) : null;
+
+              if (homeScore !== null && awayScore !== null) {
+                records[home].pf += homeScore; records[home].pa += awayScore;
+                records[away].pf += awayScore; records[away].pa += homeScore;
+                if (homeScore > awayScore) {
+                  records[home].wins++; records[away].losses++;
+                  records[home].h2h[away] = (records[home].h2h[away]||0) + 1;
+                  records[away].h2h[home] = (records[away].h2h[home]||0) - 1;
+                } else if (awayScore > homeScore) {
+                  records[away].wins++; records[home].losses++;
+                  records[away].h2h[home] = (records[away].h2h[home]||0) + 1;
+                  records[home].h2h[away] = (records[home].h2h[away]||0) - 1;
+                }
+              }
+            });
+          }
+
+          // Sort members: wins desc → H2H record (among tied) → PF desc
+          const sorted = [...members].sort((a, b) => {
+            const wa = records[a].wins, wb = records[b].wins;
+            if (wb !== wa) return wb - wa;
+            // H2H tiebreaker (only between the two tied teams)
+            tiebreakUsed = true;
+            const h2hNet = (records[a].h2h[b]||0) - (records[b].h2h[a]||0);
+            if (h2hNet !== 0) return -h2hNet; // positive = a beat b more
+            // PF differential in H2H matchups would need score-level data — fallback to total PF
+            return records[b].pf - records[a].pf;
+          });
+
+          // Build table rows
+          const rows = sorted.map((name, i) => {
+            const r     = records[name];
+            const isAdv = i < advCount;
+            const rowCls = isAdv ? "trn-po-row--advance" : "trn-po-row--cut";
+            const badge  = isAdv
+              ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+            const info = teamInfoMap[name] || {};
+            const lc   = Object.values(t.standingsCache||{}).find(lc => String(lc.year)===String(activeY) && (lc.teams||[]).some(tm=>tm.teamName===name));
+            return `<tr class="${rowCls}">
+              <td class="trn-po-rank">${i+1}</td>
+              <td class="trn-po-team-name">
+                <div>${_esc(name)}</div>
+                ${lc ? `<div class="trn-po-team-sub">${_esc(lc.leagueName||"")}</div>` : ""}
+              </td>
+              <td class="trn-po-num">${r.wins}</td>
+              <td class="trn-po-num">${r.losses}</td>
+              <td class="trn-po-num trn-po-pf">${r.pf.toFixed(2)}</td>
+              <td class="trn-po-num">${r.pa.toFixed(2)}</td>
+              <td>${badge}</td>
+            </tr>`;
+          }).join("");
+
+          const cutRow = advCount < sorted.length
+            ? `<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— ${advCount} advance · ${sorted.length-advCount} eliminated —</div></td></tr>`
+            : "";
+
+          const tbl    = document.getElementById(tableId);
+          const loader = document.getElementById(loaderId);
+          if (tbl)    { tbl.querySelector("tbody").innerHTML = rows + cutRow; tbl.style.display = ""; }
+          if (loader) loader.style.display = "none";
+          const note  = document.getElementById(tableId+"-tiebreak-note");
+          if (note)   { note.textContent = tiebreakUsed ? "⚠️ Tiebreaker applied: H2H record, then Points For" : ""; note.style.display = tiebreakUsed ? "" : "none"; }
+        } catch(e) {
+          const loader = document.getElementById(loaderId);
+          if (loader) loader.textContent = "⚠️ Could not load scores: " + e.message;
+        }
+      })();
+
+      return shell;
+    };
+
+    // ── World Cup: Bracket tab ────────────────────────────────────────────────
+    // Before bracket is seeded: admin sees group advancers as reference + seed editor.
+    // After seeding: renders a visual bracket (same layout as H2H bracket).
+    const _renderWCBracket = () => {
+      const bracketSeeds = po.worldcupBracket || [];
+      const wcWPR        = po.worldcupWeeksPerRound || 2;
+      const startWeekPo  = po.startWeek || null;
+
+      const _sk = (s) => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+      const _lookupTeam = (name) => {
+        for (const lc of Object.values(t.standingsCache||{})) {
+          if (String(lc.year) !== String(activeY)) continue;
+          const tm = (lc.teams||[]).find(tm => _sk(tm.teamName) === _sk(name));
+          if (tm) return { displayName:name, teamName:tm.teamName, pf:tm.pf||0, wins:tm.wins||0, losses:tm.losses||0, leagueName:lc.leagueName||"", teamId:String(tm.teamId||""), leagueId:String(lc.leagueId||lc.league_id||"") };
+        }
+        return { displayName:name, teamName:name, pf:0, wins:0, losses:0, leagueName:"", teamId:"", leagueId:"" };
+      };
+
+      if (!bracketSeeds.length) {
+        // Admin view: let them seed the bracket from group results
+        const groups = po.worldcupGroups || [];
+        const advancers = groups.flatMap((g,gi) =>
+          (g.members||[]).slice(0, g.advanceCount ?? (po.worldcupAdvanceCount??2))
+            .map((name,pos) => ({ name, groupName: g.name||("Group "+(gi+1)), pos }))
+        );
+
+        if (!tid) return `<div class="trn-po-empty">Bracket not yet seeded. The admin will place teams after group stage.</div>`;
+
+        const groupRef = groups.map((g,gi) => {
+          const adv = g.advanceCount ?? (po.worldcupAdvanceCount??2);
+          const chips = (g.members||[]).slice(0,adv).map((n,i)=>`<span class="trn-wc-seed-chip">#${i+1} ${_esc(n)}</span>`).join("");
+          return `<div style="margin-bottom:var(--space-2)"><div style="font-weight:700;font-size:.82rem;margin-bottom:4px">${_esc(g.name||("Group "+(gi+1)))}</div><div style="display:flex;flex-wrap:wrap;gap:4px">${chips}</div></div>`;
+        }).join("");
+
+        const seedRows = advancers.map((tm,i)=>`
+          <div class="trn-wc-seed-row" data-idx="${i}">
+            <span class="trn-wc-seed-num">${i+1}</span>
+            <input type="text" class="trn-wc-seed-input" data-idx="${i}" value="${_esc(tm.name)}"
+              placeholder="Team name"
+              style="flex:1;font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" />
+            <span style="font-size:.72rem;color:var(--color-text-dim)">${_esc(tm.groupName)}</span>
+          </div>`).join("");
+
+        return `
+          <div class="trn-po-tp-note">
+            🌍 Seed the knockout bracket from group results. Seed 1 plays Seed N, Seed 2 plays Seed N−1, etc.
+            ${wcWPR > 1 ? `Each round spans <strong>${wcWPR} weeks</strong>.` : ""}
+            ${startWeekPo ? `Bracket begins Week <strong>${startWeekPo}</strong>.` : ""}
+          </div>
+          ${groups.length ? `<div class="trn-section-card" style="margin-bottom:var(--space-3)"><div class="trn-section-card-title">Group Advancers (reference)</div>${groupRef}</div>` : ""}
+          <div class="trn-section-card">
+            <div class="trn-section-card-title">Bracket Seeds — edit order to adjust matchups</div>
+            <div id="trn-wc-seed-list" style="display:flex;flex-direction:column;gap:var(--space-2)">
+              ${seedRows || `<div style="color:var(--color-text-dim);font-size:.82rem">No group advancers configured yet.</div>`}
+            </div>
+            ${advancers.length ? `
+              <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+                <button class="btn-primary btn-sm" id="trn-wc-seed-save">💾 Save &amp; Lock Bracket</button>
+                <button class="btn-secondary btn-xs" id="trn-wc-seed-add">+ Add Seed</button>
+              </div>` : ""}
+          </div>`;
+      }
+
+      // Bracket seeded — render visual bracket
+      const seeds      = bracketSeeds.map(_lookupTeam);
+      const numSeeds   = seeds.length;
+      const numRounds  = Math.ceil(Math.log2(Math.max(numSeeds, 2)));
+      const wcByeCount = (po.byes?.type !== "none") ? (po.byes?.count || 0) : 0;
+      const r1Byes     = seeds.slice(0, wcByeCount);
+      const r1Players  = seeds.slice(wcByeCount);
+      const r1Matchups = [];
+      for (let i = 0; i < Math.floor(r1Players.length/2); i++)
+        r1Matchups.push({ a:r1Players[i], b:r1Players[r1Players.length-1-i] });
+      const getRoundName = (ri, tot) =>
+        ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
+
+      return `
+        <div class="trn-po-bracket-note">
+          ${numSeeds}-team bracket
+          ${wcByeCount > 0 ? ` · ${wcByeCount} first-round bye${wcByeCount!==1?"s":""}` : ""}
+          · ${wcWPR} week${wcWPR!==1?"s":""}/round
+          ${startWeekPo ? ` · Bracket starts Week ${startWeekPo}` : ""}
+        </div>
+        ${tid ? `<div style="text-align:right;margin-bottom:var(--space-2)"><button class="btn-secondary btn-xs" id="trn-wc-reseed-btn">✏ Adjust Seeding</button></div>` : ""}
+        <div class="trn-po-bracket-wrap"><div class="trn-po-bracket">
+          <div class="trn-po-bracket-round">
+            <div class="trn-po-bracket-round-title">${getRoundName(0,numRounds)}</div>
+            ${r1Byes.map(tm=>`<div class="trn-po-matchup trn-po-matchup--bye"><div class="trn-po-matchup-row">
+              <span class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</span>
+              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${_esc(tm.displayName)}</span>
+              <span class="trn-po-badge trn-po-badge--bye" style="margin-left:auto">BYE</span>
+            </div></div>`).join("")}
+            ${r1Matchups.map(m=>`<div class="trn-po-matchup">
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${_esc(m.a.displayName)}</span><span class="trn-po-matchup-pf">${m.a.pf.toFixed(1)}</span></div>
+              <div class="trn-po-matchup-vs">vs</div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${_esc(m.b.displayName)}</span><span class="trn-po-matchup-pf">${m.b.pf.toFixed(1)}</span></div>
+            </div>`).join("")}
+          </div>
+          ${Array.from({length:numRounds-1},(_,ri)=>`<div class="trn-po-bracket-round">
+            <div class="trn-po-bracket-round-title">${getRoundName(ri+1,numRounds)}</div>
+            ${Array.from({length:Math.pow(2,numRounds-ri-2)},()=>`<div class="trn-po-matchup trn-po-matchup--tbd">
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+              <div class="trn-po-matchup-vs">vs</div>
+              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
+            </div>`).join("")}
+          </div>`).join("")}
+        </div></div>
+        <div class="trn-po-seed-list">
+          <div class="trn-po-section-title">Bracket Seeds</div>
+          ${seeds.map((tm,i)=>`<div class="trn-po-seed-row ${i<wcByeCount?"trn-po-seed-row--bye":""}">
+            <span class="trn-po-seed-num">#${i+1}</span>
+            <span class="trn-po-seed-name">${_esc(tm.displayName)}</span>
+            <span class="trn-po-seed-league">${_esc(tm.leagueName)}</span>
+            <span class="trn-po-seed-record">${tm.wins}–${tm.losses}</span>
+            <span class="trn-po-seed-pf">${tm.pf.toFixed(1)} pts</span>
+            ${i<wcByeCount?`<span class="trn-po-badge trn-po-badge--bye">BYE</span>`:""}
+          </div>`).join("")}
+        </div>`;
+    };
+
     // ── League champs ────────────────────────────────────
     const _renderLeagueChamps = () => {
       const _getChamp = (lc) => {
@@ -8693,8 +9456,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (tabId==="leaderboard")   return _renderLeaderboard();
       if (tabId==="bracket")       return _renderBracket();
       if (tabId==="league_champs") return _renderLeagueChamps();
-      if (tabId.startsWith("round_"))  return _renderPointsRound(parseInt(tabId.split("_")[1]));
-      if (tabId.startsWith("cround_")) return _renderCustomRound(parseInt(tabId.split("_")[1]));
+      if (tabId==="wc_bracket")    return _renderWCBracket();
+      if (tabId.startsWith("round_"))   return _renderPointsRound(parseInt(tabId.split("_")[1]));
+      if (tabId.startsWith("cround_"))  return _renderCustomRound(parseInt(tabId.split("_")[1]));
+      if (tabId.startsWith("wcgroup_")) return _renderWCGroup(parseInt(tabId.split("_")[1]));
       return `<div class="trn-po-empty">Unknown tab.</div>`;
     };
 
@@ -8702,10 +9467,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       <div class="trn-po-container">
         <div class="trn-po-header">
           <div class="trn-po-title">
-            ${{total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️"}[mode]||"🏆"}
+            ${{total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍"}[mode]||"🏆"}
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
-          <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds"}[mode]||mode}</div>
+          <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
           ${tid ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
         </div>
         ${_tabBar(_poViewTab)}
@@ -8720,6 +9485,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const sel = document.getElementById("trn-po-tab-select");
         if (sel) sel.value = _poViewTab;
         document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
+        _wcWireBracketButtons();
       });
     });
     document.getElementById("trn-po-tab-select")?.addEventListener("change", function() {
@@ -8727,7 +9493,45 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
         b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
       document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
+      _wcWireBracketButtons();
     });
+
+    // Wire WC bracket seed-save + re-seed buttons (called after any WC tab render)
+    const _wcWireBracketButtons = () => {
+      document.getElementById("trn-wc-seed-save")?.addEventListener("click", async () => {
+        const inputs = document.querySelectorAll(".trn-wc-seed-input");
+        const seeds  = Array.from(inputs).map(inp => inp.value.trim()).filter(Boolean);
+        if (!seeds.length) { showToast("Enter at least one seed","error"); return; }
+        try {
+          await _tPlayoffsRef(tid, activeY).update({ worldcupBracket: seeds });
+          Object.assign(_poLocal(), { worldcupBracket: seeds });
+          showToast(`Bracket locked — ${seeds.length} seeds ✓`);
+          document.getElementById("trn-po-content").innerHTML = _renderContent("wc_bracket");
+          _wcWireBracketButtons();
+        } catch(e) { showToast("Failed: "+e.message,"error"); }
+      });
+      document.getElementById("trn-wc-seed-add")?.addEventListener("click", () => {
+        const list = document.getElementById("trn-wc-seed-list");
+        if (!list) return;
+        const idx = list.querySelectorAll(".trn-wc-seed-row").length;
+        const row = document.createElement("div");
+        row.className = "trn-wc-seed-row"; row.dataset.idx = idx;
+        row.innerHTML = `<span class="trn-wc-seed-num">${idx+1}</span>
+          <input type="text" class="trn-wc-seed-input" data-idx="${idx}" value="" placeholder="Team name"
+            style="flex:1;font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" />
+          <span style="font-size:.72rem;color:var(--color-text-dim)"></span>`;
+        list.appendChild(row);
+      });
+      document.getElementById("trn-wc-reseed-btn")?.addEventListener("click", () => {
+        if (!confirm("Clear bracket seeding and re-enter? This only resets the seed order.")) return;
+        _tPlayoffsRef(tid, activeY).update({ worldcupBracket: [] }).then(() => {
+          Object.assign(_poLocal(), { worldcupBracket: [] });
+          document.getElementById("trn-po-content").innerHTML = _renderContent("wc_bracket");
+          _wcWireBracketButtons();
+        }).catch(e => showToast("Failed: "+e.message,"error"));
+      });
+    };
+    _wcWireBracketButtons();
     // Shared snapshot builder — single source of truth for both manual + auto publish
     const _buildPlayoffSnapshot = () => {
       // Standings: qualified-first (sorted by PF desc), then eliminated (by PF desc)
@@ -8838,6 +9642,37 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           await Promise.all(
             weeksNeeded_.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w)))
           );
+        }
+
+        if (mode === "worldcup") {
+          // Fetch group-stage weeks for all groups
+          const wcRegWks2  = po.worldcupRegWeeks  || 6;
+          const wcStartPo  = po.startWeek         || null;
+          const wcSched2   = po.worldcupSchedule  || {};
+          const _nflWk2    = (wi) => wcStartPo ? (wcStartPo - wcRegWks2 + wi) : (wi + 1);
+          const wcWeeksSet = new Set();
+          for (let wi = 0; wi < wcRegWks2; wi++) {
+            const wk = _nflWk2(wi);
+            if (wk > 0) wcWeeksSet.add(wk);
+          }
+          const allLidsWC = [...new Set(
+            allTeams.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean)
+          )];
+          if (wcWeeksSet.size && allLidsWC.length) {
+            if (btn) btn.textContent = `Fetching group-stage weeks (${allLidsWC.length} leagues × ${wcWeeksSet.size} weeks)…`;
+            await Promise.all([...wcWeeksSet].flatMap(w => allLidsWC.map(lid => _fetchWeekScores(lid, w))));
+          }
+          // Fetch bracket weeks
+          const wcBracketSeeds2 = po.worldcupBracket || [];
+          const wcWPR2   = po.worldcupWeeksPerRound || 2;
+          if (wcBracketSeeds2.length && wcStartPo) {
+            const wcNumRounds2 = Math.ceil(Math.log2(Math.max(wcBracketSeeds2.length, 2)));
+            const wcBktWeeks2  = Array.from({length: wcNumRounds2}, (_, ri) =>
+              Array.from({length: wcWPR2}, (_, wi) => wcStartPo + ri * wcWPR2 + wi)
+            ).flat();
+            if (btn) btn.textContent = `Fetching bracket weeks (${wcBktWeeks2.length} weeks)…`;
+            await Promise.all(wcBktWeeks2.flatMap(w => allLidsWC.map(lid => _fetchWeekScores(lid, w))));
+          }
         }
 
         // Build pre-computed round results: each round gets a sorted results array
@@ -9270,6 +10105,130 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 isTChamp:    !!(tm.isTChamp),
                 pf:          tm.pf || sl.pf || 0
               };
+            });
+
+          } else if (mode === "worldcup") {
+            // World Cup: simulate group-stage standings, then bracket, to build full ranking.
+            const _sk3 = (s) => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+            const wcGroups3    = po.worldcupGroups    || [];
+            const wcSched3     = po.worldcupSchedule  || {};
+            const wcRegWks3    = po.worldcupRegWeeks  || 6;
+            const wcStartPo3   = po.startWeek         || null;
+            const wcWPR3       = po.worldcupWeeksPerRound || 2;
+            const wcBracket3   = po.worldcupBracket   || [];
+            const _nflWk3      = (wi) => wcStartPo3 ? (wcStartPo3 - wcRegWks3 + wi) : (wi + 1);
+
+            // ── Step 1: Compute group standings from schedule ──────────────
+            // records[groupIdx][teamName] = { wins, losses, pf, pa, h2h }
+            const groupRecords = wcGroups3.map((g, gi) => {
+              const members = g.members || [];
+              const rec = {};
+              members.forEach(n => { rec[n] = { wins:0, losses:0, pf:0, pa:0, h2h:{} }; });
+              for (let wi = 0; wi < wcRegWks3; wi++) {
+                ((wcSched3[String(gi)]||{})[String(wi)]||[]).forEach(({home,away}) => {
+                  if (!home || !away || home===away || !rec[home] || !rec[away]) return;
+                  const homeInfo = (() => { for (const lc of Object.values(t.standingsCache||{})) { if(String(lc.year)!==String(activeY))continue; const tm=(lc.teams||[]).find(t2=>_sk3(t2.teamName)===_sk3(home)); if(tm) return {teamId:String(tm.teamId||""),leagueId:String(lc.leagueId||lc.league_id||"")}; } return null; })();
+                  const awayInfo = (() => { for (const lc of Object.values(t.standingsCache||{})) { if(String(lc.year)!==String(activeY))continue; const tm=(lc.teams||[]).find(t2=>_sk3(t2.teamName)===_sk3(away)); if(tm) return {teamId:String(tm.teamId||""),leagueId:String(lc.leagueId||lc.league_id||"")}; } return null; })();
+                  const nflWk = _nflWk3(wi);
+                  const hs = homeInfo ? (_weekScoreCache[homeInfo.leagueId+"|"+nflWk]?.[homeInfo.teamId]??null) : null;
+                  const as_ = awayInfo ? (_weekScoreCache[awayInfo.leagueId+"|"+nflWk]?.[awayInfo.teamId]??null) : null;
+                  if (hs !== null && as_ !== null) {
+                    rec[home].pf += hs; rec[home].pa += as_;
+                    rec[away].pf += as_; rec[away].pa += hs;
+                    if (hs > as_) { rec[home].wins++; rec[away].losses++; rec[home].h2h[away]=(rec[home].h2h[away]||0)+1; rec[away].h2h[home]=(rec[away].h2h[home]||0)-1; }
+                    else if (as_ > hs) { rec[away].wins++; rec[home].losses++; rec[away].h2h[home]=(rec[away].h2h[home]||0)+1; rec[home].h2h[away]=(rec[home].h2h[away]||0)-1; }
+                  }
+                });
+              }
+              // Sort members within group
+              const sorted = [...members].sort((a,b) => {
+                const d = (rec[b]?.wins||0) - (rec[a]?.wins||0); if (d!==0) return d;
+                const h = (rec[a]?.h2h[b]||0) - (rec[b]?.h2h[a]||0); if (h!==0) return -h;
+                return (rec[b]?.pf||0) - (rec[a]?.pf||0);
+              });
+              return { sorted, rec };
+            });
+
+            // ── Step 2: Identify advancers and eliminated per group ────────
+            const wcEliminated = []; // {name, groupIdx, groupRank}
+            const wcAdvancers  = []; // {name, groupIdx, groupRank}
+            wcGroups3.forEach((g, gi) => {
+              const adv = g.advanceCount ?? (po.worldcupAdvanceCount??2);
+              const { sorted } = groupRecords[gi];
+              sorted.forEach((name,rank) => {
+                if (rank < adv) wcAdvancers.push({name,groupIdx:gi,groupRank:rank});
+                else            wcEliminated.push({name,groupIdx:gi,groupRank:rank});
+              });
+            });
+
+            // ── Step 3: Simulate bracket (WC bracket seeded by admin) ──────
+            const standingsLookupWC = {};
+            snapshot.standings.forEach(s => { standingsLookupWC[`${s.teamName}|${s.leagueId}`] = s; });
+
+            const _bktScoreWC3 = (tm, weekNum_) => {
+              if (!wcStartPo3 || !weekNum_) return null;
+              const lid = leagueIdByTeamKey[_teamKey(tm)];
+              if (!lid) return null;
+              let total = 0, hasAny = false;
+              for (let w = 0; w < wcWPR3; w++) {
+                const v = _weekScoreCache[lid+"|"+(weekNum_+w)]?.[String(tm.teamId)];
+                if (v != null) { total += v; hasAny = true; }
+              }
+              return hasAny ? total : null;
+            };
+
+            const wcAllRanked3 = [];
+            const wcPlaced3    = new Set();
+
+            if (wcBracket3.length) {
+              const wcSeeds3 = wcBracket3.map(name => allTeams.find(t => _sk3(_displayName(t)) === _sk3(name) || _sk3(t.teamName) === _sk3(name)) || {teamName:name,displayName:name,pf:0,teamId:""});
+              const wcBktSize3 = wcSeeds3.length;
+              const wcNR3 = Math.ceil(Math.log2(Math.max(wcBktSize3,2)));
+              const wcByeCount3 = (po.byes?.type!=="none") ? (po.byes?.count||0) : 0;
+              const wcElimRnd3 = Array.from({length:wcNR3},()=>[]);
+              let wcCur3 = [...wcSeeds3];
+              const wcR1B3 = wcCur3.slice(0,wcByeCount3), wcR1P3 = wcCur3.slice(wcByeCount3);
+              for (let ri = 0; ri < wcNR3; ri++) {
+                const wkN_ = wcStartPo3 ? wcStartPo3 + ri*wcWPR3 : null;
+                const next = [];
+                if (ri===0) {
+                  next.push(...wcR1B3);
+                  const half = Math.floor(wcR1P3.length/2);
+                  for (let mi=0;mi<half;mi++) {
+                    const a=wcR1P3[mi],b=wcR1P3[wcR1P3.length-1-mi];
+                    const sa=_bktScoreWC3(a,wkN_)??(wcBktSize3-wcSeeds3.indexOf(a));
+                    const sb=_bktScoreWC3(b,wkN_)??(wcBktSize3-wcSeeds3.indexOf(b));
+                    if(sa>=sb){next.push(a);wcElimRnd3[ri].push(b);}else{next.push(b);wcElimRnd3[ri].push(a);}
+                  }
+                  if(wcR1P3.length%2!==0)next.push(wcR1P3[Math.floor(wcR1P3.length/2)]);
+                } else {
+                  const half=Math.floor(wcCur3.length/2);
+                  for(let mi=0;mi<half;mi++){const a=wcCur3[mi*2],b=wcCur3[mi*2+1];const sa=_bktScoreWC3(a,wkN_)??0,sb=_bktScoreWC3(b,wkN_)??0;if(sa>=sb){next.push(a);wcElimRnd3[ri].push(b);}else{next.push(b);wcElimRnd3[ri].push(a);}}
+                  if(wcCur3.length%2!==0)next.push(wcCur3[wcCur3.length-1]);
+                }
+                wcCur3 = next;
+              }
+              // Champion(s)
+              wcCur3.forEach(tm=>{const tk=_teamKey(tm);if(!wcPlaced3.has(tk)){wcAllRanked3.push({...tm,isTChamp:true});wcPlaced3.add(tk);}});
+              // Bracket eliminated (deepest round first)
+              for(let ri=wcNR3-1;ri>=0;ri--){const wkN_=wcStartPo3?wcStartPo3+ri*wcWPR3:null;[...(wcElimRnd3[ri]||[])].sort((a,b)=>(_bktScoreWC3(b,wkN_)??0)-(_bktScoreWC3(a,wkN_)??0)).forEach(tm=>{const tk=_teamKey(tm);if(!wcPlaced3.has(tk)){wcAllRanked3.push({...tm,isTChamp:false});wcPlaced3.add(tk);}});}
+            }
+
+            // Group-stage eliminated (by group order, then rank within group)
+            wcEliminated.forEach(({name}) => {
+              const tm = allTeams.find(t => _sk3(_displayName(t)) === _sk3(name) || _sk3(t.teamName) === _sk3(name)) || {teamName:name,pf:0};
+              const tk = _teamKey(tm);
+              if (!wcPlaced3.has(tk)) { wcAllRanked3.push({...tm,isTChamp:false}); wcPlaced3.add(tk); }
+            });
+            // Any remaining teams (not in any group)
+            sortedTeams.forEach(tm => { const tk=_teamKey(tm); if(!wcPlaced3.has(tk)){wcAllRanked3.push({...tm,isTChamp:false});wcPlaced3.add(tk);} });
+
+            return wcAllRanked3.map((tm,i) => {
+              const sl = standingsLookupWC[`${tm.teamName}|${_leagueIdForTeam(tm)}`] || {};
+              const isAdvancer = wcAdvancers.some(a => _sk3(a.name) === _sk3(_displayName(tm)));
+              return { finalRank:i+1, teamName:tm.teamName||"", displayName:tm.displayName||_displayName(tm),
+                leagueId:_leagueIdForTeam(tm), teamId:String(tm.teamId||""),
+                qualified:isAdvancer, bye:false, isTChamp:!!(tm.isTChamp), pf:tm.pf||sl.pf||0 };
             });
 
           } else {

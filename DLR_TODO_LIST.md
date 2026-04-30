@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 29, 2026 — Tournament analytics complete. Players tab, Most Rostered, ADP vs Finish all done.*
+*Updated: April 30, 2026 — T1–T4 tournament polish complete. Public Players tab fully parity with internal.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -43,55 +43,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🟢 Tournament — Known Tweaks / Future Polish
 
-These are not bugs but known limitations to revisit when needed.
-
----
-
-### T1 — Multi-Week Playoff Rounds
-**Issue:** The current `points_rounds` config assumes each playoff round = exactly one NFL week.
-Some tournament formats run a round over 2+ weeks (highest combined score advances).
-The round config has no "weeks per round" field, so `startWeek + roundIndex` breaks for multi-week rounds.
-**Scope:** Add a `weeksPerRound` field (default 1) to each round in the `pointsRounds` config UI.
-Round simulation must sum scores across those weeks. `finalRankings` publish must fetch all spanned weeks.
-**Files:** `tournament.js`, `tournament.css`
-**Effort:** Medium
-
----
-
-### T2 — Public Players Tab Playoff Data
-**Issue:** The public `tournaments/index.html` Players tab has its own parallel implementation
-of `renderPlayersTab` that does NOT call `_buildPoByYear` (which only exists in `tournament.js`).
-It has its own inline career builder and doesn't read `finalRankings`.
-As a result, the public site Players tab won't show correct playoff stats / best rank / year pips
-until that function is replicated or refactored.
-**Scope:** Either (a) duplicate `_buildPoByYear` logic into `index.html` reading from
-`_currentT.playoffs[year].finalRankings`, or (b) restructure the publish snapshot to include
-a pre-computed per-participant career summary that the public site can read directly.
-Option (b) is cleaner — add `participantCareer` to the published snapshot.
-**Files:** `tournaments/index.html`, `tournament.js`
-**Effort:** Medium
-
----
-
-### T3 — Custom Rounds Mode: finalRankings
-**Issue:** When mode is `custom_rounds`, `_buildFinalRankings` in the publish button falls back
-to the simple "qualifiers first by PF, non-qualifiers last" ordering — it doesn't simulate
-the custom rounds. This means ADP vs Finish and Players tab Best Rank will be inaccurate
-for tournaments using custom rounds mode.
-**Scope:** Implement round simulation for `custom_rounds` in `_buildFinalRankings`, similar
-to the `points_rounds` branch but using `po.customRounds.rounds[]` config.
-**Files:** `tournament.js`
-**Effort:** Medium
-
----
-
-### T4 — H2H Bracket Mode: finalRankings
-**Issue:** Same limitation as T3 but for `h2h_bracket` mode. Bracket results aren't simulated
-in `_buildFinalRankings`, so finish ranks for bracket tournaments are PF-based only.
-**Scope:** Parse the bracket results (already available from `_weekScoreCache` and bracket config)
-to determine actual bracket finish order.
-**Files:** `tournament.js`
-**Effort:** High
+*(none currently)*
 
 ---
 
@@ -157,16 +109,12 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files Needed |
 |---|-----|-------------|--------|--------------|
-| 1 | T2 | Public Players tab playoff data | Medium | `tournaments/index.html`, `tournament.js` |
-| 2 | T1 | Multi-week playoff rounds | Medium | `tournament.js`, `tournament.css` |
-| 3 | T3 | Custom rounds finalRankings | Medium | `tournament.js` |
-| 4 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 5 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 6 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
-| 7 | T4 | H2H Bracket finalRankings | High | `tournament.js` |
-| 8 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 9 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 10 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 1 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 2 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 3 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
+| 4 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 5 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 6 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -185,13 +133,45 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 ## ✅ Completed
 
-### April 29, 2026 — Tournament Analytics: Players Tab, Most Rostered, ADP vs Finish
+### April 30, 2026 — T1–T4: Tournament Polish + Public Players Tab Parity
 
-**Players Tab (internal + public site):**
-- Paginated list view (25/page) with search, replaces old card grid
-- Sort: Tournament champs → Years played desc → Best finish rank asc → Win% desc
-- Columns: Yrs, W–L, Win%, PO (playoff apps/seasons), Best (finish rank), Titles, Year pips
-- Year pips: gold=champion, green=qualified, red=eliminated, grey=absent (hover tooltips with rank)
+**T1 — Multi-Week Playoff Rounds (`tournament.js`)**
+- Added `weeksPerRound` field (default 1) to each Points Rounds config row in the admin UI
+- Round display shows "Weeks 14–15" format when `wpr > 1`
+- Publish pre-fetch computes cumulative NFL week offsets across all rounds; fetches exactly the right weeks
+- `_computedRounds` builder uses `_wsCombined_` + `_roundStartWeeks_` — scores summed across all weeks in the round
+- Live `_renderPointsRound` async fetch, prior-round simulation, and current-round scoring all updated to use combined scores
+- Fully backward-compatible: rounds without `weeksPerRound` default to 1 (no data migration needed)
+
+**T2 — Public Players Tab Playoff Data (`tournaments/index.html`)**
+- `poByYear` now reads `finalRankings` first (same primary path as internal `_buildPoByYear`) — correct `rank`, qualification, and champion status from authoritative published data
+- Fallback to `po.standings` array for pre-finalRankings snapshots
+- Aggregates `bestRank`, `yearData`, and `streak` the same way the internal tab does
+- Sort updated: champions → years → bestRank asc → win%
+- Table gains **Best** rank and **year pips** columns (conditionally shown when PO data exists), pip legend, and 🔥 streak badge
+- Modal per-year sections restructured to match internal format: `poBlock`/`lchampNote` divs removed; playoff result now appears as a `finishRow` at the bottom of each year's `<tbody>` (gold for champion, green for qualified, grey "Did not qualify")
+- Modal totals row: **Leagues** stat tile removed; **Best Rank** always renders as plain number (`p.bestRank ?? "—"`); **Career PF** guarded against zero
+
+**T3 — Custom Rounds `finalRankings` (`tournament.js`)**
+- New `custom_rounds` branch in `_buildFinalRankings` simulates PF-based group advancement through each configured round (groups × teamsPerGroup × advPerGroup), with byes passing round 0 automatically
+- Builds rankings backwards: final pool survivors (PF-sorted, champion = top) → last-round eliminated → earlier rounds → non-qualifiers
+- Analytics tabs (Players Best Rank, ADP vs Finish) now accurate for custom-rounds tournaments
+
+**T4 — H2H Bracket `finalRankings` (`tournament.js`)**
+- New `h2h_bracket` branch in `_buildFinalRankings` simulates single-elimination bracket using `_weekScoreCache` scores; falls back to inverse-seed-rank when scores aren't available
+- Publish button now pre-fetches all bracket round weeks before computing `finalRankings`
+- Seeding uses same record/PF metric as `_renderBracket`; round 1 uses top-vs-bottom pairing; subsequent rounds pair adjacently
+- Analytics tabs now accurate for bracket tournaments
+
+---
+
+### April 29, 2026 — F5-P4-ext: Players Tab, Most Rostered, ADP vs Finish, finalRankings
+
+**Players tab (internal + public):**
+- Paginated list (25/page), searchable by name
+- Sort: Tournament champions → Years played desc → Best finish rank asc → Win% desc
+- Columns: # | Player (name, gender, streak badge, twitter) | Yrs | W–L | Win% | PO | Best | Titles | Year pips
+- Year pips: gold=champion, green=qualified, red=eliminated, grey=absent (hover for tooltip with rank)
 - Gold row highlight for tournament champions; purple for league-only champs
 - Streak badge 🔥 for consecutive playoff qualification
 - Modal: consolidated table per year with W–L, PF, Lg Champ column + finish/rank summary row
