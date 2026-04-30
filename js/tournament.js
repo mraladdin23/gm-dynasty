@@ -6790,25 +6790,54 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   }
 
   // ── _buildPoByYear: year → { sanitizedKey → {qualified,bye,rank,isTChamp} } ──
-  // Uses _computeQualification — no Firebase reads, pure derivation from t.
-  // Also folds in lc.champion entries from standingsCache for league champs.
+  //
+  // PRIMARY: reads t.playoffs[year].finalRankings written by the publish button.
+  //   finalRankings is the authoritative ordered list (rank 1 = overall champion)
+  //   built from the full round simulation at publish time. No re-computation needed.
+  //
+  // FALLBACK: if finalRankings not yet written (year not yet published), derives
+  //   qualification from _computeQualification(). Rank is PF-based only (approximate).
+  //   Re-publish the Playoffs tab to get correct round-based rankings.
 
   function _buildPoByYear(t) {
     const _sk = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
     const poByYear = {};
 
     for (const yr of _playoffYears(t)) {
-      const { qualSet, byeSet, allTeams, overallWinner, _teamKey } = _computeQualification(t, yr);
-      if (!allTeams.length) continue;
+      const po = _playoffForYear(t, yr);
       poByYear[String(yr)] = {};
+
+      // ── Primary: finalRankings written at publish time ─────────────────────
+      const fr = po.finalRankings;
+      if (Array.isArray(fr) && fr.length) {
+        fr.forEach(entry => {
+          [entry.displayName, entry.teamName].filter(Boolean).map(_sk).forEach(k => {
+            if (!poByYear[String(yr)][k]) {
+              poByYear[String(yr)][k] = {
+                qualified: !!(entry.qualified),
+                bye:       !!(entry.bye),
+                rank:      entry.finalRank || null,
+                isTChamp:  !!(entry.isTChamp),
+                leagueId:  String(entry.leagueId || ""),
+                teamId:    String(entry.teamId   || "")
+              };
+            }
+          });
+        });
+        continue; // done for this year — authoritative data used
+      }
+
+      // ── Fallback: derive from qual engine (no round scores, PF-based rank) ─
+      const { qualSet, byeSet, allTeams, overallWinner, _teamKey } =
+        _computeQualification(t, yr);
+      if (!allTeams.length) continue;
 
       const sorted = [...allTeams].sort((a, b) => (b.pf||0) - (a.pf||0));
       sorted.forEach((tm, idx) => {
         const isQual   = qualSet.has(_teamKey(tm));
         const isBye    = byeSet.has(_teamKey(tm));
         const isTChamp = overallWinner ? (_teamKey(tm) === _teamKey(overallWinner)) : (isQual && idx === 0);
-        const keys = [tm.displayName, tm.teamName, tm.sleeperUsername].filter(Boolean).map(_sk);
-        keys.forEach(k => {
+        [tm.displayName, tm.teamName, tm.sleeperUsername].filter(Boolean).map(_sk).forEach(k => {
           if (!poByYear[String(yr)][k]) {
             poByYear[String(yr)][k] = {
               qualified: isQual, bye: isBye, rank: idx + 1, isTChamp,
@@ -6818,7 +6847,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         });
       });
 
-      // Fold in lc.champion (league champs not already in the map)
+      // Fold in lc.champion entries (league champs not already in the map)
       Object.values(t.standingsCache || {}).forEach(lc => {
         if (String(lc.year) !== String(yr)) return;
         const champ = lc.champion;
@@ -8804,7 +8833,138 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const snapshot = _buildPlayoffSnapshot();
         snapshot.computedRounds = _computedRounds;
         if (btn) btn.textContent = "Writing…";
+
+        // ── Build finalRankings: authoritative ordered list for analytics tabs ──
+        // Rank 1 = overall tournament champion. Works backwards through rounds:
+        //   Finals survivors ordered by final-round score → last-round elim → … → non-qualifiers by PF.
+        // Written to gmd/tournaments/{tid}/playoffs/{year}/finalRankings so analytics
+        // tabs can read from t.playoffs[year].finalRankings without re-simulation.
+        const _buildFinalRankings = () => {
+          const _leagueIdForTeam = (tm) => leagueIdByTeamKey[_teamKey(tm)] || "";
+
+          if (mode === "points_rounds" && _computedRounds.length) {
+            // Work backwards: last round survivors first, then each round's eliminated
+            // teams sorted by the score from the round they were eliminated in.
+            const allRanked = [];
+            const placed    = new Set(); // _teamKey strings already ranked
+
+            // Collect the surviving pool after each round, working backwards
+            // computedRounds[i].results has advances:bool per team
+            for (let ri = _computedRounds.length - 1; ri >= 0; ri--) {
+              const cr       = _computedRounds[ri];
+              const isFinal  = ri === _computedRounds.length - 1;
+
+              if (isFinal) {
+                // Rank all final-round teams in score order (champion first)
+                const finalTeams = [...cr.results].sort((a, b) => {
+                  const sa = cr.blendEnabled ? (b.bScore ?? b.wkScore ?? b.pf) : (b.wkScore ?? b.pf);
+                  const sb = cr.blendEnabled ? (a.bScore ?? a.wkScore ?? a.pf) : (a.wkScore ?? a.pf);
+                  return sa - sb;
+                });
+                finalTeams.forEach(tm => {
+                  const tk = tm.teamName + "|" + tm.leagueId;
+                  if (!placed.has(tk)) { allRanked.push({ ...tm, isTChamp: !!(tm.isChamp) }); placed.add(tk); }
+                });
+              } else {
+                // Teams eliminated this round: in this round's results, !advances
+                const elimThisRound = cr.results
+                  .filter(tm => !tm.advances && !tm.isBye)
+                  .sort((a, b) => {
+                    const sa = cr.blendEnabled ? (b.bScore ?? b.wkScore ?? b.pf) : (b.wkScore ?? b.pf);
+                    const sb = cr.blendEnabled ? (a.bScore ?? a.wkScore ?? a.pf) : (a.wkScore ?? a.pf);
+                    return sa - sb;
+                  });
+                elimThisRound.forEach(tm => {
+                  const tk = tm.teamName + "|" + tm.leagueId;
+                  if (!placed.has(tk)) { allRanked.push({ ...tm, isTChamp: false }); placed.add(tk); }
+                });
+              }
+            }
+
+            // Non-qualifiers: ranked last by regular-season PF desc
+            const nonQual = sortedTeams
+              .filter(tm => !qualSet.has(_teamKey(tm)))
+              .sort((a, b) => (b.pf||0) - (a.pf||0));
+            nonQual.forEach(tm => {
+              const tk = _teamKey(tm);
+              if (!placed.has(tk)) {
+                allRanked.push({ teamName: tm.teamName, displayName: _displayName(tm),
+                  leagueId: _leagueIdForTeam(tm), teamId: String(tm.teamId||""),
+                  pf: tm.pf, isTChamp: false, advances: false });
+                placed.add(tk);
+              }
+            });
+
+            // Build a quick lookup for qualified/bye from the snapshot standings
+            const standingsLookup = {};
+            snapshot.standings.forEach(s => {
+              standingsLookup[`${s.teamName}|${s.leagueId}`] = s;
+            });
+
+            return allRanked.map((tm, i) => {
+              const sl  = standingsLookup[`${tm.teamName}|${tm.leagueId}`] || {};
+              return {
+                finalRank:   i + 1,
+                teamName:    tm.teamName    || "",
+                displayName: tm.displayName || tm.teamName || "",
+                leagueId:    String(tm.leagueId || ""),
+                teamId:      String(tm.teamId   || ""),
+                qualified:   !!(sl.qualified),
+                bye:         !!(sl.bye),
+                isTChamp:    !!(tm.isTChamp),
+                pf:          tm.pf || sl.pf || 0
+              };
+            });
+
+          } else if (mode === "total_points") {
+            // No rounds: rank by PF desc, champion = #1
+            return sortedTeams.map((tm, i) => ({
+              finalRank:   i + 1,
+              teamName:    tm.teamName    || "",
+              displayName: _displayName(tm),
+              leagueId:    _leagueIdForTeam(tm),
+              teamId:      String(tm.teamId || ""),
+              qualified:   true,
+              bye:         false,
+              isTChamp:    i === 0,
+              pf:          tm.pf || 0
+            }));
+
+          } else {
+            // Other modes (h2h_bracket, custom_rounds): qualified teams first by PF,
+            // then non-qualifiers by PF. isTChamp = first qualifier.
+            const qual    = sortedTeams.filter(tm =>  qualSet.has(_teamKey(tm)));
+            const nonQual = sortedTeams.filter(tm => !qualSet.has(_teamKey(tm)));
+            return [...qual, ...nonQual].map((tm, i) => ({
+              finalRank:   i + 1,
+              teamName:    tm.teamName    || "",
+              displayName: _displayName(tm),
+              leagueId:    _leagueIdForTeam(tm),
+              teamId:      String(tm.teamId || ""),
+              qualified:   qualSet.has(_teamKey(tm)),
+              bye:         byeSet.has(_teamKey(tm)),
+              isTChamp:    i === 0,
+              pf:          tm.pf || 0
+            }));
+          }
+        };
+
+        const finalRankings = _buildFinalRankings();
+        snapshot.finalRankings = finalRankings; // include in public snapshot too
+
+        // Write to public site
         await GMD.child(`publicTournaments/${tid}/playoffs/${activeY}`).set(snapshot);
+
+        // Write finalRankings to private tournaments path so analytics tabs can read
+        // from t.playoffs[year].finalRankings without re-simulation or pub fetches
+        await GMD.child(`tournaments/${tid}/playoffs/${activeY}/finalRankings`).set(finalRankings);
+
+        // Update local t so analytics tabs see it immediately without re-loading
+        if (!_tournaments[tid])                                _tournaments[tid] = {};
+        if (!_tournaments[tid].playoffs)                       _tournaments[tid].playoffs = {};
+        if (!_tournaments[tid].playoffs[activeY])              _tournaments[tid].playoffs[activeY] = {};
+        _tournaments[tid].playoffs[activeY].finalRankings = finalRankings;
+
         showToast("Playoffs published ✓");
       } catch(e) { showToast("Publish failed: "+e.message, "error"); }
       finally { if (btn) { btn.disabled=false; btn.textContent="📢 Publish"; } }
