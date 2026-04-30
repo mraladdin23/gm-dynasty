@@ -514,11 +514,101 @@
       });
     }
 
+    // ── ADP tab (public site) ────────────────────────────────────────────────
+    // Reads from _currentT.adp (flat) or _currentT.adpByYear[_selectedYear].
+    // Uses the same POS_COLOR and page variables declared above.
+    function renderAdpTab(body) {
+      const t   = _currentT;
+      const adp = (t.adpByYear && _selectedYear && t.adpByYear[_selectedYear])
+        ? t.adpByYear[_selectedYear]
+        : (t.adp || []);
+
+      if (!adp.length) {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">📊</div>
+            <div class="trn-empty-title">No ADP data for ${_selectedYear || "this year"}</div>
+            <div class="trn-empty-sub">ADP is published by the tournament admin after the draft.</div>
+          </div>`;
+        return;
+      }
+
+      const isMobile  = window.innerWidth <= 640;
+      const PAGE_SIZE = ADP_PAGE_SIZE;
+
+      const positions = ["all", ...new Set(adp.map(p => p.position).filter(Boolean))];
+      const posOpts   = positions.map(p =>
+        `<option value="${esc(p)}" ${_adpPos === p ? "selected" : ""}>${p === "all" ? "All Positions" : esc(p)}</option>`
+      ).join("");
+
+      const filtered = _adpPos === "all" ? adp : adp.filter(p => p.position === _adpPos);
+      const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+      const page       = Math.max(1, Math.min(_adpPage, totalPages));
+      const pageSlice  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+      const COL = isMobile ? "28px 1fr 44px 34px 34px" : "32px 1fr 36px 52px 40px 40px 76px";
+      const headerCols = isMobile
+        ? `<span>#</span><span>Player</span><span style="text-align:right">ADP</span><span style="text-align:right">Min</span><span style="text-align:right">Max</span>`
+        : `<span>#</span><span>Player</span><span style="text-align:center">Dft</span><span style="text-align:center">ADP</span><span style="text-align:center">Min</span><span style="text-align:center">Max</span><span style="text-align:center">25–75%</span>`;
+
+      const rows = pageSlice.map((p, i) => {
+        const col      = POS_COLOR[p.position] || "#9ca3af";
+        const mn       = p.min  != null ? p.min  : "—";
+        const mx       = p.max  != null ? p.max  : "—";
+        const rangeStr = (p.p25 != null && p.p75 != null) ? `${Math.round(p.p25)}–${Math.round(p.p75)}` : "—";
+        const statCols = isMobile
+          ? `<span style="text-align:right;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+             <span style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums;color:var(--color-text-dim)">${mn}</span>
+             <span style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums;color:var(--color-text-dim)">${mx}</span>`
+          : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count || "—"}</span>
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mn}</span>
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mx}</span>
+             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${rangeStr}</span>`;
+        return `
+          <div class="draft-auction-row" style="grid-template-columns:${COL}">
+            <span style="font-size:.75rem;color:var(--color-text-dim)">${(page - 1) * PAGE_SIZE + i + 1}</span>
+            <div style="display:flex;align-items:center;gap:4px;min-width:0">
+              <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;flex-shrink:0;font-size:.65rem;padding:1px 5px;border-radius:4px;border:1px solid">${esc(p.position || "?")}</span>
+              <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name || "Unknown")}</span>
+            </div>
+            ${statCols}
+          </div>`;
+      }).join("");
+
+      const pagination = totalPages > 1 ? `
+        <div class="draft-pagination" style="display:flex;align-items:center;justify-content:center;gap:var(--space-3);padding:var(--space-3)">
+          <button class="draft-toggle-btn" id="pub-adp-prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button>
+          <span style="font-size:.85rem;color:var(--color-text-dim)">Page ${page} of ${totalPages}</span>
+          <button class="draft-toggle-btn" id="pub-adp-next" ${page >= totalPages ? "disabled" : ""}>Next ›</button>
+        </div>` : "";
+
+      body.innerHTML = `
+        <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
+          <select id="pub-adp-pos" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">${posOpts}</select>
+          <span style="font-size:.78rem;color:var(--color-text-dim)">${adp.length} players · ${filtered.length} shown${_selectedYear ? " · " + _selectedYear : ""}</span>
+        </div>
+        <div class="draft-auction-list trn-adp-table">
+          <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">${headerCols}</div>
+          ${rows}
+        </div>
+        ${pagination}`;
+
+      document.getElementById("pub-adp-pos")?.addEventListener("change", function() {
+        _adpPos  = this.value;
+        _adpPage = 1;
+        renderAdpTab(body);
+      });
+      document.getElementById("pub-adp-prev")?.addEventListener("click", () => { _adpPage--; renderAdpTab(body); });
+      document.getElementById("pub-adp-next")?.addEventListener("click", () => { _adpPage++; renderAdpTab(body); });
+    }
+
     // ── Players tab — career history (public site) ──────────────────────────
-    // Reads from _currentT.standingsCache + _currentT.participantMap.
-    // participantMap keys are sanitized by _writePublicSummary in tournament.js.
+    // List view, 25/page, searchable. Sorted: tournament champions first,
+    // then years desc, then win% desc. Click row → career modal.
     // Year-agnostic: shows all years regardless of _selectedYear.
     let _pubPhSearch = "";
+    let _pubPhPage   = 1;
 
     function renderPlayersTab(body) {
       const t    = _currentT;
@@ -526,7 +616,7 @@
       const pMap  = t.participantMap || {};
       const _sk   = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
 
-      // ── Build career data ──────────────────────────────────
+      // ── Build career data from standingsCache ───────────────
       const careers = {};
 
       for (const lc of Object.values(cache)) {
@@ -538,7 +628,6 @@
           : null;
 
         for (const tm of (lc.teams || [])) {
-          // Resolve participant: try sleeperUsername then teamName against participantMap
           let part = null;
           if (tm.sleeperUsername) part = pMap[_sk(tm.sleeperUsername)];
           if (!part && tm.teamName) part = pMap[_sk(tm.teamName)];
@@ -547,14 +636,8 @@
           const careerKey   = _sk(displayName);
 
           if (!careers[careerKey]) {
-            careers[careerKey] = {
-              displayName,
-              gender:  part?.gender        || "",
-              twitter: part?.twitterHandle || "",
-              seasons: {}
-            };
+            careers[careerKey] = { displayName, gender: part?.gender || "", twitter: part?.twitterHandle || "", seasons: {} };
           }
-
           if (!careers[careerKey].seasons[year]) careers[careerKey].seasons[year] = [];
 
           const isChamp = !!(champKey && (
@@ -563,22 +646,43 @@
           ));
 
           careers[careerKey].seasons[year].push({
-            leagueName: lgName,
-            teamName:   tm.teamName || displayName,
-            wins:       tm.wins    || 0,
-            losses:     tm.losses  || 0,
-            ties:       tm.ties    || 0,
-            pf:         tm.pf      || 0,
-            isChamp,
-            platform:   lc.platform || "sleeper"
+            leagueName: lgName, teamName: tm.teamName || displayName,
+            wins: tm.wins || 0, losses: tm.losses || 0, ties: tm.ties || 0,
+            pf: tm.pf || 0, isChamp, platform: lc.platform || "sleeper"
           });
         }
       }
 
-      // ── Aggregate ──────────────────────────────────────────
+      // ── Join playoff qualification data from published snapshots ───────────
+      // _currentT.playoffs is year-keyed: {2025: {standings:[{displayName,teamName,qualified,bye}]}}
+      // We build a map: year → { sanitizedKey → {qualified, bye, isTournamentChamp} }
+      const poByYear = {};
+      const poData = t.playoffs || {};
+      for (const [yr, po] of Object.entries(poData)) {
+        if (!/^\d{4}$/.test(String(yr))) continue; // skip flat/legacy
+        if (!po?.standings) continue;
+        poByYear[String(yr)] = {};
+        po.standings.forEach((tm, idx) => {
+          // Build keys from both displayName and teamName to match career keys
+          const keys = [tm.displayName, tm.teamName].filter(Boolean).map(_sk);
+          const isTournamentChamp = (po.mode === "total_points" && idx === 0) || !!(tm.isChamp);
+          keys.forEach(k => {
+            poByYear[String(yr)][k] = {
+              qualified: !!(tm.qualified),
+              bye:       !!(tm.bye),
+              isTournamentChamp,
+              roundsData: po.computedRounds || []
+            };
+          });
+        });
+      }
+
+      // ── Aggregate career stats ───────────────────────────────
       const playerList = Object.values(careers).map(c => {
         const yearKeys = Object.keys(c.seasons).sort((a, b) => b - a);
         let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
+        let playoffApps = 0, tournamentChamps = 0;
+
         yearKeys.forEach(yr => {
           c.seasons[yr].forEach(s => {
             totalLeagues++;
@@ -587,11 +691,28 @@
             totalPF     += s.pf;
             if (s.isChamp) totalChamps++;
           });
+          // Playoff qualification: any entry in this year's playoffs standings
+          const cKey  = _sk(c.displayName);
+          const poYr  = poByYear[yr] || {};
+          const poEntry = poYr[cKey];
+          if (poEntry?.qualified) playoffApps++;
+          if (poEntry?.isTournamentChamp) tournamentChamps++;
         });
+
         const winPct = (totalWins + totalLosses) > 0
           ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
-        return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues, totalWins, totalLosses, totalPF, totalChamps, winPct };
-      }).sort((a, b) => b.totalYears - a.totalYears || b.totalWins - a.totalWins);
+
+        return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues,
+          totalWins, totalLosses, totalPF, totalChamps, playoffApps, tournamentChamps, winPct };
+      });
+
+      // ── Sort: tournament champs first, then years desc, then win% desc ──────
+      playerList.sort((a, b) => {
+        if (b.tournamentChamps !== a.tournamentChamps) return b.tournamentChamps - a.tournamentChamps;
+        if (b.totalYears !== a.totalYears) return b.totalYears - a.totalYears;
+        const wa = parseFloat(a.winPct) || 0, wb = parseFloat(b.winPct) || 0;
+        return wb - wa;
+      });
 
       if (!playerList.length) {
         body.innerHTML = `
@@ -603,77 +724,143 @@
         return;
       }
 
-      // ── Render helpers ─────────────────────────────────────
-      const _card = (p) => {
-        const champBadge  = p.totalChamps > 0 ? `<span class="trn-ph-champ-badge">🏆 ×${p.totalChamps}</span>` : "";
-        const genderBadge = p.gender === "Male"
-          ? `<span class="trn-gender-m">M</span>`
-          : p.gender === "Female" ? `<span class="trn-gender-f">F</span>` : "";
-        const twitterLink = p.twitter
-          ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.72rem">@${esc(p.twitter.replace(/^@/,""))}</a>` : "";
-        const yearPills = p.yearKeys.map(yr => {
-          const hasChamp = p.seasons[yr].some(s => s.isChamp);
-          return `<span class="trn-ph-year-pill${hasChamp ? " trn-ph-year-pill--champ" : ""}">${esc(yr)}${hasChamp ? " 🏆" : ""}</span>`;
-        }).join("");
-        return `
-          <div class="trn-ph-card" data-ph-key="${esc(_sk(p.displayName))}" role="button" tabindex="0">
-            <div class="trn-ph-card-header">
-              <span class="trn-ph-avatar">${esc((p.displayName || "?").slice(0, 2).toUpperCase())}</span>
-              <div class="trn-ph-card-info">
-                <div class="trn-ph-card-name">${esc(p.displayName)} ${genderBadge} ${champBadge}</div>
-                <div class="trn-ph-card-meta">${twitterLink}</div>
-              </div>
-            </div>
-            <div class="trn-ph-stats-row">
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Yr${p.totalYears !== 1 ? "s" : ""}</div></div>
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Lgue${p.totalLeagues !== 1 ? "s" : ""}</div></div>
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">W–L</div></div>
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
-            </div>
-            <div class="trn-ph-years">${yearPills}</div>
-          </div>`;
-      };
+      const PH_PAGE_SIZE = 25;
 
-      const _renderGrid = (q) => {
+      // ── Build list rows ──────────────────────────────────────
+      const _renderList = (q, pg) => {
         const filtered = q
           ? playerList.filter(p => p.displayName.toLowerCase().includes(q.toLowerCase()))
           : playerList;
-        if (!filtered.length) return `<div class="trn-players-empty">No players match "${esc(q)}"</div>`;
-        return filtered.map(_card).join("");
+        if (!filtered.length) return { html: `<div class="trn-players-empty">No players match "${esc(q)}"</div>`, total: 0, pages: 0 };
+
+        const totalPgs = Math.ceil(filtered.length / PH_PAGE_SIZE);
+        const curPg    = Math.max(1, Math.min(pg, totalPgs));
+        const slice    = filtered.slice((curPg - 1) * PH_PAGE_SIZE, curPg * PH_PAGE_SIZE);
+        const startRank = (curPg - 1) * PH_PAGE_SIZE + 1;
+
+        const rows = slice.map((p, i) => {
+          const rank = startRank + i;
+          const genderBadge = p.gender === "Male"
+            ? `<span class="trn-gender-m" style="font-size:.65rem">M</span>`
+            : p.gender === "Female" ? `<span class="trn-gender-f" style="font-size:.65rem">F</span>` : "";
+          // Highlight row: gold for tournament champions, subtle for league champs only
+          const isTChamp = p.tournamentChamps > 0;
+          const isLChamp = p.totalChamps > 0 && !isTChamp;
+          const rowCls   = isTChamp ? "trn-ph-row trn-ph-row--tchamp" : isLChamp ? "trn-ph-row trn-ph-row--lchamp" : "trn-ph-row";
+          const champCell = isTChamp
+            ? `<span class="trn-ph-champ-badge">🏆 ×${p.tournamentChamps}</span>`
+            : p.totalChamps > 0 ? `<span class="trn-ph-champ-badge" style="background:rgba(99,102,241,.15);color:#a78bfa;border-color:rgba(99,102,241,.3)">🥇 ×${p.totalChamps}</span>`
+            : `<span style="color:var(--color-text-dim)">—</span>`;
+          const poCell = p.playoffApps > 0
+            ? `<span style="color:var(--color-green,#4ade80);font-weight:600">${p.playoffApps}</span>/<span style="color:var(--color-text-dim)">${p.totalYears}</span>`
+            : `<span style="color:var(--color-text-dim)">0/${p.totalYears}</span>`;
+          return `
+            <tr class="${rowCls}" data-ph-key="${esc(_sk(p.displayName))}" role="button" tabindex="0" style="cursor:pointer">
+              <td class="trn-ph-col-rank">${rank}</td>
+              <td class="trn-ph-col-name">
+                <span style="font-weight:600">${esc(p.displayName)}</span>
+                ${genderBadge}
+                ${p.twitter ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.68rem" onclick="event.stopPropagation()">@${esc(p.twitter.replace(/^@/,""))}</a>` : ""}
+              </td>
+              <td class="trn-ph-col-num">${p.totalYears}</td>
+              <td class="trn-ph-col-num">${p.totalWins}–${p.totalLosses}</td>
+              <td class="trn-ph-col-num">${p.winPct !== null ? p.winPct + "%" : "—"}</td>
+              <td class="trn-ph-col-num">${poCell}</td>
+              <td class="trn-ph-col-champ">${champCell}</td>
+            </tr>`;
+        }).join("");
+
+        const pagination = totalPgs > 1 ? `
+          <tr class="trn-ph-pagination-row">
+            <td colspan="7">
+              <div class="trn-ph-pagination">
+                <button class="draft-toggle-btn" id="pub-ph-prev" ${curPg <= 1 ? "disabled" : ""}>‹ Prev</button>
+                <span style="font-size:.82rem;color:var(--color-text-dim)">Page ${curPg} of ${totalPgs} · ${filtered.length} players</span>
+                <button class="draft-toggle-btn" id="pub-ph-next" ${curPg >= totalPgs ? "disabled" : ""}>Next ›</button>
+              </div>
+            </td>
+          </tr>` : "";
+
+        return {
+          html: `
+            <div class="trn-ph-list-wrap">
+              <table class="trn-ph-list-table">
+                <thead><tr>
+                  <th class="trn-ph-col-rank">#</th>
+                  <th class="trn-ph-col-name">Player</th>
+                  <th class="trn-ph-col-num trn-ph-th-tip" title="Seasons played">Yrs</th>
+                  <th class="trn-ph-col-num trn-ph-th-tip" title="Career wins–losses">W–L</th>
+                  <th class="trn-ph-col-num trn-ph-th-tip" title="Win percentage">Win%</th>
+                  <th class="trn-ph-col-num trn-ph-th-tip" title="Playoff appearances / seasons played">PO</th>
+                  <th class="trn-ph-col-champ trn-ph-th-tip" title="🏆 Tournament Champion · 🥇 League Champion">Titles</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+                ${pagination}
+              </table>
+            </div>`,
+          total: filtered.length,
+          pages: totalPgs,
+          cur:   curPg
+        };
       };
 
+      // ── Initial render ───────────────────────────────────────
+      const _refresh = () => {
+        const result = _renderList(_pubPhSearch, _pubPhPage);
+        const wrap   = document.getElementById("pub-ph-list-wrap");
+        if (wrap) wrap.innerHTML = result.html;
+        _wirePubPhRows(playerList);
+      };
+
+      const initial = _renderList(_pubPhSearch, _pubPhPage);
       body.innerHTML = `
         <div class="trn-players-toolbar">
           <input type="text" id="pub-ph-search" class="trn-st-search"
             placeholder="Search by name…" value="${esc(_pubPhSearch)}" />
           <span style="font-size:.8rem;color:var(--color-text-dim);white-space:nowrap">${playerList.length} player${playerList.length !== 1 ? "s" : ""} · all years</span>
         </div>
-        <div class="trn-ph-grid" id="pub-ph-grid">
-          ${_renderGrid(_pubPhSearch)}
-        </div>`;
+        <div id="pub-ph-list-wrap">${initial.html}</div>`;
 
-      // ── Search ─────────────────────────────────────────────
+      // ── Events ────────────────────────────────────────────────
       document.getElementById("pub-ph-search")?.addEventListener("input", function() {
         _pubPhSearch = this.value;
-        const grid = document.getElementById("pub-ph-grid");
-        if (grid) grid.innerHTML = _renderGrid(_pubPhSearch);
-        _wirePubPhCards(playerList);
+        _pubPhPage   = 1;
+        _refresh();
       });
 
-      // ── Card click → modal ─────────────────────────────────
-      const _openModal = (p) => {
+      const _wirePubPhRows = (list) => {
+        document.querySelectorAll(".trn-ph-row").forEach(row => {
+          const key = row.dataset.phKey;
+          const p   = list.find(pl => _sk(pl.displayName) === key);
+          if (!p) return;
+          const open = () => _openPhModal(p);
+          row.addEventListener("click", open);
+          row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
+        });
+        document.getElementById("pub-ph-prev")?.addEventListener("click", () => { _pubPhPage--; _refresh(); });
+        document.getElementById("pub-ph-next")?.addEventListener("click", () => { _pubPhPage++; _refresh(); });
+      };
+
+      // ── Career modal ─────────────────────────────────────────
+      const _openPhModal = (p) => {
         document.getElementById("pub-ph-modal-root")?.remove();
 
+        const cKey = _sk(p.displayName);
         const twitterLink = p.twitter
-          ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:var(--space-2)">@${esc(p.twitter.replace(/^@/,""))}</a>` : "";
+          ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:6px">@${esc(p.twitter.replace(/^@/,""))}</a>` : "";
         const genderBadge = p.gender === "Male"
           ? ` <span class="trn-gender-m">M</span>`
           : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
 
+        // Per-year detail sections
         const yearSections = p.yearKeys.map(yr => {
+          const poYr    = poByYear[yr] || {};
+          const poEntry = poYr[cKey];
+
+          // ── Regular season league rows ──
           const leagueRows = p.seasons[yr].map(s => {
             const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
-            const platIcon = { sleeper: "🟢", mfl: "🔵", yahoo: "🟣" }[s.platform] || "⚪";
+            const platIcon = { sleeper:"🟢", mfl:"🔵", yahoo:"🟣" }[s.platform] || "⚪";
             const result   = s.isChamp
               ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>`
               : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
@@ -681,22 +868,51 @@
               <td class="trn-ph-tbl-league">${platIcon} ${esc(s.leagueName)}</td>
               <td class="trn-ph-tbl-num">${s.wins}–${s.losses}${tiesStr}</td>
               <td class="trn-ph-tbl-num">${(s.pf || 0).toFixed(1)}</td>
-              <td style="padding:5px 6px">${result}</td>
+              <td style="padding:5px 6px;text-align:center">${result}</td>
             </tr>`;
           }).join("");
+
           const yrWins  = p.seasons[yr].reduce((a, s) => a + s.wins, 0);
           const yrLoss  = p.seasons[yr].reduce((a, s) => a + s.losses, 0);
           const yrPF    = p.seasons[yr].reduce((a, s) => a + s.pf, 0);
-          const yrChamp = p.seasons[yr].some(s => s.isChamp);
+          const yrLChamp = p.seasons[yr].some(s => s.isChamp);
+
+          // ── Playoff result block ──
+          let poBlock = "";
+          if (poEntry) {
+            const statusLabel = poEntry.isTournamentChamp
+              ? `<span class="trn-ph-champ-badge">🏆 Tournament Champion</span>`
+              : poEntry.bye
+              ? `<span class="trn-ph-champ-badge" style="background:rgba(59,130,246,.15);color:#60a5fa;border-color:rgba(59,130,246,.3)">🌟 Qualified (BYE)</span>`
+              : `<span class="trn-ph-champ-badge" style="background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)">✓ Qualified</span>`;
+            poBlock = `
+              <div class="trn-ph-po-block">
+                <div class="trn-ph-po-label">🥇 Playoff Result</div>
+                <div style="margin-top:4px">${statusLabel}</div>
+              </div>`;
+          }
+
+          // ── League champ separator ──
+          const lchampNote = yrLChamp && !poEntry?.isTournamentChamp
+            ? `<div class="trn-ph-po-block" style="background:rgba(212,175,55,.07);border-color:rgba(212,175,55,.25)">
+                <div class="trn-ph-po-label">League</div>
+                <span class="trn-ph-champ-badge" style="font-size:.7rem;margin-top:4px;display:inline-flex">🥇 League Champion</span>
+               </div>` : "";
+
           return `
             <div class="trn-ph-year-section">
               <div class="trn-ph-year-label">
                 <strong>${esc(yr)}</strong>
-                <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""} · ${yrWins}–${yrLoss} · ${yrPF.toFixed(1)} pts</span>
-                ${yrChamp ? `<span class="trn-ph-champ-badge" style="margin-left:8px;font-size:.7rem">🏆 League Champ</span>` : ""}
+                <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""}</span>
               </div>
+              ${poBlock}${lchampNote}
               <table class="trn-ph-career-table">
-                <thead><tr><th>League</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th><th>Result</th></tr></thead>
+                <thead><tr>
+                  <th>League</th>
+                  <th style="text-align:right;width:52px">W–L</th>
+                  <th style="text-align:right;width:52px">PF</th>
+                  <th style="text-align:center;width:80px">Result</th>
+                </tr></thead>
                 <tbody>${leagueRows}</tbody>
               </table>
             </div>`;
@@ -709,18 +925,19 @@
         modalRoot.innerHTML = `
           <div class="trn-ph-modal">
             <div class="trn-ph-modal-header">
-              <span class="trn-ph-modal-title">${esc(p.displayName)}</span>
+              <span class="trn-ph-modal-title">${esc(p.displayName)}${genderBadge}${twitterLink}</span>
               <button class="modal-close" id="pub-ph-close">✕</button>
             </div>
             <div class="trn-ph-modal-body">
-              <div class="trn-ph-modal-identity">${genderBadge}${twitterLink}</div>
               <div class="trn-ph-modal-totals">
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Leagues</div></div>
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(1)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
-                ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆 ×${p.totalChamps}</div><div class="trn-ph-stat-lbl">Champ${p.totalChamps !== 1 ? "s" : ""}</div></div>` : ""}
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.playoffApps}/${p.totalYears}</div><div class="trn-ph-stat-lbl">PO Apps</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(0)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
+                ${p.tournamentChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆×${p.tournamentChamps}</div><div class="trn-ph-stat-lbl">Tourn.</div></div>` : ""}
+                ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🥇×${p.totalChamps}</div><div class="trn-ph-stat-lbl">League</div></div>` : ""}
               </div>
               ${yearSections}
             </div>
@@ -728,24 +945,12 @@
 
         document.body.appendChild(modalRoot);
         document.body.style.overflow = "hidden";
-
         const _close = () => { modalRoot.remove(); document.body.style.overflow = ""; };
         document.getElementById("pub-ph-close")?.addEventListener("click", _close);
         modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
       };
 
-      const _wirePubPhCards = (list) => {
-        document.querySelectorAll(".trn-ph-card").forEach(card => {
-          const key = card.dataset.phKey;
-          const p   = list.find(pl => _sk(pl.displayName) === key);
-          if (!p) return;
-          const open = () => _openModal(p);
-          card.addEventListener("click", open);
-          card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
-        });
-      };
-
-      _wirePubPhCards(playerList);
+      _wirePubPhRows(playerList);
     }
 
     // ── Rules tab (public) ──────────────────────────────────

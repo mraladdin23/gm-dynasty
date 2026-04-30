@@ -6622,97 +6622,97 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // re-implements a parallel version using _currentT instead of t.
 
   let _phSearch = ""; // persists within a session
+  let _phPage   = 1;
 
   function _renderPlayersTab(tid, t, body) {
     const _sk    = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
     const cache  = t.standingsCache  || {};
     const parts  = t.participants    || {};
 
-    // ── Build participant lookup: sanitizedKey → {displayName, gender, twitter} ──
-    // Multiple keys per participant (sleeperUsername, displayName, teamName)
-    const pLookup = {}; // sanitizedKey → participant obj
+    // ── Build participant lookup ─────────────────────────────
+    const pLookup = {};
     Object.values(parts).forEach(p => {
-      [p.sleeperUsername, p.displayName, p.teamName]
-        .filter(Boolean)
-        .map(_sk)
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).map(_sk)
         .forEach(k => { pLookup[k] = p; });
     });
-
     const _findPart = (tm) => {
-      if (tm.sleeperUsername) {
-        const p = pLookup[_sk(tm.sleeperUsername)];
-        if (p) return p;
-      }
-      if (tm.teamName) {
-        const p = pLookup[_sk(tm.teamName)];
-        if (p) return p;
-      }
+      if (tm.sleeperUsername) { const p = pLookup[_sk(tm.sleeperUsername)]; if (p) return p; }
+      if (tm.teamName)        { const p = pLookup[_sk(tm.teamName)];        if (p) return p; }
       return null;
     };
 
-    // ── Build careers map: displayName → careerObj ──────────
-    const careers = {}; // careerKey → obj
-
+    // ── Build careers from standingsCache ────────────────────
+    const careers = {};
     for (const lc of Object.values(cache)) {
       const year     = String(lc.year || "Unknown");
       const lgName   = lc.leagueName || "Unknown League";
       const champion = lc.champion || null;
       const champKey = champion
-        ? (_sk(champion.sleeperUsername || "") || _sk(champion.teamName || ""))
-        : null;
+        ? (_sk(champion.sleeperUsername || "") || _sk(champion.teamName || "")) : null;
 
       for (const tm of (lc.teams || [])) {
         const part        = _findPart(tm);
         const displayName = part?.displayName || tm.teamName || "Unknown";
         const careerKey   = _sk(displayName);
-
         if (!careers[careerKey]) {
-          careers[careerKey] = {
-            displayName,
-            gender:  part?.gender        || "",
-            twitter: part?.twitterHandle || "",
-            seasons: {}
-          };
+          careers[careerKey] = { displayName, gender: part?.gender || "", twitter: part?.twitterHandle || "", seasons: {} };
         }
-
         if (!careers[careerKey].seasons[year]) careers[careerKey].seasons[year] = [];
-
-        // Is this team the champion for this league?
         const isChamp = !!(champKey && (
           (tm.sleeperUsername && _sk(tm.sleeperUsername) === champKey) ||
           (tm.teamName        && _sk(tm.teamName)        === champKey)
         ));
-
         careers[careerKey].seasons[year].push({
-          leagueName: lgName,
-          teamName:   tm.teamName || displayName,
-          wins:       tm.wins    || 0,
-          losses:     tm.losses  || 0,
-          ties:       tm.ties    || 0,
-          pf:         tm.pf      || 0,
-          isChamp,
-          platform:   lc.platform || "sleeper"
+          leagueName: lgName, teamName: tm.teamName || displayName,
+          wins: tm.wins || 0, losses: tm.losses || 0, ties: tm.ties || 0,
+          pf: tm.pf || 0, isChamp, platform: lc.platform || "sleeper"
         });
       }
     }
 
-    // ── Compute aggregates ───────────────────────────────────
+    // ── Join playoff data from t.playoffs (year-keyed) ───────
+    // t.playoffs[year].standings[] has {displayName, teamName, qualified, bye}
+    const poByYear = {};
+    const poData = t.playoffs || {};
+    for (const [yr, po] of Object.entries(poData)) {
+      if (!/^\d{4}$/.test(String(yr))) continue;
+      if (!po?.standings) continue;
+      poByYear[String(yr)] = {};
+      po.standings.forEach((tm, idx) => {
+        const isTournamentChamp = (po.mode === "total_points" && idx === 0) || !!(tm.isChamp);
+        [tm.displayName, tm.teamName].filter(Boolean).map(_sk).forEach(k => {
+          poByYear[String(yr)][k] = { qualified: !!(tm.qualified), bye: !!(tm.bye), isTournamentChamp };
+        });
+      });
+    }
+
+    // ── Aggregate ────────────────────────────────────────────
     const playerList = Object.values(careers).map(c => {
       const yearKeys = Object.keys(c.seasons).sort((a, b) => b - a);
       let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
+      let playoffApps = 0, tournamentChamps = 0;
+      const cKey = _sk(c.displayName);
       yearKeys.forEach(yr => {
         c.seasons[yr].forEach(s => {
-          totalLeagues++;
-          totalWins   += s.wins;
-          totalLosses += s.losses;
-          totalPF     += s.pf;
+          totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
           if (s.isChamp) totalChamps++;
         });
+        const poEntry = (poByYear[yr] || {})[cKey];
+        if (poEntry?.qualified) playoffApps++;
+        if (poEntry?.isTournamentChamp) tournamentChamps++;
       });
       const winPct = (totalWins + totalLosses) > 0
         ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
-      return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues, totalWins, totalLosses, totalPF, totalChamps, winPct };
-    }).sort((a, b) => b.totalYears - a.totalYears || b.totalWins - a.totalWins);
+      return { ...c, yearKeys, totalYears: yearKeys.length, totalLeagues,
+        totalWins, totalLosses, totalPF, totalChamps, playoffApps, tournamentChamps, winPct };
+    });
+
+    // Sort: tournament champs first, then years desc, then win% desc
+    playerList.sort((a, b) => {
+      if (b.tournamentChamps !== a.tournamentChamps) return b.tournamentChamps - a.tournamentChamps;
+      if (b.totalYears !== a.totalYears) return b.totalYears - a.totalYears;
+      return (parseFloat(b.winPct) || 0) - (parseFloat(a.winPct) || 0);
+    });
 
     if (!playerList.length) {
       body.innerHTML = `
@@ -6724,44 +6724,85 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       return;
     }
 
-    // ── Build a single player card HTML ─────────────────────
-    const _card = (p) => {
-      const champBadge  = p.totalChamps > 0
-        ? `<span class="trn-ph-champ-badge">🏆 ×${p.totalChamps}</span>` : "";
-      const genderBadge = p.gender === "Male"
-        ? `<span class="trn-gender-m">M</span>`
-        : p.gender === "Female" ? `<span class="trn-gender-f">F</span>` : "";
-      const twitterLink = p.twitter
-        ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.72rem">@${_esc(p.twitter.replace(/^@/,""))}</a>` : "";
-      const yearPills = p.yearKeys.map(yr => {
-        const hasChamp = p.seasons[yr].some(s => s.isChamp);
-        return `<span class="trn-ph-year-pill${hasChamp ? " trn-ph-year-pill--champ" : ""}">${_esc(yr)}${hasChamp ? " 🏆" : ""}</span>`;
-      }).join("");
-      return `
-        <div class="trn-ph-card" data-ph-key="${_esc(_sk(p.displayName))}" role="button" tabindex="0">
-          <div class="trn-ph-card-header">
-            <span class="trn-ph-avatar">${_esc((p.displayName || "?").slice(0, 2).toUpperCase())}</span>
-            <div class="trn-ph-card-info">
-              <div class="trn-ph-card-name">${_esc(p.displayName)} ${genderBadge} ${champBadge}</div>
-              <div class="trn-ph-card-meta">${twitterLink}</div>
-            </div>
-          </div>
-          <div class="trn-ph-stats-row">
-            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Yr${p.totalYears !== 1 ? "s" : ""}</div></div>
-            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Lgue${p.totalLeagues !== 1 ? "s" : ""}</div></div>
-            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">W–L</div></div>
-            <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
-          </div>
-          <div class="trn-ph-years">${yearPills}</div>
-        </div>`;
-    };
+    const PH_PAGE_SIZE = 25;
 
-    const _renderGrid = (q) => {
+    // ── Build paginated list HTML ────────────────────────────
+    const _renderList = (q, pg) => {
       const filtered = q
         ? playerList.filter(p => p.displayName.toLowerCase().includes(q.toLowerCase()))
         : playerList;
       if (!filtered.length) return `<div class="trn-players-empty">No players match "${_esc(q)}"</div>`;
-      return filtered.map(_card).join("");
+
+      const totalPgs  = Math.ceil(filtered.length / PH_PAGE_SIZE);
+      const curPg     = Math.max(1, Math.min(pg, totalPgs));
+      const slice     = filtered.slice((curPg - 1) * PH_PAGE_SIZE, curPg * PH_PAGE_SIZE);
+      const startRank = (curPg - 1) * PH_PAGE_SIZE + 1;
+
+      const rows = slice.map((p, i) => {
+        const rank        = startRank + i;
+        const isTChamp    = p.tournamentChamps > 0;
+        const isLChamp    = p.totalChamps > 0 && !isTChamp;
+        const rowCls      = isTChamp ? "trn-ph-row trn-ph-row--tchamp" : isLChamp ? "trn-ph-row trn-ph-row--lchamp" : "trn-ph-row";
+        const genderBadge = p.gender === "Male"
+          ? `<span class="trn-gender-m" style="font-size:.65rem">M</span>`
+          : p.gender === "Female" ? `<span class="trn-gender-f" style="font-size:.65rem">F</span>` : "";
+        const champCell = isTChamp
+          ? `<span class="trn-ph-champ-badge">🏆 ×${p.tournamentChamps}</span>`
+          : p.totalChamps > 0
+            ? `<span class="trn-ph-champ-badge" style="background:rgba(99,102,241,.15);color:#a78bfa;border-color:rgba(99,102,241,.3)">🥇 ×${p.totalChamps}</span>`
+            : `<span style="color:var(--color-text-dim)">—</span>`;
+        const poCell = p.playoffApps > 0
+          ? `<span style="color:var(--color-green,#4ade80);font-weight:600">${p.playoffApps}</span>/<span style="color:var(--color-text-dim)">${p.totalYears}</span>`
+          : `<span style="color:var(--color-text-dim)">0/${p.totalYears}</span>`;
+        return `
+          <tr class="${rowCls}" data-ph-key="${_esc(_sk(p.displayName))}" role="button" tabindex="0" style="cursor:pointer">
+            <td class="trn-ph-col-rank">${rank}</td>
+            <td class="trn-ph-col-name">
+              <span style="font-weight:600">${_esc(p.displayName)}</span>
+              ${genderBadge}
+              ${p.twitter ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.68rem" onclick="event.stopPropagation()">@${_esc(p.twitter.replace(/^@/,""))}</a>` : ""}
+            </td>
+            <td class="trn-ph-col-num">${p.totalYears}</td>
+            <td class="trn-ph-col-num">${p.totalWins}–${p.totalLosses}</td>
+            <td class="trn-ph-col-num">${p.winPct !== null ? p.winPct + "%" : "—"}</td>
+            <td class="trn-ph-col-num">${poCell}</td>
+            <td class="trn-ph-col-champ">${champCell}</td>
+          </tr>`;
+      }).join("");
+
+      const pagination = totalPgs > 1 ? `
+        <tr class="trn-ph-pagination-row">
+          <td colspan="7">
+            <div class="trn-ph-pagination">
+              <button class="draft-toggle-btn" id="trn-ph-prev" ${curPg <= 1 ? "disabled" : ""}>‹ Prev</button>
+              <span style="font-size:.82rem;color:var(--color-text-dim)">Page ${curPg} of ${totalPgs} · ${filtered.length} players</span>
+              <button class="draft-toggle-btn" id="trn-ph-next" ${curPg >= totalPgs ? "disabled" : ""}>Next ›</button>
+            </div>
+          </td>
+        </tr>` : "";
+
+      return `
+        <div class="trn-ph-list-wrap">
+          <table class="trn-ph-list-table">
+            <thead><tr>
+              <th class="trn-ph-col-rank">#</th>
+              <th class="trn-ph-col-name">Player</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" title="Seasons played">Yrs</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" title="Career wins–losses">W–L</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" title="Win percentage">Win%</th>
+              <th class="trn-ph-col-num trn-ph-th-tip" title="Playoff appearances / seasons played">PO</th>
+              <th class="trn-ph-col-champ trn-ph-th-tip" title="🏆 Tournament Champion · 🥇 League Champion">Titles</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+            ${pagination}
+          </table>
+        </div>`;
+    };
+
+    const _refresh = () => {
+      const wrap = document.getElementById("trn-ph-list-wrap");
+      if (wrap) wrap.outerHTML = _renderList(_phSearch, _phPage);
+      _wirePhRows(playerList);
     };
 
     body.innerHTML = `
@@ -6770,80 +6811,102 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           placeholder="Search by name…" value="${_esc(_phSearch)}" />
         <span style="font-size:.8rem;color:var(--color-text-dim);white-space:nowrap">${playerList.length} player${playerList.length !== 1 ? "s" : ""} · all years</span>
       </div>
-      <div class="trn-ph-grid" id="trn-ph-grid">
-        ${_renderGrid(_phSearch)}
-      </div>`;
+      <div id="trn-ph-list-outer">${_renderList(_phSearch, _phPage)}</div>`;
 
-    // ── Search ───────────────────────────────────────────────
     document.getElementById("trn-ph-search")?.addEventListener("input", function() {
-      _phSearch = this.value;
-      const grid = document.getElementById("trn-ph-grid");
-      if (grid) grid.innerHTML = _renderGrid(_phSearch);
-      _wirePhCards(playerList, body);
+      _phSearch = this.value; _phPage = 1;
+      const outer = document.getElementById("trn-ph-list-outer");
+      if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
+      _wirePhRows(playerList);
     });
 
-    // ── Wire card clicks → modal ─────────────────────────────
+    // ── Career modal ─────────────────────────────────────────
     const _openPhModal = (p) => {
-      // Remove any existing modal
       document.getElementById("trn-ph-modal-root")?.remove();
-
-      const modalRoot = document.createElement("div");
-      modalRoot.id        = "trn-ph-modal-root";
-      modalRoot.className = "trn-ph-modal-backdrop";
-      modalRoot.style.display = "flex";
-
+      const cKey = _sk(p.displayName);
       const twitterLink = p.twitter
-        ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:var(--space-2)">@${_esc(p.twitter.replace(/^@/,""))}</a>` : "";
-      const genderBadge = p.gender === "Male"
-        ? ` <span class="trn-gender-m">M</span>`
+        ? `<a href="https://x.com/${_esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:6px">@${_esc(p.twitter.replace(/^@/,""))}</a>` : "";
+      const genderBadge = p.gender === "Male" ? ` <span class="trn-gender-m">M</span>`
         : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
 
       const yearSections = p.yearKeys.map(yr => {
+        const poEntry  = (poByYear[yr] || {})[cKey];
         const leagueRows = p.seasons[yr].map(s => {
           const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
-          const platIcon = { sleeper: "🟢", mfl: "🔵", yahoo: "🟣" }[s.platform] || "⚪";
+          const platIcon = { sleeper:"🟢", mfl:"🔵", yahoo:"🟣" }[s.platform] || "⚪";
           const result   = s.isChamp
-            ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>` : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
+            ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>`
+            : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
           return `<tr>
             <td class="trn-ph-tbl-league">${platIcon} ${_esc(s.leagueName)}</td>
             <td class="trn-ph-tbl-num">${s.wins}–${s.losses}${tiesStr}</td>
             <td class="trn-ph-tbl-num">${(s.pf || 0).toFixed(1)}</td>
-            <td style="padding:5px 6px">${result}</td>
+            <td style="padding:5px 6px;text-align:center">${result}</td>
           </tr>`;
         }).join("");
-        const yrWins   = p.seasons[yr].reduce((a, s) => a + s.wins, 0);
-        const yrLoss   = p.seasons[yr].reduce((a, s) => a + s.losses, 0);
-        const yrPF     = p.seasons[yr].reduce((a, s) => a + s.pf, 0);
-        const yrChamp  = p.seasons[yr].some(s => s.isChamp);
+
+        const yrWins  = p.seasons[yr].reduce((a, s) => a + s.wins, 0);
+        const yrLoss  = p.seasons[yr].reduce((a, s) => a + s.losses, 0);
+        const yrPF    = p.seasons[yr].reduce((a, s) => a + s.pf, 0);
+        const yrLChamp = p.seasons[yr].some(s => s.isChamp);
+
+        const poBlock = poEntry ? `
+          <div class="trn-ph-po-block">
+            <div class="trn-ph-po-label">🥇 Playoff Result</div>
+            <div style="margin-top:4px">
+              ${poEntry.isTournamentChamp
+                ? `<span class="trn-ph-champ-badge">🏆 Tournament Champion</span>`
+                : poEntry.bye
+                  ? `<span class="trn-ph-champ-badge" style="background:rgba(59,130,246,.15);color:#60a5fa;border-color:rgba(59,130,246,.3)">🌟 Qualified (BYE)</span>`
+                  : `<span class="trn-ph-champ-badge" style="background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)">✓ Qualified</span>`}
+            </div>
+          </div>` : "";
+
+        const lchampNote = yrLChamp && !poEntry?.isTournamentChamp
+          ? `<div class="trn-ph-po-block" style="background:rgba(212,175,55,.07);border-color:rgba(212,175,55,.25)">
+               <div class="trn-ph-po-label">League</div>
+               <span class="trn-ph-champ-badge" style="font-size:.7rem;margin-top:4px;display:inline-flex">🥇 League Champion</span>
+             </div>` : "";
+
         return `
           <div class="trn-ph-year-section">
             <div class="trn-ph-year-label">
               <strong>${_esc(yr)}</strong>
-              <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:var(--space-2)">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""} · ${yrWins}–${yrLoss} · ${yrPF.toFixed(1)} pts</span>
-              ${yrChamp ? `<span class="trn-ph-champ-badge" style="margin-left:var(--space-2);font-size:.7rem">🏆 League Champ</span>` : ""}
+              <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""}</span>
             </div>
+            ${poBlock}${lchampNote}
             <table class="trn-ph-career-table">
-              <thead><tr><th>League</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th><th>Result</th></tr></thead>
+              <thead><tr>
+                <th>League</th>
+                <th style="text-align:right;width:52px">W–L</th>
+                <th style="text-align:right;width:52px">PF</th>
+                <th style="text-align:center;width:80px">Result</th>
+              </tr></thead>
               <tbody>${leagueRows}</tbody>
             </table>
           </div>`;
       }).join("");
 
+      const modalRoot = document.createElement("div");
+      modalRoot.id        = "trn-ph-modal-root";
+      modalRoot.className = "trn-ph-modal-backdrop";
+      modalRoot.style.display = "flex";
       modalRoot.innerHTML = `
         <div class="trn-ph-modal">
           <div class="trn-ph-modal-header">
-            <span class="trn-ph-modal-title">${_esc(p.displayName)}</span>
+            <span class="trn-ph-modal-title">${_esc(p.displayName)}${genderBadge}${twitterLink}</span>
             <button class="modal-close" id="trn-ph-modal-close">✕</button>
           </div>
           <div class="trn-ph-modal-body">
-            <div class="trn-ph-modal-identity">${genderBadge}${twitterLink}</div>
             <div class="trn-ph-modal-totals">
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Leagues</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(1)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
-              ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆 ×${p.totalChamps}</div><div class="trn-ph-stat-lbl">Champ${p.totalChamps !== 1 ? "s" : ""}</div></div>` : ""}
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.playoffApps}/${p.totalYears}</div><div class="trn-ph-stat-lbl">PO Apps</div></div>
+              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(0)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
+              ${p.tournamentChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆×${p.tournamentChamps}</div><div class="trn-ph-stat-lbl">Tourn.</div></div>` : ""}
+              ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🥇×${p.totalChamps}</div><div class="trn-ph-stat-lbl">League</div></div>` : ""}
             </div>
             ${yearSections}
           </div>
@@ -6851,24 +6914,35 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       document.body.appendChild(modalRoot);
       document.body.style.overflow = "hidden";
-
       const _close = () => { modalRoot.remove(); document.body.style.overflow = ""; };
       document.getElementById("trn-ph-modal-close")?.addEventListener("click", _close);
       modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
     };
 
-    const _wirePhCards = (list, ctx) => {
-      (ctx || body).querySelectorAll(".trn-ph-card").forEach(card => {
-        const key = card.dataset.phKey;
+    const _wirePhRows = (list) => {
+      body.querySelectorAll(".trn-ph-row").forEach(row => {
+        const key = row.dataset.phKey;
         const p   = list.find(pl => _sk(pl.displayName) === key);
         if (!p) return;
         const open = () => _openPhModal(p);
-        card.addEventListener("click", open);
-        card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
+        row.addEventListener("click", open);
+        row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
+      });
+      body.querySelector("#trn-ph-prev")?.addEventListener("click", () => {
+        _phPage--;
+        const outer = document.getElementById("trn-ph-list-outer");
+        if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
+        _wirePhRows(list);
+      });
+      body.querySelector("#trn-ph-next")?.addEventListener("click", () => {
+        _phPage++;
+        const outer = document.getElementById("trn-ph-list-outer");
+        if (outer) outer.innerHTML = _renderList(_phSearch, _phPage);
+        _wirePhRows(list);
       });
     };
 
-    _wirePhCards(playerList, body);
+    _wirePhRows(playerList);
   }
 
   // ── User: Info tab ─────────────────────────────────────
