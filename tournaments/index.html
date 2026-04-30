@@ -1803,6 +1803,18 @@
 
     async function submitPublicRegistration(fields, custom, form) {
       const errEl = document.getElementById("pub-reg-error");
+      const btn   = document.getElementById("pub-reg-submit");
+
+      // Helper: find the right success container — overlay path or tab path
+      const _successContainer = () =>
+        document.getElementById("pub-register-page-body") ||
+        document.getElementById("pub-tab-body");
+
+      const _showError = (msg) => {
+        if (errEl) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
+        if (btn)   { btn.disabled = false; btn.textContent = "Submit Registration"; }
+      };
+
       const entry = {
         status:      "pending",
         submittedAt: Date.now(),
@@ -1811,45 +1823,63 @@
         dlrLinked:   false
       };
 
-      // Collect fields
+      // ── Collect and validate fields ────────────────────
       for (const f of fields) {
         const val = document.getElementById("pub-reg-" + f)?.value.trim();
         if (!val && ["displayName", "email"].includes(f)) {
-          errEl.textContent = (f === "displayName" ? "Display Name" : "Email Address") + " is required.";
-          errEl.classList.remove("hidden");
-          return;
+          return _showError((f === "displayName" ? "Display Name" : "Email Address") + " is required.");
         }
         entry[f] = val || null;
       }
-
-      // Custom questions
       for (let i = 0; i < custom.length; i++) {
         const q   = custom[i];
         const val = document.getElementById("pub-reg-custom-" + i)?.value.trim();
-        if (q.required && !val) {
-          errEl.textContent = '"' + q.question + '" is required.';
-          errEl.classList.remove("hidden");
-          return;
-        }
+        if (q.required && !val) return _showError('"' + q.question + '" is required.');
         if (val) entry["custom_" + i] = val;
       }
 
-      const btn = document.getElementById("pub-reg-submit");
+      // ── Pre-flight: check if already approved ─────────
+      // participantMap is in publicTournaments and already loaded in _currentT
+      const _norm = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+      const pMap  = _currentT.participantMap || {};
+      const emailKey = _norm(entry.email       || "");
+      const nameKey  = _norm(entry.displayName || "");
+      if ((emailKey && pMap[emailKey]) || (nameKey && pMap[nameKey])) {
+        return _showError("✅ You're already an approved participant in this tournament! Check your email for your league invite.");
+      }
+
+      // ── Pre-flight: check localStorage guard (client-side duplicate prevention) ──
+      // This catches the case where the Firebase write succeeded but the success screen
+      // didn't show (e.g. network hiccup on the count update).
+      const _storageKey = "reg_submitted_" + _currentTid + "_" + _norm(entry.email || entry.displayName || "");
+      try {
+        if (localStorage.getItem(_storageKey)) {
+          return _showError("📬 It looks like you already submitted a registration for this tournament. If you haven't heard back, please contact the tournament admin.");
+        }
+      } catch(e) { /* localStorage may be blocked — non-fatal */ }
+
+      // ── Disable button and clear any previous error ────
       if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
-      errEl.classList.add("hidden");
+      if (errEl) errEl.classList.add("hidden");
 
       try {
         const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
 
-        // Also update public registrationCount
-        const newCount = (_currentT.registrationCount || 0) + 1;
-        await _pubDb.ref("gmd/publicTournaments/" + _currentTid + "/registrationCount").set(newCount);
-        _currentT.registrationCount = newCount;
+        // Mark submitted in localStorage so repeat clicks show a friendly message
+        try { localStorage.setItem(_storageKey, "1"); } catch(e) {}
 
-        const body = document.getElementById("pub-tab-body");
-        if (body) {
-          body.innerHTML = `
+        // Update public registrationCount (non-fatal if this fails)
+        try {
+          const newCount = (_currentT.registrationCount || 0) + 1;
+          await _pubDb.ref("gmd/publicTournaments/" + _currentTid + "/registrationCount").set(newCount);
+          _currentT.registrationCount = newCount;
+        } catch(e) { /* count update failure should not block success screen */ }
+
+        // Show success in whichever container is active (overlay or tab)
+        const container = _successContainer();
+        if (container) {
+          container.innerHTML = `
             <div class="trn-success">
               <div class="trn-success-icon">✅</div>
               <h3>Registration Submitted!</h3>
@@ -1862,9 +1892,26 @@
             </div>`;
         }
       } catch(err) {
-        if (btn) { btn.disabled = false; btn.textContent = "Submit Registration"; }
-        errEl.textContent = "Submission failed: " + err.message;
-        errEl.classList.remove("hidden");
+        // Friendly messages for known Firebase error codes
+        const code = (err.code || err.message || "").toLowerCase();
+        let friendlyMsg;
+        if (code.includes("permission_denied") || code.includes("permission denied")) {
+          // Check localStorage — if we stored a key, the first write succeeded and this
+          // is a duplicate attempt caught by Firebase rules
+          let alreadySubmitted = false;
+          try { alreadySubmitted = !!localStorage.getItem(_storageKey); } catch(e) {}
+          if (alreadySubmitted) {
+            friendlyMsg = "📬 Your registration was already submitted! The admin will review it shortly.";
+          } else {
+            // Check participantMap again — might have been approved since page load
+            friendlyMsg = "⚠️ Registration could not be submitted. You may already be registered or approved for this tournament. Please contact the tournament admin if you think this is an error.";
+          }
+        } else if (code.includes("network") || code.includes("unavailable") || code.includes("timeout")) {
+          friendlyMsg = "⚠️ Network error — please check your connection and try again.";
+        } else {
+          friendlyMsg = "Submission failed. Please try again or contact the tournament admin.";
+        }
+        _showError(friendlyMsg);
       }
     }
 
