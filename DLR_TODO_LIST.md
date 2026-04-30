@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 29, 2026 — F5-P4 Custom Playoffs fully complete. All F5 phases done.*
+*Updated: April 29, 2026 — Tournament analytics complete. Players tab, Most Rostered, ADP vs Finish all done.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -41,6 +41,60 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ---
 
+## 🟢 Tournament — Known Tweaks / Future Polish
+
+These are not bugs but known limitations to revisit when needed.
+
+---
+
+### T1 — Multi-Week Playoff Rounds
+**Issue:** The current `points_rounds` config assumes each playoff round = exactly one NFL week.
+Some tournament formats run a round over 2+ weeks (highest combined score advances).
+The round config has no "weeks per round" field, so `startWeek + roundIndex` breaks for multi-week rounds.
+**Scope:** Add a `weeksPerRound` field (default 1) to each round in the `pointsRounds` config UI.
+Round simulation must sum scores across those weeks. `finalRankings` publish must fetch all spanned weeks.
+**Files:** `tournament.js`, `tournament.css`
+**Effort:** Medium
+
+---
+
+### T2 — Public Players Tab Playoff Data
+**Issue:** The public `tournaments/index.html` Players tab has its own parallel implementation
+of `renderPlayersTab` that does NOT call `_buildPoByYear` (which only exists in `tournament.js`).
+It has its own inline career builder and doesn't read `finalRankings`.
+As a result, the public site Players tab won't show correct playoff stats / best rank / year pips
+until that function is replicated or refactored.
+**Scope:** Either (a) duplicate `_buildPoByYear` logic into `index.html` reading from
+`_currentT.playoffs[year].finalRankings`, or (b) restructure the publish snapshot to include
+a pre-computed per-participant career summary that the public site can read directly.
+Option (b) is cleaner — add `participantCareer` to the published snapshot.
+**Files:** `tournaments/index.html`, `tournament.js`
+**Effort:** Medium
+
+---
+
+### T3 — Custom Rounds Mode: finalRankings
+**Issue:** When mode is `custom_rounds`, `_buildFinalRankings` in the publish button falls back
+to the simple "qualifiers first by PF, non-qualifiers last" ordering — it doesn't simulate
+the custom rounds. This means ADP vs Finish and Players tab Best Rank will be inaccurate
+for tournaments using custom rounds mode.
+**Scope:** Implement round simulation for `custom_rounds` in `_buildFinalRankings`, similar
+to the `points_rounds` branch but using `po.customRounds.rounds[]` config.
+**Files:** `tournament.js`
+**Effort:** Medium
+
+---
+
+### T4 — H2H Bracket Mode: finalRankings
+**Issue:** Same limitation as T3 but for `h2h_bracket` mode. Bracket results aren't simulated
+in `_buildFinalRankings`, so finish ranks for bracket tournaments are PF-based only.
+**Scope:** Parse the bracket results (already available from `_weekScoreCache` and bracket config)
+to determine actual bracket finish order.
+**Files:** `tournament.js`
+**Effort:** High
+
+---
+
 ## 🟢 New Features
 
 ---
@@ -68,15 +122,6 @@ select their favorite NFL team and the locker theme (colors, logo, textures) upd
 to match. Interchangeable visual elements — door style, nameplates, decorations.
 **Files:** New CSS theme system + `locker.css`, `base.css`, `profile.js`, `index.html`
 **Note:** Needs design mockup attached to session.
-
----
-
-### F5 — Tournament Mode (Cross-Platform) ✅ ALL PHASES COMPLETE
-
-**Files:** `tournament.js`, `tournament.css`, `tournaments/index.html`
-**Public URL:** `dynastylockerroom.com/tournaments`
-
-All four phases complete. See ✅ Completed section for full detail.
 
 ---
 
@@ -112,12 +157,16 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files Needed |
 |---|-----|-------------|--------|--------------|
-| 1 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 2 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 3 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
-| 4 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 5 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 6 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 1 | T2 | Public Players tab playoff data | Medium | `tournaments/index.html`, `tournament.js` |
+| 2 | T1 | Multi-week playoff rounds | Medium | `tournament.js`, `tournament.css` |
+| 3 | T3 | Custom rounds finalRankings | Medium | `tournament.js` |
+| 4 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 5 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 6 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
+| 7 | T4 | H2H Bracket finalRankings | High | `tournament.js` |
+| 8 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
+| 9 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 10 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -135,6 +184,52 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 ---
 
 ## ✅ Completed
+
+### April 29, 2026 — Tournament Analytics: Players Tab, Most Rostered, ADP vs Finish
+
+**Players Tab (internal + public site):**
+- Paginated list view (25/page) with search, replaces old card grid
+- Sort: Tournament champs → Years played desc → Best finish rank asc → Win% desc
+- Columns: Yrs, W–L, Win%, PO (playoff apps/seasons), Best (finish rank), Titles, Year pips
+- Year pips: gold=champion, green=qualified, red=eliminated, grey=absent (hover tooltips with rank)
+- Gold row highlight for tournament champions; purple for league-only champs
+- Streak badge 🔥 for consecutive playoff qualification
+- Modal: consolidated table per year with W–L, PF, Lg Champ column + finish/rank summary row
+- Uses `_buildPoByYear(t)` — reads `finalRankings` if published, otherwise derives from qual engine
+
+**finalRankings system:**
+- Publish button now writes `finalRankings` to BOTH `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`
+- `finalRankings` = authoritative rank 1→N list; for `points_rounds` mode works backwards from round simulation
+- `_buildPoByYear(t)` reads this directly — no re-simulation needed for analytics tabs
+- Local `_tournaments[tid]` cache updated immediately after publish so tabs reflect new data without reload
+
+**_computeQualification(t, year):**
+- Extracted as shared pure function (no network calls)
+- Full qual engine copy: composite steps, wins_threshold, top_record/pf/per_group, scoped byes
+- Used by both `_renderPlayoffsTab` (via existing inline logic, unchanged) and `_buildPoByYear` fallback
+
+**Most Rostered tab:**
+- Playoff-qualified teams' rosters, players ranked by how many of those teams rostered them
+- Sleeper via public API; MFL + Yahoo via new worker `/tournament/rosters` endpoint
+- Position filter, ownership %, bar chart, team chip list
+
+**ADP vs Finish tab:**
+- Splits drafted players into playoff-team vs eliminated-team buckets
+- PO%, Elim%, Swing (PO%−Elim%) per player
+- Three sort views: PO-Heavy / Elim-Heavy / By Swing
+- `teamQualMap` now built directly from `poYr` keys (all sanitized variants) to correctly identify all playoff teams
+
+**Cross-platform sync warnings (F-X):**
+- Dismissible amber banner after standings sync if MFL/Yahoo leagues skipped or failed
+- Scoring difference chips when platforms have different scoring settings
+- `_showSyncWarningBanner(warnings, diffs)` helper
+
+**Bug fixes applied:**
+- Year pip duplication: `lc.year` (number) vs `Object.keys(poByYear)` (strings) → normalized all to `String(yr)`
+- `poapprate` tab removed; PO stats merged into Players tab
+- ADP vs Finish only showing 1 PO team → fixed by populating `teamQualMap` from `poYr` entries directly
+
+---
 
 ### April 29, 2026 — F5-P4: Custom Playoffs — FULLY COMPLETE
 
@@ -182,6 +277,7 @@ for Tournament Mode. Verified working in production across 2023, 2024, and 2025.
 **Firebase paths added:**
 - `gmd/tournaments/{tid}/playoffs/{year}/` — year-keyed playoff config
 - `gmd/publicTournaments/{tid}/playoffs/{year}` — year-keyed published snapshot with `computedRounds`
+- `gmd/tournaments/{tid}/playoffs/{year}/finalRankings` — authoritative ranked list written at publish time
 - `lc.teams[].sleeperUsername` — now stored on every team entry during standings sync
 - `lc.teams[].userId` — Sleeper numeric owner_id also stored
 
@@ -238,6 +334,14 @@ const TID = "YOUR_TOURNAMENT_ID"; // ← replace
 const YEAR = 2025;
 await firebase.database().ref(`gmd/publicTournaments/${TID}/playoffs/${YEAR}`).remove();
 console.log("Cleared — re-publish from admin Playoffs tab");
+```
+
+### Clear finalRankings for a year (forces re-publish to regenerate)
+```js
+const TID = "YOUR_TOURNAMENT_ID"; // ← replace
+const YEAR = 2025;
+await firebase.database().ref(`gmd/tournaments/${TID}/playoffs/${YEAR}/finalRankings`).remove();
+console.log("Cleared — re-publish from admin Playoffs tab to regenerate");
 ```
 
 ### Clear tournament analytics cache
