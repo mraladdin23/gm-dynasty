@@ -994,12 +994,11 @@
             <div class="trn-ph-modal-body">
               <div class="trn-ph-modal-totals">
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Leagues</div></div>
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
                 <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.playoffApps}/${p.totalYears}</div><div class="trn-ph-stat-lbl">PO Apps</div></div>
-                ${p.bestRank ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.bestRank === 1 ? "1 🏆" : p.bestRank}</div><div class="trn-ph-stat-lbl">Best Rank</div></div>` : ""}
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF.toFixed(0)}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.bestRank ?? "—"}</div><div class="trn-ph-stat-lbl">Best Rank</div></div>
+                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF ? p.totalPF.toFixed(0) : "—"}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
                 ${p.tournamentChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆×${p.tournamentChamps}</div><div class="trn-ph-stat-lbl">Tourn.</div></div>` : ""}
                 ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🥇×${p.totalChamps}</div><div class="trn-ph-stat-lbl">League</div></div>` : ""}
               </div>
