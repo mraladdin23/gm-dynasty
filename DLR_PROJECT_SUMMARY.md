@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: April 29, 2026 — Tournament analytics, Players tab, and all F5 phases complete.*
+*Updated: April 30, 2026 — T1–T4 tournament polish complete. Public Players tab fully at parity with internal.*
 
 ---
 
@@ -70,7 +70,7 @@ GitHub Pages (dynastylockerroom.com)
 | Other modules | `salary.js`, `auction.js`, `playercard.js`, `idb-cache.js`, `chat.js`, `leaguegroups.js`, `manager-search.js`, `playerreport.js`, `config.js` |
 
 ### `tournaments/`
-- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/league champs rendering. Players tab with career history (list view, searchable).
+- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/league champs rendering. Players tab with career history (list view, searchable) — fully at parity with internal Players tab including finalRankings, Best Rank, year pips, streak badge, and finishRow in per-year table.
 
 ---
 
@@ -122,11 +122,15 @@ gmd/publicTournaments/{tid}/
 
 **Bye metric:** `byes.method` (H2H Record or PF) is independent of seeding method. `byeSet` computed per-group per scope.
 
-**Publish:** Button fetches all playoff weeks, computes `computedRounds` (pre-sorted with blend scores) and `finalRankings` (authoritative ordered list from rank 1 = champion down to last non-qualifier). Writes to both `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`.
+**Publish:** Button fetches all playoff weeks (including all weeks spanned by multi-week rounds and all bracket rounds), computes `computedRounds` (pre-sorted with blend scores) and `finalRankings` (authoritative ordered list from rank 1 = champion down to last non-qualifier). Writes to both `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`.
 
-**finalRankings:** Written at publish time. Rank 1 = overall champion. For `points_rounds` mode: works backwards from final round (survivors → R(N-1) elim sorted by that round's score → … → non-qualifiers by regular-season PF). Used by all analytics tabs so no re-simulation is needed.
+**finalRankings:** Written at publish time. Rank 1 = overall champion. Mode-specific:
+- `points_rounds`: works backwards from round simulation (supports multi-week rounds)
+- `custom_rounds`: simulates PF-based group advancement through each round
+- `h2h_bracket`: simulates bracket matchups using `_weekScoreCache` scores; falls back to seeding order
+- `total_points`: ranked by PF desc
 
-**_buildPoByYear(t):** Shared helper used by Players tab, PO Appearance Rate (now merged into Players), ADP vs Finish, and Most Rostered. PRIMARY: reads `t.playoffs[year].finalRankings`. FALLBACK: derives from `_computeQualification()` if not yet published (PF-based, approximate). Keyed by sanitized displayName + teamName + sleeperUsername.
+**_buildPoByYear(t):** Shared helper used by Players tab, ADP vs Finish, and Most Rostered. PRIMARY: reads `t.playoffs[year].finalRankings`. FALLBACK: derives from `_computeQualification()` if not yet published (PF-based, approximate). Keyed by sanitized displayName + teamName + sleeperUsername.
 
 **_computeQualification(t, year):** Pure function, no network calls, runs the full qual engine from `t.standingsCache + t.playoffs[year]` config. Same logic as `_renderPlayoffsTab`. Shared between the publish flow and `_buildPoByYear` fallback.
 
@@ -154,7 +158,14 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 - Tournament champion rows: gold left border + amber background
 - League champion rows (not tournament champ): subtle purple background
 - Modal: career totals (Seasons, W–L, Win%, PO Apps, Best Rank, Career PF, Tourn champs, League champs) + per-year table with W–L, PF, Lg Champ column, finish row at bottom of each year's table
-- Also on public `tournaments/index.html` with the same structure
+- Public `tournaments/index.html` is fully at parity with internal tab (same columns, pips, modal structure, finalRankings primary path)
+
+### Points Rounds — Multi-Week Support
+- Each round in the `pointsRounds` config has an optional `weeksPerRound` field (default 1, omitted when 1)
+- Admin UI shows a "Weeks per round" input (1–4) with a note that scores are summed
+- Week display in round header shows "Weeks 14–15" format when `wpr > 1`
+- All score lookups use `_wsCombined_(tm, startWk, numWks)` to sum across weeks
+- Prior-round simulation and publish `_computedRounds` both use cumulative `_roundStartWeeks_` offsets
 
 ### Most Rostered tab
 - For a selected year: among all playoff-qualified teams, which players appeared on the most rosters
@@ -174,6 +185,7 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 - **Phase 3 ✅** — Analytics: Draft, ADP, Matchups, Rosters, admin settings, public ADP by year
 - **Phase 4 ✅** — Custom playoffs: config UI, qualification engine, seeding/byes, round rendering, live scores, public site
 - **Phase 4-ext ✅** — Players tab (career history + PO stats), Most Rostered, ADP vs Finish, finalRankings publish, cross-platform sync warnings
+- **Phase 4-ext-2 ✅** — Multi-week rounds (T1), public Players tab parity (T2), custom_rounds finalRankings (T3), h2h_bracket finalRankings (T4)
 - **Phase 5** — Advanced (future if needed): multi-week rounds, cross-platform identity merging, weekly emails, message board
 
 ---

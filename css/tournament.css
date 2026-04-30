@@ -3210,3 +3210,261 @@
   .trn-az-legend      { gap: var(--space-2); font-size: .7rem; }
   .trn-az-stat-table td, .trn-az-stat-table th { padding-left: 4px; padding-right: 4px; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   World Cup Mode — Groups, Schedule Builder, Bracket
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Settings row ─────────────────────────────────────── */
+.trn-wc-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.trn-wc-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.trn-wc-setting label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-text-dim);
+}
+
+/* ── Section headers ──────────────────────────────────── */
+.trn-wc-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.trn-wc-count-chip {
+  display: inline-block;
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* ── Groups grid ──────────────────────────────────────── */
+.trn-wc-groups-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* ── Individual group card ────────────────────────────── */
+.trn-wc-group-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  min-width: 180px;
+  max-width: 220px;
+  flex: 1 1 180px;
+}
+.trn-wc-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+.trn-wc-adv-label {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  margin-left: auto;
+}
+.trn-wc-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: var(--space-2);
+  min-height: 28px;
+}
+.trn-wc-member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: .8rem;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  min-height: 24px;
+}
+.trn-wc-member-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trn-wc-add-row select {
+  width: 100%;
+  font-size: .78rem;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* ── Schedule section ─────────────────────────────────── */
+.trn-wc-group-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-2);
+}
+.trn-wc-group-tab-btn {
+  font-size: .78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+.trn-wc-group-tab-btn:hover { color: var(--color-text); border-color: var(--color-gold, #d4af37); }
+.trn-wc-group-tab-btn--active {
+  background: var(--color-gold, #d4af37);
+  border-color: var(--color-gold, #d4af37);
+  color: #000;
+  font-weight: 700;
+}
+.trn-wc-tab-count {
+  display: inline-block;
+  background: rgba(255,255,255,.2);
+  border-radius: 99px;
+  font-size: .65rem;
+  padding: 0 5px;
+  margin-left: 3px;
+}
+.trn-wc-sched-group { }
+.trn-wc-sched-title {
+  font-size: .85rem;
+  font-weight: 700;
+  margin-bottom: var(--space-1);
+}
+.trn-wc-sched-hint {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.trn-wc-sched-autofill-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* ── Weeks grid ───────────────────────────────────────── */
+.trn-wc-weeks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+.trn-wc-sched-week {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.trn-wc-sched-week-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-wc-sched-week-label {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-text-dim);
+}
+.trn-wc-matchups-list {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Individual matchup row ───────────────────────────── */
+.trn-wc-matchup-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.trn-wc-matchup-row select {
+  font-size: .72rem;
+  padding: 2px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+.trn-wc-vs {
+  font-size: .65rem;
+  color: var(--color-text-dim);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ── Group standings table ────────────────────────────── */
+.trn-wc-group-table thead th { font-size: .68rem; }
+
+/* ── Bracket seed editor ──────────────────────────────── */
+.trn-wc-seed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 0;
+}
+.trn-wc-seed-num {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  width: 24px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.trn-wc-seed-chip {
+  display: inline-block;
+  font-size: .75rem;
+  padding: 2px 7px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-dim);
+}
+
+/* ── Responsive ───────────────────────────────────────── */
+@media (max-width: 600px) {
+  .trn-wc-settings-row { gap: var(--space-3); }
+  .trn-wc-groups-grid  { gap: var(--space-2); }
+  .trn-wc-weeks-grid   { grid-template-columns: 1fr; }
+  .trn-wc-group-card   { max-width: 100%; }
+}
