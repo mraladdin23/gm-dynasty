@@ -7267,25 +7267,34 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         .forEach(k => { pLookup[k] = p; });
     });
 
-    // Build teamName/displayName → qualified boolean for this year.
-    // Draft picks use teamName resolved via standingsCache+participant map.
-    // poByYear keys on sanitized displayName AND teamName AND sleeperUsername,
-    // so we try all three for each team in standingsCache.
+    // Build a direct lookup: sanitized key → qualified boolean.
+    // Draft picks have teamName = participant displayName (set during draft normalization
+    // at line ~5058: if (pMap[key]) teamName = pMap[key].displayName).
+    // poYr is already keyed by sanitized displayName/teamName/sleeperUsername from
+    // _buildPoByYear, so we can look up pk.teamName directly in poYr.
+    // We also cross-reference standingsCache to catch cases where the pick teamName
+    // is the raw standingsCache teamName rather than the resolved displayName.
+    const teamQualMap = {}; // sanitized key → true/false, covers all key variants
+
+    // Populate from poYr directly — every key that exists in poYr gets its qual status
+    Object.entries(poYr).forEach(([k, entry]) => {
+      teamQualMap[k] = !!(entry?.qualified);
+    });
+
+    // Also map raw standingsCache teamNames → same qual status via sleeperUsername bridge
     const scEntries = Object.values(t.standingsCache || {}).filter(lc => String(lc.year) === String(year));
-    const teamQualMap = {}; // sanitized teamName → true/false
     scEntries.forEach(lc => {
       (lc.teams || []).forEach(tm => {
-        // Try all keys that _buildPoByYear may have stored under
+        if (teamQualMap[_sk(tm.teamName || "")] !== undefined) return; // already mapped
+        // Try to find this team's qual status via sleeperUsername or displayName
         const tryKeys = [
-          tm.teamName, tm.sleeperUsername,
-          // Also try the participant displayName for this team
-          ...(tm.sleeperUsername ? [pLookup?.[_sk(tm.sleeperUsername)]?.displayName] : []),
-          ...(tm.teamName        ? [pLookup?.[_sk(tm.teamName)]?.displayName]        : [])
+          tm.sleeperUsername,
+          tm.teamName,
+          pLookup[_sk(tm.sleeperUsername || "")]?.displayName,
+          pLookup[_sk(tm.teamName        || "")]?.displayName
         ].filter(Boolean);
-
-        const entry = tryKeys.reduce((found, k) => found || poYr[_sk(k)], null);
-        // Store under sanitized teamName (what draft picks use)
-        if (tm.teamName) teamQualMap[_sk(tm.teamName)] = !!(entry?.qualified);
+        const entry = tryKeys.reduce((found, k) => found !== undefined ? found : teamQualMap[_sk(k)], undefined);
+        if (tm.teamName) teamQualMap[_sk(tm.teamName)] = !!(entry);
       });
     });
 
@@ -7479,15 +7488,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const poByYear  = _buildPoByYear(t);
     const hasPoData = Object.keys(poByYear).length > 0;
 
-    // All years across standings + playoff data, newest first
+    // All years across standings + playoff data, newest first — all normalized to strings
     const allYearsSet = [...new Set([
-      ...Object.values(cache).map(lc => lc.year).filter(Boolean),
+      ...Object.values(cache).map(lc => lc.year).filter(Boolean).map(String),
       ...Object.keys(poByYear)
     ])].sort((a, b) => String(b).localeCompare(String(a)));
 
     // ── Aggregate career stats ───────────────────────────────
     const playerList = Object.values(careers).map(c => {
-      const yearKeys = Object.keys(c.seasons).sort((a, b) => String(b).localeCompare(String(a)));
+      const yearKeys = Object.keys(c.seasons).map(String).sort((a, b) => String(b).localeCompare(String(a)));
       const cKey = _sk(c.displayName);
       let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
       let playoffApps = 0, tournamentChamps = 0, bestRank = null;
@@ -7498,7 +7507,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
           if (s.isChamp) totalChamps++;
         });
-        const poEntry = (poByYear[yr] || {})[cKey];
+        const poEntry = (poByYear[String(yr)] || {})[cKey];
         yearData[yr] = poEntry || { qualified: false, bye: false, rank: null, isTChamp: false };
         if (poEntry?.qualified)  playoffApps++;
         if (poEntry?.isTChamp)   tournamentChamps++;
@@ -7586,8 +7595,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               : `<span style="font-weight:600">${p.bestRank}</span>`)
           : `<span style="color:var(--color-text-dim)">—</span>`;
         const yearPips = allYearsSet.map(yr => {
-          const e   = p.yearData[yr];
-          const inS = !!(p.seasons[yr]);
+          const e   = p.yearData[String(yr)];
+          const inS = !!(p.seasons[String(yr)]);
           if (!e && !inS) return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: did not play"></span>`;
           const cls = !e ? "trn-az-yr-pip--absent"
             : e.isTChamp  ? "trn-az-yr-pip--champ"
@@ -7685,55 +7694,48 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
 
       const yearSections = p.yearKeys.map(yr => {
-        const poEntry  = p.yearData[yr] || {};
-        const leagueRows = p.seasons[yr].map(s => {
-          const tiesStr  = s.ties > 0 ? `-${s.ties}` : "";
+        const poEntry  = p.yearData[String(yr)] || {};
+        const leagueRows = p.seasons[String(yr)].map(s => {
+          const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
           const platIcon = { sleeper:"🟢", mfl:"🔵", yahoo:"🟣" }[s.platform] || "⚪";
-          const result   = s.isChamp
-            ? `<span class="trn-ph-champ-badge" style="font-size:.7rem">🏆 Champ</span>`
+          // League champ cell
+          const lchampCell = s.isChamp
+            ? `<span class="trn-ph-champ-badge" style="font-size:.68rem">🥇 Champ</span>`
             : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
           return `<tr>
             <td class="trn-ph-tbl-league">${platIcon} ${_esc(s.leagueName)}</td>
             <td class="trn-ph-tbl-num">${s.wins}–${s.losses}${tiesStr}</td>
             <td class="trn-ph-tbl-num">${(s.pf || 0).toFixed(1)}</td>
-            <td style="padding:5px 6px;text-align:center">${result}</td>
+            <td style="padding:5px 6px;text-align:center">${lchampCell}</td>
           </tr>`;
         }).join("");
 
-        const yrLChamp = p.seasons[yr].some(s => s.isChamp);
-        const poBlock  = poEntry.qualified ? `
-          <div class="trn-ph-po-block">
-            <div class="trn-ph-po-label">🏆 Playoff Result</div>
-            <div style="margin-top:4px">
-              ${poEntry.isTChamp
-                ? `<span class="trn-ph-champ-badge">🏆 Tournament Champion</span>`
-                : poEntry.bye
-                  ? `<span class="trn-ph-champ-badge" style="background:rgba(59,130,246,.15);color:#60a5fa;border-color:rgba(59,130,246,.3)">🌟 Qualified (BYE)${poEntry.rank ? " · Rank " + poEntry.rank : ""}</span>`
-                  : `<span class="trn-ph-champ-badge" style="background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)">✓ Qualified${poEntry.rank ? " · Rank " + poEntry.rank : ""}</span>`}
-            </div>
-          </div>` : "";
-
-        const lchampNote = yrLChamp && !poEntry.isTChamp
-          ? `<div class="trn-ph-po-block" style="background:rgba(212,175,55,.07);border-color:rgba(212,175,55,.25)">
-               <div class="trn-ph-po-label">League</div>
-               <span class="trn-ph-champ-badge" style="font-size:.7rem;margin-top:4px;display:inline-flex">🥇 League Champion</span>
-             </div>` : "";
+        // Tournament finish / playoff status for this year — shown as a summary row at bottom
+        let finishRow = "";
+        if (poEntry.isTChamp) {
+          finishRow = `<tr style="background:rgba(212,175,55,.1)"><td colspan="4" style="padding:5px 8px;font-size:.78rem;font-weight:700;color:var(--color-gold,#d4af37)">🏆 Tournament Champion${poEntry.rank ? " · Overall Rank " + poEntry.rank : ""}</td></tr>`;
+        } else if (poEntry.qualified) {
+          const label = poEntry.bye ? "🌟 Qualified (BYE)" : "✓ Qualified";
+          const rankStr = poEntry.rank ? " · Rank " + poEntry.rank : "";
+          finishRow = `<tr style="background:rgba(34,197,94,.06)"><td colspan="4" style="padding:5px 8px;font-size:.78rem;color:#4ade80">${label}${rankStr}</td></tr>`;
+        } else if (hasPoData) {
+          finishRow = `<tr><td colspan="4" style="padding:5px 8px;font-size:.78rem;color:var(--color-text-dim)">Did not qualify</td></tr>`;
+        }
 
         return `
           <div class="trn-ph-year-section">
             <div class="trn-ph-year-label">
-              <strong>${_esc(yr)}</strong>
-              <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""}</span>
+              <strong>${_esc(String(yr))}</strong>
+              <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[String(yr)].length} league${p.seasons[String(yr)].length !== 1 ? "s" : ""}</span>
             </div>
-            ${poBlock}${lchampNote}
             <table class="trn-ph-career-table">
               <thead><tr>
                 <th>League</th>
                 <th style="text-align:right;width:52px">W–L</th>
                 <th style="text-align:right;width:52px">PF</th>
-                <th style="text-align:center;width:80px">Result</th>
+                <th style="text-align:center;width:72px">Lg Champ</th>
               </tr></thead>
-              <tbody>${leagueRows}</tbody>
+              <tbody>${leagueRows}${finishRow}</tbody>
             </table>
           </div>`;
       }).join("");
@@ -7751,7 +7753,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="trn-ph-modal-body">
             <div class="trn-ph-modal-totals">
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
-              <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalLeagues}</div><div class="trn-ph-stat-lbl">Leagues</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
               <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.playoffApps}/${p.totalYears}</div><div class="trn-ph-stat-lbl">PO Apps</div></div>
