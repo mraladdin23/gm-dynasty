@@ -9990,6 +9990,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // Initialise r1 slots
       const r1 = Array.from({length: r1Count}, (_, mi) => ({ a: "", b: "" }));
 
+      // Build a compact per-group standings preview so admin can verify
+      // which teams are being picked before committing to a bracket.
+      const _qualifiedPreview = groups.map((g, gi) => {
+        const qualified = _wcQualified(g, gi);
+        const rec = _wcGroupRec(g, gi);
+        const hasScores = Object.values(rec).some(r => r.wins > 0 || r.losses > 0 || r.pf > 0);
+        const rows = qualified.map(name => {
+          const r = rec[_skWC(name)];
+          return hasScores
+            ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.75rem;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);border-radius:4px;padding:1px 6px">
+                ✓ ${_esc(name)} <span style="color:var(--color-text-dim)">${r?.wins||0}W–${r?.losses||0}L ${(r?.pf||0).toFixed(0)}PF</span>
+               </span>`
+            : `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.75rem;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:4px;padding:1px 6px">
+                ⚠ ${_esc(name)} <span style="color:var(--color-text-dim)">no scores yet</span>
+               </span>`;
+        }).join(" ");
+        return `<div style="margin-bottom:4px"><span style="font-size:.72rem;font-weight:700;color:var(--color-text-dim);margin-right:6px">${_esc(g.name||("Group "+(gi+1)))}</span>${rows}</div>`;
+      }).join("");
+
       const _opts = (placed, cur) => {
         const byGroup = {};
         advancers.forEach(adv => {
@@ -10017,8 +10036,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       }).join("");
 
       return `
-        <div class="trn-section-card" style="max-width:520px">
+        <div class="trn-section-card" style="max-width:560px">
           <div class="trn-section-card-title">Bracket Setup — Round 1</div>
+
+          <div style="background:var(--color-bg);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-3);margin-bottom:var(--space-3)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2)">
+              <span style="font-size:.75rem;font-weight:700;color:var(--color-text-dim)">Qualified teams (from group standings)</span>
+              <button class="btn-secondary btn-xs" id="trn-wc-refresh-standings">↺ Refresh from groups</button>
+            </div>
+            ${_qualifiedPreview}
+          </div>
+
           <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
             Choose seeding mode and assign Round 1 matchups. Later rounds are filled as teams advance.
             ${startWeekPo?`Round 1 begins <strong>Week ${startWeekPo}</strong>.`:""}
@@ -10277,6 +10305,62 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── World Cup bracket wiring ─────────────────────────────────────────────
     const _wcWireBracketButtons = () => {
+
+      // ── Refresh standings button — explicit fetch + re-render ────────────
+      document.getElementById("trn-wc-refresh-standings")?.addEventListener("click", async () => {
+        const btn = document.getElementById("trn-wc-refresh-standings");
+        if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+        const groups   = po.worldcupGroups || [];
+        const regWks   = po.worldcupRegWeeks || 6;
+        const startWk  = po.startWeek || null;
+        const _nflWk   = wi => startWk ? (startWk - regWks + wi) : (wi + 1);
+        // Collect all unique leagueId+week pairs needed
+        const seen = new Set();
+        const toFetch = [];
+        groups.forEach((g, gi) => {
+          const sched = (po.worldcupSchedule||{})[String(gi)]||{};
+          for (let wi = 0; wi < regWks; wi++) {
+            if (!(sched[String(wi)]||[]).length) continue;
+            const nflWk = _nflWk(wi);
+            (g.members||[]).forEach(name => {
+              const info = _wcTeamInfoMap[_skWC(name)];
+              if (!info?.leagueId) return;
+              const key = info.leagueId+"|"+nflWk;
+              if (!seen.has(key)) { seen.add(key); toFetch.push({leagueId:info.leagueId,week:nflWk}); }
+            });
+          }
+        });
+        // Force-clear cache so we get fresh data
+        toFetch.forEach(({leagueId,week}) => { delete _weekScoreCache[leagueId+"|"+week]; });
+        try {
+          await Promise.all(toFetch.map(({leagueId,week}) => _fetchWeekScores(leagueId,week)));
+        } catch(e) {}
+        // Log diagnostics to console
+        console.group("[DLR WC] Group standings after refresh");
+        groups.forEach((g,gi) => {
+          const rec = _wcGroupRec(g, gi);
+          const qualified = _wcQualified(g, gi);
+          console.group(`Group ${gi}: ${g.name||("Group "+(gi+1))}`);
+          console.log("Schedule slot", String(gi), "→", (po.worldcupSchedule||{})[String(gi)] ? "found" : "MISSING");
+          console.log("_weekScoreCache keys for this group:", Object.keys(_weekScoreCache).filter(k => {
+            return (g.members||[]).some(n => {
+              const info = _wcTeamInfoMap[_skWC(n)];
+              return info && k.startsWith(info.leagueId+"|");
+            });
+          }));
+          console.log("Records (by skWC key):", JSON.parse(JSON.stringify(rec)));
+          console.log("Qualified:", qualified);
+          console.groupEnd();
+        });
+        console.log("_wcTeamInfoMap keys:", Object.keys(_wcTeamInfoMap));
+        console.groupEnd();
+        // Re-render
+        const contentEl = document.getElementById("trn-po-content");
+        if (contentEl) {
+          contentEl.innerHTML = _renderContent("wc_bracket");
+          _wcWireBracketButtons();
+        }
+      });
 
       // ── Setup UI: dropdown cross-exclusion ──────────────
       const _refreshSetupDropdowns = () => {
