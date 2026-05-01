@@ -9595,35 +9595,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const rounds = po.customRounds?.rounds || [];
       const round  = rounds[roundIdx];
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
-      const isFinal = roundIdx === rounds.length - 1;
-      const weekNum = po.startWeek ? po.startWeek + roundIdx : null;
+      const isFinal  = roundIdx === rounds.length - 1;
+      const weekNum  = po.startWeek ? po.startWeek + roundIdx : null;
+      const tableId  = `trn-cr-table-${roundIdx}`;
+      const loaderId = `trn-cr-loader-${roundIdx}`;
 
-      // Build the pool entering this round by simulating all previous rounds.
-      // This mirrors what the snapshot builder does so Round 2+ shows the correct teams.
-      let crPool = _sortByMetric([...qualifiers], byeMetric); // seeded order entering Round 1
-
-      for (let ri = 0; ri < roundIdx; ri++) {
-        const cr     = rounds[ri];
-        const groups = cr.groups  || 1;
-        const tpg    = cr.teamsPerGroup || Math.ceil(crPool.length / groups);
-        const apg    = cr.advPerGroup  || 1;
-
-        const byeSec  = ri === 0 ? crPool.slice(0, byeCount) : [];
-        const compSec = ri === 0 ? crPool.slice(byeCount)    : [...crPool];
-
-        const advancers = [...byeSec];
-        for (let gi = 0; gi < groups; gi++) {
-          const groupTeams = compSec.slice(gi * tpg, (gi + 1) * tpg);
-          const sorted     = [...groupTeams].sort((a, b) => (b.pf||0) - (a.pf||0));
-          advancers.push(...sorted.slice(0, apg));
-        }
-        crPool = advancers;
-      }
-
-      // crPool is now the teams entering this round
-      const pool = crPool;
-
-      return `
+      const shell = `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
@@ -9632,26 +9609,118 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </div>
           ${roundIdx===0&&byeCount>0?`<div class="trn-po-bye-row"><span class="trn-po-badge trn-po-badge--bye">BYE</span><span style="font-size:.82rem;color:var(--color-text-dim)"> Top ${byeCount} advance automatically</span></div>`:""}
         </div>
-        <div class="trn-po-groups-wrap" style="margin-top:var(--space-2)">
-          ${Array.from({length:round.groups},(_,gi)=>{
-            const groupTeams = pool.slice(gi*round.teamsPerGroup,(gi+1)*round.teamsPerGroup);
+        <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">⏳ Loading scores…</div>
+        <div id="${tableId}" style="margin-top:var(--space-2)"></div>`;
+
+      (async () => {
+        try {
+          // Fetch weekly scores for this round and all prior rounds
+          const allLeagueIds = [...new Set(qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
+          const weeksNeeded  = weekNum ? Array.from({length: roundIdx + 1}, (_, i) => (po.startWeek||weekNum) + i) : [];
+          await Promise.all(weeksNeeded.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w))));
+
+          const _wkScore = (tm, wk) => {
+            if (!wk) return null;
+            const lid = leagueIdByTeamKey[_teamKey(tm)];
+            if (!lid) return null;
+            const v = _weekScoreCache[lid+"|"+wk]?.[String(tm.teamId)];
+            return v != null ? v : null;
+          };
+
+          // Simulate advancement through all prior rounds using actual weekly scores.
+          // Advancement within a round is purely by weekly score rank — no group constraints
+          // on who can go where in the next round (free placement).
+          let pool = _sortByMetric([...qualifiers], byeMetric);
+
+          for (let ri = 0; ri < roundIdx; ri++) {
+            const cr      = rounds[ri];
+            const rWk     = po.startWeek ? po.startWeek + ri : null;
+            const rByes   = ri === 0 ? byeCount : 0;
+            const byeSec  = pool.slice(0, rByes);
+            const compSec = pool.slice(rByes);
+            const advFromComp = cr.advanceMethod === "pct"
+              ? Math.round(compSec.length * (cr.advancePct||50) / 100)
+              : (cr.advanceCount || cr.groups * (cr.advPerGroup||1));
+
+            // Sort entire competing section by week score — winners advance regardless of group
+            const sorted = [...compSec].sort((a, b) => {
+              const sa = _wkScore(a, rWk) ?? -1;
+              const sb = _wkScore(b, rWk) ?? -1;
+              if (sb !== sa) return sb - sa;
+              return (b.pf||0) - (a.pf||0);
+            });
+            pool = [...byeSec, ...sorted.slice(0, advFromComp)];
+          }
+
+          // Sort this round's pool by this week's score
+          const rByes   = roundIdx === 0 ? byeCount : 0;
+          const byeSec  = pool.slice(0, rByes);
+          const compSec = pool.slice(rByes);
+          const advFromComp = isFinal ? 1
+            : round.advanceMethod === "pct"
+              ? Math.round(compSec.length * (round.advancePct||50) / 100)
+              : (round.advanceCount || round.groups * (round.advPerGroup||1));
+
+          const sorted = [...compSec].sort((a, b) => {
+            const sa = _wkScore(a, weekNum) ?? -1;
+            const sb = _wkScore(b, weekNum) ?? -1;
+            if (sb !== sa) return sb - sa;
+            return (b.pf||0) - (a.pf||0);
+          });
+          const fullPool = [...byeSec, ...sorted];
+
+          // Render as groups if configured, otherwise a single ranked list
+          const numGroups = round.groups || 1;
+          const tpg       = round.teamsPerGroup || Math.ceil(compSec.length / numGroups);
+          const apg       = isFinal ? 1 : (round.advPerGroup || 1);
+
+          const groupsHTML = Array.from({length: numGroups}, (_, gi) => {
+            const groupTeams = compSec.slice(gi * tpg, (gi + 1) * tpg);
+            // Sort this group by week score
+            const gSorted = [...groupTeams].sort((a, b) => {
+              const sa = _wkScore(a, weekNum) ?? -1;
+              const sb = _wkScore(b, weekNum) ?? -1;
+              if (sb !== sa) return sb - sa;
+              return (b.pf||0) - (a.pf||0);
+            });
             return `<div class="trn-po-group-card">
               <div class="trn-po-group-title">Group ${gi+1}</div>
-              ${groupTeams.map((tm,ti)=>{
-                const isByeTeam = roundIdx===0 && sortedTeams.indexOf(tm)<byeCount;
-                const adv = isByeTeam || ti<round.advPerGroup;
+              ${gSorted.map((tm, ti) => {
+                const isByeTeam = roundIdx===0 && byeSet.has(_teamKey(tm));
+                const adv = isByeTeam || ti < apg;
+                const wk  = _wkScore(tm, weekNum);
                 return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}">
                   <span class="trn-po-rank">${ti+1}</span>
                   <span class="trn-po-team-name">${_esc(_displayName(tm))}</span>
-                  <span class="trn-po-pf" style="margin-left:auto">${(tm.pf||0).toFixed(1)}</span>
+                  <span class="trn-po-pf" style="margin-left:auto">${wk != null ? wk.toFixed(2) : (tm.pf||0).toFixed(1)}</span>
                   ${isByeTeam?'<span class="trn-po-badge trn-po-badge--bye">BYE</span>'
                     :adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
                     :'<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
                 </div>`;
               }).join("")}
             </div>`;
-          }).join("")}
-        </div>`;
+          }).join("");
+
+          // Bye section at top if present
+          const byeHTML = byeSec.length ? `<div class="trn-po-group-card">
+            <div class="trn-po-group-title">Byes (auto-advance)</div>
+            ${byeSec.map(tm => `<div class="trn-po-group-row trn-po-row--bye-seed">
+              <span class="trn-po-team-name">${_esc(_displayName(tm))}</span>
+              <span class="trn-po-badge trn-po-badge--bye">BYE</span>
+            </div>`).join("")}
+          </div>` : "";
+
+          const tableEl  = document.getElementById(tableId);
+          const loaderEl = document.getElementById(loaderId);
+          if (tableEl)  tableEl.innerHTML  = `<div class="trn-po-groups-wrap">${byeHTML}${groupsHTML}</div>`;
+          if (loaderEl) loaderEl.style.display = "none";
+        } catch(e) {
+          const loaderEl = document.getElementById(loaderId);
+          if (loaderEl) loaderEl.textContent = "⚠️ Could not load scores: " + e.message;
+        }
+      })();
+
+      return shell;
     };
 
     // ── World Cup: Group standings tab ───────────────────────────────────────
