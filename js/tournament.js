@@ -9592,127 +9592,99 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Custom round tab ─────────────────────────────────
     const _renderCustomRound = (roundIdx) => {
-      const rounds = po.customRounds?.rounds || [];
-      const round  = rounds[roundIdx];
+      const rounds   = po.customRounds?.rounds    || [];
+      const matchups = po.customRounds?.matchups  || []; // [roundIdx][groupIdx] = [teamName,...]
+      const round    = rounds[roundIdx];
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
       const isFinal  = roundIdx === rounds.length - 1;
       const weekNum  = po.startWeek ? po.startWeek + roundIdx : null;
       const tableId  = `trn-cr-table-${roundIdx}`;
       const loaderId = `trn-cr-loader-${roundIdx}`;
 
+      const storedGroups = matchups[roundIdx]; // array of groups, each group = array of team names
+      const hasMatchups  = storedGroups?.length > 0 && storedGroups.some(g => g?.some(Boolean));
+
+      if (!hasMatchups && isAdmin) {
+        return `
+          <div class="trn-po-round-card">
+            <div class="trn-po-round-header"><span>Round ${roundIdx+1}</span></div>
+          </div>
+          <div class="trn-po-empty" style="margin-top:var(--space-2)">
+            No matchup assignments yet. Click <strong>📋 Set Matchups</strong> above to assign teams to groups for this round.
+          </div>`;
+      }
+
       const shell = `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
             ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
-            <span class="trn-po-round-meta">${round.groups} group${round.groups!==1?"s":""} of ${round.teamsPerGroup} · ${round.groups*(round.advPerGroup||0)} advance</span>
           </div>
-          ${roundIdx===0&&byeCount>0?`<div class="trn-po-bye-row"><span class="trn-po-badge trn-po-badge--bye">BYE</span><span style="font-size:.82rem;color:var(--color-text-dim)"> Top ${byeCount} advance automatically</span></div>`:""}
         </div>
         <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">⏳ Loading scores…</div>
         <div id="${tableId}" style="margin-top:var(--space-2)"></div>`;
 
       (async () => {
         try {
-          // Fetch weekly scores for this round and all prior rounds
-          const allLeagueIds = [...new Set(qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
-          const weeksNeeded  = weekNum ? Array.from({length: roundIdx + 1}, (_, i) => (po.startWeek||weekNum) + i) : [];
-          await Promise.all(weeksNeeded.flatMap(w => allLeagueIds.map(lid => _fetchWeekScores(lid, w))));
+          // Build teamName → team object map from sortedTeams
+          const _skCR   = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+          const teamMap = {};
+          sortedTeams.forEach(tm => { teamMap[_skCR(_displayName(tm))] = tm; });
 
-          const _wkScore = (tm, wk) => {
-            if (!wk) return null;
+          // Fetch this week's scores for all leagues
+          const allLeagueIds = [...new Set(sortedTeams.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
+          if (weekNum) await Promise.all(allLeagueIds.map(lid => _fetchWeekScores(lid, weekNum)));
+
+          const _score = (teamName) => {
+            const tm = teamMap[_skCR(teamName)];
+            if (!tm) return null;
             const lid = leagueIdByTeamKey[_teamKey(tm)];
-            if (!lid) return null;
-            const v = _weekScoreCache[lid+"|"+wk]?.[String(tm.teamId)];
+            if (!lid || !weekNum) return null;
+            const v = _weekScoreCache[lid+"|"+weekNum]?.[String(tm.teamId)];
             return v != null ? v : null;
           };
 
-          // Simulate advancement through all prior rounds using actual weekly scores.
-          // Advancement within a round is purely by weekly score rank — no group constraints
-          // on who can go where in the next round (free placement).
-          let pool = _sortByMetric([...qualifiers], byeMetric);
-
-          for (let ri = 0; ri < roundIdx; ri++) {
-            const cr      = rounds[ri];
-            const rWk     = po.startWeek ? po.startWeek + ri : null;
-            const rByes   = ri === 0 ? byeCount : 0;
-            const byeSec  = pool.slice(0, rByes);
-            const compSec = pool.slice(rByes);
-            const advFromComp = cr.advanceMethod === "pct"
-              ? Math.round(compSec.length * (cr.advancePct||50) / 100)
-              : (cr.advanceCount || cr.groups * (cr.advPerGroup||1));
-
-            // Sort entire competing section by week score — winners advance regardless of group
-            const sorted = [...compSec].sort((a, b) => {
-              const sa = _wkScore(a, rWk) ?? -1;
-              const sb = _wkScore(b, rWk) ?? -1;
-              if (sb !== sa) return sb - sa;
-              return (b.pf||0) - (a.pf||0);
-            });
-            pool = [...byeSec, ...sorted.slice(0, advFromComp)];
-          }
-
-          // Sort this round's pool by this week's score
-          const rByes   = roundIdx === 0 ? byeCount : 0;
-          const byeSec  = pool.slice(0, rByes);
-          const compSec = pool.slice(rByes);
-          const advFromComp = isFinal ? 1
-            : round.advanceMethod === "pct"
-              ? Math.round(compSec.length * (round.advancePct||50) / 100)
-              : (round.advanceCount || round.groups * (round.advPerGroup||1));
-
-          const sorted = [...compSec].sort((a, b) => {
-            const sa = _wkScore(a, weekNum) ?? -1;
-            const sb = _wkScore(b, weekNum) ?? -1;
-            if (sb !== sa) return sb - sa;
-            return (b.pf||0) - (a.pf||0);
-          });
-          const fullPool = [...byeSec, ...sorted];
-
-          // Render as groups if configured, otherwise a single ranked list
-          const numGroups = round.groups || 1;
-          const tpg       = round.teamsPerGroup || Math.ceil(compSec.length / numGroups);
+          // Render each group — teams are exactly who was stored in the assignment
+          const numGroups = storedGroups.length;
           const apg       = isFinal ? 1 : (round.advPerGroup || 1);
 
-          const groupsHTML = Array.from({length: numGroups}, (_, gi) => {
-            const groupTeams = compSec.slice(gi * tpg, (gi + 1) * tpg);
-            // Sort this group by week score
-            const gSorted = [...groupTeams].sort((a, b) => {
-              const sa = _wkScore(a, weekNum) ?? -1;
-              const sb = _wkScore(b, weekNum) ?? -1;
-              if (sb !== sa) return sb - sa;
-              return (b.pf||0) - (a.pf||0);
-            });
+          const groupsHTML = storedGroups.map((groupTeams, gi) => {
+            const valid = (groupTeams||[]).filter(Boolean);
+            if (!valid.length) return "";
+
+            // Score each team and sort by score desc
+            const scored = valid.map(name => ({
+              name,
+              score: _score(name)
+            })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+
+            // Determine winners: top apg by score
+            // If only 2 teams (H2H matchup), winner = higher score
             return `<div class="trn-po-group-card">
               <div class="trn-po-group-title">Group ${gi+1}</div>
-              ${gSorted.map((tm, ti) => {
-                const isByeTeam = roundIdx===0 && byeSet.has(_teamKey(tm));
-                const adv = isByeTeam || ti < apg;
-                const wk  = _wkScore(tm, weekNum);
+              ${scored.map(({name, score}, ti) => {
+                const adv = ti < apg;
+                const won = scored.length === 2 ? (ti === 0) : adv;
                 return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}">
                   <span class="trn-po-rank">${ti+1}</span>
-                  <span class="trn-po-team-name">${_esc(_displayName(tm))}</span>
-                  <span class="trn-po-pf" style="margin-left:auto">${wk != null ? wk.toFixed(2) : (tm.pf||0).toFixed(1)}</span>
-                  ${isByeTeam?'<span class="trn-po-badge trn-po-badge--bye">BYE</span>'
-                    :adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
-                    :'<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
+                  <span class="trn-po-team-name">${_esc(name)}</span>
+                  ${scored.length === 2
+                    ? (score !== null
+                        ? `<span class="trn-po-badge" style="background:${adv?"rgba(74,222,128,.15)":"rgba(248,113,113,.12)"};color:${adv?"#4ade80":"#f87171"}">${adv?"W":"L"}</span>`
+                        : "")
+                    : ""}
+                  <span class="trn-po-pf" style="margin-left:auto">${score != null ? score.toFixed(2) : "—"}</span>
+                  ${adv
+                    ? '<span class="trn-po-badge trn-po-badge--advance">↑</span>'
+                    : '<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
                 </div>`;
               }).join("")}
             </div>`;
           }).join("");
 
-          // Bye section at top if present
-          const byeHTML = byeSec.length ? `<div class="trn-po-group-card">
-            <div class="trn-po-group-title">Byes (auto-advance)</div>
-            ${byeSec.map(tm => `<div class="trn-po-group-row trn-po-row--bye-seed">
-              <span class="trn-po-team-name">${_esc(_displayName(tm))}</span>
-              <span class="trn-po-badge trn-po-badge--bye">BYE</span>
-            </div>`).join("")}
-          </div>` : "";
-
           const tableEl  = document.getElementById(tableId);
           const loaderEl = document.getElementById(loaderId);
-          if (tableEl)  tableEl.innerHTML  = `<div class="trn-po-groups-wrap">${byeHTML}${groupsHTML}</div>`;
+          if (tableEl)  tableEl.innerHTML  = `<div class="trn-po-groups-wrap">${groupsHTML}</div>`;
           if (loaderEl) loaderEl.style.display = "none";
         } catch(e) {
           const loaderEl = document.getElementById(loaderId);
@@ -10416,7 +10388,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </div>
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
           ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
+          ${isAdmin && mode==="custom_rounds" ? `<button class="btn-secondary btn-sm" id="trn-cr-set-matchups-btn">📋 Set Matchups</button>` : ""}
         </div>
+        ${isAdmin && mode==="custom_rounds" ? `<div id="trn-cr-matchup-panel"></div>` : ""}
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
       </div>`;
@@ -10806,6 +10780,123 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         publishedAt: Date.now()
       };
     };
+
+    // ── Custom Rounds: matchup assignment panel ──────────────────────────────
+    document.getElementById("trn-cr-set-matchups-btn")?.addEventListener("click", () => {
+      const panel = document.getElementById("trn-cr-matchup-panel");
+      if (!panel) return;
+
+      // Toggle: if already open, close it
+      if (panel.dataset.open === "1") {
+        panel.dataset.open = "0";
+        panel.innerHTML = "";
+        return;
+      }
+      panel.dataset.open = "1";
+
+      const rounds    = po.customRounds?.rounds || [];
+      const stored    = po.customRounds?.matchups || [];  // [roundIdx][groupIdx] = [teamName,...]
+      const allTeams  = sortedTeams.slice(0, qualCount);   // qualifier pool
+
+      // Build per-round per-group team dropdowns
+      const _teamOpts = (placed, cur) => {
+        let h = `<option value="">— Select —</option>`;
+        allTeams.forEach(tm => {
+          const name = _displayName(tm);
+          const dis  = placed.has(name) && name !== cur;
+          h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
+        });
+        return h;
+      };
+
+      const roundsHTML = rounds.map((r, ri) => {
+        if (ri === rounds.length - 1) return ""; // skip championship — it's derived
+        const numGroups = r.groups || 1;
+        const tpg       = r.teamsPerGroup || 2;
+        const storedRnd = stored[ri] || [];
+
+        const groupsHTML = Array.from({length: numGroups}, (_, gi) => {
+          const storedGrp = storedRnd[gi] || [];
+          const slots = Array.from({length: tpg}, (_, si) => storedGrp[si] || "");
+          return `<div class="trn-cr-mu-group" data-ri="${ri}" data-gi="${gi}">
+            <div style="font-size:.72rem;font-weight:700;color:var(--color-text-dim);margin-bottom:4px">Group ${gi+1}</div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              ${slots.map((cur, si) =>
+                `<select class="trn-cr-mu-sel" data-ri="${ri}" data-gi="${gi}" data-si="${si}"
+                  style="font-size:.78rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${_teamOpts(new Set(), cur)}</select>`
+              ).join("")}
+            </div>
+          </div>`;
+        }).join("");
+
+        return `<div style="margin-bottom:var(--space-3)">
+          <div style="font-size:.82rem;font-weight:700;margin-bottom:var(--space-2)">Round ${ri+1}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--space-2)">${groupsHTML}</div>
+        </div>`;
+      }).join("");
+
+      panel.innerHTML = `
+        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+          <div class="trn-section-card-title">Custom Round Matchup Assignments</div>
+          <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Assign which teams play in each group for each round. Teams within a group compete head-to-head — whoever scores more that week advances.
+          </p>
+          <div id="trn-cr-mu-rounds">${roundsHTML}</div>
+          <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+            <button class="btn-primary btn-sm" id="trn-cr-mu-save">💾 Save Matchups</button>
+            <button class="btn-secondary btn-sm" id="trn-cr-mu-cancel">Cancel</button>
+          </div>
+        </div>`;
+
+      // Cross-exclusion: refresh all dropdowns when any changes
+      const _refreshAllSels = () => {
+        const allSels = Array.from(panel.querySelectorAll(".trn-cr-mu-sel"));
+        // Per-round placed sets
+        const placedByRound = {};
+        allSels.forEach(sel => {
+          const ri = sel.dataset.ri;
+          if (!placedByRound[ri]) placedByRound[ri] = new Set();
+          if (sel.value) placedByRound[ri].add(sel.value);
+        });
+        allSels.forEach(sel => {
+          const cur = sel.value;
+          const placed = placedByRound[sel.dataset.ri] || new Set();
+          sel.innerHTML = _teamOpts(placed, cur);
+        });
+      };
+      panel.querySelectorAll(".trn-cr-mu-sel").forEach(sel =>
+        sel.addEventListener("change", _refreshAllSels)
+      );
+      _refreshAllSels();
+
+      document.getElementById("trn-cr-mu-cancel")?.addEventListener("click", () => {
+        panel.dataset.open = "0";
+        panel.innerHTML = "";
+      });
+
+      document.getElementById("trn-cr-mu-save")?.addEventListener("click", async () => {
+        const allSels  = Array.from(panel.querySelectorAll(".trn-cr-mu-sel"));
+        const matchups = [];
+        allSels.forEach(sel => {
+          const ri = parseInt(sel.dataset.ri);
+          const gi = parseInt(sel.dataset.gi);
+          const si = parseInt(sel.dataset.si);
+          if (!matchups[ri]) matchups[ri] = [];
+          if (!matchups[ri][gi]) matchups[ri][gi] = [];
+          matchups[ri][gi][si] = sel.value || "";
+        });
+        try {
+          const updated = { ...po.customRounds, matchups };
+          await _tPlayoffsRef(tid, activeY).update({ customRounds: updated });
+          Object.assign(po, { customRounds: updated });
+          panel.dataset.open = "0";
+          panel.innerHTML = "";
+          showToast("Matchups saved ✓");
+          // Re-render current round tab so it reflects new assignments
+          document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
+        } catch(e) { showToast("Failed: " + e.message, "error"); }
+      });
+    });
 
     document.getElementById("trn-po-publish-btn")?.addEventListener("click", async () => {
       const btn = document.getElementById("trn-po-publish-btn");
