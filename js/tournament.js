@@ -9597,7 +9597,32 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
       const isFinal = roundIdx === rounds.length - 1;
       const weekNum = po.startWeek ? po.startWeek + roundIdx : null;
-      const pool = sortedTeams.slice(0, round.groups * round.teamsPerGroup);
+
+      // Build the pool entering this round by simulating all previous rounds.
+      // This mirrors what the snapshot builder does so Round 2+ shows the correct teams.
+      let crPool = _sortByMetric([...qualifiers], byeMetric); // seeded order entering Round 1
+
+      for (let ri = 0; ri < roundIdx; ri++) {
+        const cr     = rounds[ri];
+        const groups = cr.groups  || 1;
+        const tpg    = cr.teamsPerGroup || Math.ceil(crPool.length / groups);
+        const apg    = cr.advPerGroup  || 1;
+
+        const byeSec  = ri === 0 ? crPool.slice(0, byeCount) : [];
+        const compSec = ri === 0 ? crPool.slice(byeCount)    : [...crPool];
+
+        const advancers = [...byeSec];
+        for (let gi = 0; gi < groups; gi++) {
+          const groupTeams = compSec.slice(gi * tpg, (gi + 1) * tpg);
+          const sorted     = [...groupTeams].sort((a, b) => (b.pf||0) - (a.pf||0));
+          advancers.push(...sorted.slice(0, apg));
+        }
+        crPool = advancers;
+      }
+
+      // crPool is now the teams entering this round
+      const pool = crPool;
+
       return `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
           <div class="trn-po-round-header">
