@@ -3556,14 +3556,8 @@
 }
 
 /* ── Connector lines ──────────────────────────────────── */
-/*  Each card is 44px tall (22px per team row).
-    The connector extends from center of the card (22px from top/bottom)
-    down/up to meet the sibling card plus the gap between them.
-    gap = slotH = 2^ri * 44.  The connector height must be:
-    half the card (22px) + gap + half the sibling card (22px) = 44 + gap.
-    We encode gap via CSS custom property set inline on the card parent,
-    but since we can't easily do that, we use a generous height and let
-    the border hide the overshoot. */
+/* --wc-gap is set inline on each card = distance from this card's
+   centre to its sibling's centre (exact pixel value from JS math). */
 .trn-wc-card--conn-top::after,
 .trn-wc-card--conn-bot::after {
   content: "";
@@ -3574,19 +3568,18 @@
   border-style: solid;
   z-index: 0;
 }
-/* Top card: right border + top border going down */
+/* Top card of pair: line goes DOWN from centre to sibling centre */
 .trn-wc-card--conn-top::after {
   top: 50%;
-  /* Height = reach down to midpoint of sibling. Dynamic via JS-set --conn-gap or large default. */
-  height: calc(50% + 22px + var(--wc-gap, 44px));
+  height: var(--wc-gap, 52px);
   border-width: 1px 1px 0 0;
   border-bottom: none;
   border-top-right-radius: 2px;
 }
-/* Bottom card: right border + bottom border going up */
+/* Bottom card of pair: line goes UP from centre to sibling centre */
 .trn-wc-card--conn-bot::after {
   bottom: 50%;
-  height: calc(50% + 22px + var(--wc-gap, 44px));
+  height: var(--wc-gap, 52px);
   border-width: 0 1px 1px 0;
   border-top: none;
   border-bottom-right-radius: 2px;

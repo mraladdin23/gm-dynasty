@@ -413,13 +413,13 @@ const DLRTournament = (() => {
     // Keep _standingsYear in sync
     _standingsYear = _tournamentYear;
 
-    // Year selector only shown in user/view mode
-    const yearSel = (!showAdminNav && availableYrs.length > 1) ? `
+    // Year selector shown for BOTH admin and user when multiple years exist
+    const yearSel = availableYrs.length > 1 ? `
       <div class="trn-year-selector">
         <select id="trn-global-year" class="trn-filter-select">
           ${availableYrs.map(y => `<option value="${y}" ${y === _tournamentYear ? "selected" : ""}>${y}</option>`).join("")}
         </select>
-      </div>` : (!showAdminNav && availableYrs.length === 1) ? `<div class="trn-year-selector"><span class="trn-year-label">${availableYrs[0]}</span></div>` : "";
+      </div>` : availableYrs.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${availableYrs[0]}</span></div>` : "";
 
     // Build tab options based on mode
     const hasPlayoffConfig = !!(Object.keys(t.playoffs||{}).some(k => /^\d{4}$/.test(k)
@@ -9882,21 +9882,46 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>`;
     };
 
-    // March Madness style bracket canvas.
-    // Each column is a round. Cards are connected with CSS lines.
-    // isAdmin=true shows per-matchup advance controls for later rounds.
+    // March Madness style bracket canvas — absolute positioning.
+    // One card = one matchup (two team rows inside).
+    // cardH = matchup card height. pairG = gap between adjacent R0 cards in the same pair.
+    // Inter-pair gap = 2*pairG so groups look separate.
+    // Every subsequent round card is centred exactly between its two feeder cards.
     const _renderWCBracketCanvas = (bracket, numRounds, getRoundName, _weekTag, isAdmin) => {
       if (!bracket.length) return "";
-      const nr = bracket.length;
+      const nr    = bracket.length;
+      const cardH = 44;  // px — matchup card height
+      const pairG = 8;   // px — intra-pair gap (R0)
+
+      // Absolute top of card mi in round ri.
+      // Uses a recursive centre calculation so every round is perfectly centred.
+      // R0 base: pairs of 2 cards with pairG inside, 2*pairG between pairs.
+      const centreR0 = (mi) => Math.floor(mi/2) * (2*cardH + 3*pairG) + (mi%2)*(cardH+pairG) + cardH/2;
+      const centreOf = (ri, mi) => {
+        if (ri === 0) return centreR0(mi);
+        return (centreOf(ri-1, 2*mi) + centreOf(ri-1, 2*mi+1)) / 2;
+      };
+      const topOf = (ri, mi) => Math.round(centreOf(ri, mi) - cardH/2);
+
+      // Column height = bottom edge of last card
+      const colH = (ri, n) => n === 0 ? cardH : topOf(ri, n-1) + cardH;
+
+      // Gap between the two R0 cards in the same pair — used for connector line height
+      // at each round (connector from card mi to the card it pairs with in the next round).
+      // For round ri: the connector from card mi spans from its centre to the midpoint
+      // between it and card mi^1 (its sibling). Connector CSS height uses --wc-gap.
+      const connGap = (ri, mi) => {
+        // The line from top card goes DOWN to meet bottom card's centre.
+        // Height = distance from top card centre to bottom card centre.
+        const sibling = mi % 2 === 0 ? mi + 1 : mi - 1;
+        return Math.abs(centreOf(ri, mi) - centreOf(ri, sibling));
+      };
 
       const cols = bracket.map((rnd, ri) => {
-        // Vertical spacing: each card takes 2^(ri+1) "units". Base unit = 44px (compact).
-        const unitH = 44;
-        const slotH = Math.pow(2, ri) * unitH;  // height allocated per matchup slot
-        const gap   = slotH;                      // gap between cards matches slot height
+        const n      = (rnd||[]).length;
+        const totalH = colH(ri, n);
 
         const cards = (rnd||[]).map((m, mi) => {
-          const hasA  = !!m.a, hasB = !!m.b;
           const hasScoreA = m.scoreA !== null && m.scoreA !== undefined;
           const hasScoreB = m.scoreB !== null && m.scoreB !== undefined;
           const winA  = hasScoreA && hasScoreB && m.scoreA > m.scoreB;
@@ -9910,73 +9935,62 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             </div>`;
           };
 
-          // Admin: show dropdowns for empty slots in later rounds
-          // In manual mode: dropdown shows ALL advancers (admin picks freely)
-          // In random mode: dropdown shows only winners from the feeding previous-round matchups
+          // selRow: static text for locked/complete rounds, dropdown for active round.
+          // Manual: round locked once every matchup has both teams + both scores.
+          // Random: feeder-only dropdowns for empty slots.
           const selRow = (side, curName) => {
-            if (!isAdmin || ri === 0) return tRow(curName, side==="a"?m.scoreA:m.scoreB, side==="a"?winA:winB, side==="a"?winB:winA);
+            const scoreVal = side==="a" ? m.scoreA : m.scoreB;
+            const isWin    = side==="a" ? winA : winB;
+            const isLoss   = side==="a" ? winB : winA;
+            if (!isAdmin || ri === 0) return tRow(curName, scoreVal, isWin, isLoss);
             const bMode = po.worldcupBracketMode || "manual";
-            const groups2  = po.worldcupGroups || [];
-            const allAdvancers = groups2.flatMap((g,gi2) =>
-              (g.members||[]).slice(0, g.advanceCount??(po.worldcupAdvanceCount??2))
-                .map(n => ({ name:n, groupName: g.name||("Group "+(gi2+1)) }))
-            );
-            const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
-            let opts;
             if (bMode === "manual") {
-              // Full manual: show all advancers
-              const byGroup2 = {};
-              allAdvancers.forEach(adv => {
-                if (!byGroup2[adv.groupName]) byGroup2[adv.groupName] = [];
-                byGroup2[adv.groupName].push(adv.name);
+              const roundComplete = (rnd||[]).every(mx =>
+                mx.a && mx.b && mx.scoreA !== null && mx.scoreA !== undefined &&
+                mx.scoreB !== null && mx.scoreB !== undefined
+              );
+              if (roundComplete) return tRow(curName, scoreVal, isWin, isLoss);
+              const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
+              const byGrp = {};
+              (po.worldcupGroups||[]).forEach((g,gi2) => {
+                const gn = g.name||("Group "+(gi2+1)); byGrp[gn]=byGrp[gn]||[];
+                (g.members||[]).slice(0,g.advanceCount??(po.worldcupAdvanceCount??2)).forEach(n=>byGrp[gn].push(n));
               });
-              let html2 = `<option value="">— Select —</option>`;
-              Object.entries(byGroup2).forEach(([gn, names]) => {
-                const inner = names.map(n =>
-                  `<option value="${_esc(n)}" ${n===curName?"selected":""}${placed.has(n)&&n!==curName?" disabled":""}>${_esc(n)}</option>`
-                ).join("");
-                html2 += `<optgroup label="${_esc(gn)}">${inner}</optgroup>`;
+              let h = `<option value="">— Select —</option>`;
+              Object.entries(byGrp).forEach(([gn,ns]) => {
+                h += `<optgroup label="${_esc(gn)}">${ns.map(n=>`<option value="${_esc(n)}" ${n===curName?"selected":""}${placed.has(n)&&n!==curName?" disabled":""}>${_esc(n)}</option>`).join("")}</optgroup>`;
               });
-              opts = html2;
+              return `<div class="trn-wc-bteam trn-wc-bt--sel"><select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${h}</select></div>`;
             } else {
-              // Random / auto mode: only offer teams from feeder matchups
-              const prevRound = bracket[ri-1] || [];
-              const prevA = prevRound[mi*2], prevB = prevRound[mi*2+1];
-              const candidates = [];
-              if (prevA?.a) candidates.push(prevA.a);
-              if (prevA?.b) candidates.push(prevA.b);
-              if (prevB?.a) candidates.push(prevB.a);
-              if (prevB?.b) candidates.push(prevB.b);
-              const available = candidates.filter(n => !placed.has(n) || n === curName);
-              if (!available.length && !curName) {
-                return tRow(curName, side==="a"?m.scoreA:m.scoreB, side==="a"?winA:winB, side==="a"?winB:winA);
-              }
-              opts = [`<option value="">— Winner —</option>`, ...available.map(n=>
-                `<option value="${_esc(n)}" ${n===curName?"selected":""}>${_esc(n)}</option>`)].join("");
+              const pr=bracket[ri-1]||[]; const pA=pr[mi*2],pB=pr[mi*2+1];
+              const cands=[]; if(pA?.a)cands.push(pA.a);if(pA?.b)cands.push(pA.b);if(pB?.a)cands.push(pB.a);if(pB?.b)cands.push(pB.b);
+              const placed=new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
+              const avail=cands.filter(n=>!placed.has(n)||n===curName);
+              if(!avail.length&&!curName) return tRow(curName,scoreVal,isWin,isLoss);
+              const opts=[`<option value="">— Winner —</option>`,...avail.map(n=>`<option value="${_esc(n)}" ${n===curName?"selected":""}>${_esc(n)}</option>`)].join("");
+              if(!curName) return `<div class="trn-wc-bteam trn-wc-bt--sel"><select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${opts}</select></div>`;
+              return tRow(curName,scoreVal,isWin,isLoss);
             }
-            // Show dropdown if slot is empty or always in manual mode
-            if (!curName || bMode === "manual") {
-              return `<div class="trn-wc-bteam trn-wc-bt--sel">
-                <select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${opts}</select>
-              </div>`;
-            }
-            return tRow(curName, side==="a"?m.scoreA:m.scoreB, side==="a"?winA:winB, side==="a"?winB:winA);
           };
 
-          // Top/bottom connector classes for the "bracket lines" CSS approach
-          const isTopCard    = mi % 2 === 0;
-          const connectorCls = ri < nr-1 ? (isTopCard ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
+          const top  = topOf(ri, mi);
+          // Connector: top card of a pair draws line down, bottom card draws line up.
+          // --wc-gap = distance between this card's centre and its sibling's centre.
+          const n2   = (rnd||[]).length;
+          const hasSibling = (mi % 2 === 0 && mi + 1 < n2) || (mi % 2 === 1);
+          const gap  = hasSibling ? connGap(ri, mi) : 0;
+          const isTopOfPair = mi % 2 === 0;
+          const connCls = (ri < nr - 1 && hasSibling)
+            ? (isTopOfPair ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
 
-          return `<div class="trn-wc-card ${connectorCls}" style="margin-top:${mi===0?Math.floor(slotH/2-22):gap}px">
-            ${selRow("a", m.a)}
-            <div class="trn-wc-card-divider"></div>
-            ${selRow("b", m.b)}
-          </div>`;
+          return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
+              ${selRow("a", m.a)}<div class="trn-wc-card-divider"></div>${selRow("b", m.b)}
+            </div>`;
         }).join("");
 
         return `<div class="trn-wc-col" data-ri="${ri}">
           <div class="trn-wc-col-header">${getRoundName(ri, nr)} ${_weekTag(ri)}</div>
-          <div class="trn-wc-col-cards">${cards}</div>
+          <div class="trn-wc-col-cards" style="position:relative;height:${totalH}px">${cards}</div>
         </div>`;
       }).join("");
 
@@ -10055,13 +10069,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
            + _section("Regular Season Leaders", "📊", regLeaders);
     }
 
-    // ── Year pill bar for playoffs tab ───────────────────
-    const _yearPillBar = () => {
-      if (years.length <= 1) return "";
-      return `<div class="trn-po-year-pills">
-        ${years.map(y => `<button class="trn-po-year-pill ${String(y)===String(activeY)?"trn-po-year-pill--active":""}" data-po-year="${y}">${y}</button>`).join("")}
-      </div>`;
-    };
     const _renderContent = (tabId) => {
       if (tabId==="standings")     return _renderStandingsView();
       if (tabId==="leaderboard")   return _renderLeaderboard();
@@ -10084,7 +10091,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
           ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
         </div>
-        ${_yearPillBar()}
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
       </div>`;
@@ -10106,14 +10112,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
       document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
       _wcWireBracketButtons();
-    });
-
-    // Year pill switcher — re-renders the entire playoffs tab for the selected year
-    body.querySelectorAll(".trn-po-year-pill").forEach(btn => {
-      btn.addEventListener("click", () => {
-        _tournamentYear = btn.dataset.poYear;
-        _renderPlayoffsTab(tid, t, body);
-      });
     });
 
     // ── World Cup bracket wiring ─────────────────────────────────────────────
