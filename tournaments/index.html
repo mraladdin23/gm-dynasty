@@ -1292,6 +1292,37 @@
         return;
       }
 
+      // For worldcup: if the published snapshot is missing WC fields (published before
+      // the worldcup fix), merge them from _currentT.playoffs[year] or standingsCache.
+      if (po.mode === "worldcup") {
+        const live = (_currentT.playoffs || {})[year] || {};
+        if (!po.worldcupGroups?.length   && live.worldcupGroups?.length)   po.worldcupGroups   = live.worldcupGroups;
+        if (!po.worldcupBracket?.length  && live.worldcupBracket?.length)  po.worldcupBracket  = live.worldcupBracket;
+        if (!po.worldcupSchedule         && live.worldcupSchedule)         po.worldcupSchedule = live.worldcupSchedule;
+        if (!po.wcStandingsCache         && live.wcStandingsCache)         po.wcStandingsCache = live.wcStandingsCache;
+        // Last resort: build wcStandingsCache from the public standingsCache
+        if (!po.wcStandingsCache && _currentT.standingsCache) {
+          const wsc = {};
+          Object.entries(_currentT.standingsCache||{}).forEach(([ck, lc]) => {
+            if (String(lc.year) !== String(year)) return;
+            wsc[ck] = {
+              leagueId:   lc.leagueId || lc.league_id || "",
+              leagueName: lc.leagueName || "",
+              year:       lc.year,
+              teams: (lc.teams||[]).map(tm => ({
+                teamId:   String(tm.teamId||""),
+                teamName: tm.teamName || "",
+                wins:     tm.wins    || 0,
+                losses:   tm.losses  || 0,
+                pf:       tm.pf      || 0,
+                pa:       tm.pa      || 0
+              }))
+            };
+          });
+          if (Object.keys(wsc).length) po.wcStandingsCache = wsc;
+        }
+      }
+
       const mode       = po.mode || "total_points";
       const standings  = po.standings  || [];
       const rounds     = po.rounds     || [];
@@ -1308,7 +1339,8 @@
       const _name = (tm) => esc(tm.displayName || tm.teamName || "—");
 
       // ── Tabs ──────────────────────────────────────────────
-      const tabs = [{ id:"standings", label:"📊 Standings" }];
+      // Worldcup has no top-level Standings tab — standings are inside each group tab
+      const tabs = mode === "worldcup" ? [] : [{ id:"standings", label:"📊 Standings" }];
       if (mode==="total_points")    tabs.push({id:"leaderboard", label:"🏆 Leaderboard"});
       else if (mode==="points_rounds") rounds.forEach((_,i) => {
         tabs.push({id:`round_${i}`, label: i===rounds.length-1 ? "🏆 Championship" : `Round ${i+1}`});
@@ -1321,7 +1353,6 @@
         (po.worldcupGroups||[]).forEach((g,gi) =>
           tabs.push({id:`wcgroup_${gi}`, label:`🌍 ${esc(g.name||("Group "+(gi+1)))}`})
         );
-        tabs.push({id:"wc_matchups", label:"📅 Matchups"});
         tabs.push({id:"wc_bracket",  label:"🥊 Bracket"});
       }
       if (showChamps) tabs.push({id:"league_champs", label:"🏅 League Champs"});
@@ -1718,125 +1749,129 @@
         const g   = (po.worldcupGroups||[])[gi];
         if (!g) return `<div class="trn-po-empty">Group not found.</div>`;
         const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
-        const standingsSrc = po.standings || [];
         const members = g.members || [];
-        const rows = members.map(name => {
-          const tm = standingsSrc.find(s => (s.teamName||"").toLowerCase()===name.toLowerCase()) || {teamName:name,wins:0,losses:0,pf:0};
-          return {...tm, _name: name};
-        }).sort((a,b) => (b.wins-a.wins)||(b.pf-a.pf));
+        if (!members.length) return `<div class="trn-po-empty">No teams in this group yet.</div>`;
+
+        const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+        const _rec = (name) => {
+          const wsc = po.wcStandingsCache || {};
+          for (const lc of Object.values(wsc)) {
+            const tm = (lc.teams||[]).find(t2 => _sk(t2.teamName)===_sk(name));
+            if (tm) return { wins:tm.wins||0, losses:tm.losses||0, pf:tm.pf||0 };
+          }
+          const tm = (po.standings||[]).find(s => _sk(s.teamName||s.displayName||"")===_sk(name));
+          return { wins:tm?.wins||0, losses:tm?.losses||0, pf:tm?.pf||0 };
+        };
+
+        const rows = members.map(name=>({name,..._rec(name)})).sort((a,b)=>(b.wins-a.wins)||(b.pf-a.pf));
         const trs = rows.map((r,i) => {
           const isAdv = i < adv;
           const badge = isAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
             : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-          const divider = i===adv && rows.length>adv
+          const div = i===adv && rows.length>adv
             ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>` : "";
-          return `${divider}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
+          return `${div}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
             <td class="trn-po-rank">${i+1}</td>
-            <td class="trn-po-team-name"><div>${esc(r._name)}</div></td>
-            <td class="trn-po-num">${r.wins??0}–${r.losses??0}</td>
+            <td class="trn-po-team-name"><div>${esc(r.name)}</div></td>
+            <td class="trn-po-num">${r.wins}–${r.losses}</td>
             <td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
             <td>${badge}</td>
           </tr>`;
         }).join("");
-        return `<div class="trn-wc-group-standings-card">
-          <div class="trn-wc-group-standings-title">🌍 ${esc(g.name||("Group "+(gi+1)))}</div>
-          <div class="trn-po-table-wrap">
-            <table class="trn-po-table">
-              <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-              <tbody>${trs}</tbody>
-            </table>
-          </div>
-        </div>`;
-      };
 
-      // ── World Cup: matchups (public) — loads live from Sleeper ───
-      const _wcMatchupsView = () => {
-        const wcGroups  = po.worldcupGroups  || [];
-        const wcSched   = po.worldcupSchedule || {};
-        const wcRegWks  = po.worldcupRegWeeks || 6;
-        const startWk   = po.startWeek ? (po.startWeek - wcRegWks) : null;
-        if (!wcGroups.length) return `<div class="trn-po-empty">No schedule configured yet.</div>`;
+        // Matchup section — load live from Sleeper
+        const wcSched  = po.worldcupSchedule || {};
+        const wcRegWks = po.worldcupRegWeeks || 6;
+        const startWk  = po.startWeek ? (po.startWeek - wcRegWks) : null;
+        const muContId = `pub-wc-mu-${gi}`;
+        const weekOpts = Array.from({length:wcRegWks},(_,wi)=>({wi,label:`Week ${wi+1}`}));
 
-        const weekOpts = Array.from({length: wcRegWks}, (_,i) => ({
-          idx: i, nflWk: startWk ? startWk + i : i + 1, label: `Week ${i+1}`
-        }));
-        const standingsSrc = po.standings || [];
-        const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-
-        // Build leagueId + teamId map from standingsCache on _currentT
-        const teamInfoMap = {};
-        Object.values(_currentT.standingsCache||{}).forEach(lc => {
-          const lid = String(lc.leagueId || lc.league_id || "");
-          (lc.teams||[]).forEach(tm => {
-            if (tm.teamName && lid) teamInfoMap[tm.teamName] = { teamId: String(tm.teamId||""), leagueId: lid };
-          });
+        const teamInfoMap2 = {};
+        const _buildTIM = (src) => Object.values(src||{}).forEach(lc => {
+          const lid = String(lc.leagueId||lc.league_id||"");
+          (lc.teams||[]).forEach(tm => { if (tm.teamName && lid) teamInfoMap2[tm.teamName]={teamId:String(tm.teamId||""),leagueId:lid}; });
         });
+        _buildTIM(po.wcStandingsCache);
+        if (!Object.keys(teamInfoMap2).length) _buildTIM(_currentT.standingsCache);
 
-        const containerId = "pub-wc-mu-content";
-        setTimeout(async () => {
-          const el = document.getElementById(containerId);
+        const _loadWCMatchups = async (wi) => {
+          const el = document.getElementById(muContId);
           if (!el) return;
-          const wkSel = document.getElementById("pub-wc-mu-week");
-          const refBtn = document.getElementById("pub-wc-mu-refresh");
-          const _load = async (wi) => {
-            if (!el) return;
-            el.innerHTML = `<div style="padding:var(--space-3);text-align:center;color:var(--color-text-dim);font-size:.82rem">Loading scores…</div>`;
-            const nflWk = startWk ? startWk + wi : wi + 1;
-            // Fetch from Sleeper
-            const leagueIds = [...new Set(Object.values(teamInfoMap).map(x=>x.leagueId).filter(Boolean))];
-            const scoreMap = {}; // "leagueId|nflWk|teamId" -> score
-            await Promise.allSettled(leagueIds.map(async lid => {
-              try {
-                const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
-                if (!r.ok) return;
-                const data = await r.json();
-                (data||[]).forEach(m => { scoreMap[`${lid}|${m.roster_id}`] = parseFloat(m.points)||0; });
-              } catch(e) {}
-            }));
-            const _score = (name) => {
-              const info = teamInfoMap[name];
-              if (!info) return null;
-              const v = scoreMap[`${info.leagueId}|${info.teamId}`];
-              return v !== undefined ? v : null;
-            };
-            const groupCards = wcGroups.map((g, gi) => {
-              const matchups = (wcSched[String(gi)]||{})[String(wi)] || [];
-              if (!matchups.length) return `<div class="trn-wc-mu-group"><div class="trn-wc-mu-group-title">${esc(g.name||("Group "+(gi+1)))}</div><div style="font-size:.78rem;color:var(--color-text-dim);padding:6px 0">No matchups this week.</div></div>`;
-              const cards = matchups.map(m => {
-                const sa = _score(m.home), sb = _score(m.away);
-                const hasScore = sa !== null && sb !== null;
-                const winH = hasScore && sa > sb, winA = hasScore && sb > sa;
-                const fmt  = v => v !== null ? v.toFixed(2) : "–";
-                return `<div class="trn-wc-mu-card">
-                  <div class="trn-wc-mu-team ${winH?"trn-wc-mu-team--win":hasScore?"trn-wc-mu-team--loss":""}">
-                    <span class="trn-wc-mu-name">${esc(m.home||"?")}</span>
-                    <span class="trn-wc-mu-score">${fmt(sa)}</span>
-                  </div>
-                  <div class="trn-wc-mu-vs">vs</div>
-                  <div class="trn-wc-mu-team ${winA?"trn-wc-mu-team--win":hasScore?"trn-wc-mu-team--loss":""}">
-                    <span class="trn-wc-mu-name">${esc(m.away||"?")}</span>
-                    <span class="trn-wc-mu-score">${fmt(sb)}</span>
-                  </div>
-                </div>`;
-              }).join("");
-              return `<div class="trn-wc-mu-group"><div class="trn-wc-mu-group-title">${esc(g.name||("Group "+(gi+1)))}</div><div class="trn-wc-mu-cards">${cards}</div></div>`;
-            }).join("");
-            el.innerHTML = groupCards;
+          el.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">Loading…</div>`;
+          const nflWk = startWk ? startWk + wi : wi + 1;
+          const lids = [...new Set(Object.values(teamInfoMap2).map(x=>x.leagueId).filter(Boolean))];
+          const scoreMap = {};
+          await Promise.allSettled(lids.map(async lid => {
+            try {
+              const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
+              if (!r.ok) return;
+              const data = await r.json();
+              (data||[]).forEach(m => { scoreMap[`${lid}|${m.roster_id}`] = parseFloat(m.points)||0; });
+            } catch(e) {}
+          }));
+          const _score2 = (name) => {
+            const info = teamInfoMap2[name];
+            if (!info) return null;
+            const v = scoreMap[`${info.leagueId}|${info.teamId}`];
+            return v !== undefined ? v : null;
           };
-          wkSel?.addEventListener("change", () => _load(parseInt(wkSel.value)||0));
-          refBtn?.addEventListener("click", () => _load(parseInt(wkSel?.value||"0")));
-          await _load(0);
+          const matchups = (wcSched[String(gi)]||{})[String(wi)] || [];
+          if (!matchups.length) { el.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`; return; }
+          const cards = matchups.map(m => {
+            const sa=_score2(m.home), sb=_score2(m.away);
+            const has=sa!==null&&sb!==null, wH=has&&sa>sb, wA=has&&sb>sa;
+            const fmt=v=>v!==null?v.toFixed(2):"–";
+            return `<div class="trn-wc-mu-card">
+              <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}">
+                <span class="trn-wc-mu-name">${esc(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(sa)}</span>
+              </div>
+              <div class="trn-wc-mu-vs">vs</div>
+              <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}">
+                <span class="trn-wc-mu-name">${esc(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(sb)}</span>
+              </div>
+            </div>`;
+          }).join("");
+          el.innerHTML = `<div class="trn-wc-mu-cards">${cards}</div>`;
+        };
+
+        setTimeout(() => {
+          const wkSel = document.getElementById(`pub-wc-wk-${gi}`);
+          const refBtn = document.getElementById(`pub-wc-ref-${gi}`);
+          wkSel?.addEventListener("change", () => _loadWCMatchups(parseInt(wkSel.value)||0));
+          refBtn?.addEventListener("click", () => _loadWCMatchups(parseInt(wkSel?.value||"0")));
+          _loadWCMatchups(0);
         }, 0);
 
-        return `<div class="trn-wc-mu-toolbar">
-          <select id="pub-wc-mu-week" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-            ${weekOpts.map(w=>`<option value="${w.idx}">${esc(w.label)}</option>`).join("")}
-          </select>
-          <button class="btn-secondary btn-sm" id="pub-wc-mu-refresh">↺ Refresh</button>
-        </div>
-        <div id="${containerId}"></div>`;
+        return `
+          <div class="trn-po-round-card" style="margin-bottom:var(--space-2)">
+            <div class="trn-po-round-header">
+              <span>🌍 ${esc(g.name||("Group "+(gi+1)))}</span>
+              <span class="trn-po-round-meta">${members.length} teams · top ${adv} advance</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
+            <div>
+              <div class="trn-po-table-wrap">
+                <table class="trn-po-table">
+                  <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
+                  <tbody>${trs}</tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
+              <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+                <select id="pub-wc-wk-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                  ${weekOpts.map(w=>`<option value="${w.wi}">${esc(w.label)}</option>`).join("")}
+                </select>
+                <button class="btn-secondary btn-xs" id="pub-wc-ref-${gi}">↺ Refresh</button>
+              </div>
+              <div id="${muContId}"></div>
+            </div>
+          </div>`;
       };
 
+      // ── World Cup: bracket (public read-only) ─────────────
       // ── World Cup: bracket (public read-only) ─────────────
       const _wcBracketView = () => {
         const bracket = po.worldcupBracket || [];
@@ -1878,7 +1913,6 @@
         if (tabId==="bracket")      return _bracketView();
         if (tabId==="league_champs") return _leagueChampsView();
         if (tabId==="wc_bracket")   return _wcBracketView();
-        if (tabId==="wc_matchups")  return _wcMatchupsView();
         if (tabId.startsWith("wcgroup_")) return _wcGroupView(parseInt(tabId.split("_")[1]));
         if (tabId.startsWith("round_"))  return _roundView(parseInt(tabId.split("_")[1]), false);
         if (tabId.startsWith("cround_")) return _roundView(parseInt(tabId.split("_")[1]), true);

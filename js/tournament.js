@@ -8542,6 +8542,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const po      = _playoffForYear(t, activeY);
     const mode    = po.mode || "total_points";
 
+    // ── Admin detection (respects "View as user" toggle) ─────────────────────
+    const isAdmin = (
+      t.roles?.[_currentUsername]?.role === "admin" ||
+      t.roles?.[_currentUsername]?.role === "sub_admin"
+    ) && !_viewingAsUser;
+
     // Build participant lookups (gender + displayName) — not stored in lc.teams
     const _skPo = (s) => String(s||'').trim().toLowerCase().replace(/[.#$\/\[\]]/g, '_');
     const genderMap      = {};
@@ -8851,7 +8857,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // Build tab list based on mode
     const _buildTabs = () => {
-      const tabs = [{ id:"standings", label:"📊 Standings" }];
+      const tabs = [];
+      if (mode !== "worldcup") {
+        // Non-WC modes always have a Standings tab
+        tabs.push({ id:"standings", label:"📊 Standings" });
+      }
       if (mode === "total_points") {
         tabs.push({ id:"leaderboard", label:"🏆 Leaderboard" });
       } else if (mode === "points_rounds") {
@@ -8867,12 +8877,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           tabs.push({ id:`cround_${i}`, label: isFinal ? "🏆 Championship" : `Round ${i+1}` });
         });
       } else if (mode === "worldcup") {
-        // Group tabs only show once groups are saved; bracket tab always shows in worldcup mode
+        // Each group tab contains both its standings table AND weekly matchups.
+        // No separate Standings or Matchups tab — everything is in the group.
         (po.worldcupGroups || []).forEach((g, gi) => {
           tabs.push({ id:`wcgroup_${gi}`, label:`🌍 ${g.name || ("Group "+(gi+1))}` });
         });
-        tabs.push({ id:"wc_matchups", label:"📅 Matchups" });
-        // Bracket tab always present so admin can always reach the seeding UI
+        // Bracket tab always present in worldcup mode
         tabs.push({ id:"wc_bracket", label:"🥊 Bracket" });
       }
       if (po.recognizeLeagueChampions) tabs.push({ id:"league_champs", label:"🏅 League Champs" });
@@ -8994,7 +9004,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         return `
           <div class="trn-po-tp-note">${note}</div>
           <div style="font-size:.8rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-            Standings reflect synced W–L and PF. For live in-game scores, use the Matchups tab.
+          Standings reflect synced W–L and PF. For live in-game scores, open the group tab and select a week.
             ${po.worldcupTiebreakers?.length ? `Tiebreakers: ${po.worldcupTiebreakers.map(k=>({h2h_record:"H2H",h2h_record_tied:"H2H (direct)",h2h_pt_diff:"H2H Pt Diff",overall_pt_diff:"Pt Diff",overall_pf:"PF"}[k]||k)).join(" → ")}` : ""}
           </div>
           <div class="trn-wc-group-standings-grid">${groupTables}</div>
@@ -9500,13 +9510,26 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       const schedule    = (po.worldcupSchedule || {})[String(gi)] || {};
       const regWeeks    = po.worldcupRegWeeks || 6;
-      const startWeekPo = po.startWeek || null; // week 1 of the tournament maps to NFL week = startWeek (if set)
+      const startWeekPo = po.startWeek || null;
 
-      // tableId for async score loading
-      const tableId   = `trn-wc-group-table-${gi}`;
-      const loaderId  = `trn-wc-group-loader-${gi}`;
+      const tableId  = `trn-wc-group-table-${gi}`;
+      const loaderId = `trn-wc-group-loader-${gi}`;
+      const muId     = `trn-wc-group-mu-${gi}`;
 
-      // Shell renders synchronously; scores loaded async
+      // Build week selector for matchups
+      const weekOpts = Array.from({length: regWeeks}, (_, wi) => {
+        const nflWk = startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
+        return { wi, nflWk, label: `Week ${wi+1}${startWeekPo ? ` (NFL Wk ${nflWk})` : ""}` };
+      });
+      const weekSelHTML = `
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);flex-wrap:wrap">
+          <select id="trn-wc-mu-week-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+            ${weekOpts.map(w=>`<option value="${w.wi}">${_esc(w.label)}</option>`).join("")}
+          </select>
+          <button class="btn-secondary btn-xs" id="trn-wc-mu-refresh-${gi}">↺ Refresh</button>
+        </div>
+        <div id="${muId}"><div style="font-size:.78rem;color:var(--color-text-dim)">⏳ Loading matchup scores…</div></div>`;
+
       const shell = `
         <div class="trn-po-round-card">
           <div class="trn-po-round-header">
@@ -9514,22 +9537,28 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             <span class="trn-po-round-meta">${members.length} teams · ${advCount} advance · ${regWeeks}-week regular season</span>
           </div>
         </div>
-        <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
-          <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">
-            ⏳ Loading scores…
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-top:var(--space-2);align-items:start" class="trn-wc-group-layout">
+          <div>
+            <div class="trn-po-table-wrap">
+              <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">⏳ Loading scores…</div>
+              <table class="trn-po-table trn-wc-group-table" id="${tableId}" style="display:none">
+                <thead><tr>
+                  <th>#</th><th>Team</th>
+                  <th class="trn-po-th-num">W</th>
+                  <th class="trn-po-th-num">L</th>
+                  <th class="trn-po-th-num">PF</th>
+                  <th class="trn-po-th-num">PA</th>
+                  <th>Status</th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+              <div id="${tableId}-tiebreak-note" style="font-size:.72rem;color:var(--color-text-dim);margin-top:4px;display:none"></div>
+            </div>
           </div>
-          <table class="trn-po-table trn-wc-group-table" id="${tableId}" style="display:none">
-            <thead><tr>
-              <th>#</th><th>Team</th>
-              <th class="trn-po-th-num" title="Wins in group">W</th>
-              <th class="trn-po-th-num" title="Losses in group">L</th>
-              <th class="trn-po-th-num" title="Points scored in group games">PF</th>
-              <th class="trn-po-th-num" title="Points against in group games">PA</th>
-              <th>Status</th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-          <div id="${tableId}-tiebreak-note" style="font-size:.72rem;color:var(--color-text-dim);margin-top:4px;display:none"></div>
+          <div>
+            <div class="trn-wc-group-standings-title" style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
+            ${weekSelHTML}
+          </div>
         </div>`;
 
       // ── Async: fetch scores, compute standings with tiebreakers ─────────────
@@ -9691,10 +9720,63 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         }
       })();
 
+      // ── Async: load matchup scores for the selected week ────────────────────
+      const _loadGroupMatchups = async (wi) => {
+        const muEl = document.getElementById(muId);
+        if (!muEl) return;
+        const nflWk = startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
+        muEl.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">⏳ Loading…</div>`;
+
+        // Collect teamInfoMap
+        const _sk2 = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+        const tim2 = {};
+        Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+          if (String(lc.year) !== String(activeY)) return;
+          const lid2 = lc.leagueId || ck.replace(/^\d+_/,"");
+          (lc.teams||[]).forEach(tm => { if (tm.teamName) tim2[tm.teamName] = { teamId: String(tm.teamId||""), leagueId: lid2 }; });
+        });
+        const lids2 = [...new Set(Object.values(tim2).map(x=>x.leagueId).filter(Boolean))];
+        try { await Promise.all(lids2.map(lid => _fetchWeekScores(lid, nflWk))); } catch(e) {}
+
+        const wkMatchups2 = schedule[String(wi)] || [];
+        if (!wkMatchups2.length) {
+          muEl.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups scheduled for this week.</div>`;
+          return;
+        }
+        const cards = wkMatchups2.map(m => {
+          const homeInfo = tim2[m.home], awayInfo = tim2[m.away];
+          const hs = homeInfo ? (_weekScoreCache[homeInfo.leagueId+"|"+nflWk]?.[homeInfo.teamId] ?? null) : null;
+          const as_ = awayInfo ? (_weekScoreCache[awayInfo.leagueId+"|"+nflWk]?.[awayInfo.teamId] ?? null) : null;
+          const hasSc = hs !== null && as_ !== null;
+          const winH = hasSc && hs > as_, winA = hasSc && as_ > hs;
+          const fmt = v => v !== null ? v.toFixed(2) : "–";
+          return `<div class="trn-wc-mu-card">
+            <div class="trn-wc-mu-team ${winH?"trn-wc-mu-team--win":hasSc?"trn-wc-mu-team--loss":""}">
+              <span class="trn-wc-mu-name">${_esc(m.home||"?")}</span>
+              <span class="trn-wc-mu-score">${fmt(hs)}</span>
+            </div>
+            <div class="trn-wc-mu-vs">vs</div>
+            <div class="trn-wc-mu-team ${winA?"trn-wc-mu-team--win":hasSc?"trn-wc-mu-team--loss":""}">
+              <span class="trn-wc-mu-name">${_esc(m.away||"?")}</span>
+              <span class="trn-wc-mu-score">${fmt(as_)}</span>
+            </div>
+          </div>`;
+        }).join("");
+        muEl.innerHTML = `<div class="trn-wc-mu-cards">${cards}</div>`;
+      };
+
+      // Wire after DOM is ready
+      setTimeout(() => {
+        const wkSel2 = document.getElementById(`trn-wc-mu-week-${gi}`);
+        const refBtn2 = document.getElementById(`trn-wc-mu-refresh-${gi}`);
+        const getWi2 = () => parseInt(wkSel2?.value || "0");
+        wkSel2?.addEventListener("change", () => _loadGroupMatchups(getWi2()));
+        refBtn2?.addEventListener("click", () => _loadGroupMatchups(getWi2()));
+        _loadGroupMatchups(getWi2());
+      }, 0);
+
       return shell;
     };
-
-    // ── World Cup: Bracket tab ────────────────────────────────────────────────
     // po.worldcupBracket  = [ [{a,b,scoreA,scoreB}, ...], [...] ]  (array of rounds)
     // po.worldcupBracketMode = "manual" | "random"
     const _renderWCBracket = () => {
@@ -9720,8 +9802,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         return `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR>1?`Wks ${ws}–${ws+wcWPR-1}`:`Wk ${ws}`}</span>`;
       };
 
-      // ── Public / viewer: read-only bracket ───────────────
-      if (!tid) {
+      // ── Viewer (non-admin): read-only bracket ───────────────
+      if (!isAdmin) {
         if (!bracket.length) return `<div class="trn-po-empty">Bracket not yet available. Check back after group stage ends.</div>`;
         return `<div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, false)}</div>`;
       }
@@ -9808,8 +9890,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const nr = bracket.length;
 
       const cols = bracket.map((rnd, ri) => {
-        // Vertical spacing: each card takes 2^(ri+1) "units". Base unit = 54px.
-        const unitH = 54;
+        // Vertical spacing: each card takes 2^(ri+1) "units". Base unit = 44px (compact).
+        const unitH = 44;
         const slotH = Math.pow(2, ri) * unitH;  // height allocated per matchup slot
         const gap   = slotH;                      // gap between cards matches slot height
 
@@ -9828,27 +9910,54 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             </div>`;
           };
 
-          // Admin: later rounds may need team selection for advancing slots
+          // Admin: show dropdowns for empty slots in later rounds
+          // In manual mode: dropdown shows ALL advancers (admin picks freely)
+          // In random mode: dropdown shows only winners from the feeding previous-round matchups
           const selRow = (side, curName) => {
             if (!isAdmin || ri === 0) return tRow(curName, side==="a"?m.scoreA:m.scoreB, side==="a"?winA:winB, side==="a"?winB:winA);
-            // For round > 0, show a compact dropdown if slot is empty
-            // Winners available = winners from previous round matchups that fed this slot
-            const prevRound = bracket[ri-1] || [];
-            // Slot mi feeds from prevRound[mi*2] (top) and prevRound[mi*2+1] (bottom)
-            const prevA = prevRound[mi*2];
-            const prevB = prevRound[mi*2+1];
-            const candidates = [];
-            if (prevA?.a) candidates.push(prevA.a);
-            if (prevA?.b) candidates.push(prevA.b);
-            if (prevB?.a) candidates.push(prevB.a);
-            if (prevB?.b) candidates.push(prevB.b);
+            const bMode = po.worldcupBracketMode || "manual";
+            const groups2  = po.worldcupGroups || [];
+            const allAdvancers = groups2.flatMap((g,gi2) =>
+              (g.members||[]).slice(0, g.advanceCount??(po.worldcupAdvanceCount??2))
+                .map(n => ({ name:n, groupName: g.name||("Group "+(gi2+1)) }))
+            );
             const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
-            const availOpts = candidates.filter(n => !placed.has(n) || n === curName);
-            if (!curName && availOpts.length > 0) {
-              const opts = [`<option value="">— Winner —</option>`, ...availOpts.map(n=>
+            let opts;
+            if (bMode === "manual") {
+              // Full manual: show all advancers
+              const byGroup2 = {};
+              allAdvancers.forEach(adv => {
+                if (!byGroup2[adv.groupName]) byGroup2[adv.groupName] = [];
+                byGroup2[adv.groupName].push(adv.name);
+              });
+              let html2 = `<option value="">— Select —</option>`;
+              Object.entries(byGroup2).forEach(([gn, names]) => {
+                const inner = names.map(n =>
+                  `<option value="${_esc(n)}" ${n===curName?"selected":""}${placed.has(n)&&n!==curName?" disabled":""}>${_esc(n)}</option>`
+                ).join("");
+                html2 += `<optgroup label="${_esc(gn)}">${inner}</optgroup>`;
+              });
+              opts = html2;
+            } else {
+              // Random / auto mode: only offer teams from feeder matchups
+              const prevRound = bracket[ri-1] || [];
+              const prevA = prevRound[mi*2], prevB = prevRound[mi*2+1];
+              const candidates = [];
+              if (prevA?.a) candidates.push(prevA.a);
+              if (prevA?.b) candidates.push(prevA.b);
+              if (prevB?.a) candidates.push(prevB.a);
+              if (prevB?.b) candidates.push(prevB.b);
+              const available = candidates.filter(n => !placed.has(n) || n === curName);
+              if (!available.length && !curName) {
+                return tRow(curName, side==="a"?m.scoreA:m.scoreB, side==="a"?winA:winB, side==="a"?winB:winA);
+              }
+              opts = [`<option value="">— Winner —</option>`, ...available.map(n=>
                 `<option value="${_esc(n)}" ${n===curName?"selected":""}>${_esc(n)}</option>`)].join("");
+            }
+            // Show dropdown if slot is empty or always in manual mode
+            if (!curName || bMode === "manual") {
               return `<div class="trn-wc-bteam trn-wc-bt--sel">
-                <select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.72rem;padding:1px 3px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px">${opts}</select>
+                <select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${opts}</select>
               </div>`;
             }
             return tRow(curName, side==="a"?m.scoreA:m.scoreB, side==="a"?winA:winB, side==="a"?winB:winA);
@@ -9858,7 +9967,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const isTopCard    = mi % 2 === 0;
           const connectorCls = ri < nr-1 ? (isTopCard ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
 
-          return `<div class="trn-wc-card ${connectorCls}" style="margin-top:${mi===0?Math.floor(slotH/2-27):gap}px">
+          return `<div class="trn-wc-card ${connectorCls}" style="margin-top:${mi===0?Math.floor(slotH/2-22):gap}px">
             ${selRow("a", m.a)}
             <div class="trn-wc-card-divider"></div>
             ${selRow("b", m.b)}
@@ -9895,115 +10004,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>` : "";
 
       return `${saveBar}<div class="trn-wc-bracket">${cols}${champCol}</div>`;
-    };
-
-
-    // ── World Cup: Matchups tab ───────────────────────────
-    // Shows the admin-defined weekly schedule for each group with real-time scores.
-    // Week selector → fetch scores for that week from Sleeper → render matchup cards.
-    const _renderWCMatchups = () => {
-      const wcGroups  = po.worldcupGroups  || [];
-      const wcSched   = po.worldcupSchedule || {};
-      const wcRegWks  = po.worldcupRegWeeks || 6;
-      const startWk   = po.startWeek ? (po.startWeek - wcRegWks) : null; // week 1 of group stage
-      const wcWPR     = po.worldcupWeeksPerRound || 2;
-
-      if (!wcGroups.length) {
-        return `<div class="trn-po-empty">No groups configured. Set up groups in Admin → Playoffs → Group &amp; Schedule Config.</div>`;
-      }
-
-      const weekOpts = Array.from({length: wcRegWks}, (_, i) => {
-        const nflWk = startWk ? startWk + i : i + 1;
-        return { idx: i, nflWk, label: `Week ${i+1}${startWk?` (NFL Wk ${nflWk})`:""}` };
-      });
-
-      const containerId = "trn-wc-mu-content";
-
-      // Shell renders immediately; scores load async
-      const shell = `
-        <div class="trn-wc-mu-toolbar">
-          <select id="trn-wc-mu-week" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-            ${weekOpts.map(w=>`<option value="${w.idx}">${_esc(w.label)}</option>`).join("")}
-          </select>
-          <button class="btn-secondary btn-sm" id="trn-wc-mu-refresh">↺ Refresh Scores</button>
-        </div>
-        <div id="${containerId}"><div class="trn-az-loading"><div class="spinner"></div> Loading scores…</div></div>`;
-
-      const _loadWeek = async (wi) => {
-        const el = document.getElementById(containerId);
-        if (!el) return;
-        el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading…</div>`;
-
-        const nflWk   = startWk ? startWk + wi : wi + 1;
-        const _sk     = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-
-        // Collect leagueIds and team info
-        const teamInfoMap = {};
-        Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
-          if (String(lc.year) !== String(activeY)) return;
-          const lid = String(lc.leagueId || lc.league_id || ck.replace(/^\d+_/,""));
-          (lc.teams||[]).forEach(tm => {
-            if (tm.teamName) teamInfoMap[tm.teamName] = { teamId: String(tm.teamId||""), leagueId: lid };
-          });
-        });
-
-        const leagueIds = [...new Set(Object.values(teamInfoMap).map(x=>x.leagueId).filter(Boolean))];
-        try {
-          await Promise.all(leagueIds.map(lid => _fetchWeekScores(lid, nflWk)));
-        } catch(e) {}
-
-        const _score = (name) => {
-          const info = teamInfoMap[name];
-          if (!info) return null;
-          return _weekScoreCache[info.leagueId+"|"+nflWk]?.[info.teamId] ?? null;
-        };
-
-        const groupCards = wcGroups.map((g, gi) => {
-          const matchups = (wcSched[String(gi)]||{})[String(wi)] || [];
-          if (!matchups.length) return `
-            <div class="trn-wc-mu-group">
-              <div class="trn-wc-mu-group-title">${_esc(g.name||("Group "+(gi+1)))}</div>
-              <div style="font-size:.78rem;color:var(--color-text-dim);padding:var(--space-2) 0">No matchups scheduled for this week.</div>
-            </div>`;
-
-          const cards = matchups.map(m => {
-            const sa = _score(m.home), sb = _score(m.away);
-            const hasScore = sa !== null && sb !== null;
-            const winH = hasScore && sa > sb, winA = hasScore && sb > sa;
-            const fmt  = v => v !== null ? v.toFixed(2) : "–";
-            return `<div class="trn-wc-mu-card">
-              <div class="trn-wc-mu-team ${winH?"trn-wc-mu-team--win":hasScore?"trn-wc-mu-team--loss":""}">
-                <span class="trn-wc-mu-name">${_esc(m.home||"?")}</span>
-                <span class="trn-wc-mu-score">${fmt(sa)}</span>
-              </div>
-              <div class="trn-wc-mu-vs">vs</div>
-              <div class="trn-wc-mu-team ${winA?"trn-wc-mu-team--win":hasScore?"trn-wc-mu-team--loss":""}">
-                <span class="trn-wc-mu-name">${_esc(m.away||"?")}</span>
-                <span class="trn-wc-mu-score">${fmt(sb)}</span>
-              </div>
-            </div>`;
-          }).join("");
-
-          return `<div class="trn-wc-mu-group">
-            <div class="trn-wc-mu-group-title">${_esc(g.name||("Group "+(gi+1)))}</div>
-            <div class="trn-wc-mu-cards">${cards}</div>
-          </div>`;
-        }).join("");
-
-        el.innerHTML = groupCards || `<div class="trn-po-empty">No matchups scheduled for this week across any group.</div>`;
-      };
-
-      // Wire after render
-      setTimeout(() => {
-        const wkSel = document.getElementById("trn-wc-mu-week");
-        const refBtn = document.getElementById("trn-wc-mu-refresh");
-        const getWi = () => parseInt(wkSel?.value || "0");
-        wkSel?.addEventListener("change", () => _loadWeek(getWi()));
-        refBtn?.addEventListener("click", () => _loadWeek(getWi()));
-        _loadWeek(getWi());
-      }, 0);
-
-      return shell;
     };
 
     // ── League champs ────────────────────────────────────
@@ -10055,14 +10055,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
            + _section("Regular Season Leaders", "📊", regLeaders);
     }
 
-    // ── Render active tab ─────────────────────────────────
+    // ── Year pill bar for playoffs tab ───────────────────
+    const _yearPillBar = () => {
+      if (years.length <= 1) return "";
+      return `<div class="trn-po-year-pills">
+        ${years.map(y => `<button class="trn-po-year-pill ${String(y)===String(activeY)?"trn-po-year-pill--active":""}" data-po-year="${y}">${y}</button>`).join("")}
+      </div>`;
+    };
     const _renderContent = (tabId) => {
       if (tabId==="standings")     return _renderStandingsView();
       if (tabId==="leaderboard")   return _renderLeaderboard();
       if (tabId==="bracket")       return _renderBracket();
       if (tabId==="league_champs") return _renderLeagueChamps();
       if (tabId==="wc_bracket")    return _renderWCBracket();
-      if (tabId==="wc_matchups")   return _renderWCMatchups();
       if (tabId.startsWith("round_"))   return _renderPointsRound(parseInt(tabId.split("_")[1]));
       if (tabId.startsWith("cround_"))  return _renderCustomRound(parseInt(tabId.split("_")[1]));
       if (tabId.startsWith("wcgroup_")) return _renderWCGroup(parseInt(tabId.split("_")[1]));
@@ -10077,8 +10082,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
-          ${tid ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
+          ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
         </div>
+        ${_yearPillBar()}
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
       </div>`;
@@ -10100,6 +10106,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
       document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
       _wcWireBracketButtons();
+    });
+
+    // Year pill switcher — re-renders the entire playoffs tab for the selected year
+    body.querySelectorAll(".trn-po-year-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _tournamentYear = btn.dataset.poYear;
+        _renderPlayoffsTab(tid, t, body);
+      });
     });
 
     // ── World Cup bracket wiring ─────────────────────────────────────────────
@@ -10231,7 +10245,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         } catch(e) { showToast("Failed: "+e.message, "error"); }
       });
 
-      // ── Refresh scores ────────────────────────────────────
+      // ── Refresh scores + auto-advance winners ─────────────
       document.getElementById("trn-wc-score-refresh")?.addEventListener("click", async () => {
         const bracket = po.worldcupBracket;
         if (!bracket?.length || !po.startWeek) {
@@ -10242,6 +10256,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
         try {
           const updBracket = JSON.parse(JSON.stringify(bracket));
+
+          // Step 1: fetch scores for all rounds
           for (let ri = 0; ri < updBracket.length; ri++) {
             const rndWk = po.startWeek + ri * wcWPR;
             for (const wk of Array.from({length:wcWPR},(_,i)=>rndWk+i)) {
@@ -10272,9 +10288,34 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               if (m.b) m.scoreB = _getScore(m.b);
             }
           }
+
+          // Step 2: auto-advance winners into next rounds
+          // For each round where all matchups have scores, fill in the next round.
+          // Only auto-advances if the next round slot is currently empty.
+          for (let ri = 0; ri < updBracket.length - 1; ri++) {
+            const rnd  = updBracket[ri];
+            const next = updBracket[ri + 1];
+            // Check if all matchups in this round have scores
+            const allScored = rnd.every(m => m.a && m.b && m.scoreA !== null && m.scoreB !== null);
+            if (!allScored) continue;
+            // Pair winners: match 0 winner vs match 1 winner → next[0], match 2 vs match 3 → next[1], etc.
+            for (let mi = 0; mi < Math.floor(rnd.length / 2); mi++) {
+              const mA = rnd[mi * 2];
+              const mB = rnd[mi * 2 + 1];
+              if (!mA || !mB) continue;
+              const winA = mA.scoreA >= mA.scoreB ? mA.a : mA.b;
+              const winB = mB.scoreA >= mB.scoreB ? mB.a : mB.b;
+              if (next[mi]) {
+                // Only overwrite if slot is empty (don't clobber admin-manual entries)
+                if (!next[mi].a) next[mi].a = winA;
+                if (!next[mi].b) next[mi].b = winB;
+              }
+            }
+          }
+
           await _tPlayoffsRef(tid, activeY).update({ worldcupBracket: updBracket });
           Object.assign(po, { worldcupBracket: updBracket });
-          showToast("Scores updated ✓");
+          showToast("Scores updated & winners advanced ✓");
           document.getElementById("trn-po-content").innerHTML = _renderContent("wc_bracket");
           _wcWireBracketButtons();
         } catch(e) { showToast("Score refresh failed: "+e.message, "error"); }
@@ -10337,6 +10378,38 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         recognizeLeagueChampions: !!(po.recognizeLeagueChampions),
         leagueChamps,
         weeklyScores,
+        // ── World Cup: include all config so public page renders without extra fetches ──
+        ...(mode === "worldcup" ? {
+          worldcupGroups:        po.worldcupGroups        || [],
+          worldcupSchedule:      po.worldcupSchedule      || {},
+          worldcupBracket:       po.worldcupBracket        || [],
+          worldcupBracketMode:   po.worldcupBracketMode   || "manual",
+          worldcupRegWeeks:      po.worldcupRegWeeks       ?? 6,
+          worldcupAdvanceCount:  po.worldcupAdvanceCount  ?? 2,
+          worldcupWeeksPerRound: po.worldcupWeeksPerRound  ?? 2,
+          worldcupTiebreakers:   po.worldcupTiebreakers   || null,
+          // Slim standingsCache copy so public page can do live Sleeper score lookups
+          wcStandingsCache: (() => {
+            const out = {};
+            Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+              if (String(lc.year) !== String(activeY)) return;
+              out[ck] = {
+                leagueId:   lc.leagueId || lc.league_id || "",
+                leagueName: lc.leagueName || "",
+                year:       lc.year,
+                teams: (lc.teams||[]).map(tm => ({
+                  teamId:   String(tm.teamId||""),
+                  teamName: tm.teamName || "",
+                  wins:     tm.wins    || 0,
+                  losses:   tm.losses  || 0,
+                  pf:       tm.pf      || 0,
+                  pa:       tm.pa      || 0
+                }))
+              };
+            });
+            return out;
+          })()
+        } : {}),
         standings: orderedTeams.map((tm, i) => ({
           rank:        i+1,
           teamName:    tm.teamName,
