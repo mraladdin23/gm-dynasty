@@ -8554,22 +8554,90 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // Used everywhere we need "who advanced" so the right teams appear in the
     // bracket builder, randomizer, and dropdown pools.
     const _skWC = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-    const _wcRec = (name) => {
-      for (const lc of Object.values(t.standingsCache||{})) {
-        if (String(lc.year) !== String(activeY)) continue;
-        const tm = (lc.teams||[]).find(t2 => _skWC(t2.teamName)===_skWC(name));
-        if (tm) return { wins:tm.wins||0, pf:tm.pf||0, pa:tm.pa||0 };
+
+    // Build teamName → {teamId, leagueId} from standingsCache for score lookups
+    const _wcTeamInfoMap = {};
+    Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== String(activeY)) return;
+      const lid = String(lc.leagueId || lc.league_id || ck.replace(/^\d+_/,""));
+      (lc.teams||[]).forEach(tm => {
+        if (tm.teamName) _wcTeamInfoMap[_skWC(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid };
+      });
+    });
+
+    // Compute group-stage W/L/PF/H2H from the saved schedule + _weekScoreCache.
+    // Returns { [teamName]: { wins, losses, pf, pa, h2h:{} } }
+    // If _weekScoreCache hasn't been populated for this group, all values are 0.
+    const _wcGroupRec = (g, gi) => {
+      const members  = g.members || [];
+      const schedule = (po.worldcupSchedule || {})[String(gi)] || {};
+      const regWeeks = po.worldcupRegWeeks || 6;
+      const startWk  = po.startWeek || null;
+      const _nflWk   = wi => startWk ? (startWk - regWeeks + wi) : (wi + 1);
+      const rec = {};
+      members.forEach(n => { rec[_skWC(n)] = { name:n, wins:0, losses:0, pf:0, pa:0, h2h:{} }; });
+      for (let wi = 0; wi < regWeeks; wi++) {
+        ((schedule[String(wi)] || [])).forEach(({ home, away }) => {
+          if (!home || !away || home === away) return;
+          const hKey = _skWC(home), aKey = _skWC(away);
+          if (!rec[hKey] || !rec[aKey]) return;
+          const hInfo = _wcTeamInfoMap[hKey];
+          const aInfo = _wcTeamInfoMap[aKey];
+          const nflWk = _nflWk(wi);
+          const hs = hInfo ? (_weekScoreCache[hInfo.leagueId+"|"+nflWk]?.[hInfo.teamId] ?? null) : null;
+          const as_ = aInfo ? (_weekScoreCache[aInfo.leagueId+"|"+nflWk]?.[aInfo.teamId] ?? null) : null;
+          if (hs !== null && as_ !== null) {
+            rec[hKey].pf += hs; rec[hKey].pa += as_;
+            rec[aKey].pf += as_; rec[aKey].pa += hs;
+            if (hs > as_) {
+              rec[hKey].wins++; rec[aKey].losses++;
+              rec[hKey].h2h[aKey] = (rec[hKey].h2h[aKey]||0) + 1;
+              rec[aKey].h2h[hKey] = (rec[aKey].h2h[hKey]||0) - 1;
+            } else if (as_ > hs) {
+              rec[aKey].wins++; rec[hKey].losses++;
+              rec[aKey].h2h[hKey] = (rec[aKey].h2h[hKey]||0) + 1;
+              rec[hKey].h2h[aKey] = (rec[hKey].h2h[aKey]||0) - 1;
+            }
+          }
+        });
       }
-      return { wins:0, pf:0, pa:0 };
+      return rec; // keyed by _skWC(teamName)
     };
-    const _wcQualified = (g) => {
+
+    // Return the top-N qualified teams from a group, sorted by in-group standings.
+    // gi (group index) is required so we look up the right schedule slot.
+    const _wcQualified = (g, gi) => {
       const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
+      const rec = _wcGroupRec(g, gi);
+      const hasScores = Object.values(rec).some(r => r.wins > 0 || r.losses > 0 || r.pf > 0);
       return [...(g.members||[])].sort((a, b) => {
-        const ra = _wcRec(a), rb = _wcRec(b);
-        if (rb.wins !== ra.wins) return rb.wins - ra.wins;
-        const dA = ra.pf - ra.pa, dB = rb.pf - rb.pa;
-        if (dB !== dA) return dB - dA;
-        return rb.pf - ra.pf;
+        const ra = rec[_skWC(a)], rb = rec[_skWC(b)];
+        if (hasScores) {
+          // In-group wins
+          const wd = (rb?.wins||0) - (ra?.wins||0);
+          if (wd !== 0) return wd;
+          // Direct H2H (net wins vs opponent)
+          const h2h = (ra?.h2h[_skWC(b)]||0) - (rb?.h2h[_skWC(a)]||0);
+          if (h2h !== 0) return -h2h;
+          // In-group pt diff
+          const dA = (ra?.pf||0) - (ra?.pa||0), dB = (rb?.pf||0) - (rb?.pa||0);
+          if (dB !== dA) return dB - dA;
+          // In-group PF
+          return (rb?.pf||0) - (ra?.pf||0);
+        } else {
+          // No schedule scores yet — fall back to league standingsCache
+          let tmA, tmB;
+          for (const lc of Object.values(t.standingsCache||{})) {
+            if (String(lc.year) !== String(activeY)) continue;
+            (lc.teams||[]).forEach(tm => {
+              if (_skWC(tm.teamName)===_skWC(a)) tmA = tm;
+              if (_skWC(tm.teamName)===_skWC(b)) tmB = tm;
+            });
+          }
+          const wd = (tmB?.wins||0) - (tmA?.wins||0);
+          if (wd !== 0) return wd;
+          return (tmB?.pf||0) - (tmA?.pf||0);
+        }
       }).slice(0, adv);
     };
 
@@ -9001,7 +9069,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         // Overall standings — all teams ranked by W/L/PF with qualified/eliminated badges
         const allGroupMembers = new Set(wcGroups.flatMap(g => g.members||[]));
-        const advancerSet = new Set(wcGroups.flatMap(g => _wcQualified(g)));
+        const advancerSet = new Set(wcGroups.flatMap((g, gi) => _wcQualified(g, gi)));
         const overallRows = [...allGroupMembers]
           .map(name => ({ name, ...(_teamRec(name)) }))
           .sort((a,b) => (b.wins-a.wins)||(b.pf-a.pf));
@@ -9829,12 +9897,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const bracket     = po.worldcupBracket || [];
       const bracketMode = po.worldcupBracketMode || "manual";
 
-      const advancers = groups.flatMap((g, gi) =>
-        _wcQualified(g).map(name => ({ name, groupName: g.name || ("Group "+(gi+1)) }))
-      );
-      const numTeams  = Math.max(advancers.length, 2);
-      const numRounds = Math.ceil(Math.log2(numTeams));
-
       const getRoundName = (ri, tot) =>
         ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
 
@@ -9843,6 +9905,62 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const ws = startWeekPo + ri * wcWPR;
         return `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR>1?`Wks ${ws}–${ws+wcWPR-1}`:`Wk ${ws}`}</span>`;
       };
+
+      // ── Always pre-fetch group-stage scores so _wcQualified has real data ──
+      // This runs async and re-renders the bracket tab once scores are loaded.
+      // It only fetches weeks not already in _weekScoreCache.
+      const _prefetchAndRender = async () => {
+        const regWks   = po.worldcupRegWeeks || 6;
+        const startWk  = startWeekPo || null;
+        const _nflWk   = wi => startWk ? (startWk - regWks + wi) : (wi + 1);
+        const toFetch  = []; // [{leagueId, week}]
+        groups.forEach((g, gi) => {
+          const sched = (po.worldcupSchedule || {})[String(gi)] || {};
+          for (let wi = 0; wi < regWks; wi++) {
+            if (!(sched[String(wi)] || []).length) continue;
+            const nflWk = _nflWk(wi);
+            const members = g.members || [];
+            members.forEach(name => {
+              const info = _wcTeamInfoMap[_skWC(name)];
+              if (info?.leagueId) {
+                const key = info.leagueId + "|" + nflWk;
+                if (!_weekScoreCache[key]) toFetch.push({ leagueId: info.leagueId, week: nflWk });
+              }
+            });
+          }
+        });
+
+        if (toFetch.length === 0) return; // already cached — no re-render needed
+
+        // Deduplicate
+        const seen = new Set();
+        const unique = toFetch.filter(({leagueId, week}) => {
+          const k = leagueId + "|" + week;
+          if (seen.has(k)) return false;
+          seen.add(k); return true;
+        });
+
+        try {
+          await Promise.all(unique.map(({leagueId, week}) => _fetchWeekScores(leagueId, week)));
+        } catch(e) { /* non-fatal */ }
+
+        // Re-render now that _weekScoreCache is populated
+        const contentEl = document.getElementById("trn-po-content");
+        if (contentEl) {
+          contentEl.innerHTML = _renderContent("wc_bracket");
+          _wcWireBracketButtons();
+        }
+      };
+
+      // Kick off the pre-fetch (runs in background; re-renders when done)
+      setTimeout(_prefetchAndRender, 0);
+
+      // Build advancers using whatever is currently in _weekScoreCache
+      const advancers = groups.flatMap((g, gi) =>
+        _wcQualified(g, gi).map(name => ({ name, groupName: g.name || ("Group "+(gi+1)) }))
+      );
+      const numTeams  = Math.max(advancers.length, 2);
+      const numRounds = Math.ceil(Math.log2(numTeams));
 
       // ── Viewer (non-admin): read-only bracket ───────────────
       if (!isAdmin) {
@@ -9997,7 +10115,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               (po.worldcupGroups||[]).forEach((g,gi2) => {
                 const gn = g.name||("Group "+(gi2+1));
                 byGrp[gn] = byGrp[gn] || [];
-                _wcQualified(g).forEach(n => byGrp[gn].push(n));
+                _wcQualified(g, gi2).forEach(n => byGrp[gn].push(n));
               });
               let h = `<option value="">— Select —</option>`;
               Object.entries(byGrp).forEach(([gn,ns]) => {
@@ -10166,7 +10284,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const placed = new Set(sels.map(s=>s.value).filter(Boolean));
         const groups = po.worldcupGroups || [];
         const advancers = groups.flatMap((g,gi) =>
-          _wcQualified(g).map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
+          _wcQualified(g,gi).map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
         );
         const byGroup = {};
         advancers.forEach(adv => {
@@ -10194,7 +10312,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       document.getElementById("trn-wc-bld-randomize")?.addEventListener("click", () => {
         const groups = po.worldcupGroups || [];
         const advancers = groups.flatMap((g,gi) =>
-          _wcQualified(g).map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
+          _wcQualified(g,gi).map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
         );
         // Fisher-Yates shuffle
         const pool = [...advancers];
