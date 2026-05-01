@@ -9636,49 +9636,70 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             ? po.worldcupTiebreakers
             : ["h2h_record_tied","h2h_pt_diff","overall_pt_diff","overall_pf"];
 
-          // Apply tiebreaker chain between two teams a and b.
-          // For "tied" tiebreakers we only consider the direct matchup between a and b.
-          const _applyTB = (a, b, tiedGroup) => {
+          // Apply the configured tiebreaker chain between exactly two tied teams.
+          const _applyTB2 = (a, b) => {
             for (const tb of tbChain) {
               let diff = 0;
               if (tb === "h2h_record") {
-                // Net wins vs every group opponent (not just b)
                 const netA = Object.values(records[a].h2h).reduce((s,v)=>s+v,0);
                 const netB = Object.values(records[b].h2h).reduce((s,v)=>s+v,0);
                 diff = netA - netB;
               } else if (tb === "h2h_record_tied") {
-                // Net wins vs b only (direct H2H)
                 diff = (records[a].h2h[b]||0) - (records[b].h2h[a]||0);
               } else if (tb === "h2h_pt_diff") {
-                // Net PF in direct H2H matchups vs b
                 diff = (records[a].h2hPF[b]||0) - (records[b].h2hPF[a]||0);
               } else if (tb === "overall_pt_diff") {
                 diff = (records[a].pf - records[a].pa) - (records[b].pf - records[b].pa);
               } else if (tb === "overall_pf") {
                 diff = records[a].pf - records[b].pf;
               }
-              if (diff !== 0) return diff > 0 ? -1 : 1; // negative = a ranks higher
+              if (diff !== 0) return diff > 0 ? -1 : 1;
             }
             return 0;
           };
 
-          // Sort: wins desc first, then tiebreaker chain
+          // Build a map of win count → list of teams with that record,
+          // so we know at comparison time how many teams are actually tied.
+          const winGroups = {};
+          members.forEach(name => {
+            const w = records[name].wins;
+            (winGroups[w] = winGroups[w] || []).push(name);
+          });
+
+          // Sort: wins desc first, then tiebreaker rule.
+          // Rule: if 3+ teams share the same win total → overall pt diff only.
+          //       if exactly 2 teams share the same win total → full configured chain.
           let tiebreakUsed = false;
           const sorted = [...members].sort((a, b) => {
             const wa = records[a].wins, wb = records[b].wins;
             if (wb !== wa) return wb - wa;
             tiebreakUsed = true;
-            return _applyTB(a, b, members);
+            const tiedCount = (winGroups[wa] || []).length;
+            if (tiedCount >= 3) {
+              // 3+ way tie: overall point differential only
+              const diff = (records[a].pf - records[a].pa) - (records[b].pf - records[b].pa);
+              if (diff !== 0) return diff > 0 ? -1 : 1;
+              // Final fallback: overall PF
+              return records[b].pf - records[a].pf;
+            }
+            // 2-way tie: apply full configured chain
+            return _applyTB2(a, b);
           });
 
-          // Build the tiebreaker label for the footnote
-          const tbLabel = tbChain.map(k => ({
+          // Build the tiebreaker footnote label
+          // Describe the actual rule(s) that were in play
+          const multiTied = Object.values(winGroups).some(g => g.length >= 3);
+          const pairTied  = Object.values(winGroups).some(g => g.length === 2);
+          const tbParts   = [];
+          if (multiTied) tbParts.push("3+-way tie → Overall Pt Diff");
+          if (pairTied)  tbParts.push("2-way tie → " + tbChain.map(k => ({
             h2h_record:      "H2H Record",
             h2h_record_tied: "H2H Record (direct)",
             h2h_pt_diff:     "H2H Pt Diff",
             overall_pt_diff: "Overall Pt Diff",
             overall_pf:      "Overall PF"
-          }[k]||k)).join(" → ");
+          }[k]||k)).join(" → "));
+          const tbLabel = tbParts.join(" | ");
 
           // Build table rows
           const rows = sorted.map((name, i) => {
