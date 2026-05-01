@@ -8548,6 +8548,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       t.roles?.[_currentUsername]?.role === "sub_admin"
     ) && !_viewingAsUser;
 
+    // Broader check: true even if t.roles structure differs slightly
+    const _poIsAdmin = isAdmin ||
+      (t.meta?.createdBy === _currentUsername && !_viewingAsUser);
+
+    console.log("[DLR Playoffs] mode:", mode, "isAdmin:", isAdmin, "_poIsAdmin:", _poIsAdmin,
+      "username:", _currentUsername, "role:", t.roles?.[_currentUsername]?.role,
+      "viewingAsUser:", _viewingAsUser);
+
     // ── World Cup: sorted advancers helper ───────────────────────────────────
     // Returns the qualified teams for a group, sorted by standings (wins desc,
     // overall pt diff desc, pf desc) from standingsCache — NOT raw member order.
@@ -9604,7 +9612,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const storedGroups = matchups[roundIdx]; // array of groups, each group = array of team names
       const hasMatchups  = storedGroups?.length > 0 && storedGroups.some(g => g?.some(Boolean));
 
-      if (!hasMatchups && isAdmin) {
+      if (!hasMatchups && _poIsAdmin) {
         return `
           <div class="trn-po-round-card">
             <div class="trn-po-round-header"><span>Round ${roundIdx+1}</span></div>
@@ -10387,10 +10395,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
-          ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
-          ${isAdmin && mode==="custom_rounds" ? `<button class="btn-secondary btn-sm" id="trn-cr-set-matchups-btn">📋 Set Matchups</button>` : ""}
+          ${_poIsAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
+          ${_poIsAdmin && mode==="custom_rounds" ? `<button class="btn-secondary btn-sm" id="trn-cr-set-matchups-btn">📋 Set Matchups</button>` : ""}
         </div>
-        ${isAdmin && mode==="custom_rounds" ? `<div id="trn-cr-matchup-panel"></div>` : ""}
+        ${_poIsAdmin && mode==="custom_rounds" ? `<div id="trn-cr-matchup-panel"></div>` : ""}
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
       </div>`;
