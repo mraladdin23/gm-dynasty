@@ -8575,7 +8575,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const startWk  = po.startWeek || null;
       const _nflWk   = wi => startWk ? (startWk - regWeeks + wi) : (wi + 1);
       const rec = {};
-      members.forEach(n => { rec[_skWC(n)] = { name:n, wins:0, losses:0, pf:0, pa:0, h2h:{} }; });
+      members.forEach(n => { rec[_skWC(n)] = { name:n, wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{} }; });
       for (let wi = 0; wi < regWeeks; wi++) {
         ((schedule[String(wi)] || [])).forEach(({ home, away }) => {
           if (!home || !away || home === away) return;
@@ -8584,11 +8584,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const hInfo = _wcTeamInfoMap[hKey];
           const aInfo = _wcTeamInfoMap[aKey];
           const nflWk = _nflWk(wi);
-          const hs = hInfo ? (_weekScoreCache[hInfo.leagueId+"|"+nflWk]?.[hInfo.teamId] ?? null) : null;
+          const hs  = hInfo ? (_weekScoreCache[hInfo.leagueId+"|"+nflWk]?.[hInfo.teamId] ?? null) : null;
           const as_ = aInfo ? (_weekScoreCache[aInfo.leagueId+"|"+nflWk]?.[aInfo.teamId] ?? null) : null;
           if (hs !== null && as_ !== null) {
             rec[hKey].pf += hs; rec[hKey].pa += as_;
             rec[aKey].pf += as_; rec[aKey].pa += hs;
+            // H2H point differential (net PF across all direct matchups)
+            rec[hKey].h2hPF[aKey] = (rec[hKey].h2hPF[aKey]||0) + (hs - as_);
+            rec[aKey].h2hPF[hKey] = (rec[aKey].h2hPF[hKey]||0) + (as_ - hs);
             if (hs > as_) {
               rec[hKey].wins++; rec[aKey].losses++;
               rec[hKey].h2h[aKey] = (rec[hKey].h2h[aKey]||0) + 1;
@@ -8610,22 +8613,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
       const rec = _wcGroupRec(g, gi);
       const hasScores = Object.values(rec).some(r => r.wins > 0 || r.losses > 0 || r.pf > 0);
-      return [...(g.members||[])].sort((a, b) => {
-        const ra = rec[_skWC(a)], rb = rec[_skWC(b)];
-        if (hasScores) {
-          // In-group wins
-          const wd = (rb?.wins||0) - (ra?.wins||0);
-          if (wd !== 0) return wd;
-          // Direct H2H (net wins vs opponent)
-          const h2h = (ra?.h2h[_skWC(b)]||0) - (rb?.h2h[_skWC(a)]||0);
-          if (h2h !== 0) return -h2h;
-          // In-group pt diff
-          const dA = (ra?.pf||0) - (ra?.pa||0), dB = (rb?.pf||0) - (rb?.pa||0);
-          if (dB !== dA) return dB - dA;
-          // In-group PF
-          return (rb?.pf||0) - (ra?.pf||0);
-        } else {
-          // No schedule scores yet — fall back to league standingsCache
+
+      if (!hasScores) {
+        // No schedule scores yet — fall back to league standingsCache W/L/PF
+        return [...(g.members||[])].sort((a, b) => {
           let tmA, tmB;
           for (const lc of Object.values(t.standingsCache||{})) {
             if (String(lc.year) !== String(activeY)) continue;
@@ -8637,7 +8628,59 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const wd = (tmB?.wins||0) - (tmA?.wins||0);
           if (wd !== 0) return wd;
           return (tmB?.pf||0) - (tmA?.pf||0);
+        }).slice(0, adv);
+      }
+
+      // Use the same tiebreaker chain + 3+-way vs 2-way rule as _renderWCGroup
+      const tbChain = Array.isArray(po.worldcupTiebreakers) && po.worldcupTiebreakers.length
+        ? po.worldcupTiebreakers
+        : ["h2h_record_tied", "h2h_pt_diff", "overall_pt_diff", "overall_pf"];
+
+      // Build win-count groups so we know how many teams are tied at comparison time
+      const winGroups = {};
+      (g.members||[]).forEach(name => {
+        const w = rec[_skWC(name)]?.wins || 0;
+        (winGroups[w] = winGroups[w] || []).push(name);
+      });
+
+      const _applyTB = (a, b) => {
+        const ka = _skWC(a), kb = _skWC(b);
+        const ra = rec[ka], rb = rec[kb];
+        for (const tb of tbChain) {
+          let diff = 0;
+          if (tb === "h2h_record") {
+            // Net wins vs all group opponents
+            const netA = Object.values(ra.h2h||{}).reduce((s,v)=>s+v,0);
+            const netB = Object.values(rb.h2h||{}).reduce((s,v)=>s+v,0);
+            diff = netA - netB;
+          } else if (tb === "h2h_record_tied") {
+            // Direct H2H net wins between a and b only
+            diff = (ra.h2h?.[kb]||0) - (rb.h2h?.[ka]||0);
+          } else if (tb === "h2h_pt_diff") {
+            // Net point differential in direct H2H matchups
+            diff = (ra.h2hPF?.[kb]||0) - (rb.h2hPF?.[ka]||0);
+          } else if (tb === "overall_pt_diff") {
+            diff = (ra.pf - ra.pa) - (rb.pf - rb.pa);
+          } else if (tb === "overall_pf") {
+            diff = ra.pf - rb.pf;
+          }
+          if (diff !== 0) return diff > 0 ? -1 : 1;
         }
+        return 0;
+      };
+
+      return [...(g.members||[])].sort((a, b) => {
+        const wa = rec[_skWC(a)]?.wins||0, wb = rec[_skWC(b)]?.wins||0;
+        if (wb !== wa) return wb - wa;
+        const tiedCount = (winGroups[wa] || []).length;
+        if (tiedCount >= 3) {
+          // 3+ way tie: overall pt diff only, then PF
+          const diff = (rec[_skWC(a)].pf - rec[_skWC(a)].pa) - (rec[_skWC(b)].pf - rec[_skWC(b)].pa);
+          if (diff !== 0) return diff > 0 ? -1 : 1;
+          return rec[_skWC(b)].pf - rec[_skWC(a)].pf;
+        }
+        // 2-way tie: full configured chain
+        return _applyTB(a, b);
       }).slice(0, adv);
     };
 
