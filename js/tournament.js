@@ -10303,7 +10303,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return tRow(curName, scoreVal, isWin, isLoss);
           };
           const top  = topOf(ri, mi);
-          const hasSibling = (mi % 2 === 0 && mi + 1 < n2) || (mi % 2 === 1);
+          const hasSibling = (mi % 2 === 0 && mi + 1 < n) || (mi % 2 === 1);
           const gap  = hasSibling ? connGap(ri, mi) : 0;
           const isTopOfPair = mi % 2 === 0;
           const connCls = (ri < nr - 1 && hasSibling)
