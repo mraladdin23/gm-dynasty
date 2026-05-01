@@ -10344,62 +10344,92 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // All its winners become the free-pick pool for the next round.
       let nextRoundPanel = "";
       if (isAdmin) {
-        // Find the active round: last round where all matchups have both teams + scores
-        let completedRi = -1;
+        const getRN = (ri) => ri===bracket.length-1?"🏆 Championship":ri===bracket.length-2?"Semifinals":ri===bracket.length-3?"Quarterfinals":`Round ${ri+1}`;
+
+        // Find the "active" next round to assign:
+        // Walk rounds in order. A round is "scored" when every matchup has both teams + both scores.
+        // A round is "seeded but unscored" when matchups have teams but missing scores.
+        // The panel should show for the FIRST round that needs team assignment —
+        // i.e. the first round where any slot is empty (missing a or b).
+        // The winner pool comes from the most recently fully-scored round before it.
+
+        // Step 1: find last fully-scored round
+        let lastScoredRi = -1;
         for (let ri = 0; ri < bracket.length; ri++) {
           const rnd = bracket[ri] || [];
-          if (rnd.length > 0 && rnd.every(m => m.a && m.b && m.scoreA !== null && m.scoreA !== undefined && m.scoreB !== null && m.scoreB !== undefined)) {
-            completedRi = ri;
-          } else {
-            break; // stop at first incomplete round
+          if (rnd.length > 0 && rnd.every(m =>
+            m.a && m.b &&
+            m.scoreA !== null && m.scoreA !== undefined &&
+            m.scoreB !== null && m.scoreB !== undefined
+          )) {
+            lastScoredRi = ri;
           }
         }
-        const nextRi = completedRi + 1;
-        const nextRnd = bracket[nextRi];
 
-        if (nextRnd && completedRi >= 0) {
-          // Collect winners from completed round — free pool, any can go anywhere
-          const winners = (bracket[completedRi] || []).map(m =>
-            m.scoreA >= m.scoreB ? m.a : m.b
+        // Step 2: find next round needing assignment (first round with any empty slot)
+        // This could be the round immediately after lastScoredRi, or any later round
+        let targetRi = -1;
+        for (let ri = lastScoredRi + 1; ri < bracket.length; ri++) {
+          const rnd = bracket[ri] || [];
+          // Show panel if this round has empty team slots
+          if (rnd.some(m => !m.a || !m.b)) {
+            targetRi = ri;
+            break;
+          }
+        }
+
+        // Also show panel if lastScoredRi exists and next round needs filling
+        if (targetRi === -1 && lastScoredRi >= 0 && lastScoredRi < bracket.length - 1) {
+          targetRi = lastScoredRi + 1;
+        }
+
+        const targetRnd = bracket[targetRi];
+
+        if (targetRnd && lastScoredRi >= 0) {
+          // Winner pool = all winners from the last fully-scored round
+          const winners = (bracket[lastScoredRi] || []).map(m =>
+            (m.scoreA !== null && m.scoreB !== null)
+              ? (m.scoreA >= m.scoreB ? m.a : m.b)
+              : null
           ).filter(Boolean);
 
-          const nextSlots = nextRnd.map((m, mi) => ({
-            a: m.a || "", b: m.b || "", mi
-          }));
+          if (winners.length > 0) {
+            const nextSlots = targetRnd.map((m, mi) => ({
+              a: m.a || "", b: m.b || "", mi
+            }));
 
-          const getRN = (ri) => ri===bracket.length-1?"🏆 Championship":ri===bracket.length-2?"Semifinals":ri===bracket.length-3?"Quarterfinals":`Round ${ri+1}`;
+            const _opts = (placed, cur) => {
+              let h = `<option value="">— Select winner —</option>`;
+              winners.forEach(name => {
+                const dis = placed.has(name) && name !== cur;
+                h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
+              });
+              return h;
+            };
 
-          const _opts = (placed, cur) => {
-            let h = `<option value="">— Select winner —</option>`;
-            winners.forEach(name => {
-              const dis = placed.has(name) && name !== cur;
-              h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
-            });
-            return h;
-          };
+            const matchupRows = nextSlots.map(({a, b, mi}) => {
+              const placed = new Set(nextSlots.map(s=>[s.a,s.b]).flat().filter(Boolean));
+              return `<div class="trn-wc-setup-matchup" data-mi="${mi}">
+                <span class="trn-wc-setup-num">${mi+1}</span>
+                <select class="trn-wc-next-sel" data-mi="${mi}" data-side="a">${_opts(placed, a)}</select>
+                <span class="trn-wc-setup-vs">vs</span>
+                <select class="trn-wc-next-sel" data-mi="${mi}" data-side="b">${_opts(placed, b)}</select>
+              </div>`;
+            }).join("");
 
-          const matchupRows = nextSlots.map(({a, b, mi}) => {
-            const placed = new Set(nextSlots.map(s=>[s.a,s.b]).flat().filter(Boolean));
-            return `<div class="trn-wc-setup-matchup" data-mi="${mi}">
-              <span class="trn-wc-setup-num">${mi+1}</span>
-              <select class="trn-wc-next-sel" data-mi="${mi}" data-side="a">${_opts(placed, a)}</select>
-              <span class="trn-wc-setup-vs">vs</span>
-              <select class="trn-wc-next-sel" data-mi="${mi}" data-side="b">${_opts(placed, b)}</select>
-            </div>`;
-          }).join("");
-
-          nextRoundPanel = `
-            <div class="trn-section-card" style="margin-top:var(--space-3);max-width:560px">
-              <div class="trn-section-card-title">Set ${getRN(nextRi)} Matchups</div>
-              <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-                ${getRN(completedRi)} is complete. Assign the ${winners.length} winners to ${getRN(nextRi)} matchups freely — any winner can go in any slot.
-              </p>
-              <div id="trn-wc-next-rows" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3)">${matchupRows}</div>
-              <div style="display:flex;gap:var(--space-2);align-items:center">
-                <button class="btn-primary btn-sm" id="trn-wc-next-save" data-next-ri="${nextRi}">💾 Save ${getRN(nextRi)} Matchups</button>
-                <span style="font-size:.73rem;color:var(--color-text-dim)">${winners.length} winners → ${nextSlots.length} matchups</span>
-              </div>
-            </div>`;
+            nextRoundPanel = `
+              <div class="trn-section-card" style="margin-top:var(--space-3);max-width:560px">
+                <div class="trn-section-card-title">Set ${getRN(targetRi)} Matchups</div>
+                <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+                  ${getRN(lastScoredRi)} complete — assign all ${winners.length} winners to ${getRN(targetRi)} matchups. Any winner can go in any slot.
+                </p>
+                <div id="trn-wc-next-rows" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3)">${matchupRows}</div>
+                <div style="display:flex;gap:var(--space-2);align-items:center">
+                  <button class="btn-primary btn-sm" id="trn-wc-next-save" data-next-ri="${targetRi}">💾 Save ${getRN(targetRi)} Matchups</button>
+                  <span style="font-size:.73rem;color:var(--color-text-dim)">${winners.length} winners → ${nextSlots.length} matchups</span>
+                </div>
+              </div>`;
+          }
         }
       }
 
