@@ -10346,14 +10346,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (isAdmin) {
         const getRN = (ri) => ri===bracket.length-1?"🏆 Championship":ri===bracket.length-2?"Semifinals":ri===bracket.length-3?"Quarterfinals":`Round ${ri+1}`;
 
-        // Find the "active" next round to assign:
-        // Walk rounds in order. A round is "scored" when every matchup has both teams + both scores.
-        // A round is "seeded but unscored" when matchups have teams but missing scores.
-        // The panel should show for the FIRST round that needs team assignment —
-        // i.e. the first round where any slot is empty (missing a or b).
-        // The winner pool comes from the most recently fully-scored round before it.
-
-        // Step 1: find last fully-scored round
+        // Find last fully-scored round (every matchup has both teams + both scores)
         let lastScoredRi = -1;
         for (let ri = 0; ri < bracket.length; ri++) {
           const rnd = bracket[ri] || [];
@@ -10366,31 +10359,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
         }
 
-        // Step 2: find next round needing assignment (first round with any empty slot)
-        // This could be the round immediately after lastScoredRi, or any later round
-        let targetRi = -1;
-        for (let ri = lastScoredRi + 1; ri < bracket.length; ri++) {
-          const rnd = bracket[ri] || [];
-          // Show panel if this round has empty team slots
-          if (rnd.some(m => !m.a || !m.b)) {
-            targetRi = ri;
-            break;
-          }
-        }
-
-        // Also show panel if lastScoredRi exists and next round needs filling
-        if (targetRi === -1 && lastScoredRi >= 0 && lastScoredRi < bracket.length - 1) {
-          targetRi = lastScoredRi + 1;
-        }
-
+        // The target round for assignment is always immediately after the last scored round.
+        // Even if auto-advance already filled it with winners, the admin may want to
+        // re-assign or confirm the matchups — so we always show the panel for that round.
+        const targetRi  = lastScoredRi + 1;
         const targetRnd = bracket[targetRi];
 
-        if (targetRnd && lastScoredRi >= 0) {
-          // Winner pool = all winners from the last fully-scored round
+        // Don't show panel for the final round (championship is determined by scores)
+        const isFinalRound = targetRi === bracket.length - 1;
+
+        if (targetRnd && lastScoredRi >= 0 && !isFinalRound) {
           const winners = (bracket[lastScoredRi] || []).map(m =>
-            (m.scoreA !== null && m.scoreB !== null)
-              ? (m.scoreA >= m.scoreB ? m.a : m.b)
-              : null
+            m.scoreA >= m.scoreB ? m.a : m.b
           ).filter(Boolean);
 
           if (winners.length > 0) {
@@ -10421,11 +10401,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div class="trn-section-card" style="margin-top:var(--space-3);max-width:560px">
                 <div class="trn-section-card-title">Set ${getRN(targetRi)} Matchups</div>
                 <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-                  ${getRN(lastScoredRi)} complete — assign all ${winners.length} winners to ${getRN(targetRi)} matchups. Any winner can go in any slot.
+                  ${getRN(lastScoredRi)} complete — assign ${winners.length} winners to ${getRN(targetRi)} matchups. Any winner can go in any slot.
+                  ${targetRnd.some(m=>m.a||m.b) ? `<br><span style="color:var(--color-gold,#d4af37)">⚡ Auto-filled from scores — review and save to confirm, or reassign freely.</span>` : ""}
                 </p>
                 <div id="trn-wc-next-rows" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3)">${matchupRows}</div>
-                <div style="display:flex;gap:var(--space-2);align-items:center">
+                <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
                   <button class="btn-primary btn-sm" id="trn-wc-next-save" data-next-ri="${targetRi}">💾 Save ${getRN(targetRi)} Matchups</button>
+                  <button class="btn-secondary btn-sm" id="trn-wc-next-clear" data-clear-ri="${targetRi}">✕ Clear This Round</button>
                   <span style="font-size:.73rem;color:var(--color-text-dim)">${winners.length} winners → ${nextSlots.length} matchups</span>
                 </div>
               </div>`;
@@ -10686,7 +10668,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           .catch(e => showToast("Failed: "+e.message, "error"));
       });
 
-      // ── Next-round free-pick: cross-exclusion ────────────
+      // ── Clear a specific round (go back) ─────────────────
+      document.getElementById("trn-wc-next-clear")?.addEventListener("click", async () => {
+        const btn     = document.getElementById("trn-wc-next-clear");
+        const clearRi = parseInt(btn?.dataset.clearRi ?? "-1");
+        if (clearRi < 0) return;
+        if (!confirm(`Clear ${["Round 1","Round 2","Quarterfinals","Semifinals","Championship"][clearRi] || ("Round "+(clearRi+1))} matchups? This lets you reassign them.`)) return;
+        const updBracket = JSON.parse(JSON.stringify(po.worldcupBracket || []));
+        // Clear teams and scores for this round onwards (since downstream rounds depend on it)
+        for (let ri = clearRi; ri < updBracket.length; ri++) {
+          updBracket[ri] = (updBracket[ri] || []).map(() => ({a:"",b:"",scoreA:null,scoreB:null}));
+        }
+        try {
+          await _tPlayoffsRef(tid, activeY).update({ worldcupBracket: updBracket });
+          Object.assign(po, { worldcupBracket: updBracket });
+          showToast("Round cleared ✓");
+          document.getElementById("trn-po-content").innerHTML = _renderContent("wc_bracket");
+          _wcWireBracketButtons();
+        } catch(e) { showToast("Failed: "+e.message, "error"); }
+      });
       const _refreshNextSels = () => {
         const sels = Array.from(document.querySelectorAll(".trn-wc-next-sel"));
         const placed = new Set(sels.map(s => s.value).filter(Boolean));
