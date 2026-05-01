@@ -8548,14 +8548,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       t.roles?.[_currentUsername]?.role === "sub_admin"
     ) && !_viewingAsUser;
 
-    // Broader check: true even if t.roles structure differs slightly
-    const _poIsAdmin = isAdmin ||
-      (t.meta?.createdBy === _currentUsername && !_viewingAsUser);
-
-    console.log("[DLR Playoffs] mode:", mode, "isAdmin:", isAdmin, "_poIsAdmin:", _poIsAdmin,
-      "username:", _currentUsername, "role:", t.roles?.[_currentUsername]?.role,
-      "viewingAsUser:", _viewingAsUser);
-
     // ── World Cup: sorted advancers helper ───────────────────────────────────
     // Returns the qualified teams for a group, sorted by standings (wins desc,
     // overall pt diff desc, pf desc) from standingsCache — NOT raw member order.
@@ -9600,16 +9592,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Custom round tab ─────────────────────────────────
     const _renderCustomRound = (roundIdx) => {
-      const rounds   = po.customRounds?.rounds    || [];
-      const matchups = po.customRounds?.matchups  || []; // [roundIdx][groupIdx] = [teamName,...]
-      const round    = rounds[roundIdx];
+      const rounds      = po.customRounds?.rounds    || [];
+      const matchups    = po.customRounds?.matchups  || [];
+      const round       = rounds[roundIdx];
       if (!round) return `<div class="trn-po-empty">Round not configured.</div>`;
-      const isFinal  = roundIdx === rounds.length - 1;
-      const weekNum  = po.startWeek ? po.startWeek + roundIdx : null;
-      const tableId  = `trn-cr-table-${roundIdx}`;
-      const loaderId = `trn-cr-loader-${roundIdx}`;
-
-      const storedGroups = matchups[roundIdx]; // array of groups, each group = array of team names
+      const isFinal     = roundIdx === rounds.length - 1;
+      const weekNum     = po.startWeek ? po.startWeek + roundIdx : null;
+      const tableId     = `trn-cr-table-${roundIdx}`;
+      const loaderId    = `trn-cr-loader-${roundIdx}`;
+      const storedGroups = matchups[roundIdx];
       const hasMatchups  = storedGroups?.length > 0 && storedGroups.some(g => g?.some(Boolean));
 
       if (!hasMatchups && _poIsAdmin) {
@@ -9634,17 +9625,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       (async () => {
         try {
-          // Build teamName → team object map from sortedTeams
-          const _skCR   = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+          const _skCR  = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
           const teamMap = {};
           sortedTeams.forEach(tm => { teamMap[_skCR(_displayName(tm))] = tm; });
 
-          // Fetch this week's scores for all leagues
-          const allLeagueIds = [...new Set(sortedTeams.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
-          if (weekNum) await Promise.all(allLeagueIds.map(lid => _fetchWeekScores(lid, weekNum)));
+          const involvedTeams = (storedGroups||[]).flat().filter(Boolean);
+          const lids = [...new Set(involvedTeams.map(name => {
+            const tm = teamMap[_skCR(name)];
+            return tm ? leagueIdByTeamKey[_teamKey(tm)] : null;
+          }).filter(Boolean))];
+          if (weekNum) await Promise.all(lids.map(lid => _fetchWeekScores(lid, weekNum)));
 
-          const _score = (teamName) => {
-            const tm = teamMap[_skCR(teamName)];
+          const _score = (name) => {
+            const tm = teamMap[_skCR(name)];
             if (!tm) return null;
             const lid = leagueIdByTeamKey[_teamKey(tm)];
             if (!lid || !weekNum) return null;
@@ -9652,57 +9645,118 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return v != null ? v : null;
           };
 
-          // Render each group — teams are exactly who was stored in the assignment
-          const numGroups = storedGroups.length;
-          const apg       = isFinal ? 1 : (round.advPerGroup || 1);
+          const apg = isFinal ? 1 : (round.advPerGroup || 1);
+          const winners = [];
 
-          const groupsHTML = storedGroups.map((groupTeams, gi) => {
+          const groupsHTML = (storedGroups||[]).map((groupTeams, gi) => {
             const valid = (groupTeams||[]).filter(Boolean);
             if (!valid.length) return "";
-
-            // Score each team and sort by score desc
-            const scored = valid.map(name => ({
-              name,
-              score: _score(name)
-            })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-
-            // Determine winners: top apg by score
-            // If only 2 teams (H2H matchup), winner = higher score
+            const scored = valid.map(name => ({name, score: _score(name)}))
+              .sort((a,b) => (b.score??-1) - (a.score??-1));
+            scored.slice(0, apg).forEach(({name}) => winners.push({name, groupIdx: gi}));
             return `<div class="trn-po-group-card">
               <div class="trn-po-group-title">Group ${gi+1}</div>
               ${scored.map(({name, score}, ti) => {
                 const adv = ti < apg;
-                const won = scored.length === 2 ? (ti === 0) : adv;
                 return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}">
                   <span class="trn-po-rank">${ti+1}</span>
                   <span class="trn-po-team-name">${_esc(name)}</span>
-                  ${scored.length === 2
-                    ? (score !== null
-                        ? `<span class="trn-po-badge" style="background:${adv?"rgba(74,222,128,.15)":"rgba(248,113,113,.12)"};color:${adv?"#4ade80":"#f87171"}">${adv?"W":"L"}</span>`
-                        : "")
-                    : ""}
-                  <span class="trn-po-pf" style="margin-left:auto">${score != null ? score.toFixed(2) : "—"}</span>
-                  ${adv
-                    ? '<span class="trn-po-badge trn-po-badge--advance">↑</span>'
-                    : '<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
+                  ${scored.length===2&&score!==null?`<span class="trn-po-badge" style="background:${adv?"rgba(74,222,128,.15)":"rgba(248,113,113,.12)"};color:${adv?"#4ade80":"#f87171"}">${adv?"W":"L"}</span>`:""}
+                  <span class="trn-po-pf" style="margin-left:auto">${score!=null?score.toFixed(2):"—"}</span>
+                  ${adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
+                      :'<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
                 </div>`;
               }).join("")}
             </div>`;
           }).join("");
 
+          // After all groups are scored: show next-round assignment panel (admin only)
+          const nextRoundIdx = roundIdx + 1;
+          const nextRound    = rounds[nextRoundIdx];
+          const allScored    = (storedGroups||[]).every(grp =>
+            (grp||[]).filter(Boolean).every(name => _score(name) !== null)
+          );
+
+          const nextMatchupHTML = (!isFinal && _poIsAdmin && nextRound && allScored && winners.length > 0) ? (() => {
+            const storedNext    = (matchups[nextRoundIdx] || []);
+            const nextNumGroups = nextRound.groups || 1;
+            const nextTpg       = nextRound.teamsPerGroup || 2;
+            const _nextOpts = (placed, cur) => {
+              let h = `<option value="">— Select winner —</option>`;
+              winners.forEach(({name}) => {
+                const dis = placed.has(name) && name !== cur;
+                h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
+              });
+              return h;
+            };
+            const grpRows = Array.from({length: nextNumGroups}, (_, gi) => {
+              const storedGrp = storedNext[gi] || [];
+              const slots = Array.from({length: nextTpg}, (_, si) => storedGrp[si] || "");
+              return `<div class="trn-cr-mu-group">
+                <div style="font-size:.72rem;font-weight:700;color:var(--color-text-dim);margin-bottom:4px">Group ${gi+1}</div>
+                <div style="display:flex;flex-direction:column;gap:4px">
+                  ${slots.map((cur,si)=>`<select class="trn-cr-nr-sel" data-ri="${nextRoundIdx}" data-gi="${gi}" data-si="${si}"
+                    style="font-size:.78rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${_nextOpts(new Set(), cur)}</select>`).join("")}
+                </div>
+              </div>`;
+            }).join("");
+            return `<div class="trn-section-card" style="margin-top:var(--space-3)">
+              <div class="trn-section-card-title">Set Round ${nextRoundIdx+1} Matchups</div>
+              <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-2)">Round ${roundIdx+1} complete — assign winners to Round ${nextRoundIdx+1} groups.</p>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--space-2);margin-bottom:var(--space-2)">${grpRows}</div>
+              <button class="btn-primary btn-sm" id="trn-cr-nr-save-${nextRoundIdx}">💾 Save Round ${nextRoundIdx+1} Matchups</button>
+            </div>`;
+          })() : "";
+
           const tableEl  = document.getElementById(tableId);
           const loaderEl = document.getElementById(loaderId);
-          if (tableEl)  tableEl.innerHTML  = `<div class="trn-po-groups-wrap">${groupsHTML}</div>`;
+          if (tableEl)  tableEl.innerHTML  = `<div class="trn-po-groups-wrap">${groupsHTML}</div>${nextMatchupHTML}`;
           if (loaderEl) loaderEl.style.display = "none";
+
+          if (nextMatchupHTML) {
+            const _refreshNR = () => {
+              const sels = Array.from(document.querySelectorAll(".trn-cr-nr-sel"));
+              const placed = new Set(sels.map(s=>s.value).filter(Boolean));
+              sels.forEach(sel => {
+                const cur = sel.value;
+                let h = `<option value="">— Select winner —</option>`;
+                winners.forEach(({name}) => {
+                  const dis = placed.has(name) && name !== cur;
+                  h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
+                });
+                sel.innerHTML = h;
+              });
+            };
+            document.querySelectorAll(".trn-cr-nr-sel").forEach(s => s.addEventListener("change", _refreshNR));
+            _refreshNR();
+
+            document.getElementById(`trn-cr-nr-save-${nextRoundIdx}`)?.addEventListener("click", async () => {
+              const allSels     = Array.from(document.querySelectorAll(".trn-cr-nr-sel"));
+              const newMatchups = JSON.parse(JSON.stringify(matchups));
+              if (!newMatchups[nextRoundIdx]) newMatchups[nextRoundIdx] = [];
+              allSels.forEach(sel => {
+                const gi = parseInt(sel.dataset.gi);
+                const si = parseInt(sel.dataset.si);
+                if (!newMatchups[nextRoundIdx][gi]) newMatchups[nextRoundIdx][gi] = [];
+                newMatchups[nextRoundIdx][gi][si] = sel.value || "";
+              });
+              try {
+                const updated = { ...po.customRounds, matchups: newMatchups };
+                await _tPlayoffsRef(tid, activeY).update({ customRounds: updated });
+                Object.assign(po, { customRounds: updated });
+                showToast(`Round ${nextRoundIdx+1} matchups saved ✓`);
+                document.getElementById("trn-po-content").innerHTML = _renderContent(`cround_${nextRoundIdx}`);
+              } catch(e) { showToast("Failed: "+e.message, "error"); }
+            });
+          }
         } catch(e) {
           const loaderEl = document.getElementById(loaderId);
-          if (loaderEl) loaderEl.textContent = "⚠️ Could not load scores: " + e.message;
+          if (loaderEl) loaderEl.textContent = "⚠️ Could not load scores: "+e.message;
         }
       })();
 
       return shell;
     };
-
     // ── World Cup: Group standings tab ───────────────────────────────────────
     // Computes W–L records and H2H tiebreakers from the admin-defined schedule
     // by fetching each team's score for the relevant Sleeper week.
@@ -10242,44 +10296,64 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           // selRow: static text for locked/complete rounds, dropdown for active round.
           // Manual: round locked once every matchup has both teams + both scores.
-          // Random: feeder-only dropdowns for empty slots.
+          // ri > 0: only offer the winner(s) from the two feeding round-(ri-1) matchups.
+          //   If scores are in → only the winner is selectable.
+          //   If scores not yet in → both teams from the feeder are selectable.
           const selRow = (side, curName) => {
             const scoreVal = side==="a" ? m.scoreA : m.scoreB;
             const isWin    = side==="a" ? winA : winB;
             const isLoss   = side==="a" ? winB : winA;
             if (!isAdmin || ri === 0) return tRow(curName, scoreVal, isWin, isLoss);
-            const bMode = po.worldcupBracketMode || "manual";
-            if (bMode === "manual") {
-              const roundComplete = (rnd||[]).every(mx =>
-                mx.a && mx.b && mx.scoreA !== null && mx.scoreA !== undefined &&
-                mx.scoreB !== null && mx.scoreB !== undefined
-              );
-              if (roundComplete) return tRow(curName, scoreVal, isWin, isLoss);
-              const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
-              const byGrp = {};
-              (po.worldcupGroups||[]).forEach((g,gi2) => {
-                const gn = g.name||("Group "+(gi2+1));
-                byGrp[gn] = byGrp[gn] || [];
-                _wcQualified(g, gi2).forEach(n => byGrp[gn].push(n));
-              });
-              let h = `<option value="">— Select —</option>`;
-              Object.entries(byGrp).forEach(([gn,ns]) => {
-                h += `<optgroup label="${_esc(gn)}">${ns.map(n=>`<option value="${_esc(n)}" ${n===curName?"selected":""}${placed.has(n)&&n!==curName?" disabled":""}>${_esc(n)}</option>`).join("")}</optgroup>`;
-              });
-              return `<div class="trn-wc-bteam trn-wc-bt--sel"><select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${h}</select></div>`;
-            } else {
-              const pr=bracket[ri-1]||[]; const pA=pr[mi*2],pB=pr[mi*2+1];
-              const cands=[]; if(pA?.a)cands.push(pA.a);if(pA?.b)cands.push(pA.b);if(pB?.a)cands.push(pB.a);if(pB?.b)cands.push(pB.b);
-              const placed=new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
-              const avail=cands.filter(n=>!placed.has(n)||n===curName);
-              if(!avail.length&&!curName) return tRow(curName,scoreVal,isWin,isLoss);
-              const opts=[`<option value="">— Winner —</option>`,...avail.map(n=>`<option value="${_esc(n)}" ${n===curName?"selected":""}>${_esc(n)}</option>`)].join("");
-              if(!curName) return `<div class="trn-wc-bteam trn-wc-bt--sel"><select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}" style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${opts}</select></div>`;
-              return tRow(curName,scoreVal,isWin,isLoss);
-            }
-          };
 
-          const top  = topOf(ri, mi);
+            const bMode = po.worldcupBracketMode || "manual";
+
+            // For ri > 0: determine candidates from feeding matchups only.
+            // matchup mi in round ri is fed by matchups (2*mi) and (2*mi+1) in round ri-1.
+            // side "a" comes from feeder index 2*mi, side "b" from 2*mi+1.
+            const prevRnd   = bracket[ri - 1] || [];
+            const feederIdx = side === "a" ? mi * 2 : mi * 2 + 1;
+            const feeder    = prevRnd[feederIdx] || {};
+            const fHasScore = feeder.scoreA !== null && feeder.scoreA !== undefined &&
+                              feeder.scoreB !== null && feeder.scoreB !== undefined &&
+                              feeder.a && feeder.b;
+
+            // If this round is complete (all scored), lock it
+            const roundComplete = (rnd||[]).every(mx =>
+              mx.a && mx.b && mx.scoreA !== null && mx.scoreA !== undefined &&
+              mx.scoreB !== null && mx.scoreB !== undefined
+            );
+            if (roundComplete) return tRow(curName, scoreVal, isWin, isLoss);
+
+            // If feeder has scores: only the winner is a valid candidate
+            let candidates;
+            if (fHasScore) {
+              const winner = feeder.scoreA >= feeder.scoreB ? feeder.a : feeder.b;
+              candidates = [winner];
+            } else if (feeder.a || feeder.b) {
+              // Feeder has teams but no scores yet — offer both
+              candidates = [feeder.a, feeder.b].filter(Boolean);
+            } else {
+              // Feeder not set at all yet — nothing to offer
+              return tRow(curName || "", scoreVal, isWin, isLoss);
+            }
+
+            const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
+            const avail  = candidates.filter(n => !placed.has(n) || n === curName);
+
+            // If only one candidate and it matches current, show static
+            if (avail.length === 1 && avail[0] === curName && roundComplete) {
+              return tRow(curName, scoreVal, isWin, isLoss);
+            }
+
+            const opts = [`<option value="">— Winner —</option>`,
+              ...avail.map(n => `<option value="${_esc(n)}" ${n===curName?"selected":""}>${_esc(n)}</option>`)
+            ].join("");
+
+            return `<div class="trn-wc-bteam trn-wc-bt--sel">
+              <select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}"
+                style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${opts}</select>
+            </div>`;
+          };
           // Connector: top card of a pair draws line down, bottom card draws line up.
           // --wc-gap = distance between this card's centre and its sibling's centre.
           const n2   = (rnd||[]).length;
@@ -10395,10 +10469,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
           <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
-          ${_poIsAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
-          ${_poIsAdmin && mode==="custom_rounds" ? `<button class="btn-secondary btn-sm" id="trn-cr-set-matchups-btn">📋 Set Matchups</button>` : ""}
+          ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
+          ${isAdmin && mode==="custom_rounds" ? `<button class="btn-secondary btn-sm" id="trn-cr-set-matchups-btn">📋 Set Matchups</button>` : ""}
         </div>
-        ${_poIsAdmin && mode==="custom_rounds" ? `<div id="trn-cr-matchup-panel"></div>` : ""}
+        ${isAdmin && mode==="custom_rounds" ? `<div id="trn-cr-matchup-panel"></div>` : ""}
         ${_tabBar(_poViewTab)}
         <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
       </div>`;
@@ -10617,58 +10691,63 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         try {
           const updBracket = JSON.parse(JSON.stringify(bracket));
 
-          // Step 1: fetch scores for all rounds
-          for (let ri = 0; ri < updBracket.length; ri++) {
-            const rndWk = po.startWeek + ri * wcWPR;
-            for (const wk of Array.from({length:wcWPR},(_,i)=>rndWk+i)) {
-              await Promise.all(
-                Object.values(t.standingsCache||{})
-                  .filter(lc => String(lc.year) === String(activeY))
-                  .map(lc => _fetchWeekScores(String(lc.leagueId || lc.league_id || ""), wk))
-              );
-            }
-            const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-            for (const m of updBracket[ri]) {
-              const _getScore = (name) => {
-                for (const lc of Object.values(t.standingsCache||{})) {
-                  if (String(lc.year) !== String(activeY)) continue;
-                  const tm = (lc.teams||[]).find(t2 => _sk(t2.teamName)===_sk(name));
-                  if (!tm) continue;
-                  const lid = String(lc.leagueId || lc.league_id || "");
-                  let total = 0;
-                  for (let w = 0; w < wcWPR; w++) {
-                    const wv = _weekScoreCache[lid+"|"+(rndWk+w)]?.[String(tm.teamId)];
-                    if (wv != null) total += wv;
+          // Collect all unique leagueId+week combos needed across all rounds
+          const seen = new Set();
+          const toFetch = [];
+          updBracket.forEach((rnd, ri) => {
+            const rndStartWk = po.startWeek + ri * wcWPR;
+            for (let w = 0; w < wcWPR; w++) {
+              const wk = rndStartWk + w;
+              (rnd||[]).forEach(m => {
+                [m.a, m.b].filter(Boolean).forEach(name => {
+                  const info = _wcTeamInfoMap[_skWC(name)];
+                  if (info?.leagueId) {
+                    const key = info.leagueId + "|" + wk;
+                    if (!seen.has(key)) { seen.add(key); toFetch.push({leagueId:info.leagueId, week:wk}); }
                   }
-                  return parseFloat(total.toFixed(2));
-                }
-                return null;
-              };
-              if (m.a) m.scoreA = _getScore(m.a);
-              if (m.b) m.scoreB = _getScore(m.b);
+                });
+              });
+            }
+          });
+
+          await Promise.all(toFetch.map(({leagueId, week}) => _fetchWeekScores(leagueId, week)));
+
+          // Score each matchup: sum scores across wcWPR weeks per round
+          const _getScore = (name, rndStartWk) => {
+            const info = _wcTeamInfoMap[_skWC(name)];
+            if (!info?.leagueId) return null;
+            let total = 0, found = false;
+            for (let w = 0; w < wcWPR; w++) {
+              const v = _weekScoreCache[info.leagueId+"|"+(rndStartWk+w)]?.[info.teamId];
+              if (v != null) { total += v; found = true; }
+            }
+            return found ? parseFloat(total.toFixed(2)) : null;
+          };
+
+          for (let ri = 0; ri < updBracket.length; ri++) {
+            const rndStartWk = po.startWeek + ri * wcWPR;
+            for (const m of updBracket[ri]) {
+              if (m.a) m.scoreA = _getScore(m.a, rndStartWk);
+              if (m.b) m.scoreB = _getScore(m.b, rndStartWk);
             }
           }
 
-          // Step 2: auto-advance winners into next rounds
-          // For each round where all matchups have scores, fill in the next round.
-          // Only auto-advances if the next round slot is currently empty.
+          // Auto-advance: for each fully-scored round, fill the next round's slots
+          // with winners — but only if the slot is currently empty.
           for (let ri = 0; ri < updBracket.length - 1; ri++) {
             const rnd  = updBracket[ri];
             const next = updBracket[ri + 1];
-            // Check if all matchups in this round have scores
             const allScored = rnd.every(m => m.a && m.b && m.scoreA !== null && m.scoreB !== null);
             if (!allScored) continue;
-            // Pair winners: match 0 winner vs match 1 winner → next[0], match 2 vs match 3 → next[1], etc.
-            for (let mi = 0; mi < Math.floor(rnd.length / 2); mi++) {
-              const mA = rnd[mi * 2];
-              const mB = rnd[mi * 2 + 1];
-              if (!mA || !mB) continue;
-              const winA = mA.scoreA >= mA.scoreB ? mA.a : mA.b;
-              const winB = mB.scoreA >= mB.scoreB ? mB.a : mB.b;
-              if (next[mi]) {
-                // Only overwrite if slot is empty (don't clobber admin-manual entries)
-                if (!next[mi].a) next[mi].a = winA;
-                if (!next[mi].b) next[mi].b = winB;
+            for (let mi = 0; mi < rnd.length; mi++) {
+              const m      = rnd[mi];
+              const winner = m.scoreA >= m.scoreB ? m.a : m.b;
+              // Each winner feeds a specific slot in the next round:
+              // matchup mi feeds: next round matchup floor(mi/2), side a if mi is even, b if odd
+              const nextMi   = Math.floor(mi / 2);
+              const nextSide = mi % 2 === 0 ? "a" : "b";
+              if (next[nextMi] && !next[nextMi][nextSide]) {
+                next[nextMi][nextSide] = winner;
               }
             }
           }
