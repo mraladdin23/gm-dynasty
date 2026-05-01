@@ -8548,6 +8548,31 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       t.roles?.[_currentUsername]?.role === "sub_admin"
     ) && !_viewingAsUser;
 
+    // ── World Cup: sorted advancers helper ───────────────────────────────────
+    // Returns the qualified teams for a group, sorted by standings (wins desc,
+    // overall pt diff desc, pf desc) from standingsCache — NOT raw member order.
+    // Used everywhere we need "who advanced" so the right teams appear in the
+    // bracket builder, randomizer, and dropdown pools.
+    const _skWC = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+    const _wcRec = (name) => {
+      for (const lc of Object.values(t.standingsCache||{})) {
+        if (String(lc.year) !== String(activeY)) continue;
+        const tm = (lc.teams||[]).find(t2 => _skWC(t2.teamName)===_skWC(name));
+        if (tm) return { wins:tm.wins||0, pf:tm.pf||0, pa:tm.pa||0 };
+      }
+      return { wins:0, pf:0, pa:0 };
+    };
+    const _wcQualified = (g) => {
+      const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
+      return [...(g.members||[])].sort((a, b) => {
+        const ra = _wcRec(a), rb = _wcRec(b);
+        if (rb.wins !== ra.wins) return rb.wins - ra.wins;
+        const dA = ra.pf - ra.pa, dB = rb.pf - rb.pa;
+        if (dB !== dA) return dB - dA;
+        return rb.pf - ra.pf;
+      }).slice(0, adv);
+    };
+
     // Build participant lookups (gender + displayName) — not stored in lc.teams
     const _skPo = (s) => String(s||'').trim().toLowerCase().replace(/[.#$\/\[\]]/g, '_');
     const genderMap      = {};
@@ -8976,10 +9001,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         // Overall standings — all teams ranked by W/L/PF with qualified/eliminated badges
         const allGroupMembers = new Set(wcGroups.flatMap(g => g.members||[]));
-        const advancerSet     = new Set(wcGroups.flatMap((g,gi) => {
-          const adv = g.advanceCount ?? wcAdv;
-          return (g.members||[]).slice(0, adv);
-        }));
+        const advancerSet = new Set(wcGroups.flatMap(g => _wcQualified(g)));
         const overallRows = [...allGroupMembers]
           .map(name => ({ name, ...(_teamRec(name)) }))
           .sort((a,b) => (b.wins-a.wins)||(b.pf-a.pf));
@@ -9808,8 +9830,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const bracketMode = po.worldcupBracketMode || "manual";
 
       const advancers = groups.flatMap((g, gi) =>
-        (g.members||[]).slice(0, g.advanceCount ?? (po.worldcupAdvanceCount ?? 2))
-          .map(name => ({ name, groupName: g.name || ("Group "+(gi+1)) }))
+        _wcQualified(g).map(name => ({ name, groupName: g.name || ("Group "+(gi+1)) }))
       );
       const numTeams  = Math.max(advancers.length, 2);
       const numRounds = Math.ceil(Math.log2(numTeams));
@@ -9974,8 +9995,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
               const byGrp = {};
               (po.worldcupGroups||[]).forEach((g,gi2) => {
-                const gn = g.name||("Group "+(gi2+1)); byGrp[gn]=byGrp[gn]||[];
-                (g.members||[]).slice(0,g.advanceCount??(po.worldcupAdvanceCount??2)).forEach(n=>byGrp[gn].push(n));
+                const gn = g.name||("Group "+(gi2+1));
+                byGrp[gn] = byGrp[gn] || [];
+                _wcQualified(g).forEach(n => byGrp[gn].push(n));
               });
               let h = `<option value="">— Select —</option>`;
               Object.entries(byGrp).forEach(([gn,ns]) => {
@@ -10144,8 +10166,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const placed = new Set(sels.map(s=>s.value).filter(Boolean));
         const groups = po.worldcupGroups || [];
         const advancers = groups.flatMap((g,gi) =>
-          (g.members||[]).slice(0, g.advanceCount??(po.worldcupAdvanceCount??2))
-            .map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
+          _wcQualified(g).map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
         );
         const byGroup = {};
         advancers.forEach(adv => {
@@ -10173,8 +10194,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       document.getElementById("trn-wc-bld-randomize")?.addEventListener("click", () => {
         const groups = po.worldcupGroups || [];
         const advancers = groups.flatMap((g,gi) =>
-          (g.members||[]).slice(0, g.advanceCount??(po.worldcupAdvanceCount??2))
-            .map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
+          _wcQualified(g).map(name=>({name, groupName:g.name||("Group "+(gi+1))}))
         );
         // Fisher-Yates shuffle
         const pool = [...advancers];
