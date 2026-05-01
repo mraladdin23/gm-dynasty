@@ -1300,8 +1300,8 @@
       const leagueChamps = po.leagueChamps || [];
       const showChamps = po.recognizeLeagueChampions && leagueChamps.length > 0;
 
-      const modeLabel = {total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds"}[mode]||mode;
-      const modeIcon  = {total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️"}[mode]||"🏆";
+      const modeLabel = {total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode;
+      const modeIcon  = {total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍"}[mode]||"🏆";
       const sw = po.startWeek, ew = po.endWeek;
 
       // Helper: prefer displayName over teamName everywhere
@@ -1317,6 +1317,13 @@
       else if (mode==="custom_rounds") rounds.forEach((_,i) => {
         tabs.push({id:`cround_${i}`, label: i===rounds.length-1 ? "🏆 Championship" : `Round ${i+1}`});
       });
+      else if (mode==="worldcup") {
+        (po.worldcupGroups||[]).forEach((g,gi) =>
+          tabs.push({id:`wcgroup_${gi}`, label:`🌍 ${esc(g.name||("Group "+(gi+1)))}`})
+        );
+        tabs.push({id:"wc_matchups", label:"📅 Matchups"});
+        tabs.push({id:"wc_bracket",  label:"🥊 Bracket"});
+      }
       if (showChamps) tabs.push({id:"league_champs", label:"🏅 League Champs"});
 
       let _tab = tabs[0].id;
@@ -1706,11 +1713,173 @@
       };
 
       // ── Render content by tab ─────────────────────────────
+      // ── World Cup: group standings (public) ───────────────
+      const _wcGroupView = (gi) => {
+        const g   = (po.worldcupGroups||[])[gi];
+        if (!g) return `<div class="trn-po-empty">Group not found.</div>`;
+        const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
+        const standingsSrc = po.standings || [];
+        const members = g.members || [];
+        const rows = members.map(name => {
+          const tm = standingsSrc.find(s => (s.teamName||"").toLowerCase()===name.toLowerCase()) || {teamName:name,wins:0,losses:0,pf:0};
+          return {...tm, _name: name};
+        }).sort((a,b) => (b.wins-a.wins)||(b.pf-a.pf));
+        const trs = rows.map((r,i) => {
+          const isAdv = i < adv;
+          const badge = isAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+            : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+          const divider = i===adv && rows.length>adv
+            ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>` : "";
+          return `${divider}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
+            <td class="trn-po-rank">${i+1}</td>
+            <td class="trn-po-team-name"><div>${esc(r._name)}</div></td>
+            <td class="trn-po-num">${r.wins??0}–${r.losses??0}</td>
+            <td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
+            <td>${badge}</td>
+          </tr>`;
+        }).join("");
+        return `<div class="trn-wc-group-standings-card">
+          <div class="trn-wc-group-standings-title">🌍 ${esc(g.name||("Group "+(gi+1)))}</div>
+          <div class="trn-po-table-wrap">
+            <table class="trn-po-table">
+              <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
+              <tbody>${trs}</tbody>
+            </table>
+          </div>
+        </div>`;
+      };
+
+      // ── World Cup: matchups (public) — loads live from Sleeper ───
+      const _wcMatchupsView = () => {
+        const wcGroups  = po.worldcupGroups  || [];
+        const wcSched   = po.worldcupSchedule || {};
+        const wcRegWks  = po.worldcupRegWeeks || 6;
+        const startWk   = po.startWeek ? (po.startWeek - wcRegWks) : null;
+        if (!wcGroups.length) return `<div class="trn-po-empty">No schedule configured yet.</div>`;
+
+        const weekOpts = Array.from({length: wcRegWks}, (_,i) => ({
+          idx: i, nflWk: startWk ? startWk + i : i + 1, label: `Week ${i+1}`
+        }));
+        const standingsSrc = po.standings || [];
+        const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+
+        // Build leagueId + teamId map from standingsCache on _currentT
+        const teamInfoMap = {};
+        Object.values(_currentT.standingsCache||{}).forEach(lc => {
+          const lid = String(lc.leagueId || lc.league_id || "");
+          (lc.teams||[]).forEach(tm => {
+            if (tm.teamName && lid) teamInfoMap[tm.teamName] = { teamId: String(tm.teamId||""), leagueId: lid };
+          });
+        });
+
+        const containerId = "pub-wc-mu-content";
+        setTimeout(async () => {
+          const el = document.getElementById(containerId);
+          if (!el) return;
+          const wkSel = document.getElementById("pub-wc-mu-week");
+          const refBtn = document.getElementById("pub-wc-mu-refresh");
+          const _load = async (wi) => {
+            if (!el) return;
+            el.innerHTML = `<div style="padding:var(--space-3);text-align:center;color:var(--color-text-dim);font-size:.82rem">Loading scores…</div>`;
+            const nflWk = startWk ? startWk + wi : wi + 1;
+            // Fetch from Sleeper
+            const leagueIds = [...new Set(Object.values(teamInfoMap).map(x=>x.leagueId).filter(Boolean))];
+            const scoreMap = {}; // "leagueId|nflWk|teamId" -> score
+            await Promise.allSettled(leagueIds.map(async lid => {
+              try {
+                const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
+                if (!r.ok) return;
+                const data = await r.json();
+                (data||[]).forEach(m => { scoreMap[`${lid}|${m.roster_id}`] = parseFloat(m.points)||0; });
+              } catch(e) {}
+            }));
+            const _score = (name) => {
+              const info = teamInfoMap[name];
+              if (!info) return null;
+              const v = scoreMap[`${info.leagueId}|${info.teamId}`];
+              return v !== undefined ? v : null;
+            };
+            const groupCards = wcGroups.map((g, gi) => {
+              const matchups = (wcSched[String(gi)]||{})[String(wi)] || [];
+              if (!matchups.length) return `<div class="trn-wc-mu-group"><div class="trn-wc-mu-group-title">${esc(g.name||("Group "+(gi+1)))}</div><div style="font-size:.78rem;color:var(--color-text-dim);padding:6px 0">No matchups this week.</div></div>`;
+              const cards = matchups.map(m => {
+                const sa = _score(m.home), sb = _score(m.away);
+                const hasScore = sa !== null && sb !== null;
+                const winH = hasScore && sa > sb, winA = hasScore && sb > sa;
+                const fmt  = v => v !== null ? v.toFixed(2) : "–";
+                return `<div class="trn-wc-mu-card">
+                  <div class="trn-wc-mu-team ${winH?"trn-wc-mu-team--win":hasScore?"trn-wc-mu-team--loss":""}">
+                    <span class="trn-wc-mu-name">${esc(m.home||"?")}</span>
+                    <span class="trn-wc-mu-score">${fmt(sa)}</span>
+                  </div>
+                  <div class="trn-wc-mu-vs">vs</div>
+                  <div class="trn-wc-mu-team ${winA?"trn-wc-mu-team--win":hasScore?"trn-wc-mu-team--loss":""}">
+                    <span class="trn-wc-mu-name">${esc(m.away||"?")}</span>
+                    <span class="trn-wc-mu-score">${fmt(sb)}</span>
+                  </div>
+                </div>`;
+              }).join("");
+              return `<div class="trn-wc-mu-group"><div class="trn-wc-mu-group-title">${esc(g.name||("Group "+(gi+1)))}</div><div class="trn-wc-mu-cards">${cards}</div></div>`;
+            }).join("");
+            el.innerHTML = groupCards;
+          };
+          wkSel?.addEventListener("change", () => _load(parseInt(wkSel.value)||0));
+          refBtn?.addEventListener("click", () => _load(parseInt(wkSel?.value||"0")));
+          await _load(0);
+        }, 0);
+
+        return `<div class="trn-wc-mu-toolbar">
+          <select id="pub-wc-mu-week" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+            ${weekOpts.map(w=>`<option value="${w.idx}">${esc(w.label)}</option>`).join("")}
+          </select>
+          <button class="btn-secondary btn-sm" id="pub-wc-mu-refresh">↺ Refresh</button>
+        </div>
+        <div id="${containerId}"></div>`;
+      };
+
+      // ── World Cup: bracket (public read-only) ─────────────
+      const _wcBracketView = () => {
+        const bracket = po.worldcupBracket || [];
+        if (!bracket.length) return `<div class="trn-po-empty">Bracket not yet set. Check back after group stage.</div>`;
+        const nr = bracket.length;
+        const getRN = (ri,tot) => ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
+        const wcWPR2 = po.worldcupWeeksPerRound||2;
+        const cols = bracket.map((rnd,ri) => {
+          const wStart = po.startWeek ? po.startWeek + ri*wcWPR2 : null;
+          const wTag = wStart ? `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR2>1?`Wks ${wStart}–${wStart+wcWPR2-1}`:`Wk ${wStart}`}</span>` : "";
+          const cards = (rnd||[]).map((m,mi) => {
+            const hasScore = m.scoreA !== null && m.scoreA !== undefined && m.scoreB !== null && m.scoreB !== undefined;
+            const winA = hasScore && m.scoreA > m.scoreB, winB = hasScore && m.scoreB > m.scoreA;
+            const tRow = (name, score, isWin, isLoss) => `<div class="trn-wc-bteam ${!name?"trn-wc-bt--tbd":isWin?"trn-wc-bt--win":isLoss?"trn-wc-bt--loss":""}">
+              <span class="trn-wc-bteam-name">${esc(name||"TBD")}</span>
+              ${hasScore?`<span class="trn-wc-bteam-score">${(score||0).toFixed(1)}</span>`:""}
+            </div>`;
+            const isTop = mi%2===0;
+            const connCls = ri<nr-1?(isTop?"trn-wc-card--conn-top":"trn-wc-card--conn-bot"):"";
+            const unitH = 54, slotH = Math.pow(2,ri)*unitH, gap = slotH;
+            return `<div class="trn-wc-card ${connCls}" style="margin-top:${mi===0?Math.floor(slotH/2-27):gap}px">
+              ${tRow(m.a, m.scoreA, winA, winB)}
+              <div class="trn-wc-card-divider"></div>
+              ${tRow(m.b, m.scoreB, winB, winA)}
+            </div>`;
+          }).join("");
+          return `<div class="trn-wc-col" data-ri="${ri}"><div class="trn-wc-col-header">${getRN(ri,nr)} ${wTag}</div><div class="trn-wc-col-cards">${cards}</div></div>`;
+        }).join("");
+        // Champion
+        const fm = (bracket[nr-1]||[])[0]||{};
+        const champ = fm.scoreA>fm.scoreB?fm.a:fm.scoreB>fm.scoreA?fm.b:"";
+        const champCol = `<div class="trn-wc-col trn-wc-col--champ"><div class="trn-wc-col-header">🏆 Champion</div><div class="trn-wc-col-cards" style="display:flex;align-items:center;height:100%"><div class="trn-wc-card trn-wc-card--champion"><div class="trn-wc-bteam trn-wc-bt--champ"><span class="trn-wc-bteam-name">${esc(champ||"TBD")}</span></div></div></div></div>`;
+        return `<div class="trn-wc-bracket-wrap"><div class="trn-wc-bracket">${cols}${champCol}</div></div>`;
+      };
+
       const _renderContent = (tabId) => {
         if (tabId==="standings")    return _standingsView();
         if (tabId==="leaderboard")  return _leaderboard();
         if (tabId==="bracket")      return _bracketView();
         if (tabId==="league_champs") return _leagueChampsView();
+        if (tabId==="wc_bracket")   return _wcBracketView();
+        if (tabId==="wc_matchups")  return _wcMatchupsView();
+        if (tabId.startsWith("wcgroup_")) return _wcGroupView(parseInt(tabId.split("_")[1]));
         if (tabId.startsWith("round_"))  return _roundView(parseInt(tabId.split("_")[1]), false);
         if (tabId.startsWith("cround_")) return _roundView(parseInt(tabId.split("_")[1]), true);
         return `<div class="trn-po-empty">Tab not found.</div>`;
