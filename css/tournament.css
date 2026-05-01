@@ -3492,7 +3492,10 @@
 
 .trn-wc-bracket-wrap {
   overflow-x: auto;
-  padding-bottom: var(--space-3);
+  overflow-y: visible;
+  padding-bottom: var(--space-2);
+  /* Allow bracket to use full available width without forcing scroll */
+  max-width: 100%;
 }
 
 .trn-wc-bracket {
@@ -3500,46 +3503,48 @@
   align-items: flex-start;
   gap: 0;
   min-width: max-content;
-  padding: var(--space-4) var(--space-2);
+  padding: var(--space-2) var(--space-1);
 }
 
 /* ── Round column ─────────────────────────────────────── */
 .trn-wc-col {
   display: flex;
   flex-direction: column;
-  min-width: 148px;
-  max-width: 160px;
+  /* Width grows slightly each round to accommodate longer names from dropdowns */
+  min-width: 130px;
+  max-width: 148px;
   position: relative;
 }
 .trn-wc-col--champ {
-  min-width: 130px;
-  max-width: 140px;
+  min-width: 110px;
+  max-width: 130px;
 }
 .trn-wc-col-header {
-  font-size: .72rem;
+  font-size: .68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
   color: var(--color-text-dim);
   text-align: center;
-  margin-bottom: var(--space-2);
+  margin-bottom: 6px;
   white-space: nowrap;
-  padding: 0 var(--space-2);
+  padding: 0 4px;
 }
 .trn-wc-col-cards {
   display: flex;
   flex-direction: column;
   position: relative;
-  padding: 0 8px;
+  /* Horizontal padding = connector stub width */
+  padding: 0 6px;
 }
 
 /* ── Matchup card ─────────────────────────────────────── */
 .trn-wc-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  width: 132px;
+  width: 118px;
   position: relative;
   flex-shrink: 0;
   z-index: 1;
@@ -3547,46 +3552,44 @@
 .trn-wc-card--champion {
   border-color: var(--color-gold, #d4af37);
   border-width: 2px;
-  box-shadow: 0 0 8px rgba(212,175,55,.25);
+  box-shadow: 0 0 6px rgba(212,175,55,.2);
 }
 
-/* ── Connector lines (March Madness bracket lines) ─────── */
-/* Right-side vertical line from card to connector */
+/* ── Connector lines ──────────────────────────────────── */
+/*  Each card is 44px tall (22px per team row).
+    The connector extends from center of the card (22px from top/bottom)
+    down/up to meet the sibling card plus the gap between them.
+    gap = slotH = 2^ri * 44.  The connector height must be:
+    half the card (22px) + gap + half the sibling card (22px) = 44 + gap.
+    We encode gap via CSS custom property set inline on the card parent,
+    but since we can't easily do that, we use a generous height and let
+    the border hide the overshoot. */
 .trn-wc-card--conn-top::after,
 .trn-wc-card--conn-bot::after {
   content: "";
   position: absolute;
-  right: -9px;
-  width: 8px;
+  right: -7px;
+  width: 6px;
   border-color: var(--color-border);
   border-style: solid;
   z-index: 0;
 }
-/* Top card: line goes from center-right downward to meet sibling */
+/* Top card: right border + top border going down */
 .trn-wc-card--conn-top::after {
   top: 50%;
-  height: calc(50% + 27px + var(--conn-gap, 0px));
+  /* Height = reach down to midpoint of sibling. Dynamic via JS-set --conn-gap or large default. */
+  height: calc(50% + 22px + var(--wc-gap, 44px));
   border-width: 1px 1px 0 0;
   border-bottom: none;
-  border-top-right-radius: 3px;
+  border-top-right-radius: 2px;
 }
-/* Bottom card: line goes from center-right upward to meet sibling */
+/* Bottom card: right border + bottom border going up */
 .trn-wc-card--conn-bot::after {
   bottom: 50%;
-  height: calc(50% + 27px + var(--conn-gap, 0px));
+  height: calc(50% + 22px + var(--wc-gap, 44px));
   border-width: 0 1px 1px 0;
   border-top: none;
-  border-bottom-right-radius: 3px;
-}
-/* Horizontal stub on the right of each column connecting to next column */
-.trn-wc-col:not(.trn-wc-col--champ) .trn-wc-col-cards::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-right: 1px solid transparent; /* placeholder */
+  border-bottom-right-radius: 2px;
 }
 
 /* ── Team row inside card ──────────────────────────────── */
@@ -3594,12 +3597,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 7px;
-  min-height: 27px;
-  gap: 4px;
+  padding: 4px 6px;
+  min-height: 22px;
+  gap: 3px;
 }
 .trn-wc-bteam-name {
-  font-size: .73rem;
+  font-size: .7rem;
   font-weight: 600;
   flex: 1;
   min-width: 0;
@@ -3609,11 +3612,11 @@
   color: var(--color-text);
 }
 .trn-wc-bteam-score {
-  font-size: .72rem;
+  font-size: .68rem;
   font-weight: 700;
   color: var(--color-text-dim);
   flex-shrink: 0;
-  margin-left: 4px;
+  margin-left: 3px;
 }
 .trn-wc-bt--tbd .trn-wc-bteam-name { color: var(--color-text-dim); font-style: italic; font-weight: 400; }
 .trn-wc-bt--win  { background: rgba(74,222,128,.08); }
@@ -3622,8 +3625,8 @@
 .trn-wc-bt--loss { background: rgba(248,113,113,.06); }
 .trn-wc-bt--loss .trn-wc-bteam-name  { color: var(--color-text-dim); }
 .trn-wc-bt--champ { background: rgba(212,175,55,.12); }
-.trn-wc-bt--champ .trn-wc-bteam-name { color: var(--color-gold,#d4af37); font-weight: 800; font-size: .82rem; }
-.trn-wc-bt--sel  { padding: 3px 5px; }
+.trn-wc-bt--champ .trn-wc-bteam-name { color: var(--color-gold,#d4af37); font-weight: 800; font-size: .78rem; }
+.trn-wc-bt--sel  { padding: 2px 4px; }
 
 .trn-wc-card-divider {
   height: 1px;
@@ -3780,4 +3783,41 @@
   .trn-wc-bteam-score { font-size: .68rem; }
   .trn-wc-group-standings-grid { grid-template-columns: 1fr; }
   .trn-wc-mu-cards { grid-template-columns: 1fr; }
+}
+
+/* ── Playoffs year pills ──────────────────────────────── */
+.trn-po-year-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.trn-po-year-pill {
+  font-size: .75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.trn-po-year-pill:hover { color: var(--color-text); border-color: var(--color-gold, #d4af37); }
+.trn-po-year-pill--active {
+  background: var(--color-gold, #d4af37);
+  border-color: var(--color-gold, #d4af37);
+  color: #000;
+}
+
+/* ── WC group layout: standings + matchups side-by-side ── */
+.trn-wc-group-layout {
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+@media (max-width: 700px) {
+  .trn-wc-group-layout { grid-template-columns: 1fr !important; }
+  .trn-wc-bracket { padding: var(--space-2) 0; }
+  .trn-wc-col     { min-width: 108px; max-width: 120px; }
+  .trn-wc-card    { width: 96px; }
 }
