@@ -10294,69 +10294,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             </div>`;
           };
 
-          // selRow: static text for locked/complete rounds, dropdown for active round.
-          // Manual: round locked once every matchup has both teams + both scores.
-          // ri > 0: only offer the winner(s) from the two feeding round-(ri-1) matchups.
-          //   If scores are in → only the winner is selectable.
-          //   If scores not yet in → both teams from the feeder are selectable.
+          // Bracket canvas is always read-only — scores and results only.
+          // Next-round matchup assignment happens in the panel below the canvas.
           const selRow = (side, curName) => {
             const scoreVal = side==="a" ? m.scoreA : m.scoreB;
             const isWin    = side==="a" ? winA : winB;
             const isLoss   = side==="a" ? winB : winA;
-            if (!isAdmin || ri === 0) return tRow(curName, scoreVal, isWin, isLoss);
-
-            const bMode = po.worldcupBracketMode || "manual";
-
-            // For ri > 0: determine candidates from feeding matchups only.
-            // matchup mi in round ri is fed by matchups (2*mi) and (2*mi+1) in round ri-1.
-            // side "a" comes from feeder index 2*mi, side "b" from 2*mi+1.
-            const prevRnd   = bracket[ri - 1] || [];
-            const feederIdx = side === "a" ? mi * 2 : mi * 2 + 1;
-            const feeder    = prevRnd[feederIdx] || {};
-            const fHasScore = feeder.scoreA !== null && feeder.scoreA !== undefined &&
-                              feeder.scoreB !== null && feeder.scoreB !== undefined &&
-                              feeder.a && feeder.b;
-
-            // If this round is complete (all scored), lock it
-            const roundComplete = (rnd||[]).every(mx =>
-              mx.a && mx.b && mx.scoreA !== null && mx.scoreA !== undefined &&
-              mx.scoreB !== null && mx.scoreB !== undefined
-            );
-            if (roundComplete) return tRow(curName, scoreVal, isWin, isLoss);
-
-            // If feeder has scores: only the winner is a valid candidate
-            let candidates;
-            if (fHasScore) {
-              const winner = feeder.scoreA >= feeder.scoreB ? feeder.a : feeder.b;
-              candidates = [winner];
-            } else if (feeder.a || feeder.b) {
-              // Feeder has teams but no scores yet — offer both
-              candidates = [feeder.a, feeder.b].filter(Boolean);
-            } else {
-              // Feeder not set at all yet — nothing to offer
-              return tRow(curName || "", scoreVal, isWin, isLoss);
-            }
-
-            const placed = new Set((rnd||[]).map(x=>[x.a,x.b]).flat().filter(Boolean));
-            const avail  = candidates.filter(n => !placed.has(n) || n === curName);
-
-            // If only one candidate and it matches current, show static
-            if (avail.length === 1 && avail[0] === curName && roundComplete) {
-              return tRow(curName, scoreVal, isWin, isLoss);
-            }
-
-            const opts = [`<option value="">— Winner —</option>`,
-              ...avail.map(n => `<option value="${_esc(n)}" ${n===curName?"selected":""}>${_esc(n)}</option>`)
-            ].join("");
-
-            return `<div class="trn-wc-bteam trn-wc-bt--sel">
-              <select class="trn-wc-adv-sel" data-ri="${ri}" data-mi="${mi}" data-side="${side}"
-                style="font-size:.7rem;padding:1px 4px;border:1px solid var(--color-border);border-radius:3px;background:var(--color-surface);color:var(--color-text);max-width:120px;width:100%">${opts}</select>
-            </div>`;
+            return tRow(curName, scoreVal, isWin, isLoss);
           };
-          // Connector: top card of a pair draws line down, bottom card draws line up.
-          // --wc-gap = distance between this card's centre and its sibling's centre.
-          const n2   = (rnd||[]).length;
+          const top  = topOf(ri, mi);
           const hasSibling = (mi % 2 === 0 && mi + 1 < n2) || (mi % 2 === 1);
           const gap  = hasSibling ? connGap(ri, mi) : 0;
           const isTopOfPair = mi % 2 === 0;
@@ -10391,13 +10337,73 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>
       </div>`;
 
-      const saveBar = isAdmin ? `
-        <div class="trn-wc-bracket-save-bar" id="trn-wc-adv-save-bar" style="display:none">
-          <button class="btn-primary btn-sm" id="trn-wc-adv-save">💾 Save Round</button>
-          <span style="font-size:.73rem;color:var(--color-text-dim)">Select advancing teams above, then save.</span>
-        </div>` : "";
+      const saveBar = ""; // no longer needed — next-round panel replaces it
 
-      return `${saveBar}<div class="trn-wc-bracket">${cols}${champCol}</div>`;
+      // ── Next-round assignment panel (admin only) ──────────────────────────
+      // Find the last round that is fully scored — that's the "current" completed round.
+      // All its winners become the free-pick pool for the next round.
+      let nextRoundPanel = "";
+      if (isAdmin) {
+        // Find the active round: last round where all matchups have both teams + scores
+        let completedRi = -1;
+        for (let ri = 0; ri < bracket.length; ri++) {
+          const rnd = bracket[ri] || [];
+          if (rnd.length > 0 && rnd.every(m => m.a && m.b && m.scoreA !== null && m.scoreA !== undefined && m.scoreB !== null && m.scoreB !== undefined)) {
+            completedRi = ri;
+          } else {
+            break; // stop at first incomplete round
+          }
+        }
+        const nextRi = completedRi + 1;
+        const nextRnd = bracket[nextRi];
+
+        if (nextRnd && completedRi >= 0) {
+          // Collect winners from completed round — free pool, any can go anywhere
+          const winners = (bracket[completedRi] || []).map(m =>
+            m.scoreA >= m.scoreB ? m.a : m.b
+          ).filter(Boolean);
+
+          const nextSlots = nextRnd.map((m, mi) => ({
+            a: m.a || "", b: m.b || "", mi
+          }));
+
+          const getRN = (ri) => ri===bracket.length-1?"🏆 Championship":ri===bracket.length-2?"Semifinals":ri===bracket.length-3?"Quarterfinals":`Round ${ri+1}`;
+
+          const _opts = (placed, cur) => {
+            let h = `<option value="">— Select winner —</option>`;
+            winners.forEach(name => {
+              const dis = placed.has(name) && name !== cur;
+              h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
+            });
+            return h;
+          };
+
+          const matchupRows = nextSlots.map(({a, b, mi}) => {
+            const placed = new Set(nextSlots.map(s=>[s.a,s.b]).flat().filter(Boolean));
+            return `<div class="trn-wc-setup-matchup" data-mi="${mi}">
+              <span class="trn-wc-setup-num">${mi+1}</span>
+              <select class="trn-wc-next-sel" data-mi="${mi}" data-side="a">${_opts(placed, a)}</select>
+              <span class="trn-wc-setup-vs">vs</span>
+              <select class="trn-wc-next-sel" data-mi="${mi}" data-side="b">${_opts(placed, b)}</select>
+            </div>`;
+          }).join("");
+
+          nextRoundPanel = `
+            <div class="trn-section-card" style="margin-top:var(--space-3);max-width:560px">
+              <div class="trn-section-card-title">Set ${getRN(nextRi)} Matchups</div>
+              <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+                ${getRN(completedRi)} is complete. Assign the ${winners.length} winners to ${getRN(nextRi)} matchups freely — any winner can go in any slot.
+              </p>
+              <div id="trn-wc-next-rows" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3)">${matchupRows}</div>
+              <div style="display:flex;gap:var(--space-2);align-items:center">
+                <button class="btn-primary btn-sm" id="trn-wc-next-save" data-next-ri="${nextRi}">💾 Save ${getRN(nextRi)} Matchups</button>
+                <span style="font-size:.73rem;color:var(--color-text-dim)">${winners.length} winners → ${nextSlots.length} matchups</span>
+              </div>
+            </div>`;
+        }
+      }
+
+      return `<div class="trn-wc-bracket-wrap"><div class="trn-wc-bracket">${cols}${champCol}</div></div>${nextRoundPanel}`;
     };
 
     // ── League champs ────────────────────────────────────
@@ -10650,30 +10656,44 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           .catch(e => showToast("Failed: "+e.message, "error"));
       });
 
-      // ── Advance-select dropdowns (later rounds) ───────────
-      document.querySelectorAll(".trn-wc-adv-sel").forEach(sel => {
-        sel.addEventListener("change", () => {
-          const saveBar = document.getElementById("trn-wc-adv-save-bar");
-          if (saveBar) saveBar.style.display = "";
+      // ── Next-round free-pick: cross-exclusion ────────────
+      const _refreshNextSels = () => {
+        const sels = Array.from(document.querySelectorAll(".trn-wc-next-sel"));
+        const placed = new Set(sels.map(s => s.value).filter(Boolean));
+        sels.forEach(sel => {
+          const cur = sel.value;
+          // Rebuild options preserving current selection
+          const opts = Array.from(sel.options).map(o => {
+            if (o.value === "") return o.outerHTML;
+            const dis = placed.has(o.value) && o.value !== cur;
+            return `<option value="${_esc(o.value)}" ${o.value===cur?"selected":""}${dis?" disabled":""}>${_esc(o.text)}</option>`;
+          }).join("");
+          sel.innerHTML = opts;
         });
-      });
+      };
+      document.querySelectorAll(".trn-wc-next-sel").forEach(sel =>
+        sel.addEventListener("change", _refreshNextSels)
+      );
+      _refreshNextSels();
 
-      // ── Save advancing teams (later rounds) ──────────────
-      document.getElementById("trn-wc-adv-save")?.addEventListener("click", async () => {
-        const bracket = po.worldcupBracket ? JSON.parse(JSON.stringify(po.worldcupBracket)) : [];
-        document.querySelectorAll(".trn-wc-adv-sel").forEach(sel => {
-          const ri   = parseInt(sel.dataset.ri);
+      // ── Save next-round matchups ──────────────────────────
+      document.getElementById("trn-wc-next-save")?.addEventListener("click", async () => {
+        const btn    = document.getElementById("trn-wc-next-save");
+        const nextRi = parseInt(btn?.dataset.nextRi ?? "-1");
+        if (nextRi < 0) return;
+        const updBracket = JSON.parse(JSON.stringify(po.worldcupBracket || []));
+        if (!updBracket[nextRi]) return;
+        // Read all slot selections
+        document.querySelectorAll(".trn-wc-next-sel").forEach(sel => {
           const mi   = parseInt(sel.dataset.mi);
           const side = sel.dataset.side;
-          const name = sel.value;
-          if (!bracket[ri]) bracket[ri] = [];
-          if (!bracket[ri][mi]) bracket[ri][mi] = {a:"",b:"",scoreA:null,scoreB:null};
-          bracket[ri][mi][side] = name;
+          if (!updBracket[nextRi][mi]) updBracket[nextRi][mi] = {a:"",b:"",scoreA:null,scoreB:null};
+          updBracket[nextRi][mi][side] = sel.value || "";
         });
         try {
-          await _tPlayoffsRef(tid, activeY).update({ worldcupBracket: bracket });
-          Object.assign(po, { worldcupBracket: bracket });
-          showToast("Round updated ✓");
+          await _tPlayoffsRef(tid, activeY).update({ worldcupBracket: updBracket });
+          Object.assign(po, { worldcupBracket: updBracket });
+          showToast("Matchups saved ✓");
           document.getElementById("trn-po-content").innerHTML = _renderContent("wc_bracket");
           _wcWireBracketButtons();
         } catch(e) { showToast("Failed: "+e.message, "error"); }
