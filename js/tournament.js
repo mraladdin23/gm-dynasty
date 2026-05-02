@@ -8472,7 +8472,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const yearData = {};
 
       yearKeys.forEach(yr => {
-        const poEntry = (poByYear[String(yr)] || {})[cKey];
+        const poYrMap = poByYear[String(yr)] || {};
+        // Try all name variants: displayName, plus any teamName from seasons this year
+        // (bracket names may differ from participant displayNames)
+        const teamNames = (c.seasons[yr] || []).map(s => _sk(s.teamName)).filter(Boolean);
+        const poEntry = poYrMap[cKey]
+          || teamNames.reduce((found, k) => found || poYrMap[k], null)
+          || null;
 
         // For worldcup years: override W/L/PF with group-stage records BEFORE accumulating
         if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {

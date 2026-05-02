@@ -708,10 +708,13 @@
         const yearData = {};
 
         yearKeys.forEach(yr => {
-          // Playoff qualification entry
+          // Playoff qualification entry — try displayName first, then teamName variants
           const cKey    = _sk(c.displayName);
           const poYr    = poByYear[yr] || {};
-          const poEntry = poYr[cKey];
+          const teamNames = (c.seasons[yr] || []).map(s => _sk(s.teamName)).filter(Boolean);
+          const poEntry = poYr[cKey]
+            || teamNames.reduce((found, k) => found || poYr[k], null)
+            || null;
 
           // For worldcup years: override W/L/PF with group-stage records BEFORE accumulating
           if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
