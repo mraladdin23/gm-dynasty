@@ -4279,11 +4279,31 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           return 0;
         });
 
+        const regComplete = (() => {
+          const regWks2  = po.worldcupRegWeeks || 6;
+          const startWk2 = po.startWeek || null;
+          const _nflWk2  = wi => startWk2 ? (startWk2 - regWks2 + wi) : (wi + 1);
+          return Array.from({length: regWks2}, (_, wi) => wi).every(wi => {
+            const matchups = schedule[String(wi)] || [];
+            if (!matchups.length) return true;
+            const nflWk = _nflWk2(wi);
+            return members.some(n => {
+              const info = teamInfoMap[n];
+              return info?.leagueId && _wsc[info.leagueId+"|"+nflWk]?.[info.teamId] != null;
+            });
+          });
+        })();
+
         const trs = sorted.map((name,i) => {
           const r=records[name], isAdv=i<advCount;
-          const divider=(i===advCount&&sorted.length>advCount)?`<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— Top ${advCount} advance —</div></td></tr>`:"";
-          const badge=isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-          return `${divider}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
+          const rowCls = regComplete ? (isAdv?"trn-po-row--advance":"trn-po-row--cut") : "trn-po-row--neutral";
+          const badge  = regComplete
+            ? (isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
+            : "";
+          const divider=(i===advCount&&sorted.length>advCount)
+            ?`<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— Cut Line (top ${advCount}${regComplete?" advance":""}) —</div></td></tr>`
+            :"";
+          return `${divider}<tr class="${rowCls}">
             <td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name">${_esc2(name)}</td>
             <td class="trn-po-num">${r.wins}</td><td class="trn-po-num">${r.losses}</td>
             <td class="trn-po-num trn-po-pf">${r.pf.toFixed(2)}</td><td class="trn-po-num">${r.pa.toFixed(2)}</td>
@@ -8852,7 +8872,29 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       return rec; // keyed by _skWC(teamName)
     };
 
-    // Return the top-N qualified teams from a group, sorted by in-group standings.
+    // Returns true when ALL regular-season weeks in ALL groups have scores fetched.
+    // Used to gate advance/eliminate badges and bracket setup.
+    const _wcRegSeasonComplete = () => {
+      const groups  = po.worldcupGroups || [];
+      const regWks  = po.worldcupRegWeeks || 6;
+      const startWk = po.startWeek || null;
+      const _nflWk  = wi => startWk ? (startWk - regWks + wi) : (wi + 1);
+      return groups.every((g, gi) => {
+        const sched = (po.worldcupSchedule || {})[String(gi)] || {};
+        for (let wi = 0; wi < regWks; wi++) {
+          const matchups = sched[String(wi)] || [];
+          if (!matchups.length) continue; // no matchups scheduled this week — skip
+          const nflWk = _nflWk(wi);
+          // Check that at least one team in this group has a score for this week
+          const hasScore = (g.members || []).some(name => {
+            const info = _wcTeamInfoMap[_skWC(name)];
+            return info?.leagueId && _weekScoreCache[info.leagueId + "|" + nflWk]?.[info.teamId] != null;
+          });
+          if (!hasScore) return false; // this week missing — not complete
+        }
+        return true;
+      });
+    };
     // gi (group index) is required so we look up the right schedule slot.
     const _wcQualified = (g, gi) => {
       const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
@@ -10111,14 +10153,21 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }[k]||k)).join(" → "));
           const tbLabel = tbParts.join(" | ");
 
-          // Build table rows
+          // Build table rows — show cut line always, but advance/eliminate badges
+          // only after the full regular season has scores (all weeks fetched).
+          const regComplete = _wcRegSeasonComplete();
           const rows = sorted.map((name, i) => {
             const r     = records[name];
             const isAdv = i < advCount;
-            const rowCls = isAdv ? "trn-po-row--advance" : "trn-po-row--cut";
-            const badge  = isAdv
-              ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+            // Cut line styling — always show position difference
+            const rowCls = regComplete
+              ? (isAdv ? "trn-po-row--advance" : "trn-po-row--cut")
+              : "trn-po-row--neutral";
+            const badge = regComplete
+              ? (isAdv
+                  ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+                  : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
+              : ""; // no badge until reg season done
             const info = teamInfoMap[name] || {};
             const lc   = Object.values(t.standingsCache||{}).find(lc => String(lc.year)===String(activeY) && (lc.teams||[]).some(tm=>tm.teamName===name));
             return `<tr class="${rowCls}">
@@ -10136,7 +10185,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }).join("");
 
           const cutRow = advCount < sorted.length
-            ? `<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— ${advCount} advance · ${sorted.length-advCount} eliminated —</div></td></tr>`
+            ? `<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— Cut Line (top ${advCount}${regComplete ? " advance" : ""}) —</div></td></tr>`
             : "";
 
           const tbl    = document.getElementById(tableId);
@@ -10306,33 +10355,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // ── Unseeded: Round 1 setup UI ───────────────────────
       if (!advancers.length) return `<div class="trn-po-empty">No group advancers found. Configure groups first.</div>`;
 
-      // Don't allow bracket seeding until the regular season has actual scores.
-      // Check whether _weekScoreCache has any entries for the group-stage weeks —
-      // if not, either weeks haven't been played or scores haven't been fetched yet.
-      const _hasGroupScores = groups.some((g, gi) => {
-        const sched = (po.worldcupSchedule || {})[String(gi)] || {};
-        const regWks = po.worldcupRegWeeks || 6;
-        const startWk = startWeekPo || null;
-        for (let wi = 0; wi < regWks; wi++) {
-          const matchups = sched[String(wi)] || [];
-          if (!matchups.length) continue;
-          const nflWk = startWk ? (startWk - regWks + wi) : (wi + 1);
-          const anyMember = (g.members || [])[0];
-          if (!anyMember) continue;
-          const info = _wcTeamInfoMap[_skWC(anyMember)];
-          if (info?.leagueId && _weekScoreCache[info.leagueId + "|" + nflWk]) return true;
-        }
-        return false;
-      });
-
-      if (!_hasGroupScores) {
+      // Don't show bracket setup until the full regular season is complete.
+      // _wcRegSeasonComplete() checks that every scheduled week has scores fetched.
+      if (!_wcRegSeasonComplete()) {
         return `<div class="trn-section-card" style="max-width:480px">
-          <div class="trn-section-card-title">Bracket Setup</div>
+          <div class="trn-section-card-title">🥊 Bracket</div>
           <div class="trn-po-empty" style="margin:0">
-            ⏳ The bracket cannot be seeded until the regular season has begun and scores are available.
-            Once group-stage weeks have been played, click <strong>↺ Refresh from groups</strong> to load the standings and build the bracket.
+            ⏳ The playoff bracket will be available once the regular season has finished.
+            Check the Standings tab to track group progress.
           </div>
-          <button class="btn-secondary btn-sm" id="trn-wc-refresh-standings" style="margin-top:var(--space-3)">↺ Refresh from groups</button>
+          <button class="btn-secondary btn-sm" id="trn-wc-refresh-standings" style="margin-top:var(--space-3)">↺ Refresh Group Scores</button>
         </div>`;
       }
 
@@ -11788,38 +11820,60 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             const wcAllRanked3 = [];
             const wcPlaced3    = new Set();
 
-            if (wcBracket3.length) {
-              const wcSeeds3 = wcBracket3.map(name => allTeams.find(t => _sk3(_displayName(t)) === _sk3(name) || _sk3(t.teamName) === _sk3(name)) || {teamName:name,displayName:name,pf:0,teamId:""});
-              const wcBktSize3 = wcSeeds3.length;
-              const wcNR3 = Math.ceil(Math.log2(Math.max(wcBktSize3,2)));
-              const wcByeCount3 = (po.byes?.type!=="none") ? (po.byes?.count||0) : 0;
-              const wcElimRnd3 = Array.from({length:wcNR3},()=>[]);
-              let wcCur3 = [...wcSeeds3];
-              const wcR1B3 = wcCur3.slice(0,wcByeCount3), wcR1P3 = wcCur3.slice(wcByeCount3);
-              for (let ri = 0; ri < wcNR3; ri++) {
-                const wkN_ = wcStartPo3 ? wcStartPo3 + ri*wcWPR3 : null;
-                const next = [];
-                if (ri===0) {
-                  next.push(...wcR1B3);
-                  const half = Math.floor(wcR1P3.length/2);
-                  for (let mi=0;mi<half;mi++) {
-                    const a=wcR1P3[mi],b=wcR1P3[wcR1P3.length-1-mi];
-                    const sa=_bktScoreWC3(a,wkN_)??(wcBktSize3-wcSeeds3.indexOf(a));
-                    const sb=_bktScoreWC3(b,wkN_)??(wcBktSize3-wcSeeds3.indexOf(b));
-                    if(sa>=sb){next.push(a);wcElimRnd3[ri].push(b);}else{next.push(b);wcElimRnd3[ri].push(a);}
-                  }
-                  if(wcR1P3.length%2!==0)next.push(wcR1P3[Math.floor(wcR1P3.length/2)]);
-                } else {
-                  const half=Math.floor(wcCur3.length/2);
-                  for(let mi=0;mi<half;mi++){const a=wcCur3[mi*2],b=wcCur3[mi*2+1];const sa=_bktScoreWC3(a,wkN_)??0,sb=_bktScoreWC3(b,wkN_)??0;if(sa>=sb){next.push(a);wcElimRnd3[ri].push(b);}else{next.push(b);wcElimRnd3[ri].push(a);}}
-                  if(wcCur3.length%2!==0)next.push(wcCur3[wcCur3.length-1]);
-                }
-                wcCur3 = next;
+            // wcBracket3 is [ [{a,b,scoreA,scoreB},...], [...], ... ] — array of rounds.
+            // Read directly from stored matchup results instead of simulating.
+            if (wcBracket3.length && Array.isArray(wcBracket3[0])) {
+              const nr3 = wcBracket3.length;
+              // Track which round each team was eliminated in (0-indexed from last round)
+              // and their score in that round (for same-round tie-breaking by PF).
+              const elimRound3 = {}; // teamName → {ri, score}
+
+              // Walk all rounds: collect winners and losers
+              for (let ri = 0; ri < nr3; ri++) {
+                const rnd = wcBracket3[ri] || [];
+                rnd.forEach(m => {
+                  if (!m.a || !m.b) return;
+                  const hasScore = m.scoreA !== null && m.scoreA !== undefined &&
+                                   m.scoreB !== null && m.scoreB !== undefined;
+                  if (!hasScore) return;
+                  const loser = m.scoreA >= m.scoreB ? m.b : m.a;
+                  const loserScore = m.scoreA >= m.scoreB ? m.scoreB : m.scoreA;
+                  // Only record first elimination (don't overwrite if already placed)
+                  if (!elimRound3[loser]) elimRound3[loser] = { ri, score: loserScore };
+                });
               }
-              // Champion(s)
-              wcCur3.forEach(tm=>{const tk=_teamKey(tm);if(!wcPlaced3.has(tk)){wcAllRanked3.push({...tm,isTChamp:true});wcPlaced3.add(tk);}});
-              // Bracket eliminated (deepest round first)
-              for(let ri=wcNR3-1;ri>=0;ri--){const wkN_=wcStartPo3?wcStartPo3+ri*wcWPR3:null;[...(wcElimRnd3[ri]||[])].sort((a,b)=>(_bktScoreWC3(b,wkN_)??0)-(_bktScoreWC3(a,wkN_)??0)).forEach(tm=>{const tk=_teamKey(tm);if(!wcPlaced3.has(tk)){wcAllRanked3.push({...tm,isTChamp:false});wcPlaced3.add(tk);}});}
+
+              // Find champion: winner of the last fully-scored round
+              let champ3 = null;
+              const lastRnd = wcBracket3[nr3 - 1] || [];
+              const lastM   = lastRnd[0];
+              if (lastM?.a && lastM?.b &&
+                  lastM.scoreA !== null && lastM.scoreA !== undefined &&
+                  lastM.scoreB !== null && lastM.scoreB !== undefined) {
+                champ3 = lastM.scoreA >= lastM.scoreB ? lastM.a : lastM.b;
+              }
+
+              // Place champion first
+              if (champ3) {
+                const tm3 = allTeams.find(t => _sk3(_displayName(t))===_sk3(champ3)||_sk3(t.teamName)===_sk3(champ3))
+                  || { teamName: champ3, displayName: champ3, pf: 0, teamId: "" };
+                const tk3 = _teamKey(tm3);
+                if (!wcPlaced3.has(tk3)) { wcAllRanked3.push({...tm3,isTChamp:true}); wcPlaced3.add(tk3); }
+              }
+
+              // Place bracket eliminated: deepest round first (ri descending),
+              // within same round sort by their score in that round descending.
+              for (let ri = nr3 - 1; ri >= 0; ri--) {
+                const elimThisRnd = Object.entries(elimRound3)
+                  .filter(([, e]) => e.ri === ri)
+                  .sort(([, a], [, b]) => b.score - a.score);
+                elimThisRnd.forEach(([name]) => {
+                  const tm3 = allTeams.find(t => _sk3(_displayName(t))===_sk3(name)||_sk3(t.teamName)===_sk3(name))
+                    || { teamName: name, displayName: name, pf: 0, teamId: "" };
+                  const tk3 = _teamKey(tm3);
+                  if (!wcPlaced3.has(tk3)) { wcAllRanked3.push({...tm3,isTChamp:false}); wcPlaced3.add(tk3); }
+                });
+              }
             }
 
             // Group-stage eliminated (by group order, then rank within group)
