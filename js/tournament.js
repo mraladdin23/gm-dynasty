@@ -7552,12 +7552,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           [entry.displayName, entry.teamName].filter(Boolean).map(_sk).forEach(k => {
             if (!poByYear[String(yr)][k]) {
               poByYear[String(yr)][k] = {
-                qualified: !!(entry.qualified),
-                bye:       !!(entry.bye),
-                rank:      entry.finalRank || null,
-                isTChamp:  !!(entry.isTChamp),
-                leagueId:  String(entry.leagueId || ""),
-                teamId:    String(entry.teamId   || "")
+                qualified:   !!(entry.qualified),
+                bye:         !!(entry.bye),
+                rank:        entry.finalRank || null,
+                isTChamp:    !!(entry.isTChamp),
+                leagueId:    String(entry.leagueId || ""),
+                teamId:      String(entry.teamId   || ""),
+                // Group-stage stats for worldcup (null for other modes)
+                groupWins:   entry.groupWins   ?? null,
+                groupLosses: entry.groupLosses ?? null,
+                groupPF:     entry.groupPF     ?? null,
               };
             }
           });
@@ -8254,6 +8258,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         if (poEntry?.qualified)  playoffApps++;
         if (poEntry?.isTChamp)   tournamentChamps++;
         if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
+
+        // For worldcup years: override W/L/PF with group-stage records if available
+        if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
+          const season = c.seasons[yr]?.[0];
+          if (season) {
+            // Replace with group-stage stats — this is what the W/L record should show
+            season.wins   = poEntry.groupWins;
+            season.losses = poEntry.groupLosses ?? season.losses;
+            season.pf     = poEntry.groupPF     ?? season.pf;
+          }
+        }
       });
 
       // Streak: consecutive most-recent seasons qualified
@@ -9013,12 +9028,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           tabs.push({ id:`cround_${i}`, label: isFinal ? "🏆 Championship" : `Round ${i+1}` });
         });
       } else if (mode === "worldcup") {
-        // Each group tab contains both its standings table AND weekly matchups.
-        // No separate Standings or Matchups tab — everything is in the group.
-        (po.worldcupGroups || []).forEach((g, gi) => {
-          tabs.push({ id:`wcgroup_${gi}`, label:`🌍 ${g.name || ("Group "+(gi+1))}` });
-        });
-        // Bracket tab always present in worldcup mode
+        // In worldcup mode the Playoffs tab only shows the bracket.
+        // All group standings + matchups live in the Standings tab.
         tabs.push({ id:"wc_bracket", label:"🥊 Bracket" });
       }
       if (po.recognizeLeagueChampions) tabs.push({ id:"league_champs", label:"🏅 League Champs" });
@@ -9045,113 +9056,21 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const note = mode === "total_points"
         ? `Champion = highest PF${ew ? ` through Week ${ew}` : ""}.`
         : mode === "worldcup"
-        ? `🌍 World Cup group stage · ${sortedTeams.length} teams · group results update after each sync`
+        ? `🌍 World Cup group stage · ${sortedTeams.length} teams`
         : `${qualifiers.length} qualified · ${elimCount} eliminated${byeCount ? ` · ${byeCount} bye${byeCount!==1?"s":""}` : ""}${sw ? ` · Playoffs Wk ${sw}` : ""}`;
 
-      // ── World Cup: show per-group tables then overall ────
+      // ── World Cup: render all groups inline (standings + matchups per group) ─
       if (mode === "worldcup") {
-        const wcGroups  = po.worldcupGroups || [];
-        const wcSched   = po.worldcupSchedule || {};
-        const wcRegWks  = po.worldcupRegWeeks || 6;
-        const wcAdv     = po.worldcupAdvanceCount ?? 2;
-
+        const wcGroups = po.worldcupGroups || [];
         if (!wcGroups.length) {
-          return `<div class="trn-po-tp-note">${note}</div><div class="trn-po-empty">No groups configured yet. Set up groups in Admin → Playoffs → Group &amp; Schedule Config.</div>`;
+          return `<div class="trn-po-tp-note">${note}</div><div class="trn-po-empty">No groups configured yet.</div>`;
         }
-
-        // Build group standings synchronously from standingsCache W/L/PF
-        const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-        const _teamRec = (name) => {
-          for (const lc of Object.values(t.standingsCache||{})) {
-            if (String(lc.year) !== String(activeY)) continue;
-            const tm = (lc.teams||[]).find(t2 => _sk(t2.teamName)===_sk(name));
-            if (tm) return { wins:tm.wins||0, losses:tm.losses||0, pf:tm.pf||0, pa:tm.pa||0, leagueName:lc.leagueName||"" };
-          }
-          return { wins:0, losses:0, pf:0, pa:0, leagueName:"" };
-        };
-
-        const groupTables = wcGroups.map((g, gi) => {
-          const adv     = g.advanceCount ?? wcAdv;
-          const members = g.members || [];
-          if (!members.length) return "";
-
-          const rows = [...members]
-            .map(name => ({ name, ...(_teamRec(name)) }))
-            .sort((a,b) => (b.wins-a.wins) || (b.pf-a.pf));
-
-          const trs = rows.map((r, i) => {
-            const isAdv = i < adv;
-            const badge = isAdv
-              ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-            const divider = (i === adv && rows.length > adv)
-              ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>` : "";
-            return `${divider}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
-              <td class="trn-po-rank">${i+1}</td>
-              <td class="trn-po-team-name">
-                <div>${_esc(r.name)}</div>
-                ${r.leagueName?`<div class="trn-po-team-sub">${_esc(r.leagueName)}</div>`:""}
-              </td>
-              <td class="trn-po-num">${r.wins}–${r.losses}</td>
-              <td class="trn-po-num trn-po-pf">${r.pf.toFixed(2)}</td>
-              <td>${badge}</td>
-            </tr>`;
-          }).join("");
-
-          return `
-            <div class="trn-wc-group-standings-card">
-              <div class="trn-wc-group-standings-title">🌍 ${_esc(g.name||("Group "+(gi+1)))}</div>
-              <div class="trn-po-table-wrap">
-                <table class="trn-po-table">
-                  <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-                  <tbody>${trs}</tbody>
-                </table>
-              </div>
-            </div>`;
-        }).join("");
-
-        // Overall standings — all teams ranked by W/L/PF with qualified/eliminated badges
-        const allGroupMembers = new Set(wcGroups.flatMap(g => g.members||[]));
-        const advancerSet = new Set(wcGroups.flatMap((g, gi) => _wcQualified(g, gi)));
-        const overallRows = [...allGroupMembers]
-          .map(name => ({ name, ...(_teamRec(name)) }))
-          .sort((a,b) => (b.wins-a.wins)||(b.pf-a.pf));
-
-        const overallTrs = overallRows.map((r, i) => {
-          const isAdv = advancerSet.has(r.name);
-          const badge = isAdv
-            ? `<span class="trn-po-badge trn-po-badge--advance">↑ Qualified</span>`
-            : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-          return `<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
-            <td class="trn-po-rank">${i+1}</td>
-            <td class="trn-po-team-name">
-              <div>${_esc(r.name)}</div>
-              ${r.leagueName?`<div class="trn-po-team-sub">${_esc(r.leagueName)}</div>`:""}
-            </td>
-            <td class="trn-po-num">${r.wins}–${r.losses}</td>
-            <td class="trn-po-num trn-po-pf">${r.pf.toFixed(2)}</td>
-            <td>${badge}</td>
-          </tr>`;
-        }).join("");
-
-        return `
-          <div class="trn-po-tp-note">${note}</div>
-          <div style="font-size:.8rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-          Standings reflect synced W–L and PF. For live in-game scores, open the group tab and select a week.
-            ${po.worldcupTiebreakers?.length ? `Tiebreakers: ${po.worldcupTiebreakers.map(k=>({h2h_record:"H2H",h2h_record_tied:"H2H (direct)",h2h_pt_diff:"H2H Pt Diff",overall_pt_diff:"Pt Diff",overall_pf:"PF"}[k]||k)).join(" → ")}` : ""}
-          </div>
-          <div class="trn-wc-group-standings-grid">${groupTables}</div>
-          <div class="trn-wc-group-standings-card" style="margin-top:var(--space-4)">
-            <div class="trn-wc-group-standings-title">📊 Overall Standings</div>
-            <div class="trn-po-table-wrap">
-              <table class="trn-po-table">
-                <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-                <tbody>${overallTrs}</tbody>
-              </table>
-            </div>
-          </div>`;
+        // Render each group the same way the group tabs do — full standings + matchups
+        const groupsHTML = wcGroups.map((_, gi) => `
+          <div style="margin-bottom:var(--space-4)">${_renderWCGroup(gi)}</div>
+        `).join("");
+        return `<div class="trn-po-tp-note">${note}</div>${groupsHTML}`;
       }
-
       // Sort: qualified teams first (by PF desc), then eliminated (by PF desc)
       // Per-division rules scatter Q/E throughout sorted order so we group them cleanly
       const qualTeams = sortedTeams.filter(tm => qualSet.has(_teamKey(tm)));
@@ -11652,12 +11571,35 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             // Any remaining teams (not in any group)
             sortedTeams.forEach(tm => { const tk=_teamKey(tm); if(!wcPlaced3.has(tk)){wcAllRanked3.push({...tm,isTChamp:false});wcPlaced3.add(tk);} });
 
+            // Build a lookup of group-stage stats per team name for finalRankings
+            const wcGroupStats = {};
+            wcGroups3.forEach((g, gi) => {
+              const { rec } = groupRecords[gi];
+              Object.entries(rec).forEach(([name, r]) => {
+                wcGroupStats[_sk3(name)] = { wins: r.wins, losses: r.losses, pf: r.pf, pa: r.pa };
+              });
+            });
+
             return wcAllRanked3.map((tm,i) => {
-              const sl = standingsLookupWC[`${tm.teamName}|${_leagueIdForTeam(tm)}`] || {};
+              const sl  = standingsLookupWC[`${tm.teamName}|${_leagueIdForTeam(tm)}`] || {};
+              const gst = wcGroupStats[_sk3(_displayName(tm))] || wcGroupStats[_sk3(tm.teamName||"")] || null;
               const isAdvancer = wcAdvancers.some(a => _sk3(a.name) === _sk3(_displayName(tm)));
-              return { finalRank:i+1, teamName:tm.teamName||"", displayName:tm.displayName||_displayName(tm),
-                leagueId:_leagueIdForTeam(tm), teamId:String(tm.teamId||""),
-                qualified:isAdvancer, bye:false, isTChamp:!!(tm.isTChamp), pf:tm.pf||sl.pf||0 };
+              return {
+                finalRank:   i + 1,
+                teamName:    tm.teamName    || "",
+                displayName: tm.displayName || _displayName(tm),
+                leagueId:    _leagueIdForTeam(tm),
+                teamId:      String(tm.teamId||""),
+                qualified:   isAdvancer,
+                bye:         false,
+                isTChamp:    !!(tm.isTChamp),
+                pf:          tm.pf || sl.pf || 0,
+                // Group-stage stats — used by Players tab to show correct records
+                groupWins:   gst ? gst.wins   : null,
+                groupLosses: gst ? gst.losses  : null,
+                groupPF:     gst ? gst.pf      : null,
+                groupPA:     gst ? gst.pa      : null,
+              };
             });
 
           } else {
