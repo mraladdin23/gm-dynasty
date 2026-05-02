@@ -707,6 +707,20 @@
         const yearData = {};
 
         yearKeys.forEach(yr => {
+          // Playoff qualification entry
+          const cKey    = _sk(c.displayName);
+          const poYr    = poByYear[yr] || {};
+          const poEntry = poYr[cKey];
+
+          // For worldcup years: override W/L/PF with group-stage records BEFORE accumulating
+          if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
+            (c.seasons[yr] || []).forEach(season => {
+              season.wins   = poEntry.groupWins;
+              season.losses = poEntry.groupLosses ?? season.losses;
+              season.pf     = poEntry.groupPF     ?? season.pf;
+            });
+          }
+
           c.seasons[yr].forEach(s => {
             totalLeagues++;
             totalWins   += s.wins;
@@ -714,22 +728,8 @@
             totalPF     += s.pf;
             if (s.isChamp) totalChamps++;
           });
-          // Playoff qualification: any entry in this year's playoffs standings
-          const cKey    = _sk(c.displayName);
-          const poYr    = poByYear[yr] || {};
-          const poEntry = poYr[cKey];
+
           yearData[yr]  = poEntry || { qualified: false, bye: false, rank: null, isTournamentChamp: false };
-
-          // For worldcup years: override W/L/PF with group-stage records if available
-          if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
-            const season = c.seasons[yr]?.[0];
-            if (season) {
-              season.wins   = poEntry.groupWins;
-              season.losses = poEntry.groupLosses ?? season.losses;
-              season.pf     = poEntry.groupPF     ?? season.pf;
-            }
-          }
-
           if (poEntry?.qualified)          playoffApps++;
           if (poEntry?.isTournamentChamp)  tournamentChamps++;
           if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
@@ -1108,10 +1108,11 @@
       const t       = _currentT;
       const cache   = t.standingsCache || {};
 
-      // ── World Cup: show group standings from published playoffs data ──────
+      // ── World Cup: group dropdown selector ──────────────────────────────────
       const allPoYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
-      const poYear     = allPoYears[0] || null;
-      const po         = poYear ? (t.playoffs[poYear] || {}) : {};
+      // Respect the global year selector
+      const poYear = allPoYears.find(y => String(y) === String(_selectedYear)) || allPoYears[0] || null;
+      const po     = poYear ? (t.playoffs[poYear] || {}) : {};
       if (po.mode === "worldcup") {
         const wcGroups  = po.worldcupGroups  || [];
         const wcSched   = po.worldcupSchedule || {};
@@ -1126,185 +1127,167 @@
           return;
         }
 
-        // Build teamName → {teamId, leagueId} from wcStandingsCache
+        // Build teamName → {teamId, leagueId} — prefer wcStandingsCache, fallback to _currentT.standingsCache
         const teamInfoMap = {};
-        Object.values(wcSC).forEach(lc => {
-          const lid = String(lc.leagueId || "");
-          (lc.teams||[]).forEach(tm => {
-            if (tm.teamName && lid) teamInfoMap[_sk(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid };
-          });
+        const _buildTIM = (src) => Object.values(src||{}).forEach(lc => {
+          const lid = String(lc.leagueId || lc.league_id || "");
+          (lc.teams||[]).forEach(tm => { if (tm.teamName && lid) teamInfoMap[_sk(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid }; });
         });
+        _buildTIM(wcSC);
+        if (!Object.keys(teamInfoMap).length) _buildTIM(_currentT.standingsCache);
 
-        // Render group sections asynchronously — week selector + live scores
-        const groupSections = wcGroups.map((g, gi) => {
-          const adv     = g.advanceCount ?? wcAdv;
-          const members = g.members || [];
-          const sched   = wcSched[String(gi)] || {};
-          const weekOpts = Array.from({length: wcRegWks}, (_, wi) => `<option value="${wi}">Week ${wi+1}</option>`).join("");
-          const muId    = `pub-st-wc-mu-${gi}`;
-          const tableId = `pub-st-wc-tbl-${gi}`;
-          return `
-            <div class="trn-wc-group-standings-card" style="margin-bottom:var(--space-4)">
-              <div class="trn-wc-group-standings-title">🌍 ${esc(g.name||("Group "+(gi+1)))}
-                <span style="font-size:.72rem;color:var(--color-text-dim);font-weight:400;margin-left:6px">top ${adv} advance</span>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
-                <div id="${tableId}"><div style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2)">Loading standings…</div></div>
-                <div>
-                  <div style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
-                  <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
-                    <select id="pub-st-wk-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${weekOpts}</select>
-                    <button class="btn-secondary btn-xs" id="pub-st-ref-${gi}">↺ Refresh</button>
-                  </div>
-                  <div id="${muId}"></div>
-                </div>
-              </div>
-            </div>`;
-        }).join("");
+        const groupOpts = wcGroups.map((g, gi) =>
+          `<option value="${gi}">${esc(g.name || ("Group "+(gi+1)))}</option>`
+        ).join("");
 
-        body.innerHTML = `<div class="trn-po-container" style="padding-top:var(--space-2)">${groupSections}</div>`;
+        body.innerHTML = `
+          <div class="trn-po-container" style="padding-top:var(--space-2)">
+            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3)">
+              <label style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">View Group</label>
+              <select id="pub-wc-group-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${groupOpts}</select>
+            </div>
+            <div id="pub-wc-group-body"></div>
+          </div>`;
 
-        // Wire each group's async score loading
-        wcGroups.forEach((g, gi) => {
+        const _loadPubGroup = (gi) => {
+          const g       = wcGroups[gi];
           const adv     = g.advanceCount ?? wcAdv;
           const members = g.members || [];
           const sched   = wcSched[String(gi)] || {};
           const _nflWk  = wi => startWk ? (startWk - wcRegWks + wi) : (wi + 1);
-          const muEl    = document.getElementById(`pub-st-wc-mu-${gi}`);
-          const tblEl   = document.getElementById(`pub-st-wc-tbl-${gi}`);
-          const wkSel   = document.getElementById(`pub-st-wk-${gi}`);
-          const refBtn  = document.getElementById(`pub-st-ref-${gi}`);
 
-          const lids = [...new Set(members.map(n => teamInfoMap[_sk(n)]?.leagueId).filter(Boolean))];
-          const scoreMap = {}; // "leagueId|nflWk|teamId" → score
+          const tableId = `pub-wc-tbl-${gi}`, muId = `pub-wc-mu-${gi}`;
+          const weekOpts = Array.from({length: wcRegWks}, (_,wi) => `<option value="${wi}">Week ${wi+1}</option>`).join("");
 
+          const el = document.getElementById("pub-wc-group-body");
+          if (!el) return;
+          el.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
+              <div>
+                <div id="pub-wc-loader-${gi}" style="font-size:.8rem;color:var(--color-text-dim);padding:4px 0">⏳ Loading…</div>
+                <div class="trn-po-table-wrap">
+                  <table class="trn-po-table" id="${tableId}" style="display:none">
+                    <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
+                <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2)">
+                  <select id="pub-wc-wk-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${weekOpts}</select>
+                  <button class="btn-secondary btn-xs" id="pub-wc-ref-${gi}">↺ Refresh</button>
+                </div>
+                <div id="${muId}"></div>
+              </div>
+            </div>`;
+
+          const scoreMap = {};
+          const _fetchScores = async (lid, nflWk) => {
+            const key = `${lid}|${nflWk}`;
+            if (scoreMap[key]) return;
+            try {
+              const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
+              if (!r.ok) return;
+              const data = await r.json();
+              (data||[]).forEach(m => { scoreMap[`${lid}|${nflWk}|${m.roster_id}`] = parseFloat(m.points)||0; });
+            } catch(e) {}
+          };
           const _score = (name, nflWk) => {
             const info = teamInfoMap[_sk(name)];
             if (!info) return null;
-            return scoreMap[`${info.leagueId}|${nflWk}|${info.teamId}`] ?? null;
+            const v = scoreMap[`${info.leagueId}|${nflWk}|${info.teamId}`];
+            return v !== undefined ? v : null;
           };
 
-          // Compute group standings from all fetched weeks
-          const _computeRec = () => {
-            const rec = {};
-            members.forEach(n => { rec[_sk(n)] = { name:n, wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{} }; });
+          // Compute full standings from all weeks
+          const rec = {};
+          members.forEach(n => { rec[n] = { wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{} }; });
+
+          const _computeAndRender = async () => {
+            const lids = [...new Set(members.map(n => teamInfoMap[_sk(n)]?.leagueId).filter(Boolean))];
+            // Fetch all weeks
+            for (let wi = 0; wi < wcRegWks; wi++) {
+              if ((sched[String(wi)]||[]).length) {
+                await Promise.allSettled(lids.map(lid => _fetchScores(lid, _nflWk(wi))));
+              }
+            }
+            // Compute records
             for (let wi = 0; wi < wcRegWks; wi++) {
               const nflWk = _nflWk(wi);
-              (sched[String(wi)] || []).forEach(({home, away}) => {
-                const hk = _sk(home), ak = _sk(away);
-                if (!rec[hk] || !rec[ak]) return;
-                const hs = _score(home, nflWk), as_ = _score(away, nflWk);
-                if (hs !== null && as_ !== null) {
-                  rec[hk].pf += hs; rec[hk].pa += as_;
-                  rec[ak].pf += as_; rec[ak].pa += hs;
-                  rec[hk].h2hPF[ak] = (rec[hk].h2hPF[ak]||0) + (hs - as_);
-                  rec[ak].h2hPF[hk] = (rec[ak].h2hPF[hk]||0) + (as_ - hs);
-                  if (hs > as_) { rec[hk].wins++; rec[ak].losses++; rec[hk].h2h[ak]=(rec[hk].h2h[ak]||0)+1; rec[ak].h2h[hk]=(rec[ak].h2h[hk]||0)-1; }
-                  else if (as_ > hs) { rec[ak].wins++; rec[hk].losses++; rec[ak].h2h[hk]=(rec[ak].h2h[hk]||0)+1; rec[hk].h2h[ak]=(rec[hk].h2h[ak]||0)-1; }
+              (sched[String(wi)]||[]).forEach(({home,away}) => {
+                if (!home||!away||home===away||!rec[home]||!rec[away]) return;
+                const hs=_score(home,nflWk), as_=_score(away,nflWk);
+                if (hs!==null&&as_!==null) {
+                  rec[home].pf+=hs;rec[home].pa+=as_;rec[away].pf+=as_;rec[away].pa+=hs;
+                  rec[home].h2hPF[away]=(rec[home].h2hPF[away]||0)+(hs-as_);
+                  rec[away].h2hPF[home]=(rec[away].h2hPF[home]||0)+(as_-hs);
+                  if(hs>as_){rec[home].wins++;rec[away].losses++;rec[home].h2h[away]=(rec[home].h2h[away]||0)+1;rec[away].h2h[home]=(rec[away].h2h[home]||0)-1;}
+                  else if(as_>hs){rec[away].wins++;rec[home].losses++;rec[away].h2h[home]=(rec[away].h2h[home]||0)+1;rec[home].h2h[away]=(rec[home].h2h[away]||0)-1;}
                 }
               });
             }
-            return rec;
-          };
-
-          const _renderTable = () => {
-            if (!tblEl) return;
-            const rec = _computeRec();
-            const tbChain = Array.isArray(po.worldcupTiebreakers) && po.worldcupTiebreakers.length
-              ? po.worldcupTiebreakers : ["h2h_record_tied","h2h_pt_diff","overall_pt_diff","overall_pf"];
-            const winGroups = {};
-            members.forEach(n => { const w=rec[_sk(n)]?.wins||0; (winGroups[w]=winGroups[w]||[]).push(n); });
-            const sorted = [...members].sort((a,b) => {
-              const ka=_sk(a),kb=_sk(b), ra=rec[ka],rb=rec[kb];
-              const wd=(rb?.wins||0)-(ra?.wins||0); if(wd!==0)return wd;
-              const tc=(winGroups[ra?.wins||0]||[]).length;
-              if(tc>=3){const d=((rb?.pf||0)-(rb?.pa||0))-((ra?.pf||0)-(ra?.pa||0));if(d!==0)return d;return(rb?.pf||0)-(ra?.pf||0);}
-              for(const tb of tbChain){let d=0;
-                if(tb==="h2h_record_tied")d=(ra?.h2h[kb]||0)-(rb?.h2h[ka]||0);
-                else if(tb==="h2h_pt_diff")d=(ra?.h2hPF[kb]||0)-(rb?.h2hPF[ka]||0);
-                else if(tb==="overall_pt_diff")d=((ra?.pf||0)-(ra?.pa||0))-((rb?.pf||0)-(rb?.pa||0));
-                else if(tb==="overall_pf")d=(ra?.pf||0)-(rb?.pf||0);
-                if(d!==0)return -d;}
+            // Sort with tiebreakers
+            const tbChain = Array.isArray(po.worldcupTiebreakers)&&po.worldcupTiebreakers.length ? po.worldcupTiebreakers : ["h2h_record_tied","h2h_pt_diff","overall_pt_diff","overall_pf"];
+            const winGrps={};
+            members.forEach(n=>{const w=rec[n]?.wins||0;(winGrps[w]=winGrps[w]||[]).push(n);});
+            const sorted=[...members].sort((a,b)=>{
+              const d=(rec[b]?.wins||0)-(rec[a]?.wins||0);if(d!==0)return d;
+              const tc=(winGrps[rec[a]?.wins||0]||[]).length;
+              if(tc>=3){const dd=((rec[b]?.pf||0)-(rec[b]?.pa||0))-((rec[a]?.pf||0)-(rec[a]?.pa||0));if(dd!==0)return dd;return(rec[b]?.pf||0)-(rec[a]?.pf||0);}
+              for(const tb of tbChain){let df=0;
+                if(tb==="h2h_record_tied")df=(rec[a]?.h2h[b]||0)-(rec[b]?.h2h[a]||0);
+                else if(tb==="h2h_pt_diff")df=(rec[a]?.h2hPF[b]||0)-(rec[b]?.h2hPF[a]||0);
+                else if(tb==="overall_pt_diff")df=((rec[a]?.pf||0)-(rec[a]?.pa||0))-((rec[b]?.pf||0)-(rec[b]?.pa||0));
+                else if(tb==="overall_pf")df=(rec[a]?.pf||0)-(rec[b]?.pf||0);
+                if(df!==0)return -df;}
               return 0;
             });
-            const trs = sorted.map((name,i) => {
-              const r = rec[_sk(name)];
-              const isAdv = i < adv;
-              const badge = isAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-                : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-              const div = i===adv && sorted.length>adv
-                ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>` : "";
+            const trs=sorted.map((name,i)=>{
+              const r=rec[name],isAdv=i<adv;
+              const div=(i===adv&&sorted.length>adv)?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>`:"";
+              const badge=isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
               return `${div}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
-                <td class="trn-po-rank">${i+1}</td>
-                <td class="trn-po-team-name"><div>${esc(name)}</div></td>
-                <td class="trn-po-num">${r?.wins||0}–${r?.losses||0}</td>
-                <td class="trn-po-num trn-po-pf">${(r?.pf||0).toFixed(2)}</td>
-                <td>${badge}</td>
-              </tr>`;
+                <td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name"><div>${esc(name)}</div></td>
+                <td class="trn-po-num">${r.wins}–${r.losses}</td><td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
+                <td>${badge}</td></tr>`;
             }).join("");
-            tblEl.innerHTML = `<div class="trn-po-table-wrap"><table class="trn-po-table">
-              <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-              <tbody>${trs}</tbody>
-            </table></div>`;
+            const tEl=document.getElementById(tableId),lEl=document.getElementById(`pub-wc-loader-${gi}`);
+            if(tEl){tEl.querySelector("tbody").innerHTML=trs;tEl.style.display="";}
+            if(lEl)lEl.style.display="none";
           };
 
-          const _fetchAndRender = async (wi) => {
-            const nflWk = _nflWk(wi);
-            await Promise.allSettled(lids.map(async lid => {
-              try {
-                const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
-                if (!r.ok) return;
-                const data = await r.json();
-                (data||[]).forEach(m => { scoreMap[`${lid}|${nflWk}|${m.roster_id}`] = parseFloat(m.points)||0; });
-              } catch(e) {}
-            }));
-            _renderTable();
-            if (!muEl) return;
-            const matchups = sched[String(wi)] || [];
-            if (!matchups.length) { muEl.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`; return; }
-            const cards = matchups.map(m => {
-              const sa = _score(m.home, nflWk), sb = _score(m.away, nflWk);
-              const has = sa!==null&&sb!==null, wH=has&&sa>sb, wA=has&&sb>sa;
-              const fmt = v => v!==null ? v.toFixed(2) : "–";
+          const _loadMatchups = async (wi) => {
+            const muEl=document.getElementById(muId);if(!muEl)return;
+            const nflWk=_nflWk(wi);
+            const lids=[...new Set(members.map(n=>teamInfoMap[_sk(n)]?.leagueId).filter(Boolean))];
+            await Promise.allSettled(lids.map(lid=>_fetchScores(lid,nflWk)));
+            const matchups=sched[String(wi)]||[];
+            if(!matchups.length){muEl.innerHTML=`<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`;return;}
+            const cards=matchups.map(m=>{
+              const sa=_score(m.home,nflWk),sb=_score(m.away,nflWk);
+              const has=sa!==null&&sb!==null,wH=has&&sa>sb,wA=has&&sb>sa;
+              const fmt=v=>v!==null?v.toFixed(2):"–";
               return `<div class="trn-wc-mu-card">
-                <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}">
-                  <span class="trn-wc-mu-name">${esc(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(sa)}</span>
-                </div>
+                <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${esc(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(sa)}</span></div>
                 <div class="trn-wc-mu-vs">vs</div>
-                <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}">
-                  <span class="trn-wc-mu-name">${esc(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(sb)}</span>
-                </div>
+                <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${esc(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(sb)}</span></div>
               </div>`;
             }).join("");
-            muEl.innerHTML = `<div class="trn-wc-mu-cards">${cards}</div>`;
+            muEl.innerHTML=`<div class="trn-wc-mu-cards">${cards}</div>`;
           };
 
-          // Prefetch all weeks for the table, then wire the week selector for matchups
-          (async () => {
-            // Fetch all weeks so the standings table is complete
-            for (let wi = 0; wi < wcRegWks; wi++) {
-              const nflWk = _nflWk(wi);
-              await Promise.allSettled(lids.map(async lid => {
-                try {
-                  const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
-                  if (!r.ok) return;
-                  const data = await r.json();
-                  (data||[]).forEach(m => { scoreMap[`${lid}|${nflWk}|${m.roster_id}`] = parseFloat(m.points)||0; });
-                } catch(e) {}
-              }));
-            }
-            _renderTable();
-            // Show week 1 matchups by default
-            const wi0 = parseInt(wkSel?.value||"0");
-            await _fetchAndRender(wi0);
-          })();
+          _computeAndRender().then(()=>_loadMatchups(0));
+          document.getElementById(`pub-wc-wk-${gi}`)?.addEventListener("change",function(){_loadMatchups(parseInt(this.value)||0);});
+          document.getElementById(`pub-wc-ref-${gi}`)?.addEventListener("click",()=>_loadMatchups(parseInt(document.getElementById(`pub-wc-wk-${gi}`)?.value||"0")));
+        };
 
-          wkSel?.addEventListener("change", () => _fetchAndRender(parseInt(wkSel.value)||0));
-          refBtn?.addEventListener("click", () => _fetchAndRender(parseInt(wkSel?.value||"0")));
-        });
+        document.getElementById("pub-wc-group-sel")?.addEventListener("change", function() { _loadPubGroup(parseInt(this.value)); });
+        setTimeout(() => _loadPubGroup(0), 0);
         return;
       }
 
+      const rankBy  = t.rankBy || "record";
       const rankBy  = t.rankBy || "record";
 
       // All available years
@@ -1551,8 +1534,8 @@
       const _name = (tm) => esc(tm.displayName || tm.teamName || "—");
 
       // ── Tabs ──────────────────────────────────────────────
-      // Worldcup has a Standings tab (shows all groups). All other modes too.
-      const tabs = [{ id:"standings", label:"📊 Standings" }];
+      // Worldcup: playoffs tab shows bracket only — standings live on the Standings tab
+      const tabs = mode === "worldcup" ? [] : [{ id:"standings", label:"📊 Standings" }];
       if (mode==="total_points")    tabs.push({id:"leaderboard", label:"🏆 Leaderboard"});
       else if (mode==="points_rounds") rounds.forEach((_,i) => {
         tabs.push({id:`round_${i}`, label: i===rounds.length-1 ? "🏆 Championship" : `Round ${i+1}`});
@@ -2087,34 +2070,69 @@
       const _wcBracketView = () => {
         const bracket = po.worldcupBracket || [];
         if (!bracket.length) return `<div class="trn-po-empty">Bracket not yet set. Check back after group stage.</div>`;
-        const nr = bracket.length;
-        const getRN = (ri,tot) => ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
-        const wcWPR2 = po.worldcupWeeksPerRound||2;
-        const cols = bracket.map((rnd,ri) => {
-          const wStart = po.startWeek ? po.startWeek + ri*wcWPR2 : null;
-          const wTag = wStart ? `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR2>1?`Wks ${wStart}–${wStart+wcWPR2-1}`:`Wk ${wStart}`}</span>` : "";
-          const cards = (rnd||[]).map((m,mi) => {
-            const hasScore = m.scoreA !== null && m.scoreA !== undefined && m.scoreB !== null && m.scoreB !== undefined;
-            const winA = hasScore && m.scoreA > m.scoreB, winB = hasScore && m.scoreB > m.scoreA;
-            const tRow = (name, score, isWin, isLoss) => `<div class="trn-wc-bteam ${!name?"trn-wc-bt--tbd":isWin?"trn-wc-bt--win":isLoss?"trn-wc-bt--loss":""}">
-              <span class="trn-wc-bteam-name">${esc(name||"TBD")}</span>
-              ${hasScore?`<span class="trn-wc-bteam-score">${(score||0).toFixed(1)}</span>`:""}
-            </div>`;
-            const isTop = mi%2===0;
-            const connCls = ri<nr-1?(isTop?"trn-wc-card--conn-top":"trn-wc-card--conn-bot"):"";
-            const unitH = 54, slotH = Math.pow(2,ri)*unitH, gap = slotH;
-            return `<div class="trn-wc-card ${connCls}" style="margin-top:${mi===0?Math.floor(slotH/2-27):gap}px">
+        const nr    = bracket.length;
+        const cardH = 44;  // px — matchup card height
+        const pairG = 8;   // px — tight intra-pair gap at Round 0
+
+        const getRN  = (ri,tot) => ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
+        const wcWPR2 = po.worldcupWeeksPerRound || 2;
+
+        // Same absolute-positioning math as private _renderWCBracketCanvas
+        const centreR0 = (mi) => Math.floor(mi/2) * (2*cardH + 3*pairG) + (mi%2)*(cardH+pairG) + cardH/2;
+        const centreOf = (ri, mi) => ri === 0 ? centreR0(mi) : (centreOf(ri-1, 2*mi) + centreOf(ri-1, 2*mi+1)) / 2;
+        const topOf    = (ri, mi) => Math.round(centreOf(ri, mi) - cardH/2);
+        const colH     = (ri, n)  => n === 0 ? cardH : topOf(ri, n-1) + cardH;
+        const connGap  = (ri, mi) => Math.abs(centreOf(ri, mi) - centreOf(ri, mi % 2 === 0 ? mi+1 : mi-1));
+
+        const cols = bracket.map((rnd, ri) => {
+          const n      = (rnd||[]).length;
+          const totalH = colH(ri, n);
+          const wStart = po.startWeek ? po.startWeek + ri * wcWPR2 : null;
+          const wTag   = wStart ? `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR2>1?`Wks ${wStart}–${wStart+wcWPR2-1}`:`Wk ${wStart}`}</span>` : "";
+
+          const cards = (rnd||[]).map((m, mi) => {
+            const hasScore = m.scoreA !== null && m.scoreA !== undefined &&
+                             m.scoreB !== null && m.scoreB !== undefined;
+            const winA = hasScore && m.scoreA > m.scoreB;
+            const winB = hasScore && m.scoreB > m.scoreA;
+            const tRow = (name, score, isWin, isLoss) =>
+              `<div class="trn-wc-bteam ${!name?"trn-wc-bt--tbd":isWin?"trn-wc-bt--win":isLoss?"trn-wc-bt--loss":""}">
+                <span class="trn-wc-bteam-name">${esc(name||"TBD")}</span>
+                ${hasScore?`<span class="trn-wc-bteam-score">${(score||0).toFixed(1)}</span>`:""}
+              </div>`;
+
+            const top  = topOf(ri, mi);
+            const gap  = connGap(ri, mi);
+            const isTopOfPair = mi % 2 === 0;
+            const hasSib      = (isTopOfPair && mi+1 < n) || (!isTopOfPair);
+            const connCls     = ri < nr-1 && hasSib ? (isTopOfPair ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
+
+            return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
               ${tRow(m.a, m.scoreA, winA, winB)}
               <div class="trn-wc-card-divider"></div>
               ${tRow(m.b, m.scoreB, winB, winA)}
             </div>`;
           }).join("");
-          return `<div class="trn-wc-col" data-ri="${ri}"><div class="trn-wc-col-header">${getRN(ri,nr)} ${wTag}</div><div class="trn-wc-col-cards">${cards}</div></div>`;
+
+          return `<div class="trn-wc-col" data-ri="${ri}">
+            <div class="trn-wc-col-header">${getRN(ri,nr)} ${wTag}</div>
+            <div class="trn-wc-col-cards" style="position:relative;height:${totalH}px">${cards}</div>
+          </div>`;
         }).join("");
-        // Champion
-        const fm = (bracket[nr-1]||[])[0]||{};
-        const champ = fm.scoreA>fm.scoreB?fm.a:fm.scoreB>fm.scoreA?fm.b:"";
-        const champCol = `<div class="trn-wc-col trn-wc-col--champ"><div class="trn-wc-col-header">🏆 Champion</div><div class="trn-wc-col-cards" style="display:flex;align-items:center;height:100%"><div class="trn-wc-card trn-wc-card--champion"><div class="trn-wc-bteam trn-wc-bt--champ"><span class="trn-wc-bteam-name">${esc(champ||"TBD")}</span></div></div></div></div>`;
+
+        const fm    = (bracket[nr-1]||[])[0] || {};
+        const champ = fm.scoreA > fm.scoreB ? fm.a : fm.scoreB > fm.scoreA ? fm.b : "";
+        const champCol = `<div class="trn-wc-col trn-wc-col--champ">
+          <div class="trn-wc-col-header">🏆 Champion</div>
+          <div class="trn-wc-col-cards" style="display:flex;align-items:center;height:100%">
+            <div class="trn-wc-card trn-wc-card--champion">
+              <div class="trn-wc-bteam trn-wc-bt--champ">
+                <span class="trn-wc-bteam-name">${esc(champ||"TBD")}</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+
         return `<div class="trn-wc-bracket-wrap"><div class="trn-wc-bracket">${cols}${champCol}</div></div>`;
       };
 
