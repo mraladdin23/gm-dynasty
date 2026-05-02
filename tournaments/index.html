@@ -722,25 +722,27 @@
             });
           }
 
+          const bracketComplete = Array.isArray(((t.playoffs||{})[yr]||{}).finalRankings)
+            && ((t.playoffs||{})[yr]||{}).finalRankings.some(e => e.isTChamp);
+
           c.seasons[yr].forEach(s => {
             totalLeagues++;
             totalWins   += s.wins;
             totalLosses += s.losses;
             totalPF     += s.pf;
-            // For worldcup: title = won your group
-            if (poEntry?.isGroupWinner) totalChamps++;
-            else if (!poEntry?.isGroupWinner && poEntry?.groupWins == null && s.isChamp) totalChamps++;
+            if (bracketComplete) {
+              if (poEntry?.isGroupWinner) totalChamps++;
+              else if (!poEntry?.isGroupWinner && poEntry?.groupWins == null && s.isChamp) totalChamps++;
+            }
           });
 
           yearData[yr]  = poEntry || { qualified: false, bye: false, rank: null, isTournamentChamp: false, isGroupWinner: false };
-          // PO count: for worldcup only if bracket has actually started (has any scored matchup)
-          const po = (t.playoffs || {})[yr] || {};
-          const bracketStarted = po.mode === "worldcup"
-            ? (po.worldcupBracket || []).some(rnd => (rnd||[]).some(m => m.scoreA !== null && m.scoreA !== undefined))
-            : true;
-          if (poEntry?.qualified && bracketStarted)  playoffApps++;
-          if (poEntry?.isTournamentChamp)  tournamentChamps++;
-          if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
+
+          if (bracketComplete) {
+            if (poEntry?.qualified)          playoffApps++;
+            if (poEntry?.isTournamentChamp)  tournamentChamps++;
+            if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
+          }
         });
 
         // Streak: consecutive most-recent seasons qualified
@@ -830,14 +832,17 @@
                 : `<span style="font-weight:600">${p.bestRank}</span>`)
             : `<span style="color:var(--color-text-dim)">—</span>`;
           const yearPips = allYearsSet.map(yr => {
-            const e   = p.yearData[String(yr)];
-            const inS = !!(p.seasons[String(yr)]);
+            const e      = p.yearData[String(yr)];
+            const inS    = !!(p.seasons[String(yr)]);
             if (!e && !inS) return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: did not play"></span>`;
-            const isWCYear = e && (e.groupWins !== null && e.groupWins !== undefined);
+            const poYrD  = (t.playoffs || {})[yr] || {};
+            const bDone  = Array.isArray(poYrD.finalRankings) && poYrD.finalRankings.some(e2 => e2.isTChamp);
+            if (!e || !bDone) {
+              return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: ${inS ? "in progress" : "played, no PO data"}"></span>`;
+            }
+            const isWCYear = e.groupWins !== null && e.groupWins !== undefined;
             let cls, tip;
-            if (!e) {
-              cls = "trn-az-yr-pip--absent"; tip = `${yr}: played, no PO data`;
-            } else if (e.isTournamentChamp) {
+            if (e.isTournamentChamp) {
               cls = "trn-az-yr-pip--champ"; tip = `${yr}: 🏆 Tournament Champion`;
             } else if (isWCYear) {
               if (e.isGroupWinner) {

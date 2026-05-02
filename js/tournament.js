@@ -8443,19 +8443,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // Determine which years have brackets that have actually started
     // (startWeek has been reached). Used to gate PO appearance count.
-    const _bracketStarted = (yr) => {
+    const _bracketComplete = (yr) => {
+      // A worldcup year is "complete" only when finalRankings has been published
+      // AND at least one team is marked as champion (bracket finished).
+      // For non-worldcup: complete when finalRankings exists with a champion,
+      // or fall back to bracket having a scored final round.
       const po = _playoffForYear(t, yr);
-      if (!po.startWeek) return false;
-      // Check if any score exists for the start week across any league
-      const regWks = po.worldcupRegWeeks || 6;
-      // Bracket starts at startWeek; group stage starts at startWeek - regWks
-      // We consider bracket started if worldcupBracket has any scored matchup
-      if (po.mode === "worldcup") {
-        return (po.worldcupBracket || []).some(rnd =>
-          (rnd||[]).some(m => m.scoreA !== null && m.scoreA !== undefined)
-        );
+      const fr = po.finalRankings;
+      if (Array.isArray(fr) && fr.length) {
+        return fr.some(e => e.isTChamp);
       }
-      return true; // non-worldcup modes always count
+      // No finalRankings yet — not complete
+      return false;
     };
 
     // All years across standings + playoff data, newest first — all normalized to strings
@@ -8486,17 +8485,22 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         c.seasons[yr].forEach(s => {
           totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
-          // For worldcup: title = won your group (consistent with winning your league)
-          // For other modes: title = won the league (isChamp from standingsCache)
-          if (poEntry?.isGroupWinner) totalChamps++;
-          else if (!poEntry?.isGroupWinner && poEntry?.groupWins === null && s.isChamp) totalChamps++;
+          // Titles: only count after bracket is complete (final published with champion)
+          if (_bracketComplete(yr)) {
+            if (poEntry?.isGroupWinner) totalChamps++;
+            else if (!poEntry?.isGroupWinner && poEntry?.groupWins === null && s.isChamp) totalChamps++;
+          }
         });
 
         yearData[yr] = poEntry || { qualified: false, bye: false, rank: null, isTChamp: false, isGroupWinner: false };
-        // Only count playoff appearance if the bracket has actually started
-        if (poEntry?.qualified && _bracketStarted(yr)) playoffApps++;
-        if (poEntry?.isTChamp)   tournamentChamps++;
-        if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
+
+        // Only count playoff appearances, rank, and champ status after the bracket
+        // is fully complete (finalRankings published with a champion).
+        if (_bracketComplete(yr)) {
+          if (poEntry?.qualified)  playoffApps++;
+          if (poEntry?.isTChamp)   tournamentChamps++;
+          if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
+        }
       });
 
       // Streak: consecutive most-recent seasons qualified
@@ -8580,34 +8584,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               : `<span style="font-weight:600">${p.bestRank}</span>`)
           : `<span style="color:var(--color-text-dim)">—</span>`;
         const yearPips = allYearsSet.map(yr => {
-          const e   = p.yearData[String(yr)];
-          const inS = !!(p.seasons[String(yr)]);
+          const e      = p.yearData[String(yr)];
+          const inS    = !!(p.seasons[String(yr)]);
+          const bDone  = _bracketComplete(yr);
           if (!e && !inS) return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: did not play"></span>`;
-          // Determine pip color:
-          // worldcup year: gold=bracket champion, green=won group, red=didn't win group, grey=no data
-          // non-worldcup year: gold=tournament champ, green=qualified, red=eliminated
-          const isWCYear = e?.groupWins !== null && e?.groupWins !== undefined;
+          if (!e || !bDone) {
+            // Played but bracket not complete yet — show neutral pip
+            return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: ${inS ? "in progress" : "played, no PO data"}"></span>`;
+          }
+          const isWCYear = e.groupWins !== null && e.groupWins !== undefined;
           let cls, tip;
-          if (!e) {
-            cls = "trn-az-yr-pip--absent";
-            tip = `${yr}: played, no PO data`;
-          } else if (e.isTChamp) {
-            cls = "trn-az-yr-pip--champ";
-            tip = `${yr}: 🏆 Tournament Champion`;
+          if (e.isTChamp) {
+            cls = "trn-az-yr-pip--champ"; tip = `${yr}: 🏆 Tournament Champion`;
           } else if (isWCYear) {
-            // Worldcup pip logic
             if (e.isGroupWinner) {
-              cls = "trn-az-yr-pip--qual";  // green = won group
-              tip = `${yr}: ✓ Won Group${e.rank ? " · Finish " + e.rank : ""}`;
-            } else if (e.groupWins !== null) {
-              cls = "trn-az-yr-pip--elim";  // red = didn't win group
-              tip = `${yr}: Did not win group${e.rank ? " · Finish " + e.rank : ""}`;
+              cls = "trn-az-yr-pip--qual"; tip = `${yr}: ✓ Won Group${e.rank ? " · Finish " + e.rank : ""}`;
             } else {
-              cls = "trn-az-yr-pip--absent";
-              tip = `${yr}: played`;
+              cls = "trn-az-yr-pip--elim"; tip = `${yr}: Did not win group${e.rank ? " · Finish " + e.rank : ""}`;
             }
           } else {
-            // Non-worldcup pip logic
             cls = e.qualified ? "trn-az-yr-pip--qual" : "trn-az-yr-pip--elim";
             tip = e.qualified
               ? `${yr}: ✓ Qualified${e.bye ? " (BYE)" : ""}${e.rank ? " · Rank " + e.rank : ""}`
