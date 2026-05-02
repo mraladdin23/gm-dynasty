@@ -4166,10 +4166,198 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   let _standingsYear = null;
 
+  // ── World Cup group standings standalone renderer ────────────────────────
+  // Renders selected group's records + matchups into #trn-wc-group-body
+  function _renderWCGroupStandalone(tid, t, body, gi, po, activeY) {
+    const group      = (po.worldcupGroups || [])[gi];
+    if (!group) return;
+    const advCount   = group.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
+    const members    = group.members || [];
+    const schedule   = (po.worldcupSchedule || {})[String(gi)] || {};
+    const regWeeks   = po.worldcupRegWeeks || 6;
+    const startWeekPo = po.startWeek || null;
+    const _esc2      = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const tableId   = `trn-wcs-table-${gi}`;
+    const loaderId  = `trn-wcs-loader-${gi}`;
+    const muId      = `trn-wcs-mu-${gi}`;
+
+    const weekOpts = Array.from({length: regWeeks}, (_, wi) => {
+      const nflWk = startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
+      return `<option value="${wi}">Week ${wi+1}${startWeekPo ? ` (NFL Wk ${nflWk})` : ""}</option>`;
+    }).join("");
+
+    const el = document.getElementById("trn-wc-group-body");
+    if (!el) return;
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
+        <div>
+          <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">⏳ Loading…</div>
+          <div class="trn-po-table-wrap">
+            <table class="trn-po-table trn-wc-group-table" id="${tableId}" style="display:none">
+              <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W</th><th class="trn-po-th-num">L</th><th class="trn-po-th-num">PF</th><th class="trn-po-th-num">PA</th><th>Status</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+            <select id="trn-wcs-wk-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${weekOpts}</select>
+            <button class="btn-secondary btn-xs" id="trn-wcs-ref-${gi}">↺ Refresh</button>
+          </div>
+          <div id="${muId}"></div>
+        </div>
+      </div>`;
+
+    const _wsc = {};
+    const _fetchWk = async (leagueId, week) => {
+      const key = leagueId + "|" + week;
+      if (_wsc[key]) return _wsc[key];
+      try {
+        const r = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week);
+        if (!r.ok) return {};
+        const data = await r.json();
+        const map = {};
+        (data||[]).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
+        _wsc[key] = map;
+        return map;
+      } catch(e) { return {}; }
+    };
+
+    const teamInfoMap = {};
+    Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== String(activeY)) return;
+      const lid = lc.leagueId || ck.replace(/^\d+_/,"");
+      (lc.teams||[]).forEach(tm => { if (tm.teamName) teamInfoMap[tm.teamName] = { teamId: String(tm.teamId||""), leagueId: lid }; });
+    });
+
+    const _nflWeek = wi => startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
+
+    (async () => {
+      try {
+        const records = {};
+        members.forEach(n => { records[n] = { wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{} }; });
+        const weeksNeeded = new Set(), leagueIds = new Set();
+        for (let wi = 0; wi < regWeeks; wi++) {
+          if ((schedule[String(wi)]||[]).length) {
+            weeksNeeded.add(_nflWeek(wi));
+            members.forEach(n => { const info=teamInfoMap[n]; if(info?.leagueId) leagueIds.add(info.leagueId); });
+          }
+        }
+        await Promise.all([...leagueIds].flatMap(lid => [...weeksNeeded].map(w => _fetchWk(lid, w))));
+
+        for (let wi = 0; wi < regWeeks; wi++) {
+          const nflWk = _nflWeek(wi);
+          (schedule[String(wi)]||[]).forEach(({home,away}) => {
+            if (!home||!away||home===away||!records[home]||!records[away]) return;
+            const hi=teamInfoMap[home], ai=teamInfoMap[away];
+            const hs=hi?(_wsc[hi.leagueId+"|"+nflWk]?.[hi.teamId]??null):null;
+            const as_=ai?(_wsc[ai.leagueId+"|"+nflWk]?.[ai.teamId]??null):null;
+            if (hs!==null&&as_!==null) {
+              records[home].pf+=hs; records[home].pa+=as_; records[away].pf+=as_; records[away].pa+=hs;
+              records[home].h2hPF[away]=(records[home].h2hPF[away]||0)+(hs-as_);
+              records[away].h2hPF[home]=(records[away].h2hPF[home]||0)+(as_-hs);
+              if(hs>as_){records[home].wins++;records[away].losses++;records[home].h2h[away]=(records[home].h2h[away]||0)+1;records[away].h2h[home]=(records[away].h2h[home]||0)-1;}
+              else if(as_>hs){records[away].wins++;records[home].losses++;records[away].h2h[home]=(records[away].h2h[home]||0)+1;records[home].h2h[away]=(records[home].h2h[away]||0)-1;}
+            }
+          });
+        }
+
+        const tbChain = Array.isArray(po.worldcupTiebreakers)&&po.worldcupTiebreakers.length ? po.worldcupTiebreakers : ["h2h_record_tied","h2h_pt_diff","overall_pt_diff","overall_pf"];
+        const winGroups = {};
+        members.forEach(n => { const w=records[n]?.wins||0; (winGroups[w]=winGroups[w]||[]).push(n); });
+        const sorted = [...members].sort((a,b) => {
+          const d=(records[b]?.wins||0)-(records[a]?.wins||0); if(d!==0)return d;
+          const tc=(winGroups[records[a]?.wins||0]||[]).length;
+          if(tc>=3){const dd=((records[b]?.pf||0)-(records[b]?.pa||0))-((records[a]?.pf||0)-(records[a]?.pa||0));if(dd!==0)return dd;return(records[b]?.pf||0)-(records[a]?.pf||0);}
+          for(const tb of tbChain){let diff=0;
+            if(tb==="h2h_record_tied")diff=(records[a]?.h2h[b]||0)-(records[b]?.h2h[a]||0);
+            else if(tb==="h2h_pt_diff")diff=(records[a]?.h2hPF[b]||0)-(records[b]?.h2hPF[a]||0);
+            else if(tb==="overall_pt_diff")diff=((records[a]?.pf||0)-(records[a]?.pa||0))-((records[b]?.pf||0)-(records[b]?.pa||0));
+            else if(tb==="overall_pf")diff=(records[a]?.pf||0)-(records[b]?.pf||0);
+            if(diff!==0)return -diff;}
+          return 0;
+        });
+
+        const trs = sorted.map((name,i) => {
+          const r=records[name], isAdv=i<advCount;
+          const divider=(i===advCount&&sorted.length>advCount)?`<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— Top ${advCount} advance —</div></td></tr>`:"";
+          const badge=isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+          return `${divider}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
+            <td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name">${_esc2(name)}</td>
+            <td class="trn-po-num">${r.wins}</td><td class="trn-po-num">${r.losses}</td>
+            <td class="trn-po-num trn-po-pf">${r.pf.toFixed(2)}</td><td class="trn-po-num">${r.pa.toFixed(2)}</td>
+            <td>${badge}</td></tr>`;
+        }).join("");
+
+        const tableEl=document.getElementById(tableId), loaderEl=document.getElementById(loaderId);
+        if(tableEl){tableEl.querySelector("tbody").innerHTML=trs;tableEl.style.display="";}
+        if(loaderEl)loaderEl.style.display="none";
+
+        const _loadMatchups = async (wi) => {
+          const muEl=document.getElementById(muId); if(!muEl)return;
+          const nflWk=_nflWeek(wi);
+          await Promise.all([...leagueIds].map(lid=>_fetchWk(lid,nflWk)));
+          const wkMus=schedule[String(wi)]||[];
+          if(!wkMus.length){muEl.innerHTML=`<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`;return;}
+          const cards=wkMus.map(m=>{
+            const hi=teamInfoMap[m.home],ai=teamInfoMap[m.away];
+            const hs=hi?(_wsc[hi.leagueId+"|"+nflWk]?.[hi.teamId]??null):null;
+            const as_=ai?(_wsc[ai.leagueId+"|"+nflWk]?.[ai.teamId]??null):null;
+            const has=hs!==null&&as_!==null,wH=has&&hs>as_,wA=has&&as_>hs;
+            const fmt=v=>v!==null?v.toFixed(2):"–";
+            return `<div class="trn-wc-mu-card">
+              <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${_esc2(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(hs)}</span></div>
+              <div class="trn-wc-mu-vs">vs</div>
+              <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${_esc2(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(as_)}</span></div>
+            </div>`;
+          }).join("");
+          muEl.innerHTML=`<div class="trn-wc-mu-cards">${cards}</div>`;
+        };
+        const wkSel=document.getElementById(`trn-wcs-wk-${gi}`);
+        const refBtn=document.getElementById(`trn-wcs-ref-${gi}`);
+        wkSel?.addEventListener("change",()=>_loadMatchups(parseInt(wkSel.value)||0));
+        refBtn?.addEventListener("click",()=>_loadMatchups(parseInt(wkSel?.value||"0")));
+        _loadMatchups(0);
+      } catch(e) {
+        const loaderEl=document.getElementById(loaderId);
+        if(loaderEl)loaderEl.textContent="⚠️ Could not load: "+e.message;
+      }
+    })();
+  }
+
   function _renderStandingsTab(tid, t, body, isAdmin) {
     const cache  = t.standingsCache || {};
     const meta   = t.meta || {};
     const rankBy = meta.rankBy || "record";
+
+    // ── World Cup: group dropdown selector ───────────────────────────────────
+    const poYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
+    const poYear  = poYears.find(y => String(y) === String(_tournamentYear)) || poYears[0];
+    const wcPo    = poYear ? (t.playoffs[poYear] || {}) : {};
+    if (wcPo.mode === "worldcup") {
+      const wcGroups = wcPo.worldcupGroups || [];
+      if (!wcGroups.length) {
+        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🌍</div><div class="trn-empty-title">No groups configured yet.</div></div>`;
+        return;
+      }
+      const groupOpts = wcGroups.map((g, gi) =>
+        `<option value="${gi}">${_esc(g.name || ("Group "+(gi+1)))}</option>`
+      ).join("");
+      body.innerHTML = `
+        <div class="trn-standings-wrap">
+          <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3)">
+            <label style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">View Group</label>
+            <select id="trn-wc-group-sel" class="trn-filter-select" style="font-size:.82rem">${groupOpts}</select>
+          </div>
+          <div id="trn-wc-group-body"></div>
+        </div>`;
+      const sel = document.getElementById("trn-wc-group-sel");
+      const loadGi = (gi) => _renderWCGroupStandalone(tid, t, body, parseInt(gi), wcPo, poYear);
+      sel?.addEventListener("change", function() { loadGi(this.value); });
+      loadGi(0);
+      return;
+    }
 
     // Deduplicate: new year_leagueId keys may coexist with old flat leagueId keys.
     // If any new-format keys exist, discard the old flat ones to avoid doubled rows.
@@ -8249,26 +8437,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const yearData = {};
 
       yearKeys.forEach(yr => {
+        const poEntry = (poByYear[String(yr)] || {})[cKey];
+
+        // For worldcup years: override W/L/PF with group-stage records BEFORE accumulating
+        if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
+          (c.seasons[yr] || []).forEach(season => {
+            season.wins   = poEntry.groupWins;
+            season.losses = poEntry.groupLosses ?? season.losses;
+            season.pf     = poEntry.groupPF     ?? season.pf;
+          });
+        }
+
         c.seasons[yr].forEach(s => {
           totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
           if (s.isChamp) totalChamps++;
         });
-        const poEntry = (poByYear[String(yr)] || {})[cKey];
         yearData[yr] = poEntry || { qualified: false, bye: false, rank: null, isTChamp: false };
         if (poEntry?.qualified)  playoffApps++;
         if (poEntry?.isTChamp)   tournamentChamps++;
         if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
-
-        // For worldcup years: override W/L/PF with group-stage records if available
-        if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
-          const season = c.seasons[yr]?.[0];
-          if (season) {
-            // Replace with group-stage stats — this is what the W/L record should show
-            season.wins   = poEntry.groupWins;
-            season.losses = poEntry.groupLosses ?? season.losses;
-            season.pf     = poEntry.groupPF     ?? season.pf;
-          }
-        }
       });
 
       // Streak: consecutive most-recent seasons qualified
