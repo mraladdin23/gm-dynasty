@@ -2301,6 +2301,7 @@
 .trn-po-row--bye-seed td     { background: rgba(212,175,55,.07); }
 .trn-po-row--qualified td    { background: rgba(60,180,60,.06); }
 .trn-po-row--eliminated td   { opacity: .5; }
+.trn-po-row--neutral td { background: transparent; color: var(--color-text); }
 .trn-po-row--advance td      { background: rgba(60,180,60,.08); }
 .trn-po-row--cut td          { opacity: .55; }
 .trn-po-cut-row td           { padding: 0; }

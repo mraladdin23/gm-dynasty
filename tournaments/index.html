@@ -1261,11 +1261,31 @@
                 if(df!==0)return -df;}
               return 0;
             });
+            // Determine if all regular season weeks have scores (gates advance/eliminate badges)
+            const regComplete = (() => {
+              for (let wi = 0; wi < wcRegWks; wi++) {
+                const matchups = sched[String(wi)] || [];
+                if (!matchups.length) continue;
+                const nflWk = _nflWk(wi);
+                const hasScore = members.some(n => {
+                  const info = teamInfoMap[_sk(n)];
+                  return info?.leagueId && scoreMap[`${info.leagueId}|${nflWk}|${info.teamId}`] !== undefined;
+                });
+                if (!hasScore) return false;
+              }
+              return true;
+            })();
+
             const trs=sorted.map((name,i)=>{
               const r=rec[name],isAdv=i<adv;
-              const div=(i===adv&&sorted.length>adv)?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>`:"";
-              const badge=isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-              return `${div}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
+              const rowCls = regComplete ? (isAdv?"trn-po-row--advance":"trn-po-row--cut") : "trn-po-row--neutral";
+              const div=(i===adv&&sorted.length>adv)
+                ?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line (top ${adv}${regComplete?" advance":""}) —</div></td></tr>`
+                :"";
+              const badge=regComplete
+                ?(isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
+                :"";
+              return `${div}<tr class="${rowCls}">
                 <td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name"><div>${esc(name)}</div></td>
                 <td class="trn-po-num">${r.wins}–${r.losses}</td><td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
                 <td>${badge}</td></tr>`;
@@ -1975,18 +1995,18 @@
         };
 
         const rows = members.map(name=>({name,..._rec(name)})).sort((a,b)=>(b.wins-a.wins)||(b.pf-a.pf));
+        // This view uses wcStandingsCache (Sleeper league data) — not schedule-computed.
+        // It can't determine if reg season is complete, so we show cut line only (no badges).
         const trs = rows.map((r,i) => {
           const isAdv = i < adv;
-          const badge = isAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-            : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
           const div = i===adv && rows.length>adv
-            ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Top ${adv} advance —</div></td></tr>` : "";
-          return `${div}<tr class="${isAdv?"trn-po-row--advance":"trn-po-row--cut"}">
+            ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line (top ${adv}) —</div></td></tr>` : "";
+          return `${div}<tr class="trn-po-row--neutral">
             <td class="trn-po-rank">${i+1}</td>
             <td class="trn-po-team-name"><div>${esc(r.name)}</div></td>
             <td class="trn-po-num">${r.wins}–${r.losses}</td>
             <td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
-            <td>${badge}</td>
+            <td></td>
           </tr>`;
         }).join("");
 
