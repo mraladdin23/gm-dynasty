@@ -7740,16 +7740,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           [entry.displayName, entry.teamName].filter(Boolean).map(_sk).forEach(k => {
             if (!poByYear[String(yr)][k]) {
               poByYear[String(yr)][k] = {
-                qualified:   !!(entry.qualified),
-                bye:         !!(entry.bye),
-                rank:        entry.finalRank || null,
-                isTChamp:    !!(entry.isTChamp),
-                leagueId:    String(entry.leagueId || ""),
-                teamId:      String(entry.teamId   || ""),
-                // Group-stage stats for worldcup (null for other modes)
-                groupWins:   entry.groupWins   ?? null,
-                groupLosses: entry.groupLosses ?? null,
-                groupPF:     entry.groupPF     ?? null,
+                qualified:    !!(entry.qualified),
+                bye:          !!(entry.bye),
+                rank:         entry.finalRank || null,
+                isTChamp:     !!(entry.isTChamp),
+                isGroupWinner: !!(entry.isGroupWinner),
+                leagueId:     String(entry.leagueId || ""),
+                teamId:       String(entry.teamId   || ""),
+                groupWins:    entry.groupWins   ?? null,
+                groupLosses:  entry.groupLosses ?? null,
+                groupPF:      entry.groupPF     ?? null,
               };
             }
           });
@@ -8418,9 +8418,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     }
 
     // ── Playoff data via shared helper (_buildPoByYear) ──────
-    // Uses finalRankings if published, otherwise qual-engine fallback.
     const poByYear  = _buildPoByYear(t);
     const hasPoData = Object.keys(poByYear).length > 0;
+
+    // Determine which years have brackets that have actually started
+    // (startWeek has been reached). Used to gate PO appearance count.
+    const _bracketStarted = (yr) => {
+      const po = _playoffForYear(t, yr);
+      if (!po.startWeek) return false;
+      // Check if any score exists for the start week across any league
+      const regWks = po.worldcupRegWeeks || 6;
+      // Bracket starts at startWeek; group stage starts at startWeek - regWks
+      // We consider bracket started if worldcupBracket has any scored matchup
+      if (po.mode === "worldcup") {
+        return (po.worldcupBracket || []).some(rnd =>
+          (rnd||[]).some(m => m.scoreA !== null && m.scoreA !== undefined)
+        );
+      }
+      return true; // non-worldcup modes always count
+    };
 
     // All years across standings + playoff data, newest first — all normalized to strings
     const allYearsSet = [...new Set([
@@ -8450,10 +8466,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         c.seasons[yr].forEach(s => {
           totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
-          if (s.isChamp) totalChamps++;
+          // For worldcup: title = won your group (consistent with winning your league)
+          // For other modes: title = won the league (isChamp from standingsCache)
+          if (poEntry?.isGroupWinner) totalChamps++;
+          else if (!poEntry?.isGroupWinner && poEntry?.groupWins === null && s.isChamp) totalChamps++;
         });
-        yearData[yr] = poEntry || { qualified: false, bye: false, rank: null, isTChamp: false };
-        if (poEntry?.qualified)  playoffApps++;
+
+        yearData[yr] = poEntry || { qualified: false, bye: false, rank: null, isTChamp: false, isGroupWinner: false };
+        // Only count playoff appearance if the bracket has actually started
+        if (poEntry?.qualified && _bracketStarted(yr)) playoffApps++;
         if (poEntry?.isTChamp)   tournamentChamps++;
         if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
       });
@@ -8526,7 +8547,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const champCell = isTChamp
           ? `<span class="trn-ph-champ-badge">🏆 ×${p.tournamentChamps}</span>`
           : p.totalChamps > 0
-            ? `<span class="trn-ph-champ-badge" style="background:rgba(99,102,241,.15);color:#a78bfa;border-color:rgba(99,102,241,.3)">🥇 ×${p.totalChamps}</span>`
+            ? `<span class="trn-ph-champ-badge" style="background:rgba(74,222,128,.15);color:#4ade80;border-color:rgba(74,222,128,.3)">🥇 ×${p.totalChamps}</span>`
             : `<span style="color:var(--color-text-dim)">—</span>`;
         const poCell = hasPoData
           ? (p.playoffApps > 0
@@ -8542,14 +8563,36 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const e   = p.yearData[String(yr)];
           const inS = !!(p.seasons[String(yr)]);
           if (!e && !inS) return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: did not play"></span>`;
-          const cls = !e ? "trn-az-yr-pip--absent"
-            : e.isTChamp  ? "trn-az-yr-pip--champ"
-            : e.qualified ? "trn-az-yr-pip--qual"
-            : "trn-az-yr-pip--elim";
-          const tip = !e ? `${yr}: played, no PO data`
-            : e.isTChamp  ? `${yr}: 🏆 Champion`
-            : e.qualified ? `${yr}: ✓ Qualified${e.bye ? " (BYE)" : ""}${e.rank ? " · Rank " + e.rank : ""}`
-            : `${yr}: Eliminated`;
+          // Determine pip color:
+          // worldcup year: gold=bracket champion, green=won group, red=didn't win group, grey=no data
+          // non-worldcup year: gold=tournament champ, green=qualified, red=eliminated
+          const isWCYear = e?.groupWins !== null && e?.groupWins !== undefined;
+          let cls, tip;
+          if (!e) {
+            cls = "trn-az-yr-pip--absent";
+            tip = `${yr}: played, no PO data`;
+          } else if (e.isTChamp) {
+            cls = "trn-az-yr-pip--champ";
+            tip = `${yr}: 🏆 Tournament Champion`;
+          } else if (isWCYear) {
+            // Worldcup pip logic
+            if (e.isGroupWinner) {
+              cls = "trn-az-yr-pip--qual";  // green = won group
+              tip = `${yr}: ✓ Won Group${e.rank ? " · Finish " + e.rank : ""}`;
+            } else if (e.groupWins !== null) {
+              cls = "trn-az-yr-pip--elim";  // red = didn't win group
+              tip = `${yr}: Did not win group${e.rank ? " · Finish " + e.rank : ""}`;
+            } else {
+              cls = "trn-az-yr-pip--absent";
+              tip = `${yr}: played`;
+            }
+          } else {
+            // Non-worldcup pip logic
+            cls = e.qualified ? "trn-az-yr-pip--qual" : "trn-az-yr-pip--elim";
+            tip = e.qualified
+              ? `${yr}: ✓ Qualified${e.bye ? " (BYE)" : ""}${e.rank ? " · Rank " + e.rank : ""}`
+              : `${yr}: Eliminated`;
+          }
           return `<span class="trn-az-yr-pip ${cls}" title="${tip}"></span>`;
         }).join("");
 
@@ -10263,6 +10306,36 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // ── Unseeded: Round 1 setup UI ───────────────────────
       if (!advancers.length) return `<div class="trn-po-empty">No group advancers found. Configure groups first.</div>`;
 
+      // Don't allow bracket seeding until the regular season has actual scores.
+      // Check whether _weekScoreCache has any entries for the group-stage weeks —
+      // if not, either weeks haven't been played or scores haven't been fetched yet.
+      const _hasGroupScores = groups.some((g, gi) => {
+        const sched = (po.worldcupSchedule || {})[String(gi)] || {};
+        const regWks = po.worldcupRegWeeks || 6;
+        const startWk = startWeekPo || null;
+        for (let wi = 0; wi < regWks; wi++) {
+          const matchups = sched[String(wi)] || [];
+          if (!matchups.length) continue;
+          const nflWk = startWk ? (startWk - regWks + wi) : (wi + 1);
+          const anyMember = (g.members || [])[0];
+          if (!anyMember) continue;
+          const info = _wcTeamInfoMap[_skWC(anyMember)];
+          if (info?.leagueId && _weekScoreCache[info.leagueId + "|" + nflWk]) return true;
+        }
+        return false;
+      });
+
+      if (!_hasGroupScores) {
+        return `<div class="trn-section-card" style="max-width:480px">
+          <div class="trn-section-card-title">Bracket Setup</div>
+          <div class="trn-po-empty" style="margin:0">
+            ⏳ The bracket cannot be seeded until the regular season has begun and scores are available.
+            Once group-stage weeks have been played, click <strong>↺ Refresh from groups</strong> to load the standings and build the bracket.
+          </div>
+          <button class="btn-secondary btn-sm" id="trn-wc-refresh-standings" style="margin-top:var(--space-3)">↺ Refresh from groups</button>
+        </div>`;
+      }
+
       const r1Count = Math.pow(2, numRounds - 1);
       // Initialise r1 slots
       const r1 = Array.from({length: r1Count}, (_, mi) => ({ a: "", b: "" }));
@@ -11770,22 +11843,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return wcAllRanked3.map((tm,i) => {
               const sl  = standingsLookupWC[`${tm.teamName}|${_leagueIdForTeam(tm)}`] || {};
               const gst = wcGroupStats[_sk3(_displayName(tm))] || wcGroupStats[_sk3(tm.teamName||"")] || null;
-              const isAdvancer = wcAdvancers.some(a => _sk3(a.name) === _sk3(_displayName(tm)));
+              const isAdvancer    = wcAdvancers.some(a => _sk3(a.name) === _sk3(_displayName(tm)));
+              const advEntry      = wcAdvancers.find(a => _sk3(a.name) === _sk3(_displayName(tm)));
+              const isGroupWinner = !!(advEntry && advEntry.groupRank === 0); // rank 0 = won the group
               return {
-                finalRank:   i + 1,
-                teamName:    tm.teamName    || "",
-                displayName: tm.displayName || _displayName(tm),
-                leagueId:    _leagueIdForTeam(tm),
-                teamId:      String(tm.teamId||""),
-                qualified:   isAdvancer,
-                bye:         false,
-                isTChamp:    !!(tm.isTChamp),
-                pf:          tm.pf || sl.pf || 0,
-                // Group-stage stats — used by Players tab to show correct records
-                groupWins:   gst ? gst.wins   : null,
-                groupLosses: gst ? gst.losses  : null,
-                groupPF:     gst ? gst.pf      : null,
-                groupPA:     gst ? gst.pa      : null,
+                finalRank:      i + 1,
+                teamName:       tm.teamName    || "",
+                displayName:    tm.displayName || _displayName(tm),
+                leagueId:       _leagueIdForTeam(tm),
+                teamId:         String(tm.teamId||""),
+                qualified:      isAdvancer,
+                bye:            false,
+                isTChamp:       !!(tm.isTChamp),
+                isGroupWinner,
+                pf:             tm.pf || sl.pf || 0,
+                groupWins:      gst ? gst.wins   : null,
+                groupLosses:    gst ? gst.losses  : null,
+                groupPF:        gst ? gst.pf      : null,
+                groupPA:        gst ? gst.pa      : null,
               };
             });
 
