@@ -1225,12 +1225,13 @@ async function tournamentDraft(leagueId, platform, year, yahooToken, mflCookie) 
         cost:     null
       })).filter(p => p.teamId && p.teamId !== "undefined");
 
-      // Return slot_to_roster_id and draft_type alongside picks so the frontend
-      // can render a proper snake/linear grid with correct column ordering (U1).
+      // Return slot_to_roster_id, draft_type, and draft_status so the frontend
+      // can render a proper grid and know whether to start live polling.
       return new Response(JSON.stringify({
         picks,
         slot_to_roster_id: draft.slot_to_roster_id || null,
-        draft_type:        draft.type || "snake"
+        draft_type:        draft.type   || "snake",
+        draft_status:      draft.status || "complete"
       }), { headers: corsHeaders() });
     } catch(e) {
       return new Response(JSON.stringify({ picks: [], error: e.message }), { headers: corsHeaders() });
