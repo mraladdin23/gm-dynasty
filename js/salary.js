@@ -416,6 +416,10 @@ const DLRSalaryCap = (() => {
 
   async function _saveSalaryData() {
     await GMDB.saveSalaryRosters(_storageKey, _salaryData);
+    // Force a fresh read so the local Firebase SDK cache reflects the write
+    // immediately — without this, the next init() call returns stale cached
+    // data and manual edits appear lost until the cache expires naturally.
+    _salaryData = await GMDB.getSalaryRosters(_storageKey) || {};
   }
 
   // ── Main render ───────────────────────────────────────────
