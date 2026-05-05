@@ -551,6 +551,9 @@ const DLRTournament = (() => {
     const body = document.getElementById("trn-tab-body");
     if (!body) return;
 
+    // Stop live draft polling whenever we navigate away from the draft tab
+    if (tab !== "draft") _stopDraftPoll();
+
     if (showAdminNav) {
       switch (tab) {
         case "overview":      return _renderAdminOverview(tid, t, body);
@@ -5895,6 +5898,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   let _draftSearch    = "";    // team search for board/card
   let _draftListPage  = 1;     // pagination for board list view
   let _draftBoardMode = "grid"; // "grid" | "list" for board view
+  let _draftPollInterval = null; // live poll during active drafts
 
   async function _renderAnalyticsDraft(tid, t, body) {
     await DLRPlayers.load().catch(() => {});
@@ -5955,6 +5959,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 picks:             data.picks,
                 slot_to_roster_id: data.slot_to_roster_id || null,
                 draft_type:        data.draft_type        || null,
+                draft_status:      data.draft_status      || "complete",
                 fetchedAt:         Date.now()
               };
             }
@@ -6059,7 +6064,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ...lc,
           normalizedPicks:   normalized,
           slot_to_roster_id: lc.slot_to_roster_id || null,
-          draft_type:        lc.draft_type        || null
+          draft_type:        lc.draft_type        || null,
+          draft_status:      lc.draft_status      || "complete"
         };
         allPicks = allPicks.concat(normalized);
       }
@@ -6083,6 +6089,14 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _renderDraftView(tid, t, body, _draftCache);
       // Sync ADP to public node in the background — non-blocking
       _writePublicADP(tid).catch(() => {});
+
+      // Start live polling if any league draft is still in progress
+      const hasActiveDraft = Object.values(allCached).some(lc => lc.draft_status === "drafting");
+      if (hasActiveDraft) {
+        _startDraftPoll(tid, t, body, allCached);
+      } else {
+        _stopDraftPoll();
+      }
     } catch(e) {
       body.innerHTML = `<div class="trn-empty">Failed to load draft data: ${_esc(e.message)}</div>`;
     }
@@ -6094,6 +6108,73 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const cookie = localStorage.getItem("dlr_mfl_cookie");
       return cookie ? { cookie } : null;
     } catch(e) { return null; }
+  }
+
+  // ── Live draft polling ─────────────────────────────────
+  // Polls every 15s when any league has an active ("drafting") draft.
+  // On each tick, fetches pick counts from Sleeper and re-renders only
+  // if new picks have been made — avoids unnecessary full re-renders.
+  function _stopDraftPoll() {
+    if (_draftPollInterval) {
+      clearInterval(_draftPollInterval);
+      _draftPollInterval = null;
+    }
+  }
+
+  function _startDraftPoll(tid, t, body, initialCache) {
+    _stopDraftPoll(); // clear any existing poll first
+
+    // Build list of leagues to poll — only Sleeper for now (public API supports it
+    // without auth; MFL/Yahoo would require credentials on every tick).
+    const toPoll = Object.entries(initialCache)
+      .filter(([, lc]) => lc.platform === "sleeper" && lc.draft_status === "drafting")
+      .map(([ck, lc]) => ({ ck, leagueId: lc.leagueId, platform: lc.platform }));
+
+    if (!toPoll.length) return;
+
+    // Track pick counts so we only re-render when something changes
+    const pickCounts = {};
+    Object.entries(initialCache).forEach(([ck, lc]) => {
+      pickCounts[ck] = lc.picks?.length || 0;
+    });
+
+    _draftPollInterval = setInterval(async () => {
+      // If the draft tab is no longer visible, stop polling
+      if (!document.getElementById("trn-draft-content")) {
+        _stopDraftPoll();
+        return;
+      }
+
+      let changed = false;
+      for (const { ck, leagueId } of toPoll) {
+        try {
+          // Sleeper public API — fetch picks directly, no auth needed
+          const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+          if (!r.ok) continue;
+          const drafts = await r.json();
+          if (!Array.isArray(drafts)) continue;
+
+          for (const d of drafts) {
+            if (d.status !== "drafting") continue;
+            const picksR = await fetch(`https://api.sleeper.app/v1/draft/${d.draft_id}/picks`);
+            if (!picksR.ok) continue;
+            const picks = await picksR.json();
+            if (Array.isArray(picks) && picks.length !== pickCounts[ck]) {
+              pickCounts[ck] = picks.length;
+              changed = true;
+            }
+          }
+        } catch(e) {
+          // Silent — poll failure is non-critical
+        }
+      }
+
+      if (changed) {
+        // Bust the cache and re-render the draft tab with fresh data
+        _draftCache = null;
+        _renderAnalyticsDraft(tid, t, body);
+      }
+    }, 15000); // poll every 15 seconds
   }
 
   function _renderDraftView(tid, t, body, cache) {
