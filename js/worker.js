@@ -384,7 +384,7 @@ export default {
             aud: "https://oauth2.googleapis.com/token",
             iat: now,
             exp: now + 3600,
-            scope: "https://www.googleapis.com/auth/firebase"
+            scope: "https://www.googleapis.com/auth/identitytoolkit"
           };
 
           const encode = obj => btoa(JSON.stringify(obj))
