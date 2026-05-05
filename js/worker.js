@@ -342,9 +342,11 @@ export default {
       }
 
       // ── Password reset — looks up real email from Firebase, sends via Resend ──
-      // The worker fetches gmd/users/{username}/email using the DB secret (bypasses
-      // auth rules), generates a Firebase password-reset link for the synthetic email
-      // (username@gmdynasty.app), then emails that link to the user's real address.
+      // Flow:
+      //   1. Fetch gmd/users/{username}/email via DB secret (bypasses auth rules)
+      //   2. Mint a short-lived Google OAuth token from the service account credentials
+      //   3. Call Firebase Auth Admin REST API with that token to get a reset link
+      //   4. Email the link to the user's real address via Resend
       if (path === "/auth/passwordReset" && req.method === "POST") {
         const { username } = await req.json();
         if (!username?.trim()) {
@@ -352,7 +354,7 @@ export default {
         }
         const key = username.trim().toLowerCase();
 
-        // Look up real email from Firebase using DB secret (no user auth needed)
+        // Step 1 — look up real email from Firebase using DB secret
         const fbUrl = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/users/${key}/email.json?auth=${env.FIREBASE_DB_SECRET}`;
         let email;
         try {
@@ -366,26 +368,94 @@ export default {
           return new Response(JSON.stringify({ error: "Username not found." }), { status: 404, headers: corsHeaders() });
         }
 
-        // Generate Firebase password-reset link for the synthetic email via REST API
-        const resetRes = await fetch(
-          `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${env.FIREBASE_API_KEY}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              requestType: "PASSWORD_RESET",
-              email: `${key}@gmdynasty.app`,
-              returnOobLink: true
-            })
-          }
-        );
-        const resetData = await resetRes.json();
-        if (resetData.error || !resetData.oobLink) {
-          return new Response(JSON.stringify({ error: "Failed to generate reset link." }), { status: 500, headers: corsHeaders() });
-        }
-        const resetLink = resetData.oobLink;
+        // Step 2 — mint a Google OAuth access token from service account credentials.
+        // FIREBASE_SERVICE_ACCOUNT_JSON is the full service account JSON stored as a secret.
+        // We build a JWT, sign it with the private key, then exchange it for an access token.
+        let accessToken;
+        try {
+          const sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON);
 
-        // Send the link to the user's real email via Resend
+          // Build JWT header + claims
+          const now = Math.floor(Date.now() / 1000);
+          const header  = { alg: "RS256", typ: "JWT" };
+          const payload = {
+            iss: sa.client_email,
+            sub: sa.client_email,
+            aud: "https://oauth2.googleapis.com/token",
+            iat: now,
+            exp: now + 3600,
+            scope: "https://www.googleapis.com/auth/firebase"
+          };
+
+          const encode = obj => btoa(JSON.stringify(obj))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+          const signingInput = `${encode(header)}.${encode(payload)}`;
+
+          // Import the private key and sign
+          const pemBody = sa.private_key
+            .replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace(/\s/g, "");
+          const keyBytes = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+          const cryptoKey = await crypto.subtle.importKey(
+            "pkcs8", keyBytes.buffer,
+            { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+            false, ["sign"]
+          );
+          const sigBytes = await crypto.subtle.sign(
+            "RSASSA-PKCS1-v1_5", cryptoKey,
+            new TextEncoder().encode(signingInput)
+          );
+          const sig = btoa(String.fromCharCode(...new Uint8Array(sigBytes)))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+          const jwt = `${signingInput}.${sig}`;
+
+          // Exchange JWT for access token
+          const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+              assertion: jwt
+            })
+          });
+          const tokenData = await tokenRes.json();
+          if (!tokenData.access_token) {
+            return new Response(JSON.stringify({ error: "Failed to authenticate with Firebase Admin.", detail: JSON.stringify(tokenData).slice(0, 200) }), { status: 500, headers: corsHeaders() });
+          }
+          accessToken = tokenData.access_token;
+        } catch(err) {
+          return new Response(JSON.stringify({ error: "Service account error: " + err.message }), { status: 500, headers: corsHeaders() });
+        }
+
+        // Step 3 — generate password reset link via Firebase Auth Admin REST API
+        let resetLink;
+        try {
+          const resetRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${accessToken}`
+              },
+              body: JSON.stringify({
+                requestType: "PASSWORD_RESET",
+                email: `${key}@gmdynasty.app`,
+                returnOobLink: true
+              })
+            }
+          );
+          const resetData = await resetRes.json();
+          if (resetData.error || !resetData.oobLink) {
+            return new Response(JSON.stringify({ error: "Failed to generate reset link.", detail: JSON.stringify(resetData).slice(0, 200) }), { status: 500, headers: corsHeaders() });
+          }
+          resetLink = resetData.oobLink;
+        } catch(err) {
+          return new Response(JSON.stringify({ error: "Reset link error: " + err.message }), { status: 500, headers: corsHeaders() });
+        }
+
+        // Step 4 — send the link to the user's real email via Resend
         const emailRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: {
