@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: April 30, 2026 — T1–T4 tournament polish complete. Public Players tab fully parity with internal.*
+*Updated: May 5, 2026 — World Cup tournament mode complete. New backlog items added from review session.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -13,7 +13,17 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Critical — Crashes or Broken Core Features
 
-*(none currently)*
+### B1 — Password Reset Not Working
+**Problem:** Password reset flow fails. `sendPasswordReset(username)` in `auth.js` looks up email from DB then calls Firebase Auth. Users are reporting it doesn't work.
+**Files:** `auth.js`, `firebase-db.js`
+**Note:** Was marked done (April 24) but users still reporting it broken. Needs fresh investigation — check if email lookup is returning correctly, whether Firebase Auth `sendPasswordResetEmail` is being called on the synthetic email format (`username@gmdynasty.app`) vs a real email, and whether Firebase Auth is configured to allow password reset.
+
+---
+
+### B2 — Manually Inputted Salaries Not Saving (Salary Cap Leagues)
+**Problem:** When admin manually inputs salaries in salary cap leagues, the values don't persist after page reload.
+**Files:** `salary.js`, `firebase-db.js`
+**Note:** Likely a Firebase write path issue — check whether `.update()` is being called correctly, keys are properly sanitized, and the write isn't being silently swallowed by a missing `.catch()`.
 
 ---
 
@@ -31,7 +41,24 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🟡 Cross-Platform Bugs
 
-*(none currently)*
+### X1 — Registration Stickiness
+**Problem:** Users continue to report registration is "sticky" — form data persisting between sessions or users seeing stale registration state.
+**Files:** `tournament.js`, `firebase-db.js`
+**Note:** Previously investigated. Revisit — check if form fields are being reset on modal close, whether `registrations/` Firebase listener is being torn down properly on navigation away, and if there's a cached value being restored to the form on reopen.
+
+---
+
+### X2 — Drafts Not Updating in Real Time for Tournaments
+**Problem:** Tournament draft boards don't update live. New picks require a manual refresh.
+**Files:** `tournament.js`, `draft.js`, `firebase-db.js`
+**Note:** The regular (non-tournament) draft board may use a different listener pattern. Compare how live pick updates are wired. Check if Firebase `on('child_added')` / `on('value')` listeners are being attached to the right path (`analyticsCache/drafts/...` vs the tournament draft path), and whether Sleeper WebSocket or polling is in use.
+
+---
+
+### X3 — League Champion Detection: H2H Tournament vs PF-Only Division Winner
+**Problem:** `lc.champion` is being set based on PF ranking within the division rather than the actual H2H playoff bracket winner. Leagues with H2H playoff structures are showing the wrong champion.
+**Files:** `sleeper.js`, `mfl.js`, `standings.js`, `tournament.js`
+**Note:** During standings sync, `lc.champion` should prefer the bracket winner from `winners_bracket` (Sleeper) or the playoff bracket (MFL) over the regular season points leader. Audit the sync path to confirm bracket winner is being pulled correctly.
 
 ---
 
@@ -41,15 +68,69 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ---
 
-## 🟢 Tournament — Known Tweaks / Future Polish
+## 🟢 Tournament — New Features & Polish
 
-*(none currently)*
+### T5 — Total Points Mode: Single-Round Multi-Week (Highest PF Wins)
+**Idea:** Right now `total_points` mode forces separate "start week" and "champion week" fields, treating them like two rounds. For a true total-points playoff (e.g. weeks 15–17, highest cumulative PF is champion), it should be a single configurable window: start week + number of weeks, no separate rounds.
+**Files:** `tournament.js`, `tournament.css`
+**Note:** Should be a new sub-option within `total_points` mode — not a breaking change to existing config. Add a "Championship window: Wk X through Wk Y" config and a sum-based scoring path in `_renderTotalPointsTab`.
+
+---
+
+### T6 — H2H Bracket: Multi-Week Rounds
+**Idea:** H2H bracket rounds currently assume one week per round (disabled). Add `weeksPerRound` support to H2H bracket the same way it was added to Points Rounds (T1). Each round spans N weeks; scores summed.
+**Files:** `tournament.js`, `tournament.css`
+**Note:** `_renderBracket` uses `_weekScoreCache` for single-week lookups. Extend to `_wsCombined_`-style summing. Config UI: add "Weeks per round" input to the bracket config section. `finalRankings` for `h2h_bracket` already exists — update it to sum correctly too.
+
+---
+
+### T7 — H2H Bracket + Custom Rounds: Tight Bracket Visual (World Cup Format)
+**Idea:** The H2H bracket and Custom Rounds bracket views still use the old wide spacing layout. Replace with the same tight absolute-positioning bracket canvas built for World Cup (centreR0/centreOf/topOf math, cardH=44, pairG=8).
+**Files:** `tournament.js`, `tournament.css`
+**Note:** The World Cup `_renderWCBracketCanvas` function is the reference implementation. Extract it into a shared `_renderBracketCanvas(bracket, options)` helper usable by all bracket modes. The H2H bracket (`_renderBracket`) and the custom rounds final bracket view should both call it.
+
+---
+
+### T8 — Weekly Matchup Drop-Down View (ESPN-Style Matchup Page)
+**Idea:** For tournaments, add a Matchups view with a week selector drop-down that shows each matchup in a card format — like an ESPN matchup page. Grouped by conference/division (the same way World Cup groups are shown with a group selector drop-down). Home team vs Away team, scores, W/L result.
+**Files:** `tournament.js`, `tournament.css`, `tournaments/index.html`
+**Note:** The World Cup standings view already has a week selector + matchup card pattern. Generalize that into a "Weekly Matchups" tab available in all tournament modes, pulling from `standingsCache` matchup data. Group selector drop-down for conference/division, week selector, live score refresh.
+
+---
+
+### T9 — Cut Line Without Advance/Eliminate Badges Until Regular Season Finishes (All Modes)
+**Idea:** Across ALL tournament modes (not just World Cup), the Standings tab should show the cut line divider at all times but suppress "↑ Advances" and "Eliminated" badges until the regular season is complete. Playoff tab should show "Regular season in progress" state instead of the bracket/round view.
+**Files:** `tournament.js`, `tournament.css`, `tournaments/index.html`
+**Note:** This was implemented for World Cup mode (`_wcRegSeasonComplete()`). Generalize the pattern: add a `_regSeasonComplete(yr)` helper for all modes that checks the current NFL week against `po.startWeek`. Gate all advance/eliminate badge rendering and the bracket/round tab content behind this check across all modes.
+
+---
+
+## 🟢 Auth & Account
+
+### A1 — Contact Email for Support
+**Idea:** Add a visible support contact email somewhere accessible to users — login screen, registration confirmation, or a footer on the public site.
+**Files:** `auth.css`, `index.html`, `tournaments/index.html`
+**Note:** Simple text addition. Decide on the email address first.
+
+---
+
+### A2 — Registration Confirmation Email
+**Idea:** When a user submits a tournament registration, send a confirmation email acknowledging receipt. Either a Firebase Function-triggered email or a simple transactional email via a service like Resend/SendGrid.
+**Files:** `tournament.js`, potentially new `functions/` or `worker.js`
+**Note:** DLR doesn't currently have email sending infrastructure. Simplest path: add a `/tournament/confirmRegistration` worker endpoint that calls a transactional email API. Requires picking an email service and getting an API key.
+
+---
+
+## 🟢 UX / Notification
+
+### U1 — Global Draft Ticker (Tournament Drafts)
+**Idea:** A global sticky ticker bar (like the auction ticker) that shows: currently active tournament drafts, who is on the clock, what pick number, and how many picks until the logged-in user is up. Notification when it's their turn.
+**Files:** `tournament.js`, `draft.js`, `locker.css`
+**Note:** The auction module already has a ticker — study that pattern. Tournament draft picks are fetched via `tournament/draft` worker endpoint. Needs polling or Firebase listener on the draft state. On-the-clock notification could use browser `Notification API` (with permission prompt).
 
 ---
 
 ## 🟢 New Features
-
----
 
 ### F1 — Dynasty/Keeper League Overview Tab
 **Idea:** For dynasty and keeper leagues, add an "Overview" tab consolidating standings
@@ -64,7 +145,7 @@ and analytics across all years, with a year selector at the top.
 winner faces next 4 → winner faces top 4 → top 2 for championship) tracked inside
 DLR independent of what the platform reports. Per-league, not tournament-level.
 **Files:** New module likely needed + `firebase-db.js`, `standings.js`, `index.html`
-**Note:** Tournament-level playoff tracking is done (F5-P4). This is for individual league custom brackets.
+**Note:** Tournament-level playoff tracking is done (F5-P4). This is for individual league custom brackets. T7 (tight bracket canvas) should be built first as it's a shared dependency.
 
 ---
 
@@ -109,12 +190,25 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files Needed |
 |---|-----|-------------|--------|--------------|
-| 1 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 2 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 3 | F2 | Custom Playoff Tracker (individual leagues) | High | New module + several files |
-| 4 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js`, `locker.css` |
-| 5 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 6 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 1 | B1 | Password Reset Fix | Small | `auth.js`, `firebase-db.js` |
+| 2 | B2 | Salary Cap Manual Entry Saving | Small | `salary.js`, `firebase-db.js` |
+| 3 | X3 | League Champion H2H Detection | Small-Med | `sleeper.js`, `standings.js` |
+| 4 | X1 | Registration Stickiness | Medium | `tournament.js`, `firebase-db.js` |
+| 5 | X2 | Tournament Draft Real-Time Updates | Medium | `tournament.js`, `draft.js` |
+| 6 | T7 | Tight Bracket Canvas (H2H + Custom) | Medium | `tournament.js`, `tournament.css` |
+| 7 | T6 | H2H Bracket Multi-Week Rounds | Medium | `tournament.js` |
+| 8 | T5 | Total Points Multi-Week Single Round | Small-Med | `tournament.js` |
+| 9 | T9 | Cut Line Gating — All Modes | Medium | `tournament.js`, `index.html` |
+| 10 | T8 | Weekly Matchup Drop-Down View | Medium | `tournament.js`, `index.html` |
+| 11 | U1 | Global Draft Ticker | High | `tournament.js`, `draft.js`, `locker.css` |
+| 12 | A1 | Support Contact Email | Tiny | `index.html`, `tournaments/index.html` |
+| 13 | A2 | Registration Confirmation Email | Medium | `worker.js`, `tournament.js` |
+| 14 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 15 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 16 | F2 | Custom Playoff Tracker (individual) | High | New module + several files |
+| 17 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js` |
+| 18 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 19 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -128,10 +222,28 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 | Standings improvements | `tournament.js`, `tournament.css`, `standings.js` |
 | Worker endpoint changes | `worker.js` |
 | CSS consistency pass | `tournament.css`, `locker.css`, `base.css` |
+| Auth / registration issues | `auth.js`, `firebase-db.js`, `tournament.js` |
+| Salary issues | `salary.js`, `firebase-db.js` |
 
 ---
 
 ## ✅ Completed
+
+### May 5, 2026 — World Cup Tournament Mode: Full Implementation
+
+**World Cup bracket + standings + players tab (tournament.js, tournaments/index.html, tournament.css)**
+
+- **Groups + schedule:** Admin-defined groups with custom names, member assignment, advance count. Round-robin schedule builder per group, stored as `worldcupSchedule[gi][wi] = [{home, away}]`. Week selector + live Sleeper score fetch per group.
+- **Group standings:** Schedule-computed W/L/PF/H2H records (not Sleeper league records). Full tiebreaker chain: 3+-way tie → overall pt diff; 2-way tie → H2H record, H2H pt diff, overall pt diff, overall PF (configurable). Cut line shown always; advance/eliminate badges only after regular season complete.
+- **Bracket setup:** Tight absolute-position bracket canvas (cardH=44, pairG=8, centreR0/centreOf/topOf math) — identical on admin and public sites. Bracket hidden until all regular season weeks are scored. Qualified teams (group advancers) sorted by in-group W/L/PF/tiebreaker, not raw member order.
+- **Bracket play:** Manual or random seeding for Round 1. After scores are fetched, completed rounds lock (static results). "Set [Round N] Matchups" panel appears below canvas with free-pick dropdowns populated only from winners of the completed round. ✕ Clear This Round wipes that round + all downstream for reassignment.
+- **Score refresh:** `↺ Update Scores` uses `_wcTeamInfoMap` for direct cross-league score lookup (teams from different Sleeper leagues). Sums across `weeksPerRound`. Auto-fills next round slots with winners but doesn't override manual assignments.
+- **Tab layout:** Playoffs tab = bracket only. Standings tab = group dropdown selector (both admin + public) with standings table + week matchup cards inline.
+- **Players tab:** Group-stage W/L/PF (not Sleeper league records) used for career stats. `groupWins`/`groupLosses`/`groupPF`/`isGroupWinner` stored in `finalRankings`. Year pips: gold=bracket champion, green=won group, red=didn't win group. Titles = won group. PO appearances, rank, titles, and pips all gated behind bracket complete (champion in finalRankings). Name-matching fallback uses teamName variants in case bracket names differ from displayNames.
+- **finalRankings worldcup:** Reads actual `{a,b,scoreA,scoreB}` bracket matchup objects (not flat name arrays). Champion = winner of final round. Bracket eliminated: deepest round first, same-round tie broken by score. Group-stage eliminated: ordered by group standings. Non-qualifiers: by avg group PF.
+- **Custom rounds matchup assignment:** `customRounds.matchups[roundIdx][groupIdx] = [teamName, ...]` stored in Firebase. "📋 Set Matchups" button in admin. After a round is scored, inline "Set Round N+1 Matchups" panel appears with winners-only dropdowns.
+
+---
 
 ### April 30, 2026 — T1–T4: Tournament Polish + Public Players Tab Parity
 
@@ -144,151 +256,45 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 - Fully backward-compatible: rounds without `weeksPerRound` default to 1 (no data migration needed)
 
 **T2 — Public Players Tab Playoff Data (`tournaments/index.html`)**
-- `poByYear` now reads `finalRankings` first (same primary path as internal `_buildPoByYear`) — correct `rank`, qualification, and champion status from authoritative published data
+- `poByYear` now reads `finalRankings` first — correct rank, qualification, and champion status
 - Fallback to `po.standings` array for pre-finalRankings snapshots
-- Aggregates `bestRank`, `yearData`, and `streak` the same way the internal tab does
-- Sort updated: champions → years → bestRank asc → win%
-- Table gains **Best** rank and **year pips** columns (conditionally shown when PO data exists), pip legend, and 🔥 streak badge
-- Modal per-year sections restructured to match internal format: `poBlock`/`lchampNote` divs removed; playoff result now appears as a `finishRow` at the bottom of each year's `<tbody>` (gold for champion, green for qualified, grey "Did not qualify")
-- Modal totals row: **Leagues** stat tile removed; **Best Rank** always renders as plain number (`p.bestRank ?? "—"`); **Career PF** guarded against zero
+- Sort: champions → years → bestRank asc → win%
+- Table: Best rank and year pips columns, pip legend, 🔥 streak badge
+- Modal: finishRow at bottom of each year's tbody (gold champion, green qualified, grey did not qualify)
 
 **T3 — Custom Rounds `finalRankings` (`tournament.js`)**
-- New `custom_rounds` branch in `_buildFinalRankings` simulates PF-based group advancement through each configured round (groups × teamsPerGroup × advPerGroup), with byes passing round 0 automatically
-- Builds rankings backwards: final pool survivors (PF-sorted, champion = top) → last-round eliminated → earlier rounds → non-qualifiers
-- Analytics tabs (Players Best Rank, ADP vs Finish) now accurate for custom-rounds tournaments
+- New `custom_rounds` branch in `_buildFinalRankings` simulates PF-based group advancement
 
 **T4 — H2H Bracket `finalRankings` (`tournament.js`)**
-- New `h2h_bracket` branch in `_buildFinalRankings` simulates single-elimination bracket using `_weekScoreCache` scores; falls back to inverse-seed-rank when scores aren't available
-- Publish button now pre-fetches all bracket round weeks before computing `finalRankings`
-- Seeding uses same record/PF metric as `_renderBracket`; round 1 uses top-vs-bottom pairing; subsequent rounds pair adjacently
-- Analytics tabs now accurate for bracket tournaments
+- New `h2h_bracket` branch in `_buildFinalRankings` using `_weekScoreCache` scores
 
 ---
 
 ### April 29, 2026 — F5-P4-ext: Players Tab, Most Rostered, ADP vs Finish, finalRankings
 
-**Players tab (internal + public):**
-- Paginated list (25/page), searchable by name
-- Sort: Tournament champions → Years played desc → Best finish rank asc → Win% desc
-- Columns: # | Player (name, gender, streak badge, twitter) | Yrs | W–L | Win% | PO | Best | Titles | Year pips
-- Year pips: gold=champion, green=qualified, red=eliminated, grey=absent (hover for tooltip with rank)
-- Gold row highlight for tournament champions; purple for league-only champs
-- Streak badge 🔥 for consecutive playoff qualification
-- Modal: consolidated table per year with W–L, PF, Lg Champ column + finish/rank summary row
-- Uses `_buildPoByYear(t)` — reads `finalRankings` if published, otherwise derives from qual engine
-
-**finalRankings system:**
-- Publish button now writes `finalRankings` to BOTH `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`
-- `finalRankings` = authoritative rank 1→N list; for `points_rounds` mode works backwards from round simulation
-- `_buildPoByYear(t)` reads this directly — no re-simulation needed for analytics tabs
-- Local `_tournaments[tid]` cache updated immediately after publish so tabs reflect new data without reload
-
-**_computeQualification(t, year):**
-- Extracted as shared pure function (no network calls)
-- Full qual engine copy: composite steps, wins_threshold, top_record/pf/per_group, scoped byes
-- Used by both `_renderPlayoffsTab` (via existing inline logic, unchanged) and `_buildPoByYear` fallback
-
-**Most Rostered tab:**
-- Playoff-qualified teams' rosters, players ranked by how many of those teams rostered them
-- Sleeper via public API; MFL + Yahoo via new worker `/tournament/rosters` endpoint
-- Position filter, ownership %, bar chart, team chip list
-
-**ADP vs Finish tab:**
-- Splits drafted players into playoff-team vs eliminated-team buckets
-- PO%, Elim%, Swing (PO%−Elim%) per player
-- Three sort views: PO-Heavy / Elim-Heavy / By Swing
-- `teamQualMap` now built directly from `poYr` keys (all sanitized variants) to correctly identify all playoff teams
-
-**Cross-platform sync warnings (F-X):**
-- Dismissible amber banner after standings sync if MFL/Yahoo leagues skipped or failed
-- Scoring difference chips when platforms have different scoring settings
-- `_showSyncWarningBanner(warnings, diffs)` helper
-
-**Bug fixes applied:**
-- Year pip duplication: `lc.year` (number) vs `Object.keys(poByYear)` (strings) → normalized all to `String(yr)`
-- `poapprate` tab removed; PO stats merged into Players tab
-- ADP vs Finish only showing 1 PO team → fixed by populating `teamQualMap` from `poYr` entries directly
+- Players tab (internal + public): paginated, searchable, career stats, year pips, modal
+- finalRankings: authoritative rank 1→N written at publish
+- Most Rostered tab: cross-platform roster fetch, position filter, ownership bars
+- ADP vs Finish tab: PO% vs Elim%, Swing metric, three sort views
+- Cross-platform sync warnings
 
 ---
 
 ### April 29, 2026 — F5-P4: Custom Playoffs — FULLY COMPLETE
 
-Full playoff configuration, display, live scoring, and public site integration
-for Tournament Mode. Verified working in production across 2023, 2024, and 2025.
-
-**Admin Configuration:**
-- Section-nav dropdown: Playoff Format → Qualification Rules → Seeding & Byes → Round Config → Scoring Settings
-- Year-scoped saves: `_wirePlayoffConfigListeners` accepts `initialYear` parameter, passed through `_rerender` — fixes historical year saves always going to current year
-- Mode cards: Total Points, Points Rounds, H2H Bracket, Custom Rounds
-
-**Qualification Engine:**
-- Composite step builder with Wins Threshold gate, Top N Record/PF/Subgroup per scope
-- `_groupKey` falls back to `leagueName` when explicit division/conference fields are empty (BOTS-style: each league = one division)
-- **Gender matching:** `sleeperUsername` stored on `lc.teams` during sync (from Sleeper `/users` endpoint). Used as primary key for gender/displayName lookup — survives display name changes across years. Falls back to display-name matching.
-- `diagQual("name")` browser console tool for step-by-step qualification diagnosis
-
-**Seeding & Byes:**
-- **Bye Eligibility Ranked By:** H2H Record or Points For — independent of seeding method
-- `byeMetric` used throughout, `byeSet` computed per-group by division/conference scope
-- Key bug fixed: `byeSet` was using PF when config said H2H Record, causing wrong teams to get byes
-
-**Round Config:**
-- Points rounds: advance method, blend (Weighted/Additive with weight %)
-- Custom rounds: groups × teams-per-group × advance-per-group
-- Per-round byes removed from round config (byes handled globally in Seeding & Byes)
-
-**Scoring Settings:**
-- Year-scoped sync, SCORING_KEY_META label map, inline editing, Clear & Re-sync
-
-**Playoffs Tab:**
-- Standings: qualified-first sort, single cut line, correct BYE badges, champion banner for total_points mode
-- Points Rounds: live Sleeper score fetch, blend columns (Wk / Avg / Blend), bye rows hidden with toggle
-- Pool simulation: bye-first ordering ensures `pool.slice(0, byeCount)` always contains actual bye teams; uses actual weekly scores for advancement simulation across rounds
-- League Champs: grouped by playoff winner vs regular season leader, 4-per-row grid, derived from `lc.champion` (set during standings sync from Sleeper winners bracket)
-- Mobile: `<select>` dropdown for sub-tabs
-
-**Public Site:**
-- Year-keyed: publish writes to `publicTournaments/{tid}/playoffs/{year}` — years independent
-- `renderPlayoffsTab` async re-fetches year-specific node on every tab open
-- `renderTab` awaits `renderPlayoffsTab` — no stale cache shown
-- Publish button: fetches all playoff weeks before building snapshot, computes `computedRounds` with pre-sorted results + blend scores per team per round — public site reads directly, no re-derivation
-- Display names throughout, bye toggle, League Champs section
-
-**Firebase paths added:**
-- `gmd/tournaments/{tid}/playoffs/{year}/` — year-keyed playoff config
-- `gmd/publicTournaments/{tid}/playoffs/{year}` — year-keyed published snapshot with `computedRounds`
-- `gmd/tournaments/{tid}/playoffs/{year}/finalRankings` — authoritative ranked list written at publish time
-- `lc.teams[].sleeperUsername` — now stored on every team entry during standings sync
-- `lc.teams[].userId` — Sleeper numeric owner_id also stored
+Full playoff configuration, display, live scoring, and public site integration for Tournament Mode.
 
 ---
 
 ### April 25, 2026 — UI Polish Pass (Mobile + Draft Cards + Standings)
 
-- Roster tab mobile 2-per-row; PA column removed from standings; standings mobile tightening
-- Draft card redesign: position-colored tint, abbreviated name, pos·team inline
-- Tournament draft board mobile 4-col fit
-
-### April 25, 2026 — F5-P3 Completion
-
-- Rules year-specific versioning (`rulesByYear/{year}/`), CSS consistency pass
-- Public bio and rules, registrant/participant template CSV downloads, registrant delete
-
-### April 25, 2026 — Tournament Small Fixes Batch
-
-- Registration year in header, standings desktop/mobile column strategy
-- Public standings Twitter handle pill, Info page "Years" stat
-- `_writePublicSummary` bug fixes, Re-publish button
+- Roster tab mobile 2-per-row; PA column removed; standings mobile tightening
+- Draft card redesign: position-colored tint, abbreviated name
 
 ### April 24, 2026 — Auth, Profile, Tournament
 
 - Password reset (A1), delete league/platform (A2)
-- Duplicate registration prevention (F5-P3-S8), Rosters tab layout overhaul (F5-P3-U5)
-
-### F5-P3 — Analytics — completed April 2026
-
-- Draft board, ADP, Matchups UX, Admin settings UI, Public ADP by year
-- Worker fix (pick_no), snake/3RR direction, DraftCard PNG download
+- Duplicate registration prevention, Rosters tab layout overhaul
 
 ### Earlier completed items
 
@@ -335,15 +341,6 @@ console.log("Analytics cache cleared");
 ```js
 const snap = await firebase.database().ref('gmd/users/mraladdin23/platforms/yahoo/tokens').get();
 console.log('Yahoo tokens:', snap.val());
-```
-
-### Surgical fix for a single wrong league
-```js
-const key = "yahoo_2024_123456"; // replace with actual key
-await firebase.database().ref(`gmd/users/mraladdin23/leagues/${key}`).update({
-  playoffFinish: null, isChampion: false, resolved: null
-});
-console.log("Fixed", key);
 ```
 
 ### Clear bundles node (safe)

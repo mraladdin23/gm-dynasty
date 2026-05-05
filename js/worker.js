@@ -341,6 +341,84 @@ export default {
         return tournamentRosters(leagueId, platform, year, yahooToken, mflCookie);
       }
 
+      // ── Password reset — looks up real email from Firebase, sends via Resend ──
+      // The worker fetches gmd/users/{username}/email using the DB secret (bypasses
+      // auth rules), generates a Firebase password-reset link for the synthetic email
+      // (username@gmdynasty.app), then emails that link to the user's real address.
+      if (path === "/auth/passwordReset" && req.method === "POST") {
+        const { username } = await req.json();
+        if (!username?.trim()) {
+          return new Response(JSON.stringify({ error: "Missing username" }), { status: 400, headers: corsHeaders() });
+        }
+        const key = username.trim().toLowerCase();
+
+        // Look up real email from Firebase using DB secret (no user auth needed)
+        const fbUrl = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/users/${key}/email.json?auth=${env.FIREBASE_DB_SECRET}`;
+        let email;
+        try {
+          const fbRes = await fetch(fbUrl);
+          email = await fbRes.json();
+        } catch(err) {
+          return new Response(JSON.stringify({ error: "Could not reach database." }), { status: 500, headers: corsHeaders() });
+        }
+
+        if (!email || typeof email !== "string" || !email.includes("@")) {
+          return new Response(JSON.stringify({ error: "Username not found." }), { status: 404, headers: corsHeaders() });
+        }
+
+        // Generate Firebase password-reset link for the synthetic email via REST API
+        const resetRes = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${env.FIREBASE_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              requestType: "PASSWORD_RESET",
+              email: `${key}@gmdynasty.app`,
+              returnOobLink: true
+            })
+          }
+        );
+        const resetData = await resetRes.json();
+        if (resetData.error || !resetData.oobLink) {
+          return new Response(JSON.stringify({ error: "Failed to generate reset link." }), { status: 500, headers: corsHeaders() });
+        }
+        const resetLink = resetData.oobLink;
+
+        // Send the link to the user's real email via Resend
+        const emailRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${env.RESEND_API_KEY}`
+          },
+          body: JSON.stringify({
+            from: "Dynasty Locker Room <support@dynastylockerroom.com>",
+            to: email,
+            subject: "Reset your Dynasty Locker Room password",
+            html: `
+              <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+                <h2 style="color:#6c63ff;">Dynasty Locker Room</h2>
+                <p>Hi <strong>${key}</strong>,</p>
+                <p>We received a request to reset your password. Click the button below to choose a new one.</p>
+                <p style="margin:32px 0;">
+                  <a href="${resetLink}" style="background:#6c63ff;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:bold;">Reset My Password</a>
+                </p>
+                <p style="color:#888;font-size:13px;">This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.</p>
+                <p style="color:#888;font-size:13px;">— Dynasty Locker Room</p>
+              </div>
+            `
+          })
+        });
+
+        if (!emailRes.ok) {
+          const errText = await emailRes.text();
+          return new Response(JSON.stringify({ error: "Email send failed", detail: errText.slice(0, 200) }), { status: 500, headers: corsHeaders() });
+        }
+
+        return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders() });
+      }
+
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders() });

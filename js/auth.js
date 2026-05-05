@@ -172,30 +172,32 @@ const Auth = (() => {
   }
 
   // ── Password reset ─────────────────────────────────────
-  // Looks up the real email stored at gmd/users/{username}/email,
-  // then sends a Firebase password-reset link to that address.
+  // Calls the Cloudflare Worker, which:
+  //   1. Looks up the real email from gmd/users/{username}/email (using DB secret)
+  //   2. Generates a Firebase password-reset link for the synthetic email
+  //   3. Emails that link to the user's real address via Resend
   // Users never type a synthetic email — they just enter their username.
   async function sendPasswordReset(username) {
     if (!username?.trim()) throw new Error("Enter your username.");
     const key = username.trim().toLowerCase();
 
-    // Look up real email from DB
-    let email;
+    let result;
     try {
-      const data = await GMDB._restGet(`gmd/users/${key}/email`);
-      email = data;
+      const res = await fetch("https://mfl-proxy.mraladdin23.workers.dev/auth/passwordReset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: key })
+      });
+      result = await res.json();
     } catch(err) {
       throw new Error("Could not reach the server. Check your connection and try again.");
     }
 
-    if (!email || typeof email !== "string" || !email.includes("@")) {
+    if (result.error === "Username not found.") {
       throw new Error("Username not found. Check the spelling and try again.");
     }
-
-    try {
-      await auth.sendPasswordResetEmail(email);
-    } catch(err) {
-      throw new Error(_friendlyAuthError(err.code));
+    if (!result.ok) {
+      throw new Error("Something went wrong. Please try again.");
     }
   }
 

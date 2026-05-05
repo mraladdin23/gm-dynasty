@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: April 30, 2026 — T1–T4 tournament polish complete. Public Players tab fully at parity with internal.*
+*Updated: May 5, 2026 — World Cup tournament mode fully complete. New backlog items logged.*
 
 ---
 
@@ -44,14 +44,14 @@ GitHub Pages (dynastylockerroom.com)
 - `base.css` — Global variables, reset, typography. `.screen` uses `min-height: 100dvh`. `.screen.active { overflow: hidden }` on mobile.
 - `auth.css` — Login/register screen styles
 - `locker.css` — All app UI styles. v=22. Mobile: `100dvh` for app-view height, `env(safe-area-inset-top)` for nav + detail panel.
-- `tournament.css` — Tournament module styles. v=4. Contains all playoff UI styles, Players tab list view, year pips, analytics tabs (Most Rostered, ADP vs Finish).
+- `tournament.css` — Tournament module styles. v=4. Contains all playoff UI styles, Players tab list view, year pips, analytics tabs, World Cup bracket canvas.
 
 ### `js/` — Core modules (all vanilla JS IIFEs)
 
 | File | Purpose |
 |------|---------|
 | `app.js` | Orchestrates screens, auth state, global monitors, button handlers. |
-| `auth.js` | Firebase Auth wrapper. `sendPasswordReset(username)` looks up real email from DB. |
+| `auth.js` | Firebase Auth wrapper. `sendPasswordReset(username)` looks up real email from DB. ⚠️ Password reset reported broken — see B1. |
 | `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. |
 | `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo/Sleeper import. |
 | `mfl.js` | MFL API helpers. Full set of normalizers for standings, matchups, brackets, drafts. |
@@ -67,10 +67,11 @@ GitHub Pages (dynastylockerroom.com)
 | `hallway.js` | The Hallway social feature |
 | `trophy-room.js` | Trophy room display |
 | `players-db.js` | Cross-platform player DB. DynastyProcess CSV. `MAPPINGS_VERSION = "2026-04b"`. |
-| Other modules | `salary.js`, `auction.js`, `playercard.js`, `idb-cache.js`, `chat.js`, `leaguegroups.js`, `manager-search.js`, `playerreport.js`, `config.js` |
+| `salary.js` | Salary cap management. ⚠️ Manual salary entries not saving — see B2. |
+| Other modules | `auction.js`, `playercard.js`, `idb-cache.js`, `chat.js`, `leaguegroups.js`, `manager-search.js`, `playerreport.js`, `config.js` |
 
 ### `tournaments/`
-- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/league champs rendering. Players tab with career history (list view, searchable) — fully at parity with internal Players tab including finalRankings, Best Rank, year pips, streak badge, and finishRow in per-year table.
+- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/bracket rendering. Players tab fully at parity with internal. World Cup mode: group dropdown in Standings, tight bracket canvas in Playoffs.
 
 ---
 
@@ -99,46 +100,74 @@ gmd/tournaments/{tid}/
                                         teamName, wins, losses, ties, pf, pa}], lastSynced}}
   playoffs/         — {year: {mode, qualification, seeding, byes, pointsRounds, customRounds,
                                bracketSize, startWeek, endWeek, recognizeLeagueChampions,
-                               scoringSettings, finalRankings}}
+                               scoringSettings, finalRankings,
+                               worldcupGroups, worldcupSchedule, worldcupBracket,
+                               worldcupRegWeeks, worldcupAdvanceCount, worldcupWeeksPerRound,
+                               worldcupTiebreakers, worldcupBracketMode,
+                               customRounds.matchups}}
   scoringSettings/  — {year: {platform: {field: value}}}
   analyticsCache/   — {drafts: {...}, weeklyHighlights: {...}, recap: {...}}
 
 gmd/publicTournaments/{tid}/
   — Meta fields + leagueCount, registrationCount, standingsCache, participantMap
   — playoffs/{year} — published snapshot with computedRounds, leagueChamps, standings,
-                       finalRankings (all with displayName)
+                       finalRankings (all with displayName), worldcup config fields
   — adpByYear/{year} — published ADP data for public site
 ```
 
 ### Key behaviors
 
-**Standings display name:** Uses participant `displayName`. Lookup keyed by `sleeperUsername` (stable) first, then display name / team name. Gender also keyed by `sleeperUsername`.
+**Standings display name:** Uses participant `displayName`. Lookup keyed by `sleeperUsername` (stable) first, then display name / team name.
 
-**Gender badges:** Blue M / pink F pill inline after team name.
+**Playoff config is year-scoped:** Each season stored at `playoffs/{year}/`. Admin selects year via year selector; `_activePoYear` passed through rerender chain.
 
-**Playoff config is year-scoped:** Each season stored at `playoffs/{year}/`. Admin selects year via year pills; `_activePoYear` passed through rerender chain so historical saves never go to wrong year.
+**Qualification engine:** `_runCompositeQual` with `_groupKey`. Falls back to `leagueName` when `division/conference` fields are empty.
 
-**Qualification engine:** `_runCompositeQual` with `_groupKey` — falls back to `leagueName` when `division/conference` fields are empty. Each Sleeper league = one division in BOTS-style tournaments.
+**Publish:** Fetches all playoff weeks, computes `computedRounds` and `finalRankings`. Writes to both `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`. **Players tab stats (PO apps, rank, titles, pips) only activate after publish with a champion in `finalRankings`.**
 
-**Bye metric:** `byes.method` (H2H Record or PF) is independent of seeding method. `byeSet` computed per-group per scope.
-
-**Publish:** Button fetches all playoff weeks (including all weeks spanned by multi-week rounds and all bracket rounds), computes `computedRounds` (pre-sorted with blend scores) and `finalRankings` (authoritative ordered list from rank 1 = champion down to last non-qualifier). Writes to both `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`.
-
-**finalRankings:** Written at publish time. Rank 1 = overall champion. Mode-specific:
-- `points_rounds`: works backwards from round simulation (supports multi-week rounds)
-- `custom_rounds`: simulates PF-based group advancement through each round
-- `h2h_bracket`: simulates bracket matchups using `_weekScoreCache` scores; falls back to seeding order
+**finalRankings:** Rank 1 = overall champion. Mode-specific:
 - `total_points`: ranked by PF desc
+- `points_rounds`: backwards from round simulation (supports multi-week rounds via `weeksPerRound`)
+- `custom_rounds`: simulates PF-based group advancement; includes `customRounds.matchups` for H2H assignment
+- `h2h_bracket`: simulates bracket from `_weekScoreCache`; falls back to seed order
+- `worldcup`: reads actual `{a,b,scoreA,scoreB}` bracket objects; bracket champion first, then eliminated by deepest round (same-round tie: score desc), then group-stage eliminated, then non-qualifiers by group PF. Includes `groupWins`, `groupLosses`, `groupPF`, `isGroupWinner` per entry.
 
-**_buildPoByYear(t):** Shared helper used by Players tab, ADP vs Finish, and Most Rostered. PRIMARY: reads `t.playoffs[year].finalRankings`. FALLBACK: derives from `_computeQualification()` if not yet published (PF-based, approximate). Keyed by sanitized displayName + teamName + sleeperUsername.
+**_buildPoByYear(t):** PRIMARY: reads `t.playoffs[year].finalRankings`. FALLBACK: derives from `_computeQualification()`. Keyed by `_sk(displayName)` + `_sk(teamName)` variants. Name-matching fallback: tries `c.seasons[yr][].teamName` variants when `displayName` lookup fails (catches bracket name mismatches).
 
-**_computeQualification(t, year):** Pure function, no network calls, runs the full qual engine from `t.standingsCache + t.playoffs[year]` config. Same logic as `_renderPlayoffsTab`. Shared between the publish flow and `_buildPoByYear` fallback.
+**Players tab gating:** PO appearances, rank, titles, and year pips only count/show when `finalRankings` exists AND contains `isTChamp: true` (bracket is fully complete and published). Before that, all playoff stats show blank/zero and pips show grey "in progress".
 
-**Cross-platform sync warnings:** After standings sync, a dismissible amber banner shows any MFL/Yahoo leagues that were skipped (no auth) or failed, plus scoring setting differences between platforms.
+**Diagnostic:** `diagQual("name")` in browser console.
 
-**Diagnostic:** `diagQual("name")` in browser console — shows gender, sleeperUsername, step-by-step qualification.
+---
 
-**Mobile tabs:** `<select>` at ≤600px, button bar on desktop, synced.
+### World Cup Mode — Full Architecture
+
+#### Firebase paths (under `playoffs/{year}/`)
+```
+worldcupGroups          — [{name, advanceCount, members[]}]
+worldcupSchedule        — {groupIndex: {weekIndex: [{home, away}]}}
+worldcupBracket         — [[{a,b,scoreA,scoreB},...], [...]]  (array of rounds)
+worldcupBracketMode     — "manual" | "random"
+worldcupRegWeeks        — number of regular season weeks
+worldcupAdvanceCount    — default advance count per group
+worldcupWeeksPerRound   — weeks per playoff bracket round
+worldcupTiebreakers     — ordered array of tiebreaker keys
+customRounds.matchups   — [roundIdx][groupIdx] = [teamName, ...]
+```
+
+#### Key behaviors
+- **Group standings:** Computed from `worldcupSchedule` + Sleeper scores, NOT from Sleeper league records. Full tiebreaker chain — 3+ way tie: overall pt diff only; 2-way: configured chain (h2h_record_tied → h2h_pt_diff → overall_pt_diff → overall_pf).
+- **Bracket canvas:** Absolute positioning — `centreR0(mi)`, `centreOf(ri,mi)`, `topOf(ri,mi)`, `cardH=44`, `pairG=8`. Both admin and public use identical math. `--wc-gap` CSS var drives connector line heights.
+- **Regular season gate:** `_wcRegSeasonComplete()` checks all scheduled weeks have scores before showing advance/eliminate badges or bracket setup.
+- **Bracket assignment:** After each scored round, "Set [Round N] Matchups" panel shows below canvas with free-pick dropdowns (any winner into any slot). ✕ Clear This Round wipes that round + downstream.
+- **Score refresh:** Uses `_wcTeamInfoMap` (teamName → {teamId, leagueId}) for direct cross-league lookup. Sums across `worldcupWeeksPerRound`.
+- **Tab layout:** Playoffs tab = bracket only. Standings tab = group dropdown selector (shows standings + week matchup cards for selected group).
+- **Players tab:** `groupWins/groupLosses/groupPF` override Sleeper league records. `isGroupWinner` = finished 1st in group = counts as title. All gated on bracket complete.
+
+#### _wcQualified(g, gi) — key function
+Sorts group members by in-group W/L/PF/tiebreaker using `_wcGroupRec()` (schedule + `_weekScoreCache`). Falls back to Sleeper standingsCache if no scores. Used for bracket setup dropdowns and `finalRankings` advancer identification.
+
+---
 
 ### Tab structure (internal admin + user)
 ```
@@ -154,39 +183,15 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 - Paginated list (25/page), searchable by name
 - Sort: Tournament champions → Years played desc → Best finish rank asc → Win% desc
 - Columns: # | Player (name, gender, streak badge, twitter) | Yrs | W–L | Win% | PO | Best | Titles | Year pips
-- Year pips: gold=champion, green=qualified, red=eliminated, grey=absent (hover for tooltip with rank)
-- Tournament champion rows: gold left border + amber background
-- League champion rows (not tournament champ): subtle purple background
-- Modal: career totals (Seasons, W–L, Win%, PO Apps, Best Rank, Career PF, Tourn champs, League champs) + per-year table with W–L, PF, Lg Champ column, finish row at bottom of each year's table
-- Public `tournaments/index.html` is fully at parity with internal tab (same columns, pips, modal structure, finalRankings primary path)
+- Year pips (worldcup): gold=bracket champion, green=won group, red=didn't win group, grey=in progress/absent
+- Year pips (other modes): gold=tournament champ, green=qualified, red=eliminated
+- All playoff stats gated behind bracket complete (champion in finalRankings)
+- Public `tournaments/index.html` fully at parity with internal tab
 
 ### Points Rounds — Multi-Week Support
-- Each round in the `pointsRounds` config has an optional `weeksPerRound` field (default 1, omitted when 1)
-- Admin UI shows a "Weeks per round" input (1–4) with a note that scores are summed
-- Week display in round header shows "Weeks 14–15" format when `wpr > 1`
-- All score lookups use `_wsCombined_(tm, startWk, numWks)` to sum across weeks
-- Prior-round simulation and publish `_computedRounds` both use cumulative `_roundStartWeeks_` offsets
-
-### Most Rostered tab
-- For a selected year: among all playoff-qualified teams, which players appeared on the most rosters
-- Fetches Sleeper via public API; MFL via worker `/tournament/rosters` (cookie required); Yahoo via worker `/tournament/rosters` (token required)
-- Position filter, ownership bar, team chip list
-
-### ADP vs Finish tab
-- Requires draft data loaded (Draft tab or Load button)
-- Splits all drafted players into playoff-team picks vs eliminated-team picks
-- Computes PO%, Elim%, Swing (PO%−Elim%) per player
-- Three sort views: PO-Heavy, Elim-Heavy, By Swing
-- Position filter
-
-### Phase completion
-- **Phase 1 ✅** — Foundation (admin setup, roles, registration, participant DB, discovery)
-- **Phase 2 ✅** — Standings sync, public page, display name, gender badges, Info + Rules tabs
-- **Phase 3 ✅** — Analytics: Draft, ADP, Matchups, Rosters, admin settings, public ADP by year
-- **Phase 4 ✅** — Custom playoffs: config UI, qualification engine, seeding/byes, round rendering, live scores, public site
-- **Phase 4-ext ✅** — Players tab (career history + PO stats), Most Rostered, ADP vs Finish, finalRankings publish, cross-platform sync warnings
-- **Phase 4-ext-2 ✅** — Multi-week rounds (T1), public Players tab parity (T2), custom_rounds finalRankings (T3), h2h_bracket finalRankings (T4)
-- **Phase 5** — Advanced (future if needed): multi-week rounds, cross-platform identity merging, weekly emails, message board
+- Each round has optional `weeksPerRound` field (default 1)
+- `_wsCombined_(tm, startWk, numWks)` sums scores across weeks
+- Round header shows "Weeks 14–15" format when wpr > 1
 
 ---
 
@@ -210,7 +215,7 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 | `/mfl/players` | POST | MFL player universe |
 | `/mfl/rosters` | POST | MFL rosters for a specific week |
 | `/tournament/draft` | POST | Draft picks for one league (Sleeper/MFL/Yahoo) |
-| `/tournament/rosters` | POST | Rosters for one league (MFL/Yahoo) — normalized `{rosters:[{teamId, playerIds[]}]}` |
+| `/tournament/rosters` | POST | Rosters for one league (MFL/Yahoo) |
 | `/tournament/recap` | POST | AI-generated weekly recap via Claude Haiku |
 
 ---
@@ -233,7 +238,6 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 ### Tournament year/string normalization
 - `lc.year` in standingsCache can be a **number** (e.g. `2025`); `Object.keys(poByYear)` returns **strings**
 - Always normalize with `String(yr)` when comparing or using as Set/Map keys
-- `new Set([2025, "2025"])` creates two entries — this is the source of duplicate year pips if not normalized
 
 ### Worker deployment
 - Changes to `worker.js` require a **separate paste into Cloudflare dashboard** — git push alone does nothing
@@ -241,11 +245,15 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 
 ### Yahoo
 - Test on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
-- Yahoo game key format: `"{game_id}.l.{league_id}"`
 
-### Other
-- `standings-row--me` (NOT `standings-row--mine`)
-- Yahoo week pills use `season-pill` / `season-pill--current`
+### World Cup bracket name matching
+- `_wcQualified()` and `_buildFinalRankings` worldcup branch both normalize names via `_skWC()` / `_sk3()`
+- `_buildPoByYear` writes keys under both `displayName` and `teamName` variants
+- Career loop tries `cKey = _sk(displayName)` first, then falls back to `c.seasons[yr][].teamName` variants — handles cases where bracket-assigned names differ from participant displayNames
+
+### Auth
+- Synthetic email format: `username@gmdynasty.app` — password reset must use this format with Firebase Auth
+- ⚠️ Password reset currently broken (B1) — `sendPasswordReset` needs fresh investigation
 
 ---
 
