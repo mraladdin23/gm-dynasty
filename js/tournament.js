@@ -5905,8 +5905,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading draft data…</div>`;
 
-    // Use cached data if still fresh for this tournament
-    if (_draftCache && _draftCache.tid === tid && (Date.now() - _draftCache.fetchedAt) < 300000) {
+    // Use cached data if still fresh for this tournament.
+    // Bypass in-memory cache if any league has an active draft — always re-fetch
+    // so the board reflects picks made since the last render.
+    const _hasActiveDraft = _draftCache?.byLeague && Object.values(_draftCache.byLeague).some(lc => lc.draft_status === "drafting");
+    if (!_hasActiveDraft && _draftCache && _draftCache.tid === tid && (Date.now() - _draftCache.fetchedAt) < 300000) {
       _renderDraftView(tid, t, body, _draftCache);
       return;
     }
@@ -5925,8 +5928,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
           const ck       = `${batch.year}_${leagueId}`;
           const existing = cached[ck];
-          // Use cache if < 24h old and has picks
-          if (existing?.picks?.length && (Date.now() - (existing.fetchedAt || 0)) < 86400000) continue;
+          // Use cache if < 24h old and has picks — but always bypass for active drafts
+          // so live pick updates are fetched on every load during the draft window.
+          const isActiveDraft = existing?.draft_status === "drafting";
+          if (!isActiveDraft && existing?.picks?.length && (Date.now() - (existing.fetchedAt || 0)) < 86400000) continue;
           toFetch.push({ leagueId, platform: batch.platform, year: batch.year, leagueName: l.name || leagueId, cacheKey: ck });
         }
       }
