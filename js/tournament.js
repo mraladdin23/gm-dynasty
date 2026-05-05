@@ -12366,11 +12366,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const checkSleeper = document.getElementById("trn-reg-sleeperUsername")?.value.trim().toLowerCase() || "";
     const checkDlr     = (_currentUsername || "").toLowerCase();
 
-    const existingRegs = Object.values(t.registrations || {});
+    // Always fetch fresh registrations — the stale `t` object may not reflect
+    // a registration submitted earlier in the same session.
+    const freshRegSnap = await _tRegsRef(tid).once("value");
+    const existingRegs = Object.values(freshRegSnap.val() || {});
     const duplicate = existingRegs.find(r => {
-      if (checkDlr    && r.dlrUsername?.toLowerCase()      === checkDlr)     return true;
-      if (checkEmail  && r.email?.toLowerCase()            === checkEmail)   return true;
-      if (checkSleeper && r.sleeperUsername?.toLowerCase() === checkSleeper) return true;
+      if (checkDlr     && r.dlrUsername?.toLowerCase()      === checkDlr)      return true;
+      if (checkEmail   && r.email?.toLowerCase()            === checkEmail)    return true;
+      if (checkSleeper && r.sleeperUsername?.toLowerCase()  === checkSleeper)  return true;
       return false;
     });
 
@@ -12419,7 +12422,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const rid = _genId();
       await _tRegsRef(tid).child(rid).set(entry);
 
-      // Update public registration count
+      // Update public registration count using fresh data
       const freshForPub = await _tRef(tid).once("value");
       _tournaments[tid] = freshForPub.val();
       _writePublicSummary(tid, _tournaments[tid]);
@@ -12435,9 +12438,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         }
       }
 
-      const body = document.getElementById("trn-tab-body");
-      if (body) {
-        body.innerHTML = `
+      // Show success inside the overlay (not trn-tab-body) so the form
+      // is fully replaced and can't be resubmitted or appear sticky on reopen.
+      const overlayBody = document.getElementById("trn-register-page-body");
+      const fallbackBody = document.getElementById("trn-tab-body");
+      const successTarget = overlayBody || fallbackBody;
+      if (successTarget) {
+        successTarget.innerHTML = `
           <div class="trn-success">
             <div class="trn-success-icon">✅</div>
             <h3>Registration Submitted!</h3>
