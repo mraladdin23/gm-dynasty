@@ -1692,13 +1692,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             </div>
             <div class="trn-detail-row">
               <span style="display:flex;align-items:center;gap:5px">Weeks Per Round
-                <button class="trn-help-btn" title="How many NFL weeks each bracket round spans. Scores are summed across all weeks in the round. Default is 1 week per round.">?</button>
+                <button class="trn-help-btn" title="Set how many NFL weeks each round spans. Scores are summed. Each round can differ — e.g. 1 week for early rounds, 2 weeks for the championship.">?</button>
               </span>
-              <span>
-                <input type="number" id="trn-h2h-wpr" min="1" max="4"
-                  value="${po.h2hWeeksPerRound || 1}"
-                  style="width:56px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:4px">per round (scores summed)</span>
+              <span style="width:100%">
+                ${(() => {
+                  const bs  = bracketSize || suggestedBracket || 8;
+                  const nr  = Math.ceil(Math.log2(Math.max(bs, 2)));
+                  const getRN = (ri, tot) =>
+                    ri === tot-1 ? "Championship" : ri === tot-2 ? "Semifinals" : ri === tot-3 ? "Quarterfinals" : `Round ${ri+1}`;
+                  const saved = po.h2hRoundWeeks || [];
+                  return Array.from({length: nr}, (_, ri) => {
+                    const val = saved[ri] ?? (ri === nr - 1 ? 2 : 1);
+                    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                      <span style="font-size:.78rem;color:var(--color-text-dim);width:110px;flex-shrink:0">${getRN(ri, nr)}</span>
+                      <input type="number" class="trn-h2h-round-wpr" data-ri="${ri}"
+                        min="1" max="4" value="${val}"
+                        style="width:48px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+                      <span style="font-size:.75rem;color:var(--color-text-dim)">wk${val !== 1 ? "s" : ""}</span>
+                    </div>`;
+                  }).join("");
+                })()}
               </span>
             </div>
             <div class="trn-detail-row">
@@ -2353,7 +2366,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byeScope    = document.querySelector("#trn-bye-scope-pills .trn-qs-scope-pill--active")?.dataset.scope||"overall";
       const byeMethod   = document.getElementById("trn-bye-method")?.value || "record";
       const bracketSize = parseInt(document.getElementById("trn-bracket-size")?.value)||null;
-      const h2hWpr      = parseInt(document.getElementById("trn-h2h-wpr")?.value) || 1;
+      const h2hRoundWprs = [...document.querySelectorAll(".trn-h2h-round-wpr")]
+        .sort((a, b) => parseInt(a.dataset.ri) - parseInt(b.dataset.ri))
+        .map(el => parseInt(el.value) || 1);
       const h2hReseed   = document.getElementById("trn-h2h-reseed-on")?.classList.contains("trn-yn-btn--active") || false;
       if (bracketSize&&(bracketSize&(bracketSize-1))!==0) { showToast("Bracket size must be a power of 2","error"); return; }
       try {
@@ -2361,7 +2376,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           seeding: {method:seedMethod},
           byes: {type:byeType, count:byeType!=="none"?byeCount:0, scope:byeScope, method:byeMethod},
           bracketSize,
-          h2hWeeksPerRound: h2hWpr > 1 ? h2hWpr : null,
+          h2hRoundWeeks:    h2hRoundWprs.length ? h2hRoundWprs : null,
+          h2hWeeksPerRound: null,   // clear legacy field
           h2hReseed: h2hReseed || null
         };
         await _poSave(updates); Object.assign(_poLocal(),updates);
@@ -10807,36 +10823,52 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── H2H bracket ─────────────────────────────────────────
     // T7: uses the same tight absolute-position canvas math as World Cup.
-    // T6: supports multi-week rounds (h2hWeeksPerRound) and reseed after each round.
+    // T6: supports per-round week counts (h2hRoundWeeks) and reseed after each round.
     const _renderBracket = () => {
       const bracketSize = po.bracketSize || 8;
-      const wpr         = po.h2hWeeksPerRound || 1;
+      const numRounds   = Math.log2(bracketSize);
       const reseed      = !!(po.h2hReseed);
       const startWk     = po.startWeek || null;
-      const numRounds   = Math.log2(bracketSize);
       const seeds       = sortedTeams.slice(0, bracketSize);
+
+      // Per-round week counts. Prefer h2hRoundWeeks array; fall back to legacy
+      // scalar h2hWeeksPerRound; default 1 for every round.
+      const _wprFor = (ri) => {
+        if (po.h2hRoundWeeks?.length > ri) return po.h2hRoundWeeks[ri] || 1;
+        return po.h2hWeeksPerRound || 1;
+      };
+
+      // Absolute start week of round ri — sum of all prior rounds' wpr.
+      const _roundStart = (ri) => {
+        if (!startWk) return null;
+        let wk = startWk;
+        for (let r = 0; r < ri; r++) wk += _wprFor(r);
+        return wk;
+      };
 
       const getRoundName = (ri, tot) =>
         ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
 
       const _weekTag = (ri) => {
-        if (!startWk) return "";
-        const s = startWk + ri * wpr;
-        const e = s + wpr - 1;
+        const s = _roundStart(ri);
+        if (!s) return "";
+        const wpr = _wprFor(ri);
+        const e   = s + wpr - 1;
         return wpr > 1
           ? `<span class="trn-wc-week-tag">Wks ${s}–${e}</span>`
           : `<span class="trn-wc-week-tag">Wk ${s}</span>`;
       };
 
-      // Helper: get combined score for a team across wpr weeks starting at startWk + ri*wpr
+      // Combined score for a team across all weeks in round ri.
       const _h2hScore = (tm, ri) => {
-        if (!startWk || !tm) return null;
+        const s = _roundStart(ri);
+        if (!s || !tm) return null;
         const lid = leagueIdByTeamKey[_teamKey(tm)];
         if (!lid) return null;
+        const wpr = _wprFor(ri);
         let total = 0, found = 0;
         for (let w = 0; w < wpr; w++) {
-          const wk  = startWk + ri * wpr + w;
-          const val = _weekScoreCache[lid + "|" + wk]?.[String(tm.teamId)];
+          const val = _weekScoreCache[lid + "|" + (s + w)]?.[String(tm.teamId)];
           if (val != null) { total += val; found++; }
         }
         return found > 0 ? total : null;
@@ -10898,12 +10930,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       }
 
       // ── Render note ──────────────────────────────────────
+      const wprSummary = Array.from({length: numRounds}, (_, ri) => _wprFor(ri));
+      const allSame    = wprSummary.every(w => w === wprSummary[0]);
+      const wprNote    = allSame
+        ? (wprSummary[0] > 1 ? ` · ${wprSummary[0]} wks/round` : "")
+        : ` · ${wprSummary.join("-")} wks/round`;
       const note = `
         <div class="trn-po-bracket-note">
           ${bracketSize}-team bracket
           ${byeCount > 0 ? ` · ${byeCount} first-round bye${byeCount !== 1 ? "s" : ""}` : ""}
           · Seeded by ${po.seeding?.method === "pf" ? "Points For" : "Record"}
-          ${wpr > 1 ? ` · ${wpr} weeks/round` : ""}
+          ${wprNote}
           ${reseed ? " · Reseeds each round" : ""}
         </div>`;
 
@@ -10981,9 +11018,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // Async: fetch scores for all rounds, then re-render
       (async () => {
         if (!startWk) return;
-        const allLids = [...new Set(seeds.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
-        const weeks   = Array.from({length: numRounds * wpr}, (_, i) => startWk + i);
-        await Promise.all(allLids.flatMap(lid => weeks.map(w => _fetchWeekScores(lid, w))));
+        const allLids  = [...new Set(seeds.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
+        // Collect every NFL week touched by any round
+        const weeks = [];
+        for (let ri = 0; ri < numRounds; ri++) {
+          const s = _roundStart(ri);
+          const w = _wprFor(ri);
+          for (let i = 0; i < w; i++) weeks.push(s + i);
+        }
+        await Promise.all(allLids.flatMap(lid => weeks.map(wk => _fetchWeekScores(lid, wk))));
         // Re-render tab now that scores are cached
         const tabBody = document.getElementById("trn-po-tab-body") || body;
         const curTab  = tabBody?.dataset?.currentTab || "bracket";
@@ -12293,6 +12336,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           : mode==="custom_rounds" ? (po.customRounds?.rounds||[]) : [],
         bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
         h2hWeeksPerRound: mode==="h2h_bracket" ? (po.h2hWeeksPerRound||null) : null,
+        h2hRoundWeeks:    mode==="h2h_bracket" ? (po.h2hRoundWeeks||null)    : null,
         h2hReseed:        mode==="h2h_bracket" ? (po.h2hReseed||null)        : null,
         seeding: po.seeding||null, byes: po.byes||null,
         recognizeLeagueChampions: !!(po.recognizeLeagueChampions),
@@ -12494,8 +12538,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         if (mode === "h2h_bracket" && po.startWeek) {
           const bracketSize_ = po.bracketSize || qualifiers.length;
           const numRounds_   = Math.ceil(Math.log2(bracketSize_));
-          const wpr_         = po.h2hWeeksPerRound || 1;
-          const weeksNeeded_ = Array.from({length: numRounds_ * wpr_}, (_, i) => po.startWeek + i);
+          // Per-round weeks: prefer h2hRoundWeeks array, fall back to legacy scalar
+          const _wprFor_ = (ri) => (po.h2hRoundWeeks?.length > ri ? po.h2hRoundWeeks[ri] : null) || po.h2hWeeksPerRound || 1;
+          const weeksNeeded_ = [];
+          let wkCur = po.startWeek;
+          for (let ri = 0; ri < numRounds_; ri++) {
+            const wpr_ = _wprFor_(ri);
+            for (let i = 0; i < wpr_; i++) weeksNeeded_.push(wkCur + i);
+            wkCur += wpr_;
+          }
           const allLeagueIds = [...new Set(
             qualifiers.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean)
           )];
