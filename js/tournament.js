@@ -437,6 +437,8 @@ const DLRTournament = (() => {
       <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>
       <option value="mostrostered"  ${_activeAdminTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
       <option value="adpvsfinish"   ${_activeAdminTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>
+      <option value="matchups"      ${_activeAdminTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
+      <option value="mu_analysis"   ${_activeAdminTab === "mu_analysis"   ? "selected" : ""}>📊 Match Analysis</option>
       <option value="chat"          ${_activeAdminTab === "chat"          ? "selected" : ""}>💬 Message Board</option>`;
 
     const userOpts = `
@@ -446,6 +448,7 @@ const DLRTournament = (() => {
       ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
       <option value="draft"         ${_activeUserTab === "draft"         ? "selected" : ""}>📋 Draft</option>
       <option value="matchups"      ${_activeUserTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
+      <option value="mu_analysis"   ${_activeUserTab === "mu_analysis"   ? "selected" : ""}>📊 Match Analysis</option>
       <option value="rosters"       ${_activeUserTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
       <option value="players"       ${_activeUserTab === "players"       ? "selected" : ""}>👥 Players</option>
       <option value="mostrostered"  ${_activeUserTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
@@ -574,6 +577,8 @@ const DLRTournament = (() => {
         case "players":       return _renderPlayersTab(tid, t, body);
         case "mostrostered":  return _renderAnalyticsMostRostered(tid, t, body);
         case "adpvsfinish":   return _renderAnalyticsADPvFinish(tid, t, body);
+        case "matchups":      return _renderMatchupsLive(tid, t, body);
+        case "mu_analysis":   return _renderAnalyticsMatchups(tid, t, body);
         case "chat":          return _renderTournamentChat(tid, t, body, true);
         default:              return _renderAdminOverview(tid, t, body);
       }
@@ -590,6 +595,8 @@ const DLRTournament = (() => {
         case "players":    return _renderPlayersTab(tid, t, body);
         case "mostrostered": return _renderAnalyticsMostRostered(tid, t, body);
         case "adpvsfinish":  return _renderAnalyticsADPvFinish(tid, t, body);
+        case "matchups":     return _renderMatchupsLive(tid, t, body);
+        case "mu_analysis":  return _renderAnalyticsMatchups(tid, t, body);
         case "chat":         return _renderTournamentChat(tid, t, body, false);
         default:           return _renderInfoTab(t, body, tid);
       }
@@ -6312,7 +6319,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
 
       if (changed) {
-        // Bust the cache and re-render the draft tab with fresh data
+        // Bust in-memory cache, clear Firebase draft cache for active leagues
+        // so the re-fetch always gets fresh picks from the worker
+        try {
+          const clearUpdates = {};
+          for (const { ck } of toPoll) clearUpdates[ck] = null;
+          await _tAnalyticsRef(tid).child("drafts").update(clearUpdates).catch(() => {});
+        } catch(e) {}
         _draftCache = null;
         _renderAnalyticsDraft(tid, t, body);
       }
@@ -7073,6 +7086,176 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   let _matchupsCache = {};   // { [year_week]: { matchups[], fetchedAt } }
   let _recapCache    = {};   // { [year_week]: { content, savedAt } }
 
+  // ── Live Matchups tab — all scores with conf/div filters ─────────────────
+  // Shared week state with Analysis tab so both stay in sync
+  async function _renderMatchupsLive(tid, t, body) {
+    const meta         = t.meta || {};
+    const playoffWeek  = meta.playoffStartWeek || null;
+    const standingsCache = t.standingsCache || {};
+    const year         = _standingsYear || new Date().getFullYear();
+
+    const batches  = t.leagues || {};
+    const isBatch  = (v) => v && typeof v === "object" && v.leagues !== undefined;
+    const sleeperLeagues = [];
+    for (const [, batch] of Object.entries(batches)) {
+      if (!isBatch(batch) || batch.platform !== "sleeper" || batch.year !== year) continue;
+      for (const [lid] of Object.entries(batch.leagues || {})) sleeperLeagues.push(lid);
+    }
+
+    if (!sleeperLeagues.length) {
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏈</div><div class="trn-empty-title">No Sleeper leagues for ${year}</div></div>`;
+      return;
+    }
+
+    const maxRegWeek = playoffWeek ? playoffWeek - 1 : 17;
+    let latestWeek = 1;
+    Object.values(standingsCache).forEach(lc => {
+      if (lc.year !== year) return;
+      (lc.teams || []).forEach(tm => {
+        const played = (tm.wins || 0) + (tm.losses || 0) + (tm.ties || 0);
+        if (played > latestWeek) latestWeek = played;
+      });
+    });
+    latestWeek = Math.min(latestWeek, maxRegWeek);
+    if (!_matchupsWeek || _matchupsWeek > maxRegWeek) _matchupsWeek = latestWeek || 1;
+    const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
+
+    // Build conference/division lists
+    const _confSet = new Set(), _divSet = new Set();
+    Object.values(t.participants || {}).forEach(p => {
+      if (p.conference) _confSet.add(p.conference);
+      if (p.division)   _divSet.add(p.division);
+    });
+    const confList = [..._confSet].sort();
+    const divList  = [..._divSet].sort();
+
+    const selStyle = `font-size:.85rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)`;
+
+    body.innerHTML = `
+      <div class="trn-az-toolbar">
+        <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+          <label style="font-size:.85rem;color:var(--color-text-dim)">Week</label>
+          <select id="trn-mu-week-sel" style="${selStyle}">
+            ${weeks.map(w => `<option value="${w}" ${w === _matchupsWeek ? "selected" : ""}>Week ${w}${w === latestWeek ? " (latest)" : ""}</option>`).join("")}
+          </select>
+          ${confList.length ? `<select id="trn-mu-conf-sel" style="${selStyle}"><option value="all">All Conferences</option>${confList.map(c=>`<option value="${_esc(c)}" ${_matchupsConf===c?"selected":""}>${_esc(c)}</option>`).join("")}</select>` : ""}
+          ${divList.length ? `<select id="trn-mu-div-sel" style="${selStyle}"><option value="all">All Divisions</option>${divList.map(d=>`<option value="${_esc(d)}" ${_matchupsDiv===d?"selected":""}>${_esc(d)}</option>`).join("")}</select>` : ""}
+        </div>
+        <button class="btn-secondary btn-sm" id="trn-mu-live-refresh">↺ Refresh</button>
+      </div>
+      <div id="trn-mu-live-content"><div class="trn-az-loading"><div class="spinner"></div> Loading…</div></div>`;
+
+    const _load = () => _loadAndRenderLiveMatchups(tid, t, sleeperLeagues, year, document.getElementById("trn-mu-live-content"));
+
+    document.getElementById("trn-mu-week-sel")?.addEventListener("change", function() { _matchupsWeek = parseInt(this.value); _load(); });
+    document.getElementById("trn-mu-conf-sel")?.addEventListener("change", function() {
+      _matchupsConf = this.value; _matchupsDiv = "all";
+      const d = document.getElementById("trn-mu-div-sel"); if (d) d.value = "all";
+      _load();
+    });
+    document.getElementById("trn-mu-div-sel")?.addEventListener("change", function() { _matchupsDiv = this.value; _load(); });
+    document.getElementById("trn-mu-live-refresh")?.addEventListener("click", () => {
+      const ck = `${year}_${_matchupsWeek}`;
+      delete _matchupsCache[ck];
+      _load();
+    });
+
+    await _load();
+  }
+
+  async function _loadAndRenderLiveMatchups(tid, t, leagueIds, year, el) {
+    if (!el) return;
+    const ck = `${year}_${_matchupsWeek}`;
+    let allMatchups = _matchupsCache[ck]?.matchups;
+
+    if (!allMatchups || (Date.now() - (_matchupsCache[ck]?.fetchedAt || 0)) >= 300000) {
+      el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching week ${_matchupsWeek}…</div>`;
+      const standingsCache = t.standingsCache || {};
+      const teamMap = {};
+      Object.values(standingsCache).forEach(lc => {
+        if (lc.year && parseInt(lc.year) !== parseInt(year)) return;
+        const lcLeagueId = String(lc.leagueId || lc.league_id || "");
+        (lc.teams || []).forEach(tm => {
+          const qualKey = lcLeagueId ? `${lcLeagueId}:${tm.teamId}` : String(tm.teamId);
+          teamMap[qualKey] = tm.teamName;
+          if (lcLeagueId) teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
+        });
+      });
+      const pMap = _buildParticipantTeamMap(t);
+      const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+      allMatchups = [];
+      for (let i = 0; i < leagueIds.length; i += 5) {
+        await Promise.allSettled(leagueIds.slice(i, i + 5).map(async lid => {
+          try {
+            const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${_matchupsWeek}`);
+            if (!r.ok) return;
+            const data = await r.json();
+            if (!Array.isArray(data)) return;
+            const byMid = {};
+            data.forEach(m => { if (m.matchup_id) (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m); });
+            // Build league name from standingsCache
+            const lname = Object.values(standingsCache).find(lc => String(lc.leagueId||lc.league_id||"") === lid)?.leagueName || lid;
+            Object.values(byMid).forEach(pair => {
+              if (pair.length !== 2) return;
+              const [a, b] = pair;
+              let aName = teamMap[`${lid}:${a.roster_id}`] || teamMap[String(a.roster_id)] || `Team ${a.roster_id}`;
+              let bName = teamMap[`${lid}:${b.roster_id}`] || teamMap[String(b.roster_id)] || `Team ${b.roster_id}`;
+              if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
+              if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+              allMatchups.push({
+                leagueId: lid, leagueName: lname,
+                home: { name: aName, score: parseFloat(a.points || 0) },
+                away: { name: bName, score: parseFloat(b.points || 0) },
+              });
+            });
+          } catch(e) {}
+        }));
+        if (i + 5 < leagueIds.length) await new Promise(r => setTimeout(r, 100));
+      }
+      _matchupsCache[ck] = { matchups: allMatchups, fetchedAt: Date.now() };
+    }
+
+    // Apply conf/div filter
+    const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const pConfDiv = {};
+    Object.values(t.participants || {}).forEach(p => {
+      const key = _sk(p.displayName || p.username || "");
+      if (key) pConfDiv[key] = { conference: p.conference || "", division: p.division || "" };
+    });
+    let filtered = allMatchups;
+    if (_matchupsConf !== "all") filtered = filtered.filter(m => pConfDiv[_sk(m.home.name)]?.conference === _matchupsConf || pConfDiv[_sk(m.away.name)]?.conference === _matchupsConf);
+    if (_matchupsDiv  !== "all") filtered = filtered.filter(m => pConfDiv[_sk(m.home.name)]?.division   === _matchupsDiv  || pConfDiv[_sk(m.away.name)]?.division   === _matchupsDiv);
+
+    if (!filtered.length) {
+      el.innerHTML = `<div class="trn-empty">No matchups for Week ${_matchupsWeek}${_matchupsConf!=="all"?` · ${_matchupsConf}`:""}${_matchupsDiv!=="all"?` · ${_matchupsDiv}`:""}.</div>`;
+      return;
+    }
+
+    // Group by league name
+    const byLeague = {};
+    filtered.forEach(m => {
+      (byLeague[m.leagueName] = byLeague[m.leagueName] || []).push(m);
+    });
+
+    el.innerHTML = `
+      <div class="trn-az-meta">Week ${_matchupsWeek} · ${filtered.length} matchups · ${Object.keys(byLeague).length} leagues${_matchupsConf!=="all"?` · ${_matchupsConf}`:""}${_matchupsDiv!=="all"?` · ${_matchupsDiv}`:""}</div>
+      ${Object.entries(byLeague).sort(([a],[b])=>a.localeCompare(b)).map(([lname, matchups]) => `
+        <div class="trn-mu-league-group">
+          <div class="trn-mu-league-name">${_esc(lname)}</div>
+          ${matchups.map(m => {
+            const homeWon = m.home.score > m.away.score;
+            const live    = m.home.score > 0 || m.away.score > 0;
+            return `<div class="trn-mu-live-row">
+              <span class="trn-mu-live-team ${homeWon&&live?"trn-mu-live-team--win":""}">${_esc(m.home.name)}</span>
+              <span class="trn-mu-live-score ${homeWon&&live?"trn-mu-live-score--win":""}">${live?m.home.score.toFixed(2):"–"}</span>
+              <span class="trn-mu-live-vs">vs</span>
+              <span class="trn-mu-live-score ${!homeWon&&live?"trn-mu-live-score--win":""}">${live?m.away.score.toFixed(2):"–"}</span>
+              <span class="trn-mu-live-team ${!homeWon&&live?"trn-mu-live-team--win":""}">${_esc(m.away.name)}</span>
+            </div>`;
+          }).join("")}
+        </div>`).join("")}`;
+  }
+
   async function _renderAnalyticsMatchups(tid, t, body) {
     const meta         = t.meta || {};
     const playoffWeek  = meta.playoffStartWeek || null;
@@ -7124,7 +7307,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     body.innerHTML = `
       <div class="trn-az-toolbar">
-        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
           <label style="font-size:.85rem;color:var(--color-text-dim)">Week</label>
           <select id="trn-mu-week-sel" style="font-size:.85rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
             ${weeks.map(w => `<option value="${w}" ${w === _matchupsWeek ? "selected" : ""}>Week ${w}${w === latestWeek ? " (latest)" : ""}</option>`).join("")}
@@ -7304,6 +7487,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       el.innerHTML = `<div class="trn-empty">No matchups found for Week ${_matchupsWeek}${_matchupsConf !== "all" ? ` in ${_matchupsConf}` : ""}${_matchupsDiv !== "all" ? ` / ${_matchupsDiv}` : ""}.</div>`;
       return;
     }
+    const closest  = [...enriched].sort((a, b) =>  a.diff - b.diff).slice(0, 5);
     const blowouts = [...enriched].sort((a, b) =>  b.diff - a.diff).slice(0, 5);
 
     // Build per-team score list and league name map
@@ -9188,15 +9372,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const _regSeasonComplete = () => {
       const startWk = po.startWeek || null;
       if (!startWk) return true; // no playoff window configured — show badges
-      const lastRegWk = startWk - 1;
-      if (lastRegWk < 1) return true; // startWeek is week 1 — no reg season
-      // Check if any team in standingsCache has a score for the last reg season week
+      // Reg season is done when at least one team has played startWeek-1 or more games.
+      // Use standingsCache W+L+T as the game count — no live fetch dependency.
       return Object.values(t.standingsCache || {}).some(lc => {
         if (String(lc.year) !== String(activeY)) return false;
-        const lid = String(lc.leagueId || lc.league_id || "");
-        if (!lid) return false;
-        const weekMap = _weekScoreCache[lid + "|" + lastRegWk];
-        return weekMap && Object.keys(weekMap).length > 0;
+        return (lc.teams || []).some(tm =>
+          ((tm.wins || 0) + (tm.losses || 0) + (tm.ties || 0)) >= (startWk - 1)
+        );
       });
     };
 
@@ -10221,7 +10403,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>`;
 
       // ── Admin: no stored bracket → show setup button ──────
-      if (_poIsAdmin && !hasStoredBracket) {
+      if (isAdmin && !hasStoredBracket) {
         // Auto-build Round 1: highest seed vs lowest (#1 vs #N, #2 vs #(N-1), etc.)
         const r1 = [];
         r1Byes.forEach(tm => {}); // byes are implicit
@@ -10276,7 +10458,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const loaderId = "trn-h2h-bracket-loader";
       const panelId  = "trn-h2h-next-panel";
 
-      const adminBar = _poIsAdmin ? `
+      const adminBar = isAdmin ? `
         <div class="trn-wc-bracket-admin-bar">
           <span style="font-size:.78rem;color:var(--color-text-dim)">${bracketSize}-team bracket · ${numRounds} rounds${po.startWeek?` · Starts Wk ${po.startWeek}`:""}</span>
           <div style="display:flex;gap:var(--space-2)">
@@ -10339,7 +10521,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           if (loaderEl) loaderEl.style.display = "none";
 
           // Admin: build next-round assignment panel
-          if (_poIsAdmin) {
+          if (isAdmin) {
             const panelEl = document.getElementById(panelId);
             if (panelEl) panelEl.innerHTML = _buildH2HNextPanel(bracketData, numRounds, getRoundName);
           }
@@ -10445,7 +10627,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const storedGroups = matchups[roundIdx];
       const hasMatchups  = storedGroups?.length > 0 && storedGroups.some(g => g?.some(Boolean));
 
-      if (!hasMatchups && _poIsAdmin) {
+      if (!hasMatchups && isAdmin) {
         return `
           <div class="trn-po-round-card">
             <div class="trn-po-round-header"><span>Round ${roundIdx+1}</span></div>
@@ -10519,7 +10701,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             (grp||[]).filter(Boolean).every(name => _score(name) !== null)
           );
 
-          const nextMatchupHTML = (!isFinal && _poIsAdmin && nextRound && allScored && winners.length > 0) ? (() => {
+          const nextMatchupHTML = (!isFinal && isAdmin && nextRound && allScored && winners.length > 0) ? (() => {
             const storedNext    = (matchups[nextRoundIdx] || []);
             const nextNumGroups = nextRound.groups || 1;
             const nextTpg       = nextRound.teamsPerGroup || 2;
