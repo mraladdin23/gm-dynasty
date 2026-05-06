@@ -424,6 +424,29 @@ const DLRTournament = (() => {
     // Build tab options based on mode
     const hasPlayoffConfig = !!(Object.keys(t.playoffs||{}).some(k => /^\d{4}$/.test(k)
       ? (t.playoffs[k]?.mode) : k === "mode"));
+
+    // Playoffs tab visible to users only when reg season is close enough to done.
+    // Check: any team in standingsCache has played at least (startWeek - 1) games.
+    // Admins always see it.
+    const _poForYear = (yr) => {
+      const playoffs = t.playoffs || {};
+      if (playoffs[yr]) return playoffs[yr];
+      const flat = Object.keys(playoffs).filter(k => !/^\d{4}$/.test(k));
+      return flat.length ? playoffs : {};
+    };
+    const _activePoYearForCheck = _tournamentYear ? String(_tournamentYear)
+      : (Object.keys(t.playoffs||{}).filter(k=>/^\d{4}$/.test(k)).sort().reverse()[0] || null);
+    const _poCheck = _activePoYearForCheck ? _poForYear(_activePoYearForCheck) : {};
+    const _poStartWk = _poCheck.startWeek || meta.playoffStartWeek || null;
+    const playoffsUnlocked = showAdminNav || !_poStartWk || (() => {
+      const yr = _activePoYearForCheck;
+      return Object.values(t.standingsCache || {}).some(lc => {
+        if (yr && String(lc.year) !== String(yr)) return false;
+        return (lc.teams || []).some(tm =>
+          ((tm.wins||0) + (tm.losses||0) + (tm.ties||0)) >= (_poStartWk - 1)
+        );
+      });
+    })();
     const adminOpts = `
       <option value="overview"      ${_activeAdminTab === "overview"      ? "selected" : ""}>📊 Overview</option>
       <option value="leagues"       ${_activeAdminTab === "leagues"       ? "selected" : ""}>🏟 Leagues</option>
@@ -445,7 +468,7 @@ const DLRTournament = (() => {
       <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
       <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>📋 Rules</option>
       <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
-      ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
+      ${hasPlayoffConfig && playoffsUnlocked ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
       <option value="draft"         ${_activeUserTab === "draft"         ? "selected" : ""}>📋 Draft</option>
       <option value="matchups"      ${_activeUserTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
       <option value="mu_analysis"   ${_activeUserTab === "mu_analysis"   ? "selected" : ""}>📊 Match Analysis</option>
@@ -590,13 +613,12 @@ const DLRTournament = (() => {
         case "standings":  return _renderStandingsTab(tid, t, body, false);
         case "playoffs":   return _renderPlayoffsTab(tid, t, body);
         case "draft":      return _renderAnalyticsDraft(tid, t, body);
-        case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
+        case "matchups":   return _renderMatchupsLive(tid, t, body);
+        case "mu_analysis":return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
         case "players":    return _renderPlayersTab(tid, t, body);
         case "mostrostered": return _renderAnalyticsMostRostered(tid, t, body);
         case "adpvsfinish":  return _renderAnalyticsADPvFinish(tid, t, body);
-        case "matchups":     return _renderMatchupsLive(tid, t, body);
-        case "mu_analysis":  return _renderAnalyticsMatchups(tid, t, body);
         case "chat":         return _renderTournamentChat(tid, t, body, false);
         default:           return _renderInfoTab(t, body, tid);
       }
@@ -1670,6 +1692,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             </div>
           </div>
         </div>
+        ${mode === "h2h_bracket" ? `
+        <div class="trn-detail-row" id="trn-h2h-reseed-row" style="margin-top:var(--space-2)">
+          <span style="display:flex;align-items:center;gap:5px">Re-seed after each round
+            <button class="trn-help-btn" title="When enabled, after each bracket round the highest remaining seed always plays the lowest remaining seed. When disabled, bracket position is fixed at round 1.">?</button>
+          </span>
+          <span style="display:flex;gap:var(--space-1)">
+            <button class="trn-yn-btn ${po.h2hReseedRounds?"trn-yn-btn--active":""}" id="trn-h2h-reseed-on"  data-reseed="true">Yes</button>
+            <button class="trn-yn-btn ${!po.h2hReseedRounds?"trn-yn-btn--active":""}" id="trn-h2h-reseed-off" data-reseed="false">No</button>
+          </span>
+        </div>` : ""}
         <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
           <button class="btn-primary btn-sm" id="trn-seeding-save">Save Byes &amp; Seeding</button>
         </div>`}
@@ -2013,12 +2045,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Restore section selection
       const sel = document.getElementById("trn-pc-section-select");
       if (sel && _activePoSection) { sel.value = _activePoSection; _showPCSection(_activePoSection); }
-      // If config is inside the playoffs tab drawer, re-render the playoff view too
-      // so mode changes, round additions, etc. are immediately reflected
-      const tabBody = document.getElementById("trn-tab-body");
-      if (document.getElementById("trn-po-config-drawer") && tabBody) {
-        setTimeout(() => _renderPlayoffsTab(tid, newT, tabBody), 50);
-      }
     };
 
     // ── Section-nav select ──────────────────────────────
@@ -2340,6 +2366,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.getElementById("trn-bye-none")?.addEventListener("click",   ()=>_saveBye("none"));
     document.getElementById("trn-bye-topn")?.addEventListener("click",   ()=>_saveBye("top_n"));
     document.getElementById("trn-bye-manual")?.addEventListener("click", ()=>_saveBye("manual"));
+    document.querySelectorAll("[data-reseed]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-reseed]").forEach(b =>
+          b.classList.toggle("trn-yn-btn--active", b === btn));
+      });
+    });
+
     document.getElementById("trn-seeding-save")?.addEventListener("click", async () => {
       const seedMethod  = document.getElementById("trn-seed-method")?.value||"record";
       const byeTypeEl   = document.querySelector(".trn-yn-btn--active[id^='trn-bye-']");
@@ -2351,8 +2384,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (bracketSize&&(bracketSize&(bracketSize-1))!==0) { showToast("Bracket size must be a power of 2","error"); return; }
       const h2hRounds = Array.from(document.querySelectorAll(".trn-h2h-wpr-input"))
         .map(inp => ({ weeksPerRound: Math.max(1, parseInt(inp.value)||1) }));
+      const h2hReseedRounds = document.querySelector("[data-reseed='true']")?.classList.contains("trn-yn-btn--active") || false;
       try {
-        const updates={seeding:{method:seedMethod},byes:{type:byeType,count:byeType!=="none"?byeCount:0,scope:byeScope,method:byeMethod},bracketSize,h2hRounds};
+        const updates={seeding:{method:seedMethod},byes:{type:byeType,count:byeType!=="none"?byeCount:0,scope:byeScope,method:byeMethod},bracketSize,h2hRounds,h2hReseedRounds};
         await _poSave(updates); Object.assign(_poLocal(),updates);
         showToast("Byes & seeding saved ✓");
       } catch(e) { showToast("Failed","error"); }
@@ -6098,14 +6132,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           try {
             const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
               method: "POST",
-              headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 leagueId:   l.leagueId,
                 platform:   l.platform,
                 year:       l.year,
                 yahooToken: l.platform === "yahoo" ? yahooToken : undefined,
-                mflCookie:  l.platform === "mfl"   ? mflCreds?.cookie : undefined,
-                _bust:      Date.now()  // cache-buster for active drafts
+                mflCookie:  l.platform === "mfl"   ? mflCreds?.cookie : undefined
               })
             });
             if (!r.ok) return;
@@ -6435,10 +6468,22 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _draftListPage = 1;
       _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
-    document.getElementById("trn-draft-refresh-btn")?.addEventListener("click", () => {
+    document.getElementById("trn-draft-refresh-btn")?.addEventListener("click", async () => {
       _draftCache = null;
       _draftPosFilter = "all";
       _draftSearch = "";
+      // Clear Firebase draft cache for all active-draft leagues so we always get fresh picks
+      try {
+        const snap = await _tAnalyticsRef(tid).child("drafts").once("value");
+        const cached = snap.val() || {};
+        const clearUpdates = {};
+        Object.entries(cached).forEach(([ck, lc]) => {
+          if (lc?.draft_status === "drafting") clearUpdates[ck] = null;
+        });
+        if (Object.keys(clearUpdates).length) {
+          await _tAnalyticsRef(tid).child("drafts").update(clearUpdates).catch(() => {});
+        }
+      } catch(e) {}
       _renderAnalyticsDraft(tid, t, body);
     });
     document.getElementById("trn-draft-league-sel")?.addEventListener("change", function() {
@@ -10579,7 +10624,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         return pairs;
       };
 
-      const currentSlots = targetRnd.map((m, mi) => ({ a: m.a || "", b: m.b || "", mi }));
+      // If h2hReseedRounds is configured, auto-seed the slots by default
+      const autoReseed = po.h2hReseedRounds === true;
+      const defaultSlots = autoReseed
+        ? _reseedPairs(winners).map((p, mi) => ({ a: p.a, b: p.b, mi }))
+        : targetRnd.map((m, mi) => ({ a: m.a || "", b: m.b || "", mi }));
+      const currentSlots = defaultSlots;
 
       const _opts = (placed, cur) => {
         let h = `<option value="">— Select winner —</option>`;
@@ -10605,7 +10655,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="trn-section-card-title">Set ${getRoundName(targetRi, numRounds)} Matchups</div>
           <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
             ${getRoundName(lastScoredRi, numRounds)} complete — assign ${winners.length} winners to ${getRoundName(targetRi, numRounds)} matchups.
-            ${targetRnd.some(m=>m.a||m.b)?`<br><span style="color:var(--color-gold,#d4af37)">⚡ Previously saved — review and update, or re-seed.</span>`:""}
+            ${autoReseed ? `<br><span style="color:var(--color-accent)">↕ Auto-reseeded: highest vs lowest seed. Adjust freely before saving.</span>` : targetRnd.some(m=>m.a||m.b)?`<br><span style="color:var(--color-gold,#d4af37)">⚡ Previously saved — review and update, or re-seed.</span>`:""}
           </p>
           <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3)">
             <button class="btn-secondary btn-sm" id="trn-h2h-next-reseed" data-next-ri="${targetRi}">↕ Re-seed</button>
@@ -11536,13 +11586,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     body.innerHTML = `
       <div class="trn-po-container">
-        ${isAdmin ? `
-        <details class="trn-po-config-drawer" id="trn-po-config-drawer">
-          <summary class="trn-po-config-drawer-summary">⚙ Configure Playoffs</summary>
-          <div class="trn-po-config-drawer-body" id="trn-po-config-drawer-body">
-            ${_renderPlayoffConfigHTML(tid, t, activeY)}
-          </div>
-        </details>` : ""}
         <div class="trn-po-header">
           <div class="trn-po-title">
             ${{total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍"}[mode]||"🏆"}
@@ -11579,7 +11622,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     });
 
     // Wire playoff config drawer if admin
-    if (isAdmin) _wirePlayoffConfigListeners(tid, t, activeY);
+    // (config lives in Overview tab, wired from _renderAdminOverview)
 
     // ── World Cup bracket wiring ─────────────────────────────────────────────
     const _wcWireBracketButtons = () => {
