@@ -449,8 +449,8 @@ const DLRTournament = (() => {
       <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
       ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
       <option value="draft"         ${_activeUserTab === "draft"         ? "selected" : ""}>📋 Draft</option>
-      <option value="match_analysis" ${_activeUserTab === "match_analysis" ? "selected" : ""}>📊 Match Analysis</option>
       <option value="matchups"       ${_activeUserTab === "matchups"       ? "selected" : ""}>🏈 Matchups</option>
+      <option value="match_analysis" ${_activeUserTab === "match_analysis" ? "selected" : ""}>📊 Match Analysis</option>
       <option value="rosters"       ${_activeUserTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
       <option value="players"       ${_activeUserTab === "players"       ? "selected" : ""}>👥 Players</option>
       <option value="mostrostered"  ${_activeUserTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
@@ -574,7 +574,8 @@ const DLRTournament = (() => {
         case "standings":     return _renderStandingsTab(tid, t, body, true);
         case "playoffs":      return _renderPlayoffsTab(tid, t, body);
         case "draft":         return _renderAnalyticsDraft(tid, t, body);
-        case "matchups":      return _renderAnalyticsMatchups(tid, t, body);
+        case "matchups":       return _renderWeeklyMatchups(tid, t, body);
+        case "match_analysis": return _renderAnalyticsMatchups(tid, t, body);
         case "rosters":       return _renderAnalyticsRosters(tid, t, body);
         case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
         case "players":       return _renderPlayersTab(tid, t, body);
@@ -592,8 +593,8 @@ const DLRTournament = (() => {
         case "standings":  return _renderStandingsTab(tid, t, body, false);
         case "playoffs":   return _renderPlayoffsTab(tid, t, body);
         case "draft":      return _renderAnalyticsDraft(tid, t, body);
-        case "matchups":       return _renderAnalyticsMatchups(tid, t, body);
-        case "match_analysis": return _renderWeeklyMatchups(tid, t, body);
+        case "matchups":       return _renderWeeklyMatchups(tid, t, body);
+        case "match_analysis": return _renderAnalyticsMatchups(tid, t, body);
         case "board":          return _renderBoardTab(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
         case "players":    return _renderPlayersTab(tid, t, body);
@@ -7601,35 +7602,267 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const isAdmin = t.roles?.[_currentUsername]?.role === "admin" ||
                     t.roles?.[_currentUsername]?.role === "sub_admin";
 
+    const EMOJIS = ['🏈','🏆','🔥','💪','😂','😤','💀','🎉','👀','😮','🤣','😭','💯','🤡','👑','⚡','🎯','🗑️','💰','🤑','😈','🙌','👏','🫡','😎','🥶','🤠','🧠','😅','🫠'];
+
     body.innerHTML = `
       <div class="trn-board-wrap">
         <div class="trn-board-header">
           <span class="trn-board-title">💬 Message Board</span>
           <span class="trn-board-year">${year}</span>
         </div>
+
+        <!-- GIF panel -->
+        <div id="trn-board-gif-panel" style="display:none;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);padding:10px;margin-bottom:8px;">
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <input id="trn-board-gif-input" type="text" placeholder="Search GIFs…"
+              style="flex:1;padding:7px 10px;background:var(--color-bg-3);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-body);font-size:13px;outline:none;" />
+            <button id="trn-board-gif-close"
+              style="padding:6px 10px;background:none;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text-dim);cursor:pointer;">✕</button>
+          </div>
+          <div id="trn-board-gif-results" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-height:180px;overflow-y:auto;"></div>
+        </div>
+
+        <!-- Messages -->
         <div id="trn-board-messages" class="trn-board-messages">
           <div style="text-align:center;padding:var(--space-6);color:var(--color-text-dim)">
             <div class="spinner" style="margin:0 auto var(--space-2)"></div>Loading…
           </div>
         </div>
+
+        <!-- Toolbar -->
+        <div class="trn-board-toolbar">
+          <div style="position:relative;">
+            <button class="chat-tool-btn" id="trn-board-smack-btn" title="Smack Talk">🔥</button>
+            <div id="trn-board-smack-menu" style="display:none;position:absolute;bottom:calc(100%+4px);left:0;width:280px;background:var(--color-bg-2);border:1px solid var(--color-border);border-radius:var(--radius);box-shadow:var(--shadow-lg);z-index:100;max-height:220px;overflow-y:auto;"></div>
+          </div>
+          <button class="chat-tool-btn" id="trn-board-gif-btn" title="GIF">🎬</button>
+          <button class="chat-tool-btn" id="trn-board-poll-btn" title="Poll">📊</button>
+          <div style="position:relative;">
+            <button class="chat-tool-btn" id="trn-board-emoji-btn" title="Emoji">😊</button>
+            <div id="trn-board-emoji-picker" style="display:none;position:absolute;bottom:calc(100%+4px);left:0;width:260px;background:var(--color-bg-2);border:1px solid var(--color-border);border-radius:var(--radius);box-shadow:var(--shadow-lg);z-index:100;padding:8px;">
+              <div style="display:flex;flex-wrap:wrap;gap:2px;">
+                ${EMOJIS.map(e => `<span class="trn-board-emoji-item" data-emoji="${e}" style="font-size:20px;cursor:pointer;padding:3px;border-radius:4px;">${e}</span>`).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input row -->
         <div class="trn-board-compose">
           <textarea id="trn-board-input" class="trn-board-input"
-            placeholder="Write a message…" rows="2" maxlength="500"></textarea>
+            placeholder="Write a message…" rows="1" maxlength="500"></textarea>
           <button class="btn-primary btn-sm" id="trn-board-send-btn">Send</button>
         </div>
         <div id="trn-board-char" class="trn-board-char">0 / 500</div>
       </div>`;
 
-    document.getElementById("trn-board-input")?.addEventListener("input", function() {
-      const charEl = document.getElementById("trn-board-char");
-      if (charEl) charEl.textContent = `${this.value.length} / 500`;
+    // ── Char counter + send on Enter ─────────────────────────────────────────
+    const inp = document.getElementById("trn-board-input");
+    inp?.addEventListener("input", function() {
+      const c = document.getElementById("trn-board-char");
+      if (c) c.textContent = `${this.value.length} / 500`;
+      this.style.height = "auto";
+      this.style.height = Math.min(this.scrollHeight, 120) + "px";
     });
-    document.getElementById("trn-board-input")?.addEventListener("keydown", function(e) {
+    inp?.addEventListener("keydown", e => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); _boardSend(tid, year); }
     });
     document.getElementById("trn-board-send-btn")?.addEventListener("click", () => _boardSend(tid, year));
 
+    // ── Emoji picker ─────────────────────────────────────────────────────────
+    const emojiBtn    = document.getElementById("trn-board-emoji-btn");
+    const emojiPicker = document.getElementById("trn-board-emoji-picker");
+    emojiBtn?.addEventListener("click", e => {
+      e.stopPropagation();
+      const hidden = emojiPicker.style.display === "none" || !emojiPicker.style.display;
+      emojiPicker.style.display = hidden ? "" : "none";
+      if (hidden) {
+        setTimeout(() => {
+          document.addEventListener("click", function _close(ev) {
+            if (!emojiPicker.contains(ev.target) && ev.target !== emojiBtn) emojiPicker.style.display = "none";
+            document.removeEventListener("click", _close);
+          });
+        }, 50);
+      }
+    });
+    body.querySelectorAll(".trn-board-emoji-item").forEach(span => {
+      span.addEventListener("mouseover", () => span.style.background = "var(--color-surface)");
+      span.addEventListener("mouseout",  () => span.style.background = "");
+      span.addEventListener("click", () => {
+        const input = document.getElementById("trn-board-input");
+        if (!input) return;
+        const s = input.selectionStart || 0, e2 = input.selectionEnd || 0;
+        input.value = input.value.slice(0, s) + span.dataset.emoji + input.value.slice(e2);
+        input.selectionStart = input.selectionEnd = s + span.dataset.emoji.length;
+        input.focus();
+        emojiPicker.style.display = "none";
+      });
+    });
+
+    // ── GIF search ───────────────────────────────────────────────────────────
+    const gifPanel  = document.getElementById("trn-board-gif-panel");
+    const gifInput  = document.getElementById("trn-board-gif-input");
+    const gifResults= document.getElementById("trn-board-gif-results");
+    let   _boardGifTimer = null;
+
+    document.getElementById("trn-board-gif-btn")?.addEventListener("click", () => {
+      gifPanel.style.display = gifPanel.style.display === "none" ? "" : "none";
+      if (gifPanel.style.display === "") {
+        gifInput?.focus();
+        _boardSearchGifs("fantasy football trash talk", gifResults);
+      }
+    });
+    document.getElementById("trn-board-gif-close")?.addEventListener("click", () => {
+      gifPanel.style.display = "none";
+    });
+    gifInput?.addEventListener("input", function() {
+      clearTimeout(_boardGifTimer);
+      _boardGifTimer = setTimeout(() => _boardSearchGifs(this.value, gifResults), 500);
+    });
+
+    // ── Smack talk ───────────────────────────────────────────────────────────
+    const SMACK = [
+      "Your team is so bad, even the bye weeks are an improvement.",
+      "I've seen better rosters on a participation trophy.",
+      "Your draft strategy was bold. Boldly wrong.",
+      "I'm not saying you're the worst manager in the league, but the standings are.",
+      "Your team has more injuries than a demolition derby.",
+      "Bold move starting that guy. Bold. Wrong. But bold.",
+      "Your waiver wire pickups belong in the trash wire.",
+      "You're one bad week away from a last-place trophy.",
+      "I'd say good luck this week but I don't want to lie.",
+      "Your team looks like it was drafted on a dartboard. Blindfolded.",
+      "Even your kicker is on the injury report.",
+      "I've seen more upside in a flat line.",
+    ];
+    const smackBtn  = document.getElementById("trn-board-smack-btn");
+    const smackMenu = document.getElementById("trn-board-smack-menu");
+    smackBtn?.addEventListener("click", e => {
+      e.stopPropagation();
+      if (smackMenu.style.display === "none" || !smackMenu.style.display) {
+        smackMenu.innerHTML = SMACK.map((l, i) =>
+          `<div class="trn-board-smack-item" data-idx="${i}"
+            style="padding:8px 12px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--color-border);color:var(--color-text);">${_esc(l)}</div>`
+        ).join("");
+        smackMenu.style.display = "";
+        smackMenu.querySelectorAll(".trn-board-smack-item").forEach(el => {
+          el.addEventListener("mouseover", () => el.style.background = "var(--color-surface)");
+          el.addEventListener("mouseout",  () => el.style.background = "");
+          el.addEventListener("click", () => {
+            const input = document.getElementById("trn-board-input");
+            if (input) { input.value = SMACK[el.dataset.idx]; input.focus(); }
+            smackMenu.style.display = "none";
+          });
+        });
+        setTimeout(() => {
+          document.addEventListener("click", function _close(ev) {
+            if (!smackBtn.contains(ev.target)) smackMenu.style.display = "none";
+            document.removeEventListener("click", _close);
+          });
+        }, 0);
+      } else {
+        smackMenu.style.display = "none";
+      }
+    });
+
+    // ── Poll creator ─────────────────────────────────────────────────────────
+    document.getElementById("trn-board-poll-btn")?.addEventListener("click", () => {
+      document.getElementById("trn-board-poll-modal")?.remove();
+      const modal = document.createElement("div");
+      modal.id        = "trn-board-poll-modal";
+      modal.className = "modal-overlay";
+      modal.style.zIndex = "700";
+      modal.innerHTML = `
+        <div class="modal-box modal-box--sm">
+          <div class="modal-header">
+            <h3>📊 Create a Poll</h3>
+            <button class="modal-close" id="trn-poll-close">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Question</label>
+              <input id="trn-poll-question" type="text" placeholder="Ask a question…" />
+            </div>
+            <div id="trn-poll-options-list">
+              <input class="trn-poll-opt" type="text" placeholder="Option 1"
+                style="width:100%;margin-bottom:6px;padding:8px 12px;background:var(--color-bg-3);border:1px solid var(--color-border);border-radius:var(--radius);color:var(--color-text);font-family:var(--font-body);font-size:13px;outline:none;" />
+              <input class="trn-poll-opt" type="text" placeholder="Option 2"
+                style="width:100%;margin-bottom:6px;padding:8px 12px;background:var(--color-bg-3);border:1px solid var(--color-border);border-radius:var(--radius);color:var(--color-text);font-family:var(--font-body);font-size:13px;outline:none;" />
+            </div>
+            <button id="trn-poll-add-opt"
+              style="font-size:12px;padding:5px 12px;background:none;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text-dim);cursor:pointer;font-family:var(--font-body);">+ Add Option</button>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="trn-poll-cancel">Cancel</button>
+            <button class="btn-primary"   id="trn-poll-submit" style="width:auto;">Post Poll</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+      document.getElementById("trn-poll-close")?.addEventListener("click",  () => modal.remove());
+      document.getElementById("trn-poll-cancel")?.addEventListener("click", () => modal.remove());
+      document.getElementById("trn-poll-add-opt")?.addEventListener("click", () => {
+        const list  = document.getElementById("trn-poll-options-list");
+        const count = list?.querySelectorAll(".trn-poll-opt").length || 0;
+        if (!list || count >= 4) return;
+        const inp2 = document.createElement("input");
+        inp2.className = "trn-poll-opt";
+        inp2.type = "text";
+        inp2.placeholder = `Option ${count + 1}`;
+        inp2.style.cssText = "width:100%;margin-bottom:6px;padding:8px 12px;background:var(--color-bg-3);border:1px solid var(--color-border);border-radius:var(--radius);color:var(--color-text);font-family:var(--font-body);font-size:13px;outline:none;";
+        list.appendChild(inp2);
+        inp2.focus();
+      });
+      document.getElementById("trn-poll-submit")?.addEventListener("click", async () => {
+        const question = (document.getElementById("trn-poll-question")?.value || "").trim();
+        const options  = [...document.querySelectorAll(".trn-poll-opt")].map(el => el.value.trim()).filter(Boolean);
+        if (!question)          { alert("Please enter a question."); return; }
+        if (options.length < 2) { alert("Please add at least 2 options."); return; }
+        modal.remove();
+        await _tBoardRef(tid, year).push({
+          type: "poll", user: _currentUsername, question, options, votes: {}, ts: Date.now()
+        });
+      });
+      document.getElementById("trn-poll-question")?.focus();
+    });
+
     _boardSubscribe(tid, year, isAdmin);
+  }
+
+  async function _boardSearchGifs(query, el) {
+    if (!query?.trim() || !el) return;
+    el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--color-text-dim);font-size:11px;padding:8px;">Searching…</div>';
+    try {
+      const resp = await fetch("https://g.tenor.com/v1/search?key=LIVDSRZULELA&contentfilter=low&media_filter=minimal&limit=12&q=" + encodeURIComponent(query));
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const data    = await resp.json();
+      const results = data.results || [];
+      if (!results.length) {
+        el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--color-text-dim);font-size:11px;padding:8px;">No GIFs found</div>';
+        return;
+      }
+      el.innerHTML = "";
+      results.forEach(g => {
+        const fmt     = (g.media || [])[0] || {};
+        const preview = (fmt.tinygif || fmt.nanogif || fmt.gif || {}).url || "";
+        const full    = (fmt.gif || fmt.mediumgif || fmt.tinygif || {}).url || preview;
+        if (!preview) return;
+        const img = document.createElement("img");
+        img.src = preview;
+        img.style.cssText = "width:100%;height:80px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid transparent;";
+        img.addEventListener("mouseover", () => img.style.borderColor = "var(--color-gold)");
+        img.addEventListener("mouseout",  () => img.style.borderColor = "transparent");
+        img.addEventListener("click", async () => {
+          document.getElementById("trn-board-gif-panel").style.display = "none";
+          await _tBoardRef(tid, _tournamentYear || new Date().getFullYear()).push({
+            user: _currentUsername, text: full, ts: Date.now(), type: "gif"
+          });
+        });
+        el.appendChild(img);
+      });
+    } catch(e) {
+      el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--color-text-dim);font-size:11px;padding:8px;">Could not load GIFs</div>';
+    }
   }
 
   function _boardSubscribe(tid, year, isAdmin) {
@@ -7656,30 +7889,109 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       return;
     }
 
-    el.innerHTML = _boardMessages.map(m => {
+    el.innerHTML = "";
+    _boardMessages.forEach(m => {
       const isMine = (m.user || "").toLowerCase() === me;
       const canDel = isMine || isAdmin;
-      const ts     = m.ts ? new Date(m.ts).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) : "";
-      return `
-        <div class="trn-board-msg ${isMine ? "trn-board-msg--mine" : ""}">
-          <div class="trn-board-msg-meta">
-            <span class="trn-board-msg-user">${_esc(m.user || "Anonymous")}</span>
-            <span class="trn-board-msg-ts">${_esc(ts)}</span>
-            ${canDel ? `<button class="trn-board-del-btn" data-msgid="${_esc(m.id)}" title="Delete">✕</button>` : ""}
-          </div>
-          <div class="trn-board-msg-text">${_esc(m.text || "").replace(/\n/g, "<br>")}</div>
-        </div>`;
-    }).join("");
+      const ts     = m.ts ? new Date(m.ts).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }) : "";
 
-    el.querySelectorAll(".trn-board-del-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        if (!confirm("Delete this message?")) return;
-        _tBoardRef(tid, year).child(btn.dataset.msgid).remove()
-          .catch(() => showToast("Delete failed", "error"));
-      });
+      const row = document.createElement("div");
+      row.className = "trn-board-row " + (isMine ? "trn-board-row--mine" : "trn-board-row--theirs");
+
+      const name = document.createElement("div");
+      name.className = "trn-board-name";
+      name.textContent = m.user || "Anonymous";
+      row.appendChild(name);
+
+      if (m.type === "poll") {
+        row.appendChild(_boardRenderPoll(m, me, tid, year));
+      } else {
+        const bubble = document.createElement("div");
+        bubble.className = "trn-board-bubble " + (isMine ? "trn-board-bubble--mine" : "trn-board-bubble--theirs");
+
+        if (m.type === "gif") {
+          const img = document.createElement("img");
+          img.src = m.text || "";
+          img.style.cssText = "max-width:200px;border-radius:8px;display:block;";
+          img.loading = "lazy";
+          bubble.appendChild(img);
+          bubble.style.background = "transparent";
+          bubble.style.padding    = "0";
+        } else {
+          bubble.textContent = m.text || "";
+        }
+
+        if (canDel) {
+          const del = document.createElement("button");
+          del.className   = "trn-board-del-btn";
+          del.textContent = "✕";
+          del.title       = "Delete";
+          del.addEventListener("click", () => {
+            if (!confirm("Delete this message?")) return;
+            _tBoardRef(tid, year).child(m.id).remove()
+              .catch(() => showToast("Delete failed", "error"));
+          });
+          bubble.addEventListener("mouseenter", () => del.style.opacity = "1");
+          bubble.addEventListener("mouseleave", () => del.style.opacity = "0");
+          bubble.appendChild(del);
+        }
+        row.appendChild(bubble);
+      }
+
+      const time = document.createElement("div");
+      time.className   = "trn-board-time";
+      time.textContent = ts;
+      row.appendChild(time);
+
+      el.appendChild(row);
     });
 
     if (wasAtBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  function _boardRenderPoll(m, me, tid, year) {
+    const votes  = m.votes || {};
+    const opts   = m.options || [];
+    const total  = Object.keys(votes).length;
+    const myVote = votes[me] !== undefined ? votes[me] : -1;
+
+    const card = document.createElement("div");
+    card.style.cssText = "background:var(--color-surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px;min-width:220px;max-width:300px;position:relative;";
+
+    const header = document.createElement("div");
+    header.style.cssText = "font-size:11px;font-weight:700;color:var(--color-gold);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;";
+    header.textContent = "📊 Poll";
+    card.appendChild(header);
+
+    const q = document.createElement("div");
+    q.style.cssText = "font-size:14px;font-weight:600;color:var(--color-text);margin-bottom:10px;";
+    q.textContent = m.question || "";
+    card.appendChild(q);
+
+    opts.forEach((opt, idx) => {
+      const voters = Object.entries(votes).filter(([, v]) => v === idx);
+      const pct    = total > 0 ? Math.round(voters.length / total * 100) : 0;
+      const voted  = myVote === idx;
+      const btn    = document.createElement("button");
+      btn.style.cssText = `width:100%;text-align:left;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:var(--font-body);font-size:13px;position:relative;overflow:hidden;margin-bottom:6px;border:1px solid ${voted?"var(--color-gold)":"var(--color-border)"};background:${voted?"rgba(240,180,41,.1)":"var(--color-bg-3)"};color:var(--color-text);`;
+      const fill = document.createElement("div");
+      fill.style.cssText = `position:absolute;top:0;left:0;height:100%;background:${voted?"rgba(240,180,41,.2)":"rgba(255,255,255,.05)"};width:${pct}%;border-radius:8px;`;
+      btn.appendChild(fill);
+      const label = document.createElement("span");
+      label.style.cssText = "position:relative;z-index:1;display:flex;justify-content:space-between;align-items:center;gap:8px;";
+      label.innerHTML = `<span>${_esc(opt)}</span><span style="font-size:11px;color:var(--color-text-dim);">${pct}% (${voters.length})</span>`;
+      btn.appendChild(label);
+      btn.addEventListener("click", () => {
+        _tBoardRef(tid, year).child(`${m.id}/votes/${me}`).set(idx).catch(() => {});
+      });
+      card.appendChild(btn);
+    });
+
+    const footer = document.createElement("div");
+    footer.style.cssText = "font-size:11px;color:var(--color-text-dim);margin-top:4px;";
+    footer.textContent = total + " vote" + (total !== 1 ? "s" : "");
+    card.appendChild(footer);
+    return card;
   }
 
   async function _boardSend(tid, year) {
