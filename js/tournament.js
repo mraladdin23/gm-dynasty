@@ -387,6 +387,18 @@ const DLRTournament = (() => {
     const container = document.getElementById("view-tournament");
     if (!container) return;
 
+    // Reset per-tournament analytics caches so stale data from the previous
+    // tournament never bleeds through before a fresh fetch completes.
+    _draftCache     = null;
+    _matchupsCache  = {};
+    _recapCache     = {};
+    _rostersCache   = null;
+    _matchupsWeek   = null;
+    _weeklyMuCache  = {};
+    _weeklyMuWeek   = null;
+    _weeklyMuFilter = "all";
+    _weeklyMuPage   = 1;
+
     // Reload fresh from Firebase
     let snap;
     try {
@@ -523,6 +535,10 @@ const DLRTournament = (() => {
       _recapCache    = {};
       _rostersCache  = null;
       _matchupsWeek  = null; // reset week so it defaults to latest for the new year
+      _weeklyMuCache  = {};
+      _weeklyMuWeek   = null;
+      _weeklyMuFilter = "all";
+      _weeklyMuPage   = 1;
       // Re-render current tab with new year
       const curTab = showAdminNav ? _activeAdminTab : _activeUserTab;
       _renderTab(tid, curTab, t, showAdminNav);
