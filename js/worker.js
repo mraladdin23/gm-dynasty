@@ -1198,17 +1198,12 @@ async function tournamentDraft(leagueId, platform, year, yahooToken, mflCookie) 
       const drafts = await draftsRes.json();
       if (!drafts?.length) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
 
-      // Priority: active drafting draft first, then most recent completed startup/snake,
-      // then any completed draft. This ensures a live rookie draft is shown during
-      // the draft window rather than the old completed startup draft.
-      const activeDraft    = drafts.find(d => d.status === "drafting");
-      const completedSorted = [...drafts]
-        .filter(d => d.status === "complete")
-        .sort((a, b) => {
-          const rank = t => (t === "snake" || t === "startup") ? 0 : 1;
-          return rank(a.type) - rank(b.type) || (b.start_time || 0) - (a.start_time || 0);
-        });
-      const draft = activeDraft || completedSorted[0] || drafts[0];
+      // Prefer completed startup/snake draft; fall back to any complete draft
+      const sorted = [...drafts].sort((a, b) => {
+        const rank = t => (t === "snake" || t === "startup") ? 0 : 1;
+        return rank(a.type) - rank(b.type) || (a.start_time || 0) - (b.start_time || 0);
+      });
+      const draft = sorted.find(d => d.status === "complete") || sorted[0];
       if (!draft) return new Response(JSON.stringify({ picks: [] }), { headers: corsHeaders() });
 
       const picksRes = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
