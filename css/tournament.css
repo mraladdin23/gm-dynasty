@@ -655,15 +655,78 @@
 
 .trn-custom-question-row {
   display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Handle column: up/down arrows stacked vertically */
+.trn-cq-handle-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+
+.trn-cq-order-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: .65rem;
+  line-height: 1;
+  padding: 2px 5px;
+  transition: background .1s, color .1s;
+}
+.trn-cq-order-btn:hover { background: var(--color-bg); color: var(--color-text); }
+
+/* Fields column fills remaining width */
+.trn-cq-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* Top row: question text + type select + required + delete */
+.trn-cq-top-row {
+  display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-2);
   flex-wrap: wrap;
 }
 
 .trn-q-text { flex: 1; min-width: 140px; }
 .trn-q-type { width: 130px; flex-shrink: 0; }
 .trn-q-required { display: flex; align-items: center; gap: 4px; font-size: .82rem; white-space: nowrap; cursor: pointer; }
+
+/* Options textarea for dropdown type */
+.trn-cq-options-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.trn-cq-options-wrap textarea {
+  width: 100%;
+  min-height: 70px;
+  font-family: var(--font-body);
+  font-size: .82rem;
+  padding: 6px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.trn-cq-options-wrap textarea:focus { border-color: var(--color-accent, #6366f1); }
+
+@media (max-width: 600px) {
+  .trn-cq-top-row { flex-direction: column; align-items: stretch; }
+  .trn-q-type { width: 100%; }
+}
 
 /* ── Registrants tab ─────────────────────────────────────── */
 .trn-reg-toolbar {
@@ -818,7 +881,6 @@
 
   .trn-role-row { flex-direction: column; align-items: flex-start; }
 
-  .trn-custom-question-row { flex-direction: column; align-items: stretch; }
   .trn-q-type { width: 100%; }
 }
 

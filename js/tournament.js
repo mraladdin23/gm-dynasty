@@ -5460,32 +5460,78 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.getElementById("trn-add-question-btn")?.addEventListener("click", () => _addCustomQuestion(tid));
     document.getElementById("trn-save-form-btn")?.addEventListener("click", () => _saveRegistrationForm(tid));
 
-    body.querySelectorAll("[data-del-question]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const idx = parseInt(btn.dataset.delQuestion);
-        const rows = body.querySelectorAll(".trn-custom-question-row");
-        if (rows[idx]) rows[idx].remove();
-        if (!body.querySelectorAll(".trn-custom-question-row").length) {
-          document.getElementById("trn-custom-questions").innerHTML = `<div class="trn-empty-inline">No custom questions yet.</div>`;
-        }
-      });
-    });
+    // Wire all already-rendered custom question rows (loaded from saved data)
+    body.querySelectorAll(".trn-custom-question-row").forEach(row => _wireCQRow(row));
   }
 
   function _renderCustomQuestionRow(q, i) {
+    const isSelect = q.type === "select";
+    const opts     = (q.options || []).join("\n");
     return `
       <div class="trn-custom-question-row" data-qidx="${i}">
-        <input type="text" class="trn-q-text" value="${_esc(q.question || "")}" placeholder="Question text" />
-        <select class="trn-q-type">
-          <option value="text" ${q.type === "text" ? "selected" : ""}>Short text</option>
-          <option value="textarea" ${q.type === "textarea" ? "selected" : ""}>Paragraph</option>
-          <option value="select" ${q.type === "select" ? "selected" : ""}>Dropdown</option>
-        </select>
-        <label class="trn-q-required">
-          <input type="checkbox" ${q.required ? "checked" : ""} /> Required
-        </label>
-        <button class="btn-ghost btn-sm" data-del-question="${i}">✕</button>
+        <div class="trn-cq-handle-col">
+          <button class="trn-cq-order-btn trn-cq-up"   title="Move up"   type="button">▲</button>
+          <button class="trn-cq-order-btn trn-cq-down" title="Move down" type="button">▼</button>
+        </div>
+        <div class="trn-cq-fields">
+          <div class="trn-cq-top-row">
+            <input type="text" class="trn-q-text" value="${_esc(q.question || "")}" placeholder="Question text" />
+            <select class="trn-q-type">
+              <option value="text"     ${q.type === "text"     ? "selected" : ""}>Short text</option>
+              <option value="textarea" ${q.type === "textarea" ? "selected" : ""}>Paragraph</option>
+              <option value="select"   ${q.type === "select"   ? "selected" : ""}>Dropdown</option>
+            </select>
+            <label class="trn-q-required">
+              <input type="checkbox" class="trn-q-req-check" ${q.required ? "checked" : ""} /> Required
+            </label>
+            <button class="btn-ghost btn-sm trn-cq-del-btn" type="button">✕</button>
+          </div>
+          <div class="trn-cq-options-wrap" ${isSelect ? "" : 'style="display:none"'}>
+            <label style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:3px;display:block">
+              Dropdown options <span style="font-weight:400">(one per line)</span>
+            </label>
+            <textarea class="trn-q-options" rows="3" placeholder="Option 1&#10;Option 2&#10;Option 3">${_esc(opts)}</textarea>
+          </div>
+        </div>
       </div>`;
+  }
+
+  // Wire all interactive controls on a single custom-question row.
+  // Called after both initial render and after adding a new row.
+  function _wireCQRow(row) {
+    if (!row) return;
+
+    // Type change — show/hide options textarea
+    const typeEl = row.querySelector(".trn-q-type");
+    const optsWrap = row.querySelector(".trn-cq-options-wrap");
+    typeEl?.addEventListener("change", function() {
+      if (optsWrap) optsWrap.style.display = this.value === "select" ? "" : "none";
+    });
+
+    // Delete
+    row.querySelector(".trn-cq-del-btn")?.addEventListener("click", () => {
+      row.remove();
+      const container = document.getElementById("trn-custom-questions");
+      if (container && !container.querySelectorAll(".trn-custom-question-row").length) {
+        container.innerHTML = `<div class="trn-empty-inline">No custom questions yet.</div>`;
+      }
+    });
+
+    // Move up
+    row.querySelector(".trn-cq-up")?.addEventListener("click", () => {
+      const prev = row.previousElementSibling;
+      if (prev && prev.classList.contains("trn-custom-question-row")) {
+        row.parentNode.insertBefore(row, prev);
+      }
+    });
+
+    // Move down
+    row.querySelector(".trn-cq-down")?.addEventListener("click", () => {
+      const next = row.nextElementSibling;
+      if (next && next.classList.contains("trn-custom-question-row")) {
+        row.parentNode.insertBefore(next, row);
+      }
+    });
   }
 
   function _addCustomQuestion(tid) {
@@ -5494,24 +5540,32 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const emptyEl = container.querySelector(".trn-empty-inline");
     if (emptyEl) emptyEl.remove();
     const idx = container.querySelectorAll(".trn-custom-question-row").length;
-    const row = document.createElement("div");
-    row.innerHTML = _renderCustomQuestionRow({ question: "", type: "text", required: false }, idx);
-    container.appendChild(row.firstElementChild);
-    // Wire new delete btn
-    row.querySelector("[data-del-question]")?.addEventListener("click", e => {
-      e.currentTarget.closest(".trn-custom-question-row").remove();
-    });
+    const tmp = document.createElement("div");
+    tmp.innerHTML = _renderCustomQuestionRow({ question: "", type: "text", required: false }, idx);
+    const row = tmp.firstElementChild;
+    container.appendChild(row);
+    _wireCQRow(row);
+    row.querySelector(".trn-q-text")?.focus();
   }
 
   async function _saveRegistrationForm(tid) {
     const regType   = document.querySelector('input[name="trn-reg-type"]:checked')?.value || "open";
     const optFields = [...document.querySelectorAll("[data-opt-field]:checked")].map(c => c.dataset.optField);
     const customRows = [...document.querySelectorAll(".trn-custom-question-row")];
-    const customQuestions = customRows.map(row => ({
-      question: row.querySelector(".trn-q-text")?.value.trim() || "",
-      type:     row.querySelector(".trn-q-type")?.value || "text",
-      required: row.querySelector('input[type="checkbox"]')?.checked || false
-    })).filter(q => q.question);
+    const customQuestions = customRows.map(row => {
+      const type    = row.querySelector(".trn-q-type")?.value || "text";
+      const rawOpts = row.querySelector(".trn-q-options")?.value || "";
+      const options = type === "select"
+        ? rawOpts.split("\n").map(s => s.trim()).filter(Boolean)
+        : [];
+      const q = {
+        question: row.querySelector(".trn-q-text")?.value.trim() || "",
+        type,
+        required: row.querySelector(".trn-q-req-check")?.checked || false
+      };
+      if (options.length) q.options = options;
+      return q;
+    }).filter(q => q.question);
 
     try {
       await _tMetaRef(tid).update({
@@ -13486,6 +13540,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             <label>${_esc(q.question)}${q.required ? ' <span class="required">*</span>' : ""}</label>
             ${q.type === "textarea"
               ? `<textarea id="trn-reg-custom-${i}" rows="3" placeholder="Your answer..."></textarea>`
+              : q.type === "select" && q.options?.length
+              ? `<select id="trn-reg-custom-${i}">
+                   <option value="">— Select an option —</option>
+                   ${(q.options).map(o => `<option value="${_esc(o)}">${_esc(o)}</option>`).join("")}
+                 </select>`
               : `<input type="text" id="trn-reg-custom-${i}" placeholder="Your answer..." />`
             }
           </div>
