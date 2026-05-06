@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: May 5, 2026 — World Cup tournament mode fully complete. New backlog items logged.*
+*Updated: May 5, 2026 — B1 (password reset), B2 (salary saving), X1 (registration stickiness), X2 (live draft updates) all resolved.*
 
 ---
 
@@ -51,7 +51,7 @@ GitHub Pages (dynastylockerroom.com)
 | File | Purpose |
 |------|---------|
 | `app.js` | Orchestrates screens, auth state, global monitors, button handlers. |
-| `auth.js` | Firebase Auth wrapper. `sendPasswordReset(username)` looks up real email from DB. ⚠️ Password reset reported broken — see B1. |
+| `auth.js` | Firebase Auth wrapper. `sendPasswordReset(username)` calls worker endpoint which emails reset link via Resend to real address. |
 | `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. |
 | `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo/Sleeper import. |
 | `mfl.js` | MFL API helpers. Full set of normalizers for standings, matchups, brackets, drafts. |
@@ -67,7 +67,7 @@ GitHub Pages (dynastylockerroom.com)
 | `hallway.js` | The Hallway social feature |
 | `trophy-room.js` | Trophy room display |
 | `players-db.js` | Cross-platform player DB. DynastyProcess CSV. `MAPPINGS_VERSION = "2026-04b"`. |
-| `salary.js` | Salary cap management. ⚠️ Manual salary entries not saving — see B2. |
+| `salary.js` | Salary cap management. Force-reads from Firebase after every save to bust SDK cache. |
 | Other modules | `auction.js`, `playercard.js`, `idb-cache.js`, `chat.js`, `leaguegroups.js`, `manager-search.js`, `playerreport.js`, `config.js` |
 
 ### `tournaments/`
@@ -217,6 +217,7 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 | `/tournament/draft` | POST | Draft picks for one league (Sleeper/MFL/Yahoo) |
 | `/tournament/rosters` | POST | Rosters for one league (MFL/Yahoo) |
 | `/tournament/recap` | POST | AI-generated weekly recap via Claude Haiku |
+| `/auth/passwordReset` | POST | Look up real email, generate Firebase reset link, send via Resend |
 
 ---
 
@@ -243,6 +244,13 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 - Changes to `worker.js` require a **separate paste into Cloudflare dashboard** — git push alone does nothing
 - `YAHOO_REDIRECT_URI` must be `https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback`
 
+### Tournament Draft Live Polling
+-  /  in  poll Sleeper every 15s when 
+- Both the 24h Firebase cache and 5-min in-memory cache are bypassed entirely for active drafts
+- Worker  now prefers  draft over completed ones
+- MFL/Yahoo still require manual refresh (↺) during live drafts — no public picks API
+- If a draft shows stale pick count: clear the specific Firebase cache entry (see Console Scripts)
+
 ### Yahoo
 - Test on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
 
@@ -252,8 +260,10 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Matchups |
 - Career loop tries `cKey = _sk(displayName)` first, then falls back to `c.seasons[yr][].teamName` variants — handles cases where bracket-assigned names differ from participant displayNames
 
 ### Auth
-- Synthetic email format: `username@gmdynasty.app` — password reset must use this format with Firebase Auth
-- ⚠️ Password reset currently broken (B1) — `sendPasswordReset` needs fresh investigation
+- Synthetic email format: `username@gmdynasty.app` — Firebase Auth only knows this email, never the real one
+- Password reset: worker mints service account JWT → calls Firebase Auth Admin API with `returnOobLink: true` → sends link to real email via Resend
+- Resend sender: `support@dynastylockerroom.com` (domain verified on dynastylockerroom.com)
+- Worker secrets: `RESEND_API_KEY`, `FIREBASE_DB_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`
 
 ---
 
