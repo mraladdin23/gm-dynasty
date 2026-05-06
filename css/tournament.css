@@ -3872,3 +3872,260 @@
 .trn-mu-live-score { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
 .trn-mu-live-score--win { color: var(--color-accent, #3b82f6); font-weight: 700; }
 .trn-mu-live-vs { color: var(--color-text-dim); font-size: .7rem; padding: 0 2px; }
+/* ═══════════════════════════════════════════════════════════
+   APPEND TO BOTTOM OF tournament.css
+   New: Weekly Matchups tab + Message Board
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Weekly Matchups tab (trn-wmu-*) ─────────────────────── */
+
+.trn-wmu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.trn-wmu-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.trn-wmu-team {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  gap: var(--space-2);
+}
+
+.trn-wmu-team--win  { background: rgba(74,222,128,.09); }
+.trn-wmu-team--loss { background: rgba(248,113,113,.06); }
+
+.trn-wmu-name {
+  font-size: .8rem;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trn-wmu-score {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.trn-wmu-score--win { color: #4ade80; }
+
+.trn-wmu-vs {
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: 2px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.trn-wmu-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
+  gap: var(--space-1);
+}
+
+.trn-wmu-league-name {
+  font-size: .7rem;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.trn-wmu-diff {
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--color-gold, #d4af37);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.trn-wmu-diff--pending { color: var(--color-text-dim); font-weight: 400; }
+
+.trn-wmu-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+@media (max-width: 600px) {
+  .trn-wmu-grid { grid-template-columns: 1fr; }
+}
+
+
+/* ── Message Board (trn-board-*) ──────────────────────────── */
+
+.trn-board-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 700px;
+}
+
+.trn-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0 var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.trn-board-title {
+  font-size: .95rem;
+  font-weight: 700;
+}
+
+.trn-board-year {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+
+.trn-board-messages {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: 320px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.trn-board-empty {
+  text-align: center;
+  color: var(--color-text-dim);
+  font-size: .85rem;
+  padding: var(--space-6) 0;
+}
+
+.trn-board-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 88%;
+  align-self: flex-start;
+}
+
+.trn-board-msg--mine {
+  align-self: flex-end;
+}
+
+.trn-board-msg--mine .trn-board-msg-text {
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  border-color: transparent;
+}
+
+.trn-board-msg-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .72rem;
+  color: var(--color-text-dim);
+}
+
+.trn-board-msg-user {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.trn-board-msg-ts {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+}
+
+.trn-board-del-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: .72rem;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity .15s;
+  margin-left: auto;
+}
+
+.trn-board-msg:hover .trn-board-del-btn { opacity: 1; }
+
+.trn-board-msg-text {
+  font-size: .85rem;
+  line-height: 1.5;
+  padding: 8px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.trn-board-compose {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+  margin-top: var(--space-3);
+}
+
+.trn-board-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: .875rem;
+  resize: vertical;
+  min-height: 44px;
+  max-height: 120px;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.trn-board-input:focus {
+  border-color: var(--color-accent, #6366f1);
+}
+
+.trn-board-char {
+  font-size: .7rem;
+  color: var(--color-text-dim);
+  text-align: right;
+  margin-top: 3px;
+}
+
+@media (max-width: 600px) {
+  .trn-board-messages { min-height: 260px; max-height: 380px; }
+  .trn-board-input    { font-size: 16px; } /* prevent zoom on iOS */
+}

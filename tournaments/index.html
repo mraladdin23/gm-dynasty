@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
   <link rel="stylesheet" href="../css/base.css?v=19" />
   <link rel="stylesheet" href="../css/locker.css?v=21" />
-  <link rel="stylesheet" href="../css/tournament.css?v=4" />
+  <link rel="stylesheet" href="../css/tournament.css?v=5" />
   <style>
     /* ── Public tournament page overrides ── */
     body { background: var(--color-bg); }
@@ -295,6 +295,8 @@
     let _activeTab       = "info";
     let _selectedYear    = null;   // null = all years / most recent
     let _adpRefreshTimer = null;   // setInterval handle for ADP auto-refresh
+    let _pubBoardUnsub   = null;
+    let _pubBoardMsgs    = [];
 
     async function loadTournament(tid) {
       const loading = document.getElementById("pub-loading");
@@ -366,6 +368,7 @@
             ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
             ${Object.keys(t.rulesByYear || {}).length ? `<option value="rules" ${_activeTab === "rules" ? "selected" : ""}>📋 Rules</option>` : ""}
             ${hasStandings ? `<option value="players" ${_activeTab === "players" ? "selected" : ""}>👥 Players</option>` : ""}
+            <option value="board" ${_activeTab === "board" ? "selected" : ""}>💬 Board</option>
           </select>
         </div>
 
@@ -436,6 +439,7 @@
     async function renderTab(tab) {
       const body = document.getElementById("pub-tab-body");
       if (!body) return;
+      if (tab !== "board" && _pubBoardUnsub) { _pubBoardUnsub(); _pubBoardUnsub = null; }
       if (tab === "info")           renderInfoTab(body);
       else if (tab === "standings") renderStandingsTab(body);
       else if (tab === "playoffs")  await renderPlayoffsTab(body);
@@ -443,6 +447,7 @@
       else if (tab === "adp")       renderAdpTab(body);
       else if (tab === "rules")     renderRulesTab(body);
       else if (tab === "players")   renderPlayersTab(body);
+      else if (tab === "board")     renderBoardTab(body);
     }
 
     // ── Info tab ────────────────────────────────────────────
@@ -2389,6 +2394,83 @@
         }
         _showError(friendlyMsg);
       }
+    }
+
+    // ── Message Board (public) ──────────────────────────────
+    // Firebase path: gmd/tournamentChats/{tid}_{year}/
+    // Read-only for anonymous visitors. Sign-in required to post (handled in app).
+
+    function renderBoardTab(body) {
+      const tid  = _currentTid;
+      const year = _selectedYear || new Date().getFullYear();
+      _pubBoardMsgs = [];
+
+      body.innerHTML = `
+        <div class="trn-board-wrap">
+          <div class="trn-board-header">
+            <span class="trn-board-title">💬 Message Board</span>
+            <span class="trn-board-year">${esc(String(year))}</span>
+          </div>
+          <div id="pub-board-messages" class="trn-board-messages">
+            <div style="text-align:center;padding:var(--space-6);color:var(--color-text-dim)">
+              <div class="spinner" style="margin:0 auto var(--space-2)"></div>Loading…
+            </div>
+          </div>
+          <div class="trn-board-compose" style="opacity:.6;pointer-events:none">
+            <textarea class="trn-board-input" placeholder="Sign in to post a message…" rows="2" disabled></textarea>
+            <button class="btn-primary btn-sm" disabled>Send</button>
+          </div>
+          <div class="trn-board-char">
+            <a href="../" style="color:var(--color-accent)">Sign in to Dynasty Locker Room</a> to post messages.
+          </div>
+        </div>`;
+
+      const chatKey = `${tid}_${year}`;
+      const ref = _pubDb.ref(`gmd/tournamentChats/${chatKey}`).limitToLast(100);
+
+      const onAdded = ref.on("child_added", snap => {
+        _pubBoardMsgs.push({ id: snap.key, ...snap.val() });
+        _pubBoardRender();
+      });
+      const onRemoved = ref.on("child_removed", snap => {
+        const idx = _pubBoardMsgs.findIndex(m => m.id === snap.key);
+        if (idx !== -1) _pubBoardMsgs.splice(idx, 1);
+        _pubBoardRender();
+      });
+
+      _pubBoardUnsub = () => {
+        ref.off("child_added",  onAdded);
+        ref.off("child_removed", onRemoved);
+        _pubBoardUnsub = null;
+        _pubBoardMsgs  = [];
+      };
+    }
+
+    function _pubBoardRender() {
+      const el = document.getElementById("pub-board-messages");
+      if (!el) return;
+      const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+
+      if (!_pubBoardMsgs.length) {
+        el.innerHTML = `<div class="trn-board-empty">No messages yet. Be the first! 🏈</div>`;
+        return;
+      }
+
+      el.innerHTML = _pubBoardMsgs.map(m => {
+        const ts = m.ts ? new Date(m.ts).toLocaleString("en-US", {
+          month:"short", day:"numeric", hour:"numeric", minute:"2-digit"
+        }) : "";
+        return `
+          <div class="trn-board-msg">
+            <div class="trn-board-msg-meta">
+              <span class="trn-board-msg-user">${esc(m.user || "Anonymous")}</span>
+              <span class="trn-board-msg-ts">${esc(ts)}</span>
+            </div>
+            <div class="trn-board-msg-text">${esc(m.text || "").replace(/\n/g, "<br>")}</div>
+          </div>`;
+      }).join("");
+
+      if (wasAtBottom) el.scrollTop = el.scrollHeight;
     }
 
     function showError(msg) {

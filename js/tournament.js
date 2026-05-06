@@ -72,6 +72,10 @@ const DLRTournament = (() => {
   function _tRolesRef(tid)   { return GMD.child(`tournaments/${tid}/roles`); }
   function _tRegsRef(tid)    { return GMD.child(`tournaments/${tid}/registrations`); }
   function _tFormRef(tid)    { return GMD.child(`tournaments/${tid}/registrationForm`); }
+  function _tBoardRef(tid, year) {
+    const key = year ? `${tid}_${year}` : tid;
+    return GMD.child(`tournamentChats/${key}`);
+  }
 
   function _genId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -436,7 +440,8 @@ const DLRTournament = (() => {
       <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>
       <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>
       <option value="mostrostered"  ${_activeAdminTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
-      <option value="adpvsfinish"   ${_activeAdminTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>`;
+      <option value="adpvsfinish"   ${_activeAdminTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>
+      <option value="board"         ${_activeAdminTab === "board"         ? "selected" : ""}>💬 Board</option>`;
 
     const userOpts = `
       <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
@@ -444,11 +449,13 @@ const DLRTournament = (() => {
       <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
       ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
       <option value="draft"         ${_activeUserTab === "draft"         ? "selected" : ""}>📋 Draft</option>
-      <option value="matchups"      ${_activeUserTab === "matchups"      ? "selected" : ""}>🏈 Matchups</option>
+      <option value="match_analysis" ${_activeUserTab === "match_analysis" ? "selected" : ""}>📊 Match Analysis</option>
+      <option value="matchups"       ${_activeUserTab === "matchups"       ? "selected" : ""}>🏈 Matchups</option>
       <option value="rosters"       ${_activeUserTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
       <option value="players"       ${_activeUserTab === "players"       ? "selected" : ""}>👥 Players</option>
       <option value="mostrostered"  ${_activeUserTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
-      <option value="adpvsfinish"   ${_activeUserTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>`;
+      <option value="adpvsfinish"   ${_activeUserTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>
+      <option value="board"         ${_activeUserTab === "board"         ? "selected" : ""}>💬 Board</option>`;
     const regOpen = ["registration_open","active"].includes(meta.status);
     const regBtnHtml = (!showAdminNav && regOpen) ? `<button class="btn-primary btn-sm trn-reg-pill" id="trn-register-pill-btn">📬 Register</button>` : "";
 
@@ -553,6 +560,8 @@ const DLRTournament = (() => {
 
     // Stop live draft polling whenever we navigate away from the draft tab
     if (tab !== "draft") _stopDraftPoll();
+    // Stop board listener when navigating away from board tab
+    if (tab !== "board" && _boardUnsub) { _boardUnsub(); _boardUnsub = null; }
 
     if (showAdminNav) {
       switch (tab) {
@@ -570,8 +579,10 @@ const DLRTournament = (() => {
         case "info_edit":     return _renderAdminInfoEdit(tid, t, body);
         case "players":       return _renderPlayersTab(tid, t, body);
         case "mostrostered":  return _renderAnalyticsMostRostered(tid, t, body);
-        case "adpvsfinish":   return _renderAnalyticsADPvFinish(tid, t, body);
-        default:              return _renderAdminOverview(tid, t, body);
+        case "adpvsfinish":    return _renderAnalyticsADPvFinish(tid, t, body);
+        case "match_analysis": return _renderWeeklyMatchups(tid, t, body);
+        case "board":          return _renderBoardTab(tid, t, body);
+        default:               return _renderAdminOverview(tid, t, body);
       }
     } else {
       switch (tab) {
@@ -581,7 +592,9 @@ const DLRTournament = (() => {
         case "standings":  return _renderStandingsTab(tid, t, body, false);
         case "playoffs":   return _renderPlayoffsTab(tid, t, body);
         case "draft":      return _renderAnalyticsDraft(tid, t, body);
-        case "matchups":   return _renderAnalyticsMatchups(tid, t, body);
+        case "matchups":       return _renderAnalyticsMatchups(tid, t, body);
+        case "match_analysis": return _renderWeeklyMatchups(tid, t, body);
+        case "board":          return _renderBoardTab(tid, t, body);
         case "rosters":    return _renderAnalyticsRosters(tid, t, body);
         case "players":    return _renderPlayersTab(tid, t, body);
         case "mostrostered": return _renderAnalyticsMostRostered(tid, t, body);
@@ -6936,6 +6949,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   let _matchupsCache = {};   // { [year_week]: { matchups[], fetchedAt } }
   let _recapCache    = {};   // { [year_week]: { content, savedAt } }
 
+  // ── Weekly Matchups tab state ──────────────────────────────────────────────
+  let _weeklyMuWeek   = null;
+  let _weeklyMuFilter = "all";
+  let _weeklyMuPage   = 1;
+  let _weeklyMuCache  = {};
+  const WEEKLY_MU_PAGE_SIZE = 20;
+
+  // ── Message Board state ────────────────────────────────────────────────────
+  let _boardUnsub    = null;
+  let _boardMessages = [];
+
   async function _renderAnalyticsMatchups(tid, t, body) {
     const meta         = t.meta || {};
     const playoffWeek  = meta.playoffStartWeek || null;
@@ -7261,6 +7285,418 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       document.getElementById("trn-recap-edit-btn")?.addEventListener("click", () => {
         _showRecapEditor(tid, t, enriched, year, recapData?.content || "");
       });
+    }
+  }
+
+  // ── Weekly Matchups tab (ESPN-style, all platforms) ───────────────────────
+  // Week selector + conference/division filter. 2-per-row cards, 20/page.
+  // Fetches from: Sleeper (direct), MFL + Yahoo (via worker).
+
+  async function _renderWeeklyMatchups(tid, t, body) {
+    const year           = _standingsYear || new Date().getFullYear();
+    const standingsCache = t.standingsCache || {};
+    const po             = _playoffForYear(t, year);
+    const playoffWeek    = po?.startWeek || null;
+    const maxRegWeek     = playoffWeek ? playoffWeek - 1 : 17;
+
+    let latestWeek = 1;
+    Object.values(standingsCache).forEach(lc => {
+      if (String(lc.year) !== String(year)) return;
+      (lc.teams || []).forEach(tm => {
+        const played = (tm.wins || 0) + (tm.losses || 0) + (tm.ties || 0);
+        if (played > latestWeek) latestWeek = played;
+      });
+    });
+    latestWeek = Math.min(latestWeek, maxRegWeek);
+    if (!_weeklyMuWeek || _weeklyMuWeek > maxRegWeek) _weeklyMuWeek = latestWeek || 1;
+
+    // Gather all leagues for this year across all platforms
+    const batches  = t.leagues || {};
+    const isBatch  = (v) => v && typeof v === "object" && v.leagues !== undefined;
+    const leagueList = [];
+    for (const [, batch] of Object.entries(batches)) {
+      if (!isBatch(batch) || String(batch.year) !== String(year)) continue;
+      for (const [lid, linfo] of Object.entries(batch.leagues || {})) {
+        const scKey = Object.keys(standingsCache).find(k => {
+          const lc = standingsCache[k];
+          return String(lc.year) === String(year) &&
+                 String(lc.leagueId || lc.league_id || "") === String(lid);
+        });
+        const lc = scKey ? standingsCache[scKey] : null;
+        leagueList.push({
+          leagueId:   lid,
+          platform:   batch.platform,
+          name:       lc?.leagueName || linfo.name || lid,
+          conference: lc?.conference || linfo.conference || null,
+          division:   lc?.division   || linfo.division   || null
+        });
+      }
+    }
+
+    if (!leagueList.length) {
+      body.innerHTML = `<div class="trn-empty"><div class="trn-empty-icon">🏈</div><div class="trn-empty-title">No leagues for ${year}</div><div class="trn-empty-sub">Sync leagues for this year to see matchups.</div></div>`;
+      return;
+    }
+
+    const conferences = [...new Set(leagueList.map(l => l.conference).filter(Boolean))].sort();
+    const divisions   = [...new Set(leagueList.map(l => l.division).filter(Boolean))].sort();
+    const filterOpts  = [
+      `<option value="all" ${_weeklyMuFilter === "all" ? "selected" : ""}>All Leagues</option>`,
+      ...conferences.map(c => `<option value="conf:${_esc(c)}" ${_weeklyMuFilter === "conf:"+c ? "selected" : ""}>📂 ${_esc(c)}</option>`),
+      ...divisions.map(d =>   `<option value="div:${_esc(d)}"  ${_weeklyMuFilter === "div:"+d  ? "selected" : ""}>🗂 ${_esc(d)}</option>`)
+    ].join("");
+
+    const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
+
+    body.innerHTML = `
+      <div class="trn-az-toolbar">
+        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:var(--space-2)">
+            <label style="font-size:.85rem;color:var(--color-text-dim)">Week</label>
+            <select id="trn-wmu-week-sel" style="font-size:.85rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+              ${weeks.map(w => `<option value="${w}" ${w === _weeklyMuWeek ? "selected" : ""}>Week ${w}${w === latestWeek ? " (latest)" : ""}</option>`).join("")}
+            </select>
+          </div>
+          ${(conferences.length || divisions.length) ? `
+          <div style="display:flex;align-items:center;gap:var(--space-2)">
+            <label style="font-size:.85rem;color:var(--color-text-dim)">Filter</label>
+            <select id="trn-wmu-filter-sel" style="font-size:.85rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+              ${filterOpts}
+            </select>
+          </div>` : ""}
+        </div>
+        <button class="btn-secondary btn-sm" id="trn-wmu-refresh-btn">↺ Refresh</button>
+      </div>
+      <div id="trn-wmu-content">
+        <div class="trn-az-loading"><div class="spinner"></div> Loading matchups…</div>
+      </div>`;
+
+    document.getElementById("trn-wmu-week-sel")?.addEventListener("change", function() {
+      _weeklyMuWeek = parseInt(this.value);
+      _weeklyMuPage = 1;
+      const ck = `${year}_${_weeklyMuWeek}`;
+      delete _weeklyMuCache[ck];
+      _loadWeeklyMatchups(tid, t, leagueList, year);
+    });
+    document.getElementById("trn-wmu-filter-sel")?.addEventListener("change", function() {
+      _weeklyMuFilter = this.value;
+      _weeklyMuPage   = 1;
+      _renderWeeklyMatchupsContent(leagueList, year);
+    });
+    document.getElementById("trn-wmu-refresh-btn")?.addEventListener("click", () => {
+      const ck = `${year}_${_weeklyMuWeek}`;
+      delete _weeklyMuCache[ck];
+      _loadWeeklyMatchups(tid, t, leagueList, year);
+    });
+
+    await _loadWeeklyMatchups(tid, t, leagueList, year);
+  }
+
+  async function _loadWeeklyMatchups(tid, t, leagueList, year) {
+    const el = document.getElementById("trn-wmu-content");
+    if (!el) return;
+
+    const ck = `${year}_${_weeklyMuWeek}`;
+    if (_weeklyMuCache[ck] && (Date.now() - _weeklyMuCache[ck].fetchedAt) < 300000) {
+      _renderWeeklyMatchupsContent(leagueList, year);
+      return;
+    }
+
+    el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching week ${_weeklyMuWeek} matchups…</div>`;
+
+    const teamMap = {};
+    Object.values(t.standingsCache || {}).forEach(lc => {
+      if (String(lc.year) !== String(year)) return;
+      const lid = String(lc.leagueId || lc.league_id || "");
+      (lc.teams || []).forEach(tm => {
+        if (lid) teamMap[`${lid}:${tm.teamId}`] = { name: tm.teamName };
+      });
+    });
+    const pMap = _buildParticipantTeamMap(t);
+    const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+
+    const allMatchups = [];
+
+    // ── Sleeper — direct public API ──────────────────────────────────────────
+    const sleeperLeagues = leagueList.filter(l => l.platform === "sleeper");
+    for (let i = 0; i < sleeperLeagues.length; i += 5) {
+      await Promise.allSettled(sleeperLeagues.slice(i, i + 5).map(async lg => {
+        try {
+          const r = await fetch(`https://api.sleeper.app/v1/league/${lg.leagueId}/matchups/${_weeklyMuWeek}`);
+          if (!r.ok) return;
+          const data = await r.json();
+          if (!Array.isArray(data)) return;
+          const byMid = {};
+          data.forEach(m => { if (m.matchup_id) (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m); });
+          Object.values(byMid).forEach(pair => {
+            if (pair.length !== 2) return;
+            const [a, b] = pair;
+            const apts = parseFloat(a.points) || 0;
+            const bpts = parseFloat(b.points) || 0;
+            if (apts === 0 && bpts === 0) return;
+            let aName = teamMap[`${lg.leagueId}:${a.roster_id}`]?.name || `Team ${a.roster_id}`;
+            let bName = teamMap[`${lg.leagueId}:${b.roster_id}`]?.name || `Team ${b.roster_id}`;
+            if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
+            if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+            allMatchups.push({
+              leagueId: lg.leagueId, leagueName: lg.name,
+              conference: lg.conference, division: lg.division, platform: "sleeper",
+              home: { name: aName, score: parseFloat(apts.toFixed(2)) },
+              away: { name: bName, score: parseFloat(bpts.toFixed(2)) }
+            });
+          });
+        } catch(e) {}
+      }));
+      if (i + 5 < sleeperLeagues.length) await new Promise(r => setTimeout(r, 80));
+    }
+
+    // ── MFL — via worker liveScoring ─────────────────────────────────────────
+    for (const lg of leagueList.filter(l => l.platform === "mfl")) {
+      try {
+        const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/mfl/liveScoring", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leagueId: lg.leagueId, year, week: _weeklyMuWeek })
+        });
+        if (!r.ok) continue;
+        const d = await r.json();
+        const matchupArr = [].concat(d?.liveScoring?.matchup || d?.matchup || []);
+        for (const mu of matchupArr) {
+          const teams = [].concat(mu.franchise || []);
+          if (teams.length !== 2) continue;
+          const [a, b] = teams;
+          const apts = parseFloat(a.score) || 0;
+          const bpts = parseFloat(b.score) || 0;
+          if (apts === 0 && bpts === 0) continue;
+          let aName = teamMap[`${lg.leagueId}:${a.id}`]?.name || a.id;
+          let bName = teamMap[`${lg.leagueId}:${b.id}`]?.name || b.id;
+          if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
+          if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+          allMatchups.push({
+            leagueId: lg.leagueId, leagueName: lg.name,
+            conference: lg.conference, division: lg.division, platform: "mfl",
+            home: { name: aName, score: parseFloat(apts.toFixed(2)) },
+            away: { name: bName, score: parseFloat(bpts.toFixed(2)) }
+          });
+        }
+      } catch(e) {}
+    }
+
+    // ── Yahoo — via worker matchupRoster ─────────────────────────────────────
+    for (const lg of leagueList.filter(l => l.platform === "yahoo")) {
+      try {
+        const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/yahoo/matchupRoster", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leagueKey: lg.leagueId, week: _weeklyMuWeek })
+        });
+        if (!r.ok) continue;
+        const d = await r.json();
+        for (const mu of (d?.matchups || [])) {
+          const teams = mu.teams || [];
+          if (teams.length !== 2) continue;
+          const [a, b] = teams;
+          const apts = parseFloat(a.teamPoints?.total ?? a.points) || 0;
+          const bpts = parseFloat(b.teamPoints?.total ?? b.points) || 0;
+          if (apts === 0 && bpts === 0) continue;
+          let aName = a.name || a.teamName || "Team A";
+          let bName = b.name || b.teamName || "Team B";
+          if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
+          if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+          allMatchups.push({
+            leagueId: lg.leagueId, leagueName: lg.name,
+            conference: lg.conference, division: lg.division, platform: "yahoo",
+            home: { name: aName, score: parseFloat(apts.toFixed(2)) },
+            away: { name: bName, score: parseFloat(bpts.toFixed(2)) }
+          });
+        }
+      } catch(e) {}
+    }
+
+    if (!allMatchups.length) {
+      if (el) el.innerHTML = `<div class="trn-empty">No matchup data for Week ${_weeklyMuWeek} yet.</div>`;
+      return;
+    }
+
+    _weeklyMuCache[ck] = { matchups: allMatchups, fetchedAt: Date.now() };
+    _renderWeeklyMatchupsContent(leagueList, year);
+  }
+
+  function _renderWeeklyMatchupsContent(leagueList, year) {
+    const el = document.getElementById("trn-wmu-content");
+    if (!el) return;
+    const ck     = `${year}_${_weeklyMuWeek}`;
+    const cached = _weeklyMuCache[ck];
+    if (!cached) { el.innerHTML = `<div class="trn-empty">No data loaded.</div>`; return; }
+
+    let matchups = cached.matchups;
+
+    if (_weeklyMuFilter !== "all") {
+      const colonIdx  = _weeklyMuFilter.indexOf(":");
+      const filterType = _weeklyMuFilter.slice(0, colonIdx);
+      const filterVal  = _weeklyMuFilter.slice(colonIdx + 1);
+      matchups = matchups.filter(m =>
+        filterType === "conf" ? (m.conference || "") === filterVal :
+        filterType === "div"  ? (m.division   || "") === filterVal : true
+      );
+    }
+
+    if (!matchups.length) {
+      el.innerHTML = `<div class="trn-empty">No matchups for the selected filter.</div>`;
+      return;
+    }
+
+    const totalPages = Math.ceil(matchups.length / WEEKLY_MU_PAGE_SIZE);
+    _weeklyMuPage    = Math.max(1, Math.min(_weeklyMuPage, totalPages));
+    const pageSlice  = matchups.slice((_weeklyMuPage - 1) * WEEKLY_MU_PAGE_SIZE, _weeklyMuPage * WEEKLY_MU_PAGE_SIZE);
+
+    const platBadge = { sleeper: "💤", mfl: "⚙️", yahoo: "🟣" };
+
+    const cardHtml = pageSlice.map(m => {
+      const homeWon    = m.home.score > m.away.score;
+      const awayWon    = m.away.score > m.home.score;
+      const inProgress = m.home.score === 0 && m.away.score === 0;
+      const diff       = Math.abs(m.home.score - m.away.score).toFixed(2);
+      return `
+        <div class="trn-wmu-card">
+          <div class="trn-wmu-team ${homeWon ? "trn-wmu-team--win" : awayWon ? "trn-wmu-team--loss" : ""}">
+            <span class="trn-wmu-name">${_esc(m.home.name)}</span>
+            <span class="trn-wmu-score ${homeWon ? "trn-wmu-score--win" : ""}">${inProgress ? "–" : m.home.score.toFixed(2)}</span>
+          </div>
+          <div class="trn-wmu-vs">vs</div>
+          <div class="trn-wmu-team ${awayWon ? "trn-wmu-team--win" : homeWon ? "trn-wmu-team--loss" : ""}">
+            <span class="trn-wmu-name">${_esc(m.away.name)}</span>
+            <span class="trn-wmu-score ${awayWon ? "trn-wmu-score--win" : ""}">${inProgress ? "–" : m.away.score.toFixed(2)}</span>
+          </div>
+          <div class="trn-wmu-footer">
+            <span class="trn-wmu-league-name" title="${_esc(m.leagueName)}">${platBadge[m.platform] || ""} ${_esc(m.leagueName)}</span>
+            ${!inProgress ? `<span class="trn-wmu-diff">Δ${diff}</span>` : `<span class="trn-wmu-diff trn-wmu-diff--pending">⏳</span>`}
+          </div>
+        </div>`;
+    }).join("");
+
+    const paginationHtml = totalPages > 1 ? `
+      <div class="trn-wmu-pagination">
+        <button class="draft-toggle-btn" id="trn-wmu-prev" ${_weeklyMuPage <= 1 ? "disabled" : ""}>‹ Prev</button>
+        <span style="font-size:.82rem;color:var(--color-text-dim)">Page ${_weeklyMuPage} of ${totalPages} · ${matchups.length} matchups</span>
+        <button class="draft-toggle-btn" id="trn-wmu-next" ${_weeklyMuPage >= totalPages ? "disabled" : ""}>Next ›</button>
+      </div>` : "";
+
+    el.innerHTML = `
+      <div class="trn-az-meta">Week ${_weeklyMuWeek} · ${matchups.length} matchups</div>
+      <div class="trn-wmu-grid">${cardHtml}</div>
+      ${paginationHtml}`;
+
+    document.getElementById("trn-wmu-prev")?.addEventListener("click", () => { _weeklyMuPage--; _renderWeeklyMatchupsContent(leagueList, year); });
+    document.getElementById("trn-wmu-next")?.addEventListener("click", () => { _weeklyMuPage++; _renderWeeklyMatchupsContent(leagueList, year); });
+  }
+
+  // ── Tournament Message Board ───────────────────────────────────────────────
+  // Firebase path: gmd/tournamentChats/{tid}_{year}/
+  // Messages: { user, text, ts, type:'text' }
+  // Admin can delete any post. Users can delete their own.
+
+  function _renderBoardTab(tid, t, body) {
+    const year    = _tournamentYear || new Date().getFullYear();
+    const isAdmin = t.roles?.[_currentUsername]?.role === "admin" ||
+                    t.roles?.[_currentUsername]?.role === "sub_admin";
+
+    body.innerHTML = `
+      <div class="trn-board-wrap">
+        <div class="trn-board-header">
+          <span class="trn-board-title">💬 Message Board</span>
+          <span class="trn-board-year">${year}</span>
+        </div>
+        <div id="trn-board-messages" class="trn-board-messages">
+          <div style="text-align:center;padding:var(--space-6);color:var(--color-text-dim)">
+            <div class="spinner" style="margin:0 auto var(--space-2)"></div>Loading…
+          </div>
+        </div>
+        <div class="trn-board-compose">
+          <textarea id="trn-board-input" class="trn-board-input"
+            placeholder="Write a message…" rows="2" maxlength="500"></textarea>
+          <button class="btn-primary btn-sm" id="trn-board-send-btn">Send</button>
+        </div>
+        <div id="trn-board-char" class="trn-board-char">0 / 500</div>
+      </div>`;
+
+    document.getElementById("trn-board-input")?.addEventListener("input", function() {
+      const charEl = document.getElementById("trn-board-char");
+      if (charEl) charEl.textContent = `${this.value.length} / 500`;
+    });
+    document.getElementById("trn-board-input")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); _boardSend(tid, year); }
+    });
+    document.getElementById("trn-board-send-btn")?.addEventListener("click", () => _boardSend(tid, year));
+
+    _boardSubscribe(tid, year, isAdmin);
+  }
+
+  function _boardSubscribe(tid, year, isAdmin) {
+    if (_boardUnsub) { _boardUnsub(); _boardUnsub = null; }
+    _boardMessages = [];
+    const ref = _tBoardRef(tid, year).limitToLast(100);
+    const onAdded   = ref.on("child_added",   snap => { _boardMessages.push({ id: snap.key, ...snap.val() }); _boardRender(tid, year, isAdmin); });
+    const onRemoved = ref.on("child_removed", snap => {
+      const idx = _boardMessages.findIndex(m => m.id === snap.key);
+      if (idx !== -1) _boardMessages.splice(idx, 1);
+      _boardRender(tid, year, isAdmin);
+    });
+    _boardUnsub = () => { ref.off("child_added", onAdded); ref.off("child_removed", onRemoved); _boardUnsub = null; };
+  }
+
+  function _boardRender(tid, year, isAdmin) {
+    const el = document.getElementById("trn-board-messages");
+    if (!el) return;
+    const me          = (_currentUsername || "").toLowerCase();
+    const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+
+    if (!_boardMessages.length) {
+      el.innerHTML = `<div class="trn-board-empty">No messages yet. Be the first! 🏈</div>`;
+      return;
+    }
+
+    el.innerHTML = _boardMessages.map(m => {
+      const isMine = (m.user || "").toLowerCase() === me;
+      const canDel = isMine || isAdmin;
+      const ts     = m.ts ? new Date(m.ts).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) : "";
+      return `
+        <div class="trn-board-msg ${isMine ? "trn-board-msg--mine" : ""}">
+          <div class="trn-board-msg-meta">
+            <span class="trn-board-msg-user">${_esc(m.user || "Anonymous")}</span>
+            <span class="trn-board-msg-ts">${_esc(ts)}</span>
+            ${canDel ? `<button class="trn-board-del-btn" data-msgid="${_esc(m.id)}" title="Delete">✕</button>` : ""}
+          </div>
+          <div class="trn-board-msg-text">${_esc(m.text || "").replace(/\n/g, "<br>")}</div>
+        </div>`;
+    }).join("");
+
+    el.querySelectorAll(".trn-board-del-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (!confirm("Delete this message?")) return;
+        _tBoardRef(tid, year).child(btn.dataset.msgid).remove()
+          .catch(() => showToast("Delete failed", "error"));
+      });
+    });
+
+    if (wasAtBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  async function _boardSend(tid, year) {
+    const input = document.getElementById("trn-board-input");
+    const text  = (input?.value || "").trim();
+    if (!text || !_currentUsername) return;
+    const btn = document.getElementById("trn-board-send-btn");
+    if (btn) btn.disabled = true;
+    try {
+      await _tBoardRef(tid, year).push({ user: _currentUsername, text, ts: Date.now(), type: "text" });
+      if (input) { input.value = ""; input.style.height = ""; }
+      const charEl = document.getElementById("trn-board-char");
+      if (charEl) charEl.textContent = "0 / 500";
+    } catch(e) {
+      showToast("Failed to send message", "error");
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
