@@ -3815,3 +3815,60 @@
   .trn-wc-col     { min-width: 108px; max-width: 120px; }
   .trn-wc-card    { width: 96px; }
 }
+
+/* ── Playoff config drawer (admin, inside Playoffs tab) ─── */
+.trn-po-config-drawer {
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+.trn-po-config-drawer-summary {
+  padding: var(--space-2) var(--space-3);
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  user-select: none;
+}
+.trn-po-config-drawer-summary::-webkit-details-marker { display: none; }
+.trn-po-config-drawer-summary::before {
+  content: "▶";
+  font-size: .7rem;
+  transition: transform .15s;
+}
+.trn-po-config-drawer[open] .trn-po-config-drawer-summary::before { transform: rotate(90deg); }
+.trn-po-config-drawer-body { padding: 0 var(--space-3) var(--space-3); }
+
+/* ── Live matchup league cards ─────────────────────────── */
+.trn-mu-league-group {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.trn-mu-league-name {
+  font-size: .82rem;
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+  color: var(--color-text);
+}
+.trn-mu-live-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px 0;
+  font-size: .78rem;
+  border-bottom: 1px solid var(--color-border-dim, rgba(0,0,0,.06));
+}
+.trn-mu-live-row:last-child { border-bottom: none; }
+.trn-mu-live-team { flex: 1; color: var(--color-text-dim); }
+.trn-mu-live-team--win { color: var(--color-text); font-weight: 600; }
+.trn-mu-live-score { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+.trn-mu-live-score--win { color: var(--color-accent, #3b82f6); font-weight: 700; }
+.trn-mu-live-vs { color: var(--color-text-dim); font-size: .7rem; padding: 0 2px; }
