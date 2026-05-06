@@ -5403,11 +5403,41 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Admin: Registration Form Builder ──────────────────
+  // Unified drag-and-drop field list. Every field — standard, platform, extra,
+  // and custom questions — is one draggable row. Order is saved as fieldOrder[].
+  // Standard fields (displayName, email) are pinned (can't delete, can reorder).
+  // All others can be removed. Custom questions have the inline type/options editor.
+
   function _renderRegistrationFormTab(tid, t, body) {
-    const form     = t.meta?.registrationForm || {};
-    const fields   = form.fields   || STD_FIELDS;
-    const optFields = form.optionalFields || [];
-    const custom   = form.customQuestions || [];
+    const form      = t.meta?.registrationForm || {};
+    const savedOrder = form.fieldOrder || null;
+    const optFields  = form.optionalFields || [];
+    const custom     = form.customQuestions || [];
+
+    // Build the canonical starting list if no fieldOrder saved yet.
+    // Migrates from old separate-section format automatically.
+    const _buildDefaultOrder = () => {
+      const list = [];
+      // Standard fields always first
+      STD_FIELDS.forEach(k => list.push({ type: "std", key: k }));
+      // Then enabled optional fields in their old order
+      [...PLATFORM_FIELDS, ...OPT_FIELDS].forEach(k => {
+        if (optFields.includes(k)) list.push({ type: "opt", key: k });
+      });
+      // Then custom questions
+      custom.forEach(q => list.push({ type: "custom", ...q }));
+      return list;
+    };
+
+    // If fieldOrder is saved, use it; fill in any std fields missing from it
+    // (guards against a save before std fields were added to the order).
+    let fieldOrder = savedOrder ? savedOrder.map(f => ({ ...f })) : _buildDefaultOrder();
+    const hasStd = (k) => fieldOrder.some(f => f.type === "std" && f.key === k);
+    STD_FIELDS.forEach(k => { if (!hasStd(k)) fieldOrder.unshift({ type: "std", key: k }); });
+
+    // All available optional field keys not already in the order
+    const _allOptKeys = () => [...PLATFORM_FIELDS, ...OPT_FIELDS];
+    const _usedOptKeys = () => new Set(fieldOrder.filter(f => f.type === "opt").map(f => f.key));
 
     body.innerHTML = `
       <div class="trn-section-card">
@@ -5425,46 +5455,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>
 
       <div class="trn-section-card">
-        <div class="trn-section-card-title">Standard Fields</div>
-        <div class="trn-field-hint">These fields are always collected:</div>
-        ${STD_FIELDS.map(f => `
-          <div class="trn-field-row trn-field-row--fixed">
-            <span class="trn-field-icon">📋</span>
-            <span>${STD_FIELD_LABELS[f]}</span>
-            <span class="trn-field-required">Required</span>
+        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2)">
+          <span>Form Fields &amp; Questions</span>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <select id="trn-add-opt-field-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+              <option value="">+ Add field…</option>
+            </select>
+            <button class="btn-secondary btn-sm" id="trn-add-question-btn">+ Custom Question</button>
           </div>
-        `).join("")}
-      </div>
-
-      <div class="trn-section-card">
-        <div class="trn-section-card-title">Platform Fields</div>
-        <div class="trn-field-hint">Used for DLR identity matching. Enable the platforms relevant to your tournament.</div>
-        ${PLATFORM_FIELDS.map(f => `
-          <label class="trn-field-toggle">
-            <input type="checkbox" data-opt-field="${f}" ${optFields.includes(f) ? "checked" : ""} />
-            ${PLATFORM_FIELD_LABELS[f]}
-          </label>
-        `).join("")}
-      </div>
-
-      <div class="trn-section-card">
-        <div class="trn-section-card-title">Extra Fields</div>
-        ${OPT_FIELDS.map(f => `
-          <label class="trn-field-toggle">
-            <input type="checkbox" data-opt-field="${f}" ${optFields.includes(f) ? "checked" : ""} />
-            ${OPT_FIELD_LABELS[f]}
-          </label>
-        `).join("")}
-      </div>
-
-      <div class="trn-section-card">
-        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>Custom Questions</span>
-          <button class="btn-secondary btn-sm" id="trn-add-question-btn">+ Add Question</button>
         </div>
-        <div id="trn-custom-questions">
-          ${custom.map((q, i) => _renderCustomQuestionRow(q, i)).join("")}
-          ${!custom.length ? `<div class="trn-empty-inline">No custom questions yet.</div>` : ""}
+        <div class="trn-field-hint" style="margin-bottom:var(--space-3)">
+          Drag rows to reorder. 🔒 Standard fields are always included. Click ✕ to remove optional fields and custom questions.
+        </div>
+        <div id="trn-form-field-list" class="trn-form-field-list">
+          ${fieldOrder.map((f, i) => _renderFormFieldRow(f, i)).join("")}
         </div>
       </div>
 
@@ -5473,115 +5477,239 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>
     `;
 
-    document.getElementById("trn-add-question-btn")?.addEventListener("click", () => _addCustomQuestion(tid));
+    // Populate the "Add field" dropdown with unused optional fields
+    const _refreshAddSel = () => {
+      const sel  = document.getElementById("trn-add-opt-field-sel");
+      if (!sel) return;
+      const used = new Set(
+        [...document.querySelectorAll(".trn-form-field-row[data-ftype='opt']")]
+          .map(r => r.dataset.fkey)
+      );
+      sel.innerHTML = `<option value="">+ Add field…</option>` +
+        _allOptKeys()
+          .filter(k => !used.has(k))
+          .map(k => `<option value="${k}">${_fieldLabel(k)}</option>`)
+          .join("");
+    };
+    _refreshAddSel();
+
+    // Add optional field
+    document.getElementById("trn-add-opt-field-sel")?.addEventListener("change", function() {
+      const key = this.value;
+      if (!key) return;
+      this.value = "";
+      const list = document.getElementById("trn-form-field-list");
+      if (!list) return;
+      const tmp = document.createElement("div");
+      const idx = list.querySelectorAll(".trn-form-field-row").length;
+      tmp.innerHTML = _renderFormFieldRow({ type: "opt", key }, idx);
+      const row = tmp.firstElementChild;
+      list.appendChild(row);
+      _wireFormFieldRow(row, _refreshAddSel);
+      _refreshAddSel();
+    });
+
+    // Add custom question
+    document.getElementById("trn-add-question-btn")?.addEventListener("click", () => {
+      const list = document.getElementById("trn-form-field-list");
+      if (!list) return;
+      const idx = list.querySelectorAll(".trn-form-field-row").length;
+      const tmp = document.createElement("div");
+      tmp.innerHTML = _renderFormFieldRow({ type: "custom", question: "", inputType: "text", required: false }, idx);
+      const row = tmp.firstElementChild;
+      list.appendChild(row);
+      _wireFormFieldRow(row, _refreshAddSel);
+      row.querySelector(".trn-q-text")?.focus();
+    });
+
+    // Wire all existing rows
+    body.querySelectorAll(".trn-form-field-row").forEach(row => _wireFormFieldRow(row, _refreshAddSel));
+
+    // Save
     document.getElementById("trn-save-form-btn")?.addEventListener("click", () => _saveRegistrationForm(tid));
 
-    // Wire all already-rendered custom question rows (loaded from saved data)
-    body.querySelectorAll(".trn-custom-question-row").forEach(row => _wireCQRow(row));
+    // Drag-and-drop
+    _initFormFieldDragDrop(document.getElementById("trn-form-field-list"));
   }
 
-  function _renderCustomQuestionRow(q, i) {
-    const isSelect = q.type === "select";
-    const opts     = (q.options || []).join("\n");
+  // Render one unified field row — works for std, opt, and custom types.
+  function _renderFormFieldRow(f, i) {
+    const isStd    = f.type === "std";
+    const isOpt    = f.type === "opt";
+    const isCustom = f.type === "custom";
+    const label    = isCustom ? "" : _fieldLabel(f.key || "");
+
+    // Custom question inner fields
+    const qType    = f.inputType || f.type_q || (isCustom ? (f.type === "custom" ? "text" : f.type) : "text");
+    // Handle the case where f.type is actually the question type for existing saved questions
+    const qTypeVal = isCustom ? (["text","textarea","select"].includes(f.type) ? f.type : (f.inputType || "text")) : "text";
+    const isSelect = qTypeVal === "select";
+    const qOpts    = (f.options || []).join("\n");
+
+    const typeTag  = isStd  ? `<span class="trn-form-field-tag trn-form-field-tag--std">Required</span>`
+                   : isOpt  ? `<span class="trn-form-field-tag trn-form-field-tag--opt">Optional</span>`
+                   :          "";
+
+    const delBtn   = isStd  ? `<span class="trn-cq-order-btn" style="opacity:.25;cursor:default" title="Required — cannot remove">🔒</span>`
+                            : `<button class="btn-ghost btn-sm trn-form-field-del" type="button" title="Remove from form">✕</button>`;
+
     return `
-      <div class="trn-custom-question-row" data-qidx="${i}">
-        <div class="trn-cq-handle-col">
-          <button class="trn-cq-order-btn trn-cq-up"   title="Move up"   type="button">▲</button>
-          <button class="trn-cq-order-btn trn-cq-down" title="Move down" type="button">▼</button>
+      <div class="trn-form-field-row${isCustom ? " trn-form-field-row--custom" : ""}"
+           data-ftype="${isCustom ? "custom" : isOpt ? "opt" : "std"}"
+           data-fkey="${_esc(f.key || "")}"
+           data-fidx="${i}"
+           draggable="true">
+        <div class="trn-cq-handle-col trn-form-drag-handle" title="Drag to reorder">
+          <span class="trn-drag-grip">⠿</span>
         </div>
         <div class="trn-cq-fields">
-          <div class="trn-cq-top-row">
-            <input type="text" class="trn-q-text" value="${_esc(q.question || "")}" placeholder="Question text" />
-            <select class="trn-q-type">
-              <option value="text"     ${q.type === "text"     ? "selected" : ""}>Short text</option>
-              <option value="textarea" ${q.type === "textarea" ? "selected" : ""}>Paragraph</option>
-              <option value="select"   ${q.type === "select"   ? "selected" : ""}>Dropdown</option>
-            </select>
-            <label class="trn-q-required">
-              <input type="checkbox" class="trn-q-req-check" ${q.required ? "checked" : ""} /> Required
-            </label>
-            <button class="btn-ghost btn-sm trn-cq-del-btn" type="button">✕</button>
-          </div>
-          <div class="trn-cq-options-wrap" ${isSelect ? "" : 'style="display:none"'}>
-            <label style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:3px;display:block">
-              Dropdown options <span style="font-weight:400">(one per line)</span>
-            </label>
-            <textarea class="trn-q-options" rows="3" placeholder="Option 1&#10;Option 2&#10;Option 3">${_esc(opts)}</textarea>
-          </div>
+          ${isCustom ? `
+            <div class="trn-cq-top-row">
+              <input type="text" class="trn-q-text" value="${_esc(f.question || "")}" placeholder="Question text" />
+              <select class="trn-q-type">
+                <option value="text"     ${qTypeVal === "text"     ? "selected" : ""}>Short text</option>
+                <option value="textarea" ${qTypeVal === "textarea" ? "selected" : ""}>Paragraph</option>
+                <option value="select"   ${qTypeVal === "select"   ? "selected" : ""}>Dropdown</option>
+              </select>
+              <label class="trn-q-required">
+                <input type="checkbox" class="trn-q-req-check" ${f.required ? "checked" : ""} /> Required
+              </label>
+              ${delBtn}
+            </div>
+            <div class="trn-cq-options-wrap" ${isSelect ? "" : 'style="display:none"'}>
+              <label style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:3px;display:block">
+                Dropdown options <span style="font-weight:400">(one per line)</span>
+              </label>
+              <textarea class="trn-q-options" rows="3" placeholder="Option 1&#10;Option 2&#10;Option 3">${_esc(qOpts)}</textarea>
+            </div>
+          ` : `
+            <div class="trn-cq-top-row">
+              <span class="trn-form-field-label">${_esc(label)}</span>
+              ${typeTag}
+              ${delBtn}
+            </div>
+          `}
         </div>
       </div>`;
   }
 
-  // Wire all interactive controls on a single custom-question row.
-  // Called after both initial render and after adding a new row.
-  function _wireCQRow(row) {
+  // Wire events on a single form field row (del, type-change for custom, drag handled separately).
+  function _wireFormFieldRow(row, onDelete) {
     if (!row) return;
 
-    // Type change — show/hide options textarea
-    const typeEl = row.querySelector(".trn-q-type");
+    // Delete
+    row.querySelector(".trn-form-field-del")?.addEventListener("click", () => {
+      row.remove();
+      if (onDelete) onDelete();
+    });
+
+    // Custom question: type change shows/hides options
+    const typeEl   = row.querySelector(".trn-q-type");
     const optsWrap = row.querySelector(".trn-cq-options-wrap");
     typeEl?.addEventListener("change", function() {
       if (optsWrap) optsWrap.style.display = this.value === "select" ? "" : "none";
     });
+  }
 
-    // Delete
-    row.querySelector(".trn-cq-del-btn")?.addEventListener("click", () => {
-      row.remove();
-      const container = document.getElementById("trn-custom-questions");
-      if (container && !container.querySelectorAll(".trn-custom-question-row").length) {
-        container.innerHTML = `<div class="trn-empty-inline">No custom questions yet.</div>`;
-      }
+  // Native HTML5 drag-and-drop reordering for the field list.
+  function _initFormFieldDragDrop(list) {
+    if (!list) return;
+    let dragSrc = null;
+
+    list.addEventListener("dragstart", e => {
+      const row = e.target.closest(".trn-form-field-row");
+      if (!row) return;
+      dragSrc = row;
+      row.classList.add("trn-form-field-row--dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", "");
     });
 
-    // Move up
-    row.querySelector(".trn-cq-up")?.addEventListener("click", () => {
-      const prev = row.previousElementSibling;
-      if (prev && prev.classList.contains("trn-custom-question-row")) {
-        row.parentNode.insertBefore(row, prev);
-      }
+    list.addEventListener("dragend", e => {
+      dragSrc?.classList.remove("trn-form-field-row--dragging");
+      list.querySelectorAll(".trn-form-field-row--over").forEach(r => r.classList.remove("trn-form-field-row--over"));
+      dragSrc = null;
     });
 
-    // Move down
-    row.querySelector(".trn-cq-down")?.addEventListener("click", () => {
-      const next = row.nextElementSibling;
-      if (next && next.classList.contains("trn-custom-question-row")) {
-        row.parentNode.insertBefore(next, row);
+    list.addEventListener("dragover", e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const row = e.target.closest(".trn-form-field-row");
+      if (!row || row === dragSrc) return;
+      list.querySelectorAll(".trn-form-field-row--over").forEach(r => r !== row && r.classList.remove("trn-form-field-row--over"));
+      row.classList.add("trn-form-field-row--over");
+    });
+
+    list.addEventListener("dragleave", e => {
+      const row = e.target.closest(".trn-form-field-row");
+      row?.classList.remove("trn-form-field-row--over");
+    });
+
+    list.addEventListener("drop", e => {
+      e.preventDefault();
+      const target = e.target.closest(".trn-form-field-row");
+      if (!target || !dragSrc || target === dragSrc) return;
+      target.classList.remove("trn-form-field-row--over");
+      // Insert before or after target depending on mouse position
+      const rect = target.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      if (after) {
+        target.parentNode.insertBefore(dragSrc, target.nextSibling);
+      } else {
+        target.parentNode.insertBefore(dragSrc, target);
       }
     });
   }
 
+  // Keep _wireCQRow and _addCustomQuestion for backward compat (referenced by old code paths).
+  function _wireCQRow(row) { _wireFormFieldRow(row, null); }
+
   function _addCustomQuestion(tid) {
-    const container = document.getElementById("trn-custom-questions");
-    if (!container) return;
-    const emptyEl = container.querySelector(".trn-empty-inline");
-    if (emptyEl) emptyEl.remove();
-    const idx = container.querySelectorAll(".trn-custom-question-row").length;
+    const list = document.getElementById("trn-form-field-list");
+    if (!list) return;
+    const idx = list.querySelectorAll(".trn-form-field-row").length;
     const tmp = document.createElement("div");
-    tmp.innerHTML = _renderCustomQuestionRow({ question: "", type: "text", required: false }, idx);
+    tmp.innerHTML = _renderFormFieldRow({ type: "custom", question: "", required: false }, idx);
     const row = tmp.firstElementChild;
-    container.appendChild(row);
-    _wireCQRow(row);
+    list.appendChild(row);
+    _wireFormFieldRow(row, null);
     row.querySelector(".trn-q-text")?.focus();
   }
 
   async function _saveRegistrationForm(tid) {
-    const regType   = document.querySelector('input[name="trn-reg-type"]:checked')?.value || "open";
-    const optFields = [...document.querySelectorAll("[data-opt-field]:checked")].map(c => c.dataset.optField);
-    const customRows = [...document.querySelectorAll(".trn-custom-question-row")];
-    const customQuestions = customRows.map(row => {
-      const type    = row.querySelector(".trn-q-type")?.value || "text";
-      const rawOpts = row.querySelector(".trn-q-options")?.value || "";
-      const options = type === "select"
-        ? rawOpts.split("\n").map(s => s.trim()).filter(Boolean)
-        : [];
-      const q = {
-        question: row.querySelector(".trn-q-text")?.value.trim() || "",
-        type,
-        required: row.querySelector(".trn-q-req-check")?.checked || false
-      };
-      if (options.length) q.options = options;
-      return q;
-    }).filter(q => q.question);
+    const regType = document.querySelector('input[name="trn-reg-type"]:checked')?.value || "open";
+    const rows    = [...document.querySelectorAll("#trn-form-field-list .trn-form-field-row")];
+
+    const fieldOrder     = [];
+    const optFields      = [];
+    const customQuestions = [];
+
+    rows.forEach(row => {
+      const ftype = row.dataset.ftype;
+      if (ftype === "std") {
+        fieldOrder.push({ type: "std", key: row.dataset.fkey });
+      } else if (ftype === "opt") {
+        const key = row.dataset.fkey;
+        fieldOrder.push({ type: "opt", key });
+        optFields.push(key);
+      } else if (ftype === "custom") {
+        const qtype   = row.querySelector(".trn-q-type")?.value || "text";
+        const rawOpts = row.querySelector(".trn-q-options")?.value || "";
+        const options = qtype === "select"
+          ? rawOpts.split("\n").map(s => s.trim()).filter(Boolean)
+          : [];
+        const q = {
+          question: row.querySelector(".trn-q-text")?.value.trim() || "",
+          type:     qtype,
+          required: row.querySelector(".trn-q-req-check")?.checked || false
+        };
+        if (options.length) q.options = options;
+        if (q.question) {
+          fieldOrder.push({ type: "custom", ...q });
+          customQuestions.push(q);
+        }
+      }
+    });
 
     try {
       await _tMetaRef(tid).update({
@@ -5589,7 +5717,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         registrationForm: {
           fields:          STD_FIELDS,
           optionalFields:  optFields,
-          customQuestions
+          customQuestions,
+          fieldOrder
         }
       });
       showToast("Registration form saved ✓");
@@ -13541,7 +13670,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const form    = meta.registrationForm || {};
     const opts    = form.optionalFields || [];
     const custom  = form.customQuestions || [];
-    const allFlds = [...STD_FIELDS, ...opts];
+    const fieldOrder = form.fieldOrder || null;
+
+    // Build the ordered list of fields to render.
+    // If fieldOrder is saved, use it to drive the order and inclusion.
+    // Otherwise fall back to the classic STD + opts + custom layout.
+    const orderedFields = fieldOrder
+      ? fieldOrder
+      : [
+          ...STD_FIELDS.map(k => ({ type: "std", key: k })),
+          ...opts.map(k => ({ type: "opt", key: k })),
+          ...custom.map(q => ({ type: "custom", ...q }))
+        ];
+
+    // For _submitRegistration compat, derive the flat field list and custom array
+    // in fieldOrder order.
+    const allFlds  = orderedFields.filter(f => f.type === "std" || f.type === "opt").map(f => f.key);
+    const allFlds_set = new Set(allFlds);
+    const customOrdered = orderedFields.filter(f => f.type === "custom");
 
     if (meta.status === "draft") {
       body.innerHTML = `<div class="trn-empty">Registration is not open yet.</div>`;
@@ -13565,6 +13711,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       yahooUsername:   profile?.platforms?.yahoo?.username   || ""
     };
 
+    // Track custom question index for ID assignment
+    let customIdx = 0;
+
     body.innerHTML = `
       ${missingFields.length ? `
         <div class="trn-missing-info-banner">
@@ -13575,31 +13724,38 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
       <div class="trn-section-card">
         <div class="trn-section-card-title">Register for ${_esc(meta.name || "Tournament")} ${meta.registrationYear || new Date().getFullYear()}</div>
-        ${allFlds.map(f => {
-          const isRequired = STD_FIELDS.includes(f);
-          const isMissing  = missingFields.includes(f);
-          return `
-          <div class="form-group ${isMissing ? "trn-field--missing" : ""}">
-            <label>${_esc(_fieldLabel(f))}${isRequired ? ' <span class="required">*</span>' : ""}</label>
-            <input type="text" id="trn-reg-${f}"
-              placeholder="${_esc(_fieldLabel(f))}"
-              value="${_esc(prefill[f] || "")}" />
-          </div>`;
+        ${orderedFields.map(f => {
+          if (f.type === "std" || f.type === "opt") {
+            const key        = f.key;
+            const isRequired = STD_FIELDS.includes(key);
+            const isMissing  = missingFields.includes(key);
+            return `
+              <div class="form-group ${isMissing ? "trn-field--missing" : ""}">
+                <label>${_esc(_fieldLabel(key))}${isRequired ? ' <span class="required">*</span>' : ""}</label>
+                <input type="text" id="trn-reg-${key}"
+                  placeholder="${_esc(_fieldLabel(key))}"
+                  value="${_esc(prefill[key] || "")}" />
+              </div>`;
+          } else if (f.type === "custom") {
+            const i   = customIdx++;
+            const q   = f;
+            const qType = q.type && ["text","textarea","select"].includes(q.type) ? q.type : "text";
+            return `
+              <div class="form-group">
+                <label>${_esc(q.question || "")}${q.required ? ' <span class="required">*</span>' : ""}</label>
+                ${qType === "textarea"
+                  ? `<textarea id="trn-reg-custom-${i}" rows="3" placeholder="Your answer..."></textarea>`
+                  : qType === "select" && q.options?.length
+                  ? `<select id="trn-reg-custom-${i}">
+                       <option value="">— Select an option —</option>
+                       ${q.options.map(o => `<option value="${_esc(o)}">${_esc(o)}</option>`).join("")}
+                     </select>`
+                  : `<input type="text" id="trn-reg-custom-${i}" placeholder="Your answer..." />`
+                }
+              </div>`;
+          }
+          return "";
         }).join("")}
-        ${custom.map((q, i) => `
-          <div class="form-group">
-            <label>${_esc(q.question)}${q.required ? ' <span class="required">*</span>' : ""}</label>
-            ${q.type === "textarea"
-              ? `<textarea id="trn-reg-custom-${i}" rows="3" placeholder="Your answer..."></textarea>`
-              : q.type === "select" && q.options?.length
-              ? `<select id="trn-reg-custom-${i}">
-                   <option value="">— Select an option —</option>
-                   ${(q.options).map(o => `<option value="${_esc(o)}">${_esc(o)}</option>`).join("")}
-                 </select>`
-              : `<input type="text" id="trn-reg-custom-${i}" placeholder="Your answer..." />`
-            }
-          </div>
-        `).join("")}
         <div class="form-group">
           <label class="trn-field-toggle" style="margin:0">
             <input type="checkbox" id="trn-reg-auto" />
@@ -13615,7 +13771,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     `;
 
     document.getElementById("trn-submit-reg-btn")?.addEventListener("click", () =>
-      _submitRegistration(tid, t, allFlds, custom)
+      _submitRegistration(tid, t, allFlds, customOrdered)
     );
   }
 
