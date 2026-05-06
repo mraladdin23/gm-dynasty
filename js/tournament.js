@@ -7341,10 +7341,28 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const conferences = [...new Set(leagueList.map(l => l.conference).filter(Boolean))].sort();
     const divisions   = [...new Set(leagueList.map(l => l.division).filter(Boolean))].sort();
-    const filterOpts  = [
+
+    // Build filter options — always shown. Conf/div at top if configured, then individual leagues.
+    const confOpts = conferences.map(c =>
+      `<option value="conf:${_esc(c)}" ${_weeklyMuFilter === "conf:"+c ? "selected" : ""}>📂 ${_esc(c)}</option>`
+    );
+    const divOpts = divisions.map(d =>
+      `<option value="div:${_esc(d)}" ${_weeklyMuFilter === "div:"+d ? "selected" : ""}>🗂 ${_esc(d)}</option>`
+    );
+    const leagueOpts = leagueList.map(l =>
+      `<option value="league:${_esc(l.leagueId)}" ${_weeklyMuFilter === "league:"+l.leagueId ? "selected" : ""}>🏈 ${_esc(l.name)}</option>`
+    );
+
+    // Group league options under an optgroup if conf/div also exist
+    const leagueGroup = leagueList.length
+      ? `${(confOpts.length || divOpts.length) ? `<optgroup label="── By League ──">` : ""}${leagueOpts.join("")}${(confOpts.length || divOpts.length) ? `</optgroup>` : ""}`
+      : "";
+
+    const filterOpts = [
       `<option value="all" ${_weeklyMuFilter === "all" ? "selected" : ""}>All Leagues</option>`,
-      ...conferences.map(c => `<option value="conf:${_esc(c)}" ${_weeklyMuFilter === "conf:"+c ? "selected" : ""}>📂 ${_esc(c)}</option>`),
-      ...divisions.map(d =>   `<option value="div:${_esc(d)}"  ${_weeklyMuFilter === "div:"+d  ? "selected" : ""}>🗂 ${_esc(d)}</option>`)
+      ...confOpts,
+      ...divOpts,
+      leagueGroup
     ].join("");
 
     const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
@@ -7358,13 +7376,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               ${weeks.map(w => `<option value="${w}" ${w === _weeklyMuWeek ? "selected" : ""}>Week ${w}${w === latestWeek ? " (latest)" : ""}</option>`).join("")}
             </select>
           </div>
-          ${(conferences.length || divisions.length) ? `
           <div style="display:flex;align-items:center;gap:var(--space-2)">
             <label style="font-size:.85rem;color:var(--color-text-dim)">Filter</label>
             <select id="trn-wmu-filter-sel" style="font-size:.85rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
               ${filterOpts}
             </select>
-          </div>` : ""}
+          </div>
         </div>
         <button class="btn-secondary btn-sm" id="trn-wmu-refresh-btn">↺ Refresh</button>
       </div>
@@ -7533,12 +7550,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     let matchups = cached.matchups;
 
     if (_weeklyMuFilter !== "all") {
-      const colonIdx  = _weeklyMuFilter.indexOf(":");
+      const colonIdx   = _weeklyMuFilter.indexOf(":");
       const filterType = _weeklyMuFilter.slice(0, colonIdx);
       const filterVal  = _weeklyMuFilter.slice(colonIdx + 1);
       matchups = matchups.filter(m =>
-        filterType === "conf" ? (m.conference || "") === filterVal :
-        filterType === "div"  ? (m.division   || "") === filterVal : true
+        filterType === "conf"   ? (m.conference || "") === filterVal :
+        filterType === "div"    ? (m.division   || "") === filterVal :
+        filterType === "league" ? String(m.leagueId)  === filterVal : true
       );
     }
 
