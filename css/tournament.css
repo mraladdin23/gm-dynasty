@@ -655,78 +655,15 @@
 
 .trn-custom-question-row {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-}
-
-/* Handle column: up/down arrows stacked vertically */
-.trn-cq-handle-col {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 3px;
-  flex-shrink: 0;
-}
-
-.trn-cq-order-btn {
-  background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-dim);
-  cursor: pointer;
-  font-size: .65rem;
-  line-height: 1;
-  padding: 2px 5px;
-  transition: background .1s, color .1s;
-}
-.trn-cq-order-btn:hover { background: var(--color-bg); color: var(--color-text); }
-
-/* Fields column fills remaining width */
-.trn-cq-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-
-/* Top row: question text + type select + required + delete */
-.trn-cq-top-row {
-  display: flex;
   align-items: center;
   gap: var(--space-2);
+  margin-bottom: var(--space-2);
   flex-wrap: wrap;
 }
 
 .trn-q-text { flex: 1; min-width: 140px; }
 .trn-q-type { width: 130px; flex-shrink: 0; }
 .trn-q-required { display: flex; align-items: center; gap: 4px; font-size: .82rem; white-space: nowrap; cursor: pointer; }
-
-/* Options textarea for dropdown type */
-.trn-cq-options-wrap {
-  display: flex;
-  flex-direction: column;
-}
-
-.trn-cq-options-wrap textarea {
-  width: 100%;
-  min-height: 70px;
-  font-family: var(--font-body);
-  font-size: .82rem;
-  padding: 6px 10px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  resize: vertical;
-  outline: none;
-  box-sizing: border-box;
-}
-.trn-cq-options-wrap textarea:focus { border-color: var(--color-accent, #6366f1); }
-
-@media (max-width: 600px) {
-  .trn-cq-top-row { flex-direction: column; align-items: stretch; }
-  .trn-q-type { width: 100%; }
-}
 
 /* ── Registrants tab ─────────────────────────────────────── */
 .trn-reg-toolbar {
@@ -881,6 +818,7 @@
 
   .trn-role-row { flex-direction: column; align-items: flex-start; }
 
+  .trn-custom-question-row { flex-direction: column; align-items: stretch; }
   .trn-q-type { width: 100%; }
 }
 
@@ -4199,4 +4137,91 @@
 @media (max-width: 600px) {
   .trn-board-messages { min-height: 260px; max-height: 380px; }
   .trn-board-input    { font-size: 16px; }
+}
+
+/* ── Unified Registration Form Field List ─────────────── */
+
+.trn-form-field-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.trn-form-field-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  cursor: default;
+  transition: box-shadow .12s, border-color .12s;
+  user-select: none;
+}
+
+.trn-form-field-row[draggable="true"] { cursor: grab; }
+.trn-form-field-row[draggable="true"]:active { cursor: grabbing; }
+
+.trn-form-field-row--dragging {
+  opacity: .45;
+  box-shadow: none;
+}
+
+.trn-form-field-row--over {
+  border-color: var(--color-accent, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99,102,241,.18);
+}
+
+/* Custom question rows get a subtle left accent */
+.trn-form-field-row--custom {
+  border-left: 3px solid var(--color-accent, #6366f1);
+}
+
+/* Drag handle grip icon */
+.trn-form-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px;
+  cursor: grab;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: .5;
+  transition: opacity .1s;
+}
+.trn-form-field-row:hover .trn-form-drag-handle { opacity: 1; }
+
+.trn-drag-grip { pointer-events: none; }
+
+/* Label + tag in the top row of std/opt rows */
+.trn-form-field-label {
+  font-size: .88rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.trn-form-field-tag {
+  font-size: .7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+
+.trn-form-field-tag--std {
+  background: rgba(74,222,128,.12);
+  color: #4ade80;
+}
+
+.trn-form-field-tag--opt {
+  background: rgba(148,163,184,.1);
+  color: var(--color-text-dim);
+}
+
+@media (max-width: 600px) {
+  .trn-cq-top-row { flex-wrap: wrap; }
+  .trn-q-type { width: 100%; }
 }
