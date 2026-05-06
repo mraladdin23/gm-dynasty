@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: May 5, 2026 — World Cup tournament mode complete. New backlog items added from review session.*
+*Updated: May 5, 2026 — B1, B2, X1, X2 resolved. Draft live polling + cache bypass added.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -13,17 +13,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🔴 Critical — Crashes or Broken Core Features
 
-### B1 — Password Reset Not Working
-**Problem:** Password reset flow fails. `sendPasswordReset(username)` in `auth.js` looks up email from DB then calls Firebase Auth. Users are reporting it doesn't work.
-**Files:** `auth.js`, `firebase-db.js`
-**Note:** Was marked done (April 24) but users still reporting it broken. Needs fresh investigation — check if email lookup is returning correctly, whether Firebase Auth `sendPasswordResetEmail` is being called on the synthetic email format (`username@gmdynasty.app`) vs a real email, and whether Firebase Auth is configured to allow password reset.
-
----
-
-### B2 — Manually Inputted Salaries Not Saving (Salary Cap Leagues)
-**Problem:** When admin manually inputs salaries in salary cap leagues, the values don't persist after page reload.
-**Files:** `salary.js`, `firebase-db.js`
-**Note:** Likely a Firebase write path issue — check whether `.update()` is being called correctly, keys are properly sanitized, and the write isn't being silently swallowed by a missing `.catch()`.
+*(none currently)*
 
 ---
 
@@ -40,20 +30,6 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 ---
 
 ## 🟡 Cross-Platform Bugs
-
-### X1 — Registration Stickiness
-**Problem:** Users continue to report registration is "sticky" — form data persisting between sessions or users seeing stale registration state.
-**Files:** `tournament.js`, `firebase-db.js`
-**Note:** Previously investigated. Revisit — check if form fields are being reset on modal close, whether `registrations/` Firebase listener is being torn down properly on navigation away, and if there's a cached value being restored to the form on reopen.
-
----
-
-### X2 — Drafts Not Updating in Real Time for Tournaments
-**Problem:** Tournament draft boards don't update live. New picks require a manual refresh.
-**Files:** `tournament.js`, `draft.js`, `firebase-db.js`
-**Note:** The regular (non-tournament) draft board may use a different listener pattern. Compare how live pick updates are wired. Check if Firebase `on('child_added')` / `on('value')` listeners are being attached to the right path (`analyticsCache/drafts/...` vs the tournament draft path), and whether Sleeper WebSocket or polling is in use.
-
----
 
 ### X3 — League Champion Detection: H2H Tournament vs PF-Only Division Winner
 **Problem:** `lc.champion` is being set based on PF ranking within the division rather than the actual H2H playoff bracket winner. Leagues with H2H playoff structures are showing the wrong champion.
@@ -110,14 +86,14 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 ### A1 — Contact Email for Support
 **Idea:** Add a visible support contact email somewhere accessible to users — login screen, registration confirmation, or a footer on the public site.
 **Files:** `auth.css`, `index.html`, `tournaments/index.html`
-**Note:** Simple text addition. Decide on the email address first.
+**Note:** Support email is `support@dynastylockerroom.com` (Resend-verified, active). Simple text addition.
 
 ---
 
 ### A2 — Registration Confirmation Email
-**Idea:** When a user submits a tournament registration, send a confirmation email acknowledging receipt. Either a Firebase Function-triggered email or a simple transactional email via a service like Resend/SendGrid.
-**Files:** `tournament.js`, potentially new `functions/` or `worker.js`
-**Note:** DLR doesn't currently have email sending infrastructure. Simplest path: add a `/tournament/confirmRegistration` worker endpoint that calls a transactional email API. Requires picking an email service and getting an API key.
+**Idea:** When a user submits a tournament registration, send a confirmation email acknowledging receipt.
+**Files:** `tournament.js`, `worker.js`
+**Note:** Resend + `support@dynastylockerroom.com` is now fully set up (used for password reset). Add a `/tournament/confirmRegistration` worker endpoint that calls Resend after a successful registration write. No new infrastructure needed — just a new worker endpoint + call from `_submitRegistration`.
 
 ---
 
@@ -126,7 +102,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 ### U1 — Global Draft Ticker (Tournament Drafts)
 **Idea:** A global sticky ticker bar (like the auction ticker) that shows: currently active tournament drafts, who is on the clock, what pick number, and how many picks until the logged-in user is up. Notification when it's their turn.
 **Files:** `tournament.js`, `draft.js`, `locker.css`
-**Note:** The auction module already has a ticker — study that pattern. Tournament draft picks are fetched via `tournament/draft` worker endpoint. Needs polling or Firebase listener on the draft state. On-the-clock notification could use browser `Notification API` (with permission prompt).
+**Note:** The auction module already has a ticker — study that pattern. Tournament draft picks are fetched via `tournament/draft` worker endpoint. Needs polling or Firebase listener on the draft state. On-the-clock notification could use browser `Notification API` (with permission prompt). Draft live polling (15s interval for Sleeper) is already in place from X2 fix — ticker can piggyback on that.
 
 ---
 
@@ -190,25 +166,21 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 | # | ID | Description | Effort | Files Needed |
 |---|-----|-------------|--------|--------------|
-| 1 | B1 | Password Reset Fix | Small | `auth.js`, `firebase-db.js` |
-| 2 | B2 | Salary Cap Manual Entry Saving | Small | `salary.js`, `firebase-db.js` |
-| 3 | X3 | League Champion H2H Detection | Small-Med | `sleeper.js`, `standings.js` |
-| 4 | X1 | Registration Stickiness | Medium | `tournament.js`, `firebase-db.js` |
-| 5 | X2 | Tournament Draft Real-Time Updates | Medium | `tournament.js`, `draft.js` |
-| 6 | T7 | Tight Bracket Canvas (H2H + Custom) | Medium | `tournament.js`, `tournament.css` |
-| 7 | T6 | H2H Bracket Multi-Week Rounds | Medium | `tournament.js` |
-| 8 | T5 | Total Points Multi-Week Single Round | Small-Med | `tournament.js` |
-| 9 | T9 | Cut Line Gating — All Modes | Medium | `tournament.js`, `index.html` |
-| 10 | T8 | Weekly Matchup Drop-Down View | Medium | `tournament.js`, `index.html` |
-| 11 | U1 | Global Draft Ticker | High | `tournament.js`, `draft.js`, `locker.css` |
-| 12 | A1 | Support Contact Email | Tiny | `index.html`, `tournaments/index.html` |
-| 13 | A2 | Registration Confirmation Email | Medium | `worker.js`, `tournament.js` |
-| 14 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
-| 15 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
-| 16 | F2 | Custom Playoff Tracker (individual) | High | New module + several files |
-| 17 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js` |
-| 18 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
-| 19 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
+| 1 | X3 | League Champion H2H Detection | Small-Med | `sleeper.js`, `standings.js`, `tournament.js` |
+| 2 | T7 | Tight Bracket Canvas (H2H + Custom) | Medium | `tournament.js`, `tournament.css` |
+| 3 | T6 | H2H Bracket Multi-Week Rounds | Medium | `tournament.js` |
+| 4 | T5 | Total Points Multi-Week Single Round | Small-Med | `tournament.js` |
+| 5 | T9 | Cut Line Gating — All Modes | Medium | `tournament.js`, `index.html` |
+| 6 | T8 | Weekly Matchup Drop-Down View | Medium | `tournament.js`, `index.html` |
+| 7 | U1 | Global Draft Ticker | High | `tournament.js`, `draft.js`, `locker.css` |
+| 8 | A1 | Support Contact Email | Tiny | `index.html`, `tournaments/index.html` |
+| 9 | A2 | Registration Confirmation Email | Small | `worker.js`, `tournament.js` |
+| 10 | F8 | Hallway: H2H Records | Medium | `hallway.js` |
+| 11 | F1 | Dynasty Overview Tab | High | `standings.js`, `profile.js`, `locker.css` |
+| 12 | F2 | Custom Playoff Tracker (individual) | High | New module + several files |
+| 13 | F7 | Custom Trophy Builder | High | `trophy-builder.js`, `trophy-room.js` |
+| 14 | F4 | Locker Room Redesign + Team Theme | Very High | New theme system + CSS refactor |
+| 15 | F6 | Post-It Trash Talk Wall | High | `postits.js`, `firebase-db.js`, `locker.css` |
 
 ---
 
@@ -227,7 +199,91 @@ for each common league (dynasty/keeper shows combined H2H, redraft shows per-sea
 
 ---
 
+## Console Scripts (Safe to Run)
+
+### Diagnose playoff qualification (open Playoffs tab first, then in console)
+```js
+diagQual("Smith")    // find by any name fragment — shows gender, sleeperUsername, step breakdown
+diagQual("")         // dump all teams
+```
+
+### Clear public playoffs for a year (then re-publish from admin)
+```js
+const TID = "YOUR_TOURNAMENT_ID"; // ← replace
+const YEAR = 2025;
+await firebase.database().ref(`gmd/publicTournaments/${TID}/playoffs/${YEAR}`).remove();
+console.log("Cleared — re-publish from admin Playoffs tab");
+```
+
+### Clear finalRankings for a year (forces re-publish to regenerate)
+```js
+const TID = "YOUR_TOURNAMENT_ID"; // ← replace
+const YEAR = 2025;
+await firebase.database().ref(`gmd/tournaments/${TID}/playoffs/${YEAR}/finalRankings`).remove();
+console.log("Cleared — re-publish from admin Playoffs tab to regenerate");
+```
+
+### Clear tournament analytics cache
+```js
+const TID = "YOUR_TOURNAMENT_ID";
+await firebase.database().ref(`gmd/tournaments/${TID}/analyticsCache`).remove();
+console.log("Analytics cache cleared");
+```
+
+### Clear a single draft cache entry (use when draft shows stale pick count)
+```js
+const TID = "YOUR_TOURNAMENT_ID";
+const CACHE_KEY = "2026_LEAGUE_ID"; // e.g. "2026_1351664853462306818"
+await firebase.database().ref(`gmd/tournaments/${TID}/analyticsCache/drafts/${CACHE_KEY}`).remove();
+console.log("Draft cache entry cleared");
+```
+
+### Check Yahoo token in Firebase
+```js
+const snap = await firebase.database().ref('gmd/users/mraladdin23/platforms/yahoo/tokens').get();
+console.log('Yahoo tokens:', snap.val());
+```
+
+### Clear bundles node (safe)
+```js
+await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
+console.log("Bundles cleared");
+```
+
+---
+
+*⚠️ NEVER run bulk Firebase reset scripts. Fix stale data surgically, one league at a time.*
+
+---
+
 ## ✅ Completed
+
+### May 5, 2026 — B1, B2, X1, X2: Bug Fix Session
+
+**B1 — Password Reset (`auth.js`, `worker.js`)**
+- Root cause: `sendPasswordResetEmail` was called with the user's real email, but Firebase Auth only knows the synthetic `username@gmdynasty.app` email. Also, `_restGet` requires an auth token which isn't available pre-login.
+- Fix: Moved reset flow entirely to Cloudflare Worker (`/auth/passwordReset`). Worker uses Firebase DB secret to look up real email, mints a Google OAuth token from a service account JWT (scope: `identitytoolkit`), calls Firebase Auth Admin REST API with `returnOobLink: true` to generate the reset link, then sends it to the real email via Resend.
+- Infrastructure added: Resend account, `support@dynastylockerroom.com` verified sender on `dynastylockerroom.com` domain, three new Worker secrets: `RESEND_API_KEY`, `FIREBASE_DB_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`.
+
+**B2 — Salary Cap Manual Entry Not Persisting (`salary.js`)**
+- Root cause: Firebase SDK local cache was returning stale pre-save data on the next `init()` call, making edits appear lost until the cache expired naturally.
+- Fix: Added a fresh read from Firebase immediately after `_saveSalaryData()` writes, so `_salaryData` in memory always reflects the confirmed write.
+
+**X1 — Registration Stickiness (`tournament.js`)**
+- Root cause 1: On successful submission, the success message was written to `trn-tab-body` instead of `trn-register-page-body` (the overlay body), leaving the form visible inside the overlay.
+- Root cause 2: Duplicate check used the stale `t.registrations` object loaded at page open, missing registrations submitted in the same session.
+- Fix: Success message now targets `trn-register-page-body` (overlay) first. Duplicate check now fetches fresh registrations from Firebase via `_tRegsRef(tid).once("value")` before validating.
+
+**X2 — Tournament Draft Not Updating Live (`tournament.js`, `worker.js`)**
+- Root cause 1: No live listener — draft tab was fetch-on-demand only with a 24-hour Firebase cache and 5-minute in-memory cache.
+- Root cause 2: Worker `tournamentDraft` preferred completed drafts over active ones — a league with both a completed startup draft and an active rookie draft would show the completed one.
+- Root cause 3: Firebase cache served stale data (1 pick) even when Sleeper had 27+ picks, because the cache TTL (24h) hadn't expired.
+- Fix 1: Worker now selects `"drafting"` draft first, then falls back to most recent completed.
+- Fix 2: Worker returns `draft_status` in response; `tournament.js` stores it in cache entries.
+- Fix 3: Cache bypass — both the 24h Firebase cache and 5-minute in-memory cache are skipped entirely when `draft_status === "drafting"`.
+- Fix 4: Added `_startDraftPoll` / `_stopDraftPoll` — 15-second Sleeper polling during active drafts (Sleeper only; MFL/Yahoo still require manual refresh). Poll stops automatically when navigating away from the draft tab.
+
+---
 
 ### May 5, 2026 — World Cup Tournament Mode: Full Implementation
 
@@ -303,51 +359,6 @@ Full playoff configuration, display, live scoring, and public site integration f
 - Auth, mobile scroll, DNS, Cloudflare Worker, Firebase token storage
 - Hallway: Firebase pins, pagination, common-league modals
 - F5 Phases 1–3: foundation, standings sync, public site, registration, participants, analytics
-
----
-
-## Console Scripts (Safe to Run)
-
-### Diagnose playoff qualification (open Playoffs tab first, then in console)
-```js
-diagQual("Smith")    // find by any name fragment — shows gender, sleeperUsername, step breakdown
-diagQual("")         // dump all teams
-```
-
-### Clear public playoffs for a year (then re-publish from admin)
-```js
-const TID = "YOUR_TOURNAMENT_ID"; // ← replace
-const YEAR = 2025;
-await firebase.database().ref(`gmd/publicTournaments/${TID}/playoffs/${YEAR}`).remove();
-console.log("Cleared — re-publish from admin Playoffs tab");
-```
-
-### Clear finalRankings for a year (forces re-publish to regenerate)
-```js
-const TID = "YOUR_TOURNAMENT_ID"; // ← replace
-const YEAR = 2025;
-await firebase.database().ref(`gmd/tournaments/${TID}/playoffs/${YEAR}/finalRankings`).remove();
-console.log("Cleared — re-publish from admin Playoffs tab to regenerate");
-```
-
-### Clear tournament analytics cache
-```js
-const TID = "YOUR_TOURNAMENT_ID";
-await firebase.database().ref(`gmd/tournaments/${TID}/analyticsCache`).remove();
-console.log("Analytics cache cleared");
-```
-
-### Check Yahoo token in Firebase
-```js
-const snap = await firebase.database().ref('gmd/users/mraladdin23/platforms/yahoo/tokens').get();
-console.log('Yahoo tokens:', snap.val());
-```
-
-### Clear bundles node (safe)
-```js
-await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
-console.log("Bundles cleared");
-```
 
 ---
 
