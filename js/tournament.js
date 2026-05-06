@@ -1185,6 +1185,34 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>`;
   }
 
+
+  // H2H bracket round row — mirrors _prRoundRowHTML but without advance controls
+  // (H2H advancement is bracket-determined). Championship = last round (fixed).
+  function _h2hRoundRowHTML(round, idx, total) {
+    const wpr     = round.weeksPerRound || 1;
+    const isFinal = idx === total - 1;
+    return `
+      <div class="trn-pr-round-row" data-round-idx="${idx}">
+        <div class="trn-pr-round-header">
+          <span class="trn-pr-round-label">${isFinal ? "🏆 Championship" : `Round ${idx+1}`}</span>
+          ${!isFinal ? `<button class="trn-pr-round-remove btn-secondary btn-xs trn-h2h-round-remove" data-round-idx="${idx}">✕</button>` : ""}
+        </div>
+        <div class="trn-pr-round-body">
+          <div class="trn-pr-advance-row" style="margin-bottom:4px">
+            <span class="trn-pr-field-label">Weeks</span>
+            <input type="number" class="trn-h2h-wpr-input" data-round-idx="${idx}"
+              min="1" max="4" value="${wpr}"
+              style="width:46px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
+            <span style="font-size:.75rem;color:var(--color-text-dim)">per round (scores summed)</span>
+          </div>
+          ${isFinal
+            ? `<div style="font-size:.78rem;color:var(--color-text-dim)">Highest combined score wins. Winner is tournament champion.</div>`
+            : `<div style="font-size:.78rem;color:var(--color-text-dim)">Winner advances; loser is eliminated.</div>`}
+          ${_blendRowHTML(\`trn-h2h-r\${idx}\`, round.blend)}
+        </div>
+      </div>\`;
+  }
+
   // Points-round row
   function _prRoundRowHTML(round, idx, total) {
     const advMethod  = round.advanceMethod || "count";
@@ -1691,30 +1719,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               </span>
             </div>
             <div class="trn-detail-row">
-              <span style="display:flex;align-items:center;gap:5px">Weeks Per Round
-                <button class="trn-help-btn" title="Set how many NFL weeks each round spans. Scores are summed. Each round can differ — e.g. 1 week for early rounds, 2 weeks for the championship.">?</button>
-              </span>
-              <span style="width:100%">
-                ${(() => {
-                  const bs  = bracketSize || suggestedBracket || 8;
-                  const nr  = Math.ceil(Math.log2(Math.max(bs, 2)));
-                  const getRN = (ri, tot) =>
-                    ri === tot-1 ? "Championship" : ri === tot-2 ? "Semifinals" : ri === tot-3 ? "Quarterfinals" : `Round ${ri+1}`;
-                  const saved = po.h2hRoundWeeks || [];
-                  return Array.from({length: nr}, (_, ri) => {
-                    const val = saved[ri] ?? (ri === nr - 1 ? 2 : 1);
-                    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                      <span style="font-size:.78rem;color:var(--color-text-dim);width:110px;flex-shrink:0">${getRN(ri, nr)}</span>
-                      <input type="number" class="trn-h2h-round-wpr" data-ri="${ri}"
-                        min="1" max="4" value="${val}"
-                        style="width:48px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" />
-                      <span style="font-size:.75rem;color:var(--color-text-dim)">wk${val !== 1 ? "s" : ""}</span>
-                    </div>`;
-                  }).join("");
-                })()}
-              </span>
-            </div>
-            <div class="trn-detail-row">
               <span style="display:flex;align-items:center;gap:5px">Reseed After Each Round
                 <button class="trn-help-btn" title="When enabled, remaining teams are re-ranked by record/PF after each round and re-paired for the next round (highest vs lowest seed). When disabled, the bracket is fixed after Round 1.">?</button>
               </span>
@@ -1733,8 +1737,23 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>`;
 
     // ── Section D: Round Config ───────────────────────────────────────────────
-    const showRounds = ["points_rounds","custom_rounds"].includes(mode);
+    const showRounds = ["points_rounds","custom_rounds","h2h_bracket"].includes(mode);
     const showWC     = mode === "worldcup";
+
+    // H2H bracket rounds — stored as po.h2hRounds (array of {weeksPerRound, blend})
+    // Falls back to building from po.h2hRoundWeeks (per-round weeks) + no blend.
+    const _defaultH2HRounds = () => {
+      const bs = po.bracketSize || 8;
+      const nr = Math.max(1, Math.ceil(Math.log2(Math.max(bs, 2))));
+      const saved = po.h2hRoundWeeks || [];
+      return Array.from({length: nr}, (_, ri) => ({
+        weeksPerRound: saved[ri] ?? (ri === nr - 1 ? 2 : 1),
+        blend: null
+      }));
+    };
+    const h2hRounds = (po.h2hRounds && po.h2hRounds.length)
+      ? po.h2hRounds
+      : _defaultH2HRounds();
 
     // ── World Cup config data ─────────────────────────────────────────────────
     const wcGroups         = Array.isArray(po.worldcupGroups) ? po.worldcupGroups : [];
@@ -1891,7 +1910,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const sectionRounds = `
       <div class="trn-pc-section" id="trn-pc-rounds">
         ${!showRounds && !showWC
-          ? `<div class="trn-pc-na-note">Round configuration applies to Points Rounds, Custom Rounds, and World Cup modes only.</div>`
+          ? `<div class="trn-pc-na-note">Round configuration applies to Points Rounds, H2H Bracket, Custom Rounds, and World Cup modes only.</div>`
+          : mode==="h2h_bracket" ? `
+            <div id="trn-h2h-rounds-list" class="trn-rounds-list">
+              ${h2hRounds.map((r,i)=>_h2hRoundRowHTML(r,i,h2hRounds.length)).join("")}
+            </div>
+            <div class="trn-rounds-actions">
+              <button class="btn-secondary btn-sm" id="trn-h2h-add-round">+ Add Round</button>
+              <button class="btn-primary btn-sm"   id="trn-h2h-save">Save Rounds</button>
+            </div>`
           : mode==="points_rounds" ? `
             <div id="trn-pr-rounds-list" class="trn-rounds-list">
               ${prRounds.map((r,i)=>_prRoundRowHTML(r,i,prRounds.length)).join("")}
@@ -2026,7 +2053,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <option value="format">⚙️ Playoff Format</option>
             <option value="qual"   ${(!showQual||showWC)?"disabled":""} title="${showWC?"World Cup: set advance count on each group card instead":""}">📋 Qualification Rules${(!showQual||showWC)?" (n/a)":""}</option>
             <option value="seeding" ${(!showSeeding||showWC)?"disabled":""} title="${showWC?"World Cup: bracket seeding is done manually in the Playoffs → Bracket tab":""}">🏅 Seeding &amp; Byes${(!showSeeding||showWC)?" (n/a)":""}</option>
-            <option value="rounds" ${(!showRounds&&!showWC)?"disabled":""}>🔄 Group &amp; Schedule Config${(!showRounds&&!showWC)?" (n/a)":""}</option>
+            <option value="rounds" ${(!showRounds&&!showWC)?"disabled":""}>🔄 Round Config${mode==="h2h_bracket"?" (H2H)":(!showRounds&&!showWC)?" (n/a)":""}</option>
             <option value="scoring">📊 Scoring Settings</option>
           </select>
         </div>
@@ -2146,7 +2173,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (sel) {
         sel.querySelector('option[value="qual"]')?.toggleAttribute("disabled",    ["total_points","worldcup"].includes(mode));
         sel.querySelector('option[value="seeding"]')?.toggleAttribute("disabled", ["total_points","worldcup"].includes(mode));
-        sel.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",  !["points_rounds","custom_rounds","worldcup"].includes(mode));
+        sel.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",  !["points_rounds","custom_rounds","worldcup","h2h_bracket"].includes(mode));
       }
       document.getElementById("trn-start-week-row")?.style.setProperty("display", mode==="total_points"?"none":"");
       document.getElementById("trn-seed-method-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
@@ -2366,9 +2393,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byeScope    = document.querySelector("#trn-bye-scope-pills .trn-qs-scope-pill--active")?.dataset.scope||"overall";
       const byeMethod   = document.getElementById("trn-bye-method")?.value || "record";
       const bracketSize = parseInt(document.getElementById("trn-bracket-size")?.value)||null;
-      const h2hRoundWprs = [...document.querySelectorAll(".trn-h2h-round-wpr")]
-        .sort((a, b) => parseInt(a.dataset.ri) - parseInt(b.dataset.ri))
-        .map(el => parseInt(el.value) || 1);
       const h2hReseed   = document.getElementById("trn-h2h-reseed-on")?.classList.contains("trn-yn-btn--active") || false;
       if (bracketSize&&(bracketSize&(bracketSize-1))!==0) { showToast("Bracket size must be a power of 2","error"); return; }
       try {
@@ -2376,8 +2400,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           seeding: {method:seedMethod},
           byes: {type:byeType, count:byeType!=="none"?byeCount:0, scope:byeScope, method:byeMethod},
           bracketSize,
-          h2hRoundWeeks:    h2hRoundWprs.length ? h2hRoundWprs : null,
-          h2hWeeksPerRound: null,   // clear legacy field
           h2hReseed: h2hReseed || null
         };
         await _poSave(updates); Object.assign(_poLocal(),updates);
@@ -2491,6 +2513,49 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const rounds=_getCRRounds();
       try { await _poSave({customRounds:{rounds}}); Object.assign(_poLocal(),{customRounds:{rounds}}); showToast("Rounds saved ✓"); }
       catch(e) { showToast("Failed","error"); }
+    });
+
+    // ── H2H Bracket Rounds ─────────────────────────────────
+    const h2hList = document.getElementById("trn-h2h-rounds-list");
+    const _getH2HRounds = () => Array.from(h2hList?.querySelectorAll(".trn-pr-round-row")||[]).map(row => {
+      const wpr = parseInt(row.querySelector(".trn-h2h-wpr-input")?.value) || 1;
+      const blend = _readBlend(row);
+      const entry = { weeksPerRound: wpr };
+      if (blend) entry.blend = blend;
+      return entry;
+    });
+    const _rebuildH2H = (rounds) => {
+      if (!h2hList) return;
+      h2hList.innerHTML = rounds.map((r, i) => _h2hRoundRowHTML(r, i, rounds.length)).join("");
+      _wireH2HEvents();
+    };
+    const _wireH2HEvents = () => {
+      _wireBlendRow(h2hList);
+      h2hList?.querySelectorAll(".trn-h2h-round-remove").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const r = _getH2HRounds();
+          if (r.length <= 1) return; // can't remove the championship
+          r.splice(parseInt(btn.dataset.roundIdx), 1);
+          _rebuildH2H(r);
+        });
+      });
+    };
+    _wireH2HEvents();
+    document.getElementById("trn-h2h-add-round")?.addEventListener("click", () => {
+      const r = _getH2HRounds();
+      // Insert a new round before the championship (last)
+      r.splice(r.length - 1, 0, { weeksPerRound: 1, blend: null });
+      _rebuildH2H(r);
+    });
+    document.getElementById("trn-h2h-save")?.addEventListener("click", async () => {
+      const rounds = _getH2HRounds();
+      // Also derive h2hRoundWeeks array for backwards compat with _renderBracket
+      const h2hRoundWeeks = rounds.map(r => r.weeksPerRound || 1);
+      try {
+        await _poSave({ h2hRounds: rounds, h2hRoundWeeks });
+        Object.assign(_poLocal(), { h2hRounds: rounds, h2hRoundWeeks });
+        showToast("Rounds saved ✓");
+      } catch(e) { showToast("Failed", "error"); }
     });
 
     // ── World Cup: Group Builder + Schedule Wiring ───────────────────────────
@@ -5539,56 +5604,59 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const isCustom = f.type === "custom";
     const label    = isCustom ? "" : _fieldLabel(f.key || "");
 
-    // Custom question inner fields
-    const qType    = f.inputType || f.type_q || (isCustom ? (f.type === "custom" ? "text" : f.type) : "text");
-    // Handle the case where f.type is actually the question type for existing saved questions
-    const qTypeVal = isCustom ? (["text","textarea","select"].includes(f.type) ? f.type : (f.inputType || "text")) : "text";
-    const isSelect = qTypeVal === "select";
+    const qTypeVal = isCustom
+      ? (["text","textarea","select"].includes(f.type) ? f.type : (f.inputType || "text"))
+      : "text";
+    // Disambiguate: if f.type is "custom" the question type comes from f.inputType or defaults to text
+    const qType    = isCustom
+      ? (["textarea","select"].includes(f.inputType || f.question_type) ? (f.inputType || f.question_type) : (["textarea","select"].includes(f.type) ? f.type : "text"))
+      : "text";
+    const isSelect = qType === "select";
     const qOpts    = (f.options || []).join("\n");
 
-    const typeTag  = isStd  ? `<span class="trn-form-field-tag trn-form-field-tag--std">Required</span>`
-                   : isOpt  ? `<span class="trn-form-field-tag trn-form-field-tag--opt">Optional</span>`
-                   :          "";
+    const typeTag = isStd ? `<span class="trn-form-field-tag trn-form-field-tag--std">Required</span>`
+                  : isOpt ? `<span class="trn-form-field-tag trn-form-field-tag--opt">Optional</span>`
+                  :         "";
 
-    const delBtn   = isStd  ? `<span class="trn-cq-order-btn" style="opacity:.25;cursor:default" title="Required — cannot remove">🔒</span>`
-                            : `<button class="btn-ghost btn-sm trn-form-field-del" type="button" title="Remove from form">✕</button>`;
+    const delBtn = isStd
+      ? `<span style="font-size:.8rem;opacity:.3;cursor:default" title="Required — cannot remove">🔒</span>`
+      : `<button class="btn-ghost btn-sm trn-form-field-del" type="button" title="Remove from form" style="padding:2px 6px;font-size:.75rem">✕</button>`;
 
-    return `
-      <div class="trn-form-field-row${isCustom ? " trn-form-field-row--custom" : ""}"
-           data-ftype="${isCustom ? "custom" : isOpt ? "opt" : "std"}"
-           data-fkey="${_esc(f.key || "")}"
-           data-fidx="${i}"
-           draggable="true">
-        <div class="trn-cq-handle-col trn-form-drag-handle" title="Drag to reorder">
-          <span class="trn-drag-grip">⠿</span>
-        </div>
-        <div class="trn-cq-fields">
-          ${isCustom ? `
+    if (isCustom) {
+      return `
+        <div class="trn-form-field-row trn-form-field-row--custom"
+             data-ftype="custom" data-fkey="" data-fidx="${i}" draggable="true">
+          <span class="trn-form-drag-handle trn-drag-grip">⠿</span>
+          <div class="trn-cq-fields">
             <div class="trn-cq-top-row">
-              <input type="text" class="trn-q-text" value="${_esc(f.question || "")}" placeholder="Question text" />
+              <input type="text" class="trn-q-text" value="${_esc(f.question || "")}" placeholder="Question text…" />
               <select class="trn-q-type">
-                <option value="text"     ${qTypeVal === "text"     ? "selected" : ""}>Short text</option>
-                <option value="textarea" ${qTypeVal === "textarea" ? "selected" : ""}>Paragraph</option>
-                <option value="select"   ${qTypeVal === "select"   ? "selected" : ""}>Dropdown</option>
+                <option value="text"     ${qType === "text"     ? "selected" : ""}>Short text</option>
+                <option value="textarea" ${qType === "textarea" ? "selected" : ""}>Paragraph</option>
+                <option value="select"   ${qType === "select"   ? "selected" : ""}>Dropdown</option>
               </select>
               <label class="trn-q-required">
-                <input type="checkbox" class="trn-q-req-check" ${f.required ? "checked" : ""} /> Required
+                <input type="checkbox" class="trn-q-req-check" ${f.required ? "checked" : ""} /> Req
               </label>
               ${delBtn}
             </div>
             <div class="trn-cq-options-wrap" ${isSelect ? "" : 'style="display:none"'}>
-              <label style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:3px;display:block">
-                Dropdown options <span style="font-weight:400">(one per line)</span>
-              </label>
-              <textarea class="trn-q-options" rows="3" placeholder="Option 1&#10;Option 2&#10;Option 3">${_esc(qOpts)}</textarea>
+              <textarea class="trn-q-options" rows="2" placeholder="Option 1&#10;Option 2&#10;Option 3">${_esc(qOpts)}</textarea>
             </div>
-          ` : `
-            <div class="trn-cq-top-row">
-              <span class="trn-form-field-label">${_esc(label)}</span>
-              ${typeTag}
-              ${delBtn}
-            </div>
-          `}
+          </div>
+        </div>`;
+    }
+
+    // Std / opt — compact single-line row
+    return `
+      <div class="trn-form-field-row"
+           data-ftype="${isOpt ? "opt" : "std"}" data-fkey="${_esc(f.key || "")}" data-fidx="${i}"
+           draggable="true">
+        <span class="trn-form-drag-handle trn-drag-grip">⠿</span>
+        <div class="trn-cq-fields">
+          <span class="trn-form-field-label">${_esc(label)}</span>
+          ${typeTag}
+          ${delBtn}
         </div>
       </div>`;
   }
@@ -10960,11 +11028,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const startWk     = po.startWeek || null;
       const seeds       = sortedTeams.slice(0, bracketSize);
 
-      // Per-round week counts. Prefer h2hRoundWeeks array; fall back to legacy
-      // scalar h2hWeeksPerRound; default 1 for every round.
+      // Per-round week counts. Prefer h2hRounds[ri].weeksPerRound, then h2hRoundWeeks array,
+      // then legacy scalar h2hWeeksPerRound; default 1.
       const _wprFor = (ri) => {
+        if (po.h2hRounds?.length > ri) return po.h2hRounds[ri].weeksPerRound || 1;
         if (po.h2hRoundWeeks?.length > ri) return po.h2hRoundWeeks[ri] || 1;
         return po.h2hWeeksPerRound || 1;
+      };
+
+      // Blend config for a round (null = raw sum of weekly scores).
+      const _blendFor = (ri) => {
+        if (po.h2hRounds?.length > ri) return po.h2hRounds[ri].blend || null;
+        return null;
       };
 
       // Absolute start week of round ri — sum of all prior rounds' wpr.
@@ -10988,19 +11063,31 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           : `<span class="trn-wc-week-tag">Wk ${s}</span>`;
       };
 
-      // Combined score for a team across all weeks in round ri.
+      // Combined score for a team across all weeks in round ri, with optional blend.
       const _h2hScore = (tm, ri) => {
         const s = _roundStart(ri);
         if (!s || !tm) return null;
         const lid = leagueIdByTeamKey[_teamKey(tm)];
         if (!lid) return null;
-        const wpr = _wprFor(ri);
+        const wpr   = _wprFor(ri);
+        const blend = _blendFor(ri);
         let total = 0, found = 0;
         for (let w = 0; w < wpr; w++) {
           const val = _weekScoreCache[lid + "|" + (s + w)]?.[String(tm.teamId)];
           if (val != null) { total += val; found++; }
         }
-        return found > 0 ? total : null;
+        if (found === 0) return null;
+        if (blend?.enabled) {
+          // Apply season-average blend same as points_rounds: use _wsCombined_ if available
+          const avg = _wsCombined_(tm, 1, Math.max(1, (s || 1) - 1));
+          if (avg != null) {
+            const w = (blend.weight ?? 30) / 100;
+            return blend.mode === "additive"
+              ? total + avg * w
+              : total * (1 - w) + avg * w;
+          }
+        }
+        return total;
       };
 
       // Build bracket round-by-round, optionally reseeding survivors.
@@ -12466,6 +12553,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         bracketSize: mode==="h2h_bracket" ? (po.bracketSize||null) : null,
         h2hWeeksPerRound: mode==="h2h_bracket" ? (po.h2hWeeksPerRound||null) : null,
         h2hRoundWeeks:    mode==="h2h_bracket" ? (po.h2hRoundWeeks||null)    : null,
+        h2hRounds:        mode==="h2h_bracket" ? (po.h2hRounds||null)        : null,
         h2hReseed:        mode==="h2h_bracket" ? (po.h2hReseed||null)        : null,
         seeding: po.seeding||null, byes: po.byes||null,
         recognizeLeagueChampions: !!(po.recognizeLeagueChampions),
