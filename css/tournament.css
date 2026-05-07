@@ -333,14 +333,19 @@
 .trn-row-actions {
   display: flex;
   gap: 6px;
+  width: 162px;        /* fixed: wide enough for Manage + View side by side */
+  flex-shrink: 0;
+  justify-content: flex-end;
 }
 
-/* Lock button widths so rows with Manage+View and rows with only View stay the same width */
+/* Each button takes equal share and never shrinks below its label */
 .trn-row-actions .btn-primary,
 .trn-row-actions .btn-secondary {
-  min-width: 66px;
+  flex: 1 1 0;
+  min-width: 0;
   text-align: center;
   justify-content: center;
+  white-space: nowrap;
 }
 
 /* ── Tournament type badges ──────────────────────────────── */
