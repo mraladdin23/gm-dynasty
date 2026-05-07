@@ -180,9 +180,14 @@ const DLRTournament = (() => {
     }
 
     const allEntries   = Object.entries(_tournaments);
-    const myEntries    = allEntries.filter(([, t]) =>
-      t.meta?.discoveredBy?.[_currentUsername] || t.roles?.[_currentUsername]
-    );
+    const myEntries    = allEntries.filter(([, t]) => {
+      // Discovered via league auto-match, or has a role
+      if (t.meta?.discoveredBy?.[_currentUsername] || t.roles?.[_currentUsername]) return true;
+      // Also include if user appears as a linked participant (dlrUsername match)
+      return Object.values(t.participants || {}).some(p =>
+        p.dlrLinked && p.dlrUsername === _currentUsername
+      );
+    });
     const adminEntries = allEntries.filter(([, t]) =>
       t.roles?.[_currentUsername]?.role === "admin" ||
       t.roles?.[_currentUsername]?.role === "sub_admin"
@@ -414,15 +419,15 @@ const DLRTournament = (() => {
           <div class="trn-row-top">
             <span class="trn-row-name">${_esc(meta.name || "Untitled Tournament")}</span>
             <span class="trn-type-badge ${typeBadge.cls}">${typeBadge.icon} ${typeBadge.label}</span>
-            ${adminBy}
+            <span class="trn-row-inline-meta">
+              <span class="trn-row-stat">🏟 ${leagueCount}</span>
+              <span class="trn-row-stat">👥 ${regCount}</span>
+              ${adminBy}
+            </span>
           </div>
           ${meta.tagline ? `<div class="trn-row-desc">${_esc(meta.tagline)}</div>` : ""}
         </div>
         <div class="trn-row-right">
-          <div class="trn-row-meta">
-            <span class="trn-row-stat">🏟 ${leagueCount} lg</span>
-            <span class="trn-row-stat">👥 ${regCount}</span>
-          </div>
           <span class="trn-status-badge trn-status-${status}">
             ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
           </span>
@@ -1792,8 +1797,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 </span>`;
               }).join("")}
         </div>
-        <button class="btn-secondary btn-xs" id="trn-playoff-new-year" title="Start config for next season">+ Season</button>
-        <button class="trn-guide-link trn-guide-link--xs" id="trn-playoff-guide-btn" title="Tournament type guide">📖 Guide</button>
+        <div class="trn-pc-year-bar-actions">
+          <button class="btn-secondary btn-xs" id="trn-playoff-new-year" title="Start config for next season">+ Season</button>
+          <button class="trn-guide-link trn-guide-link--xs" id="trn-playoff-guide-btn">📖 Type Guide</button>
+        </div>
       </div>
       <div class="trn-playoff-active-year-note" style="margin-bottom:var(--space-2)">
         Editing: <strong id="trn-playoff-editing-year">${activeYear || (years[0] || currentNFLYear)}</strong>
@@ -4813,7 +4820,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         participantsRef.child(pid).set(p)
       ));
 
-      showToast(`Synced: ${newCount} new, ${updatedCount} updated`);
+      showToast(`Synced: ${newCount} new, ${updatedCount} updated — matching DLR accounts…`);
+
+      // Now run DLR match against the freshly written participants
+      await _matchParticipantsToDLR(tid, updates);
 
       // Reload tournament and re-render participants tab
       const snap = await _tRef(tid).once("value");
