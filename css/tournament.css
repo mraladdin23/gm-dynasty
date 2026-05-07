@@ -146,7 +146,7 @@
     padding: 7px var(--space-3);
   }
   .trn-row-main        { flex: 1 1 100%; }
-  .trn-row-top         { grid-template-columns: 1fr auto; }
+  .trn-row-top         { grid-template-columns: 1fr 110px; } /* drop meta col on mobile */
   .trn-row-inline-meta { display: none; }
   .trn-row-right       { width: 100%; justify-content: space-between; }
   .trn-filter-row      { flex-wrap: wrap; gap: var(--space-1); }
@@ -263,15 +263,15 @@
 }
 
 /*
-  trn-row-top grid:
-    col 1 (1fr, min 0)         = name — fills remaining space, truncates
-    col 2 (minmax 90px, auto)  = type badge — consistent minimum so badges align
-    col 3 (minmax 140px, auto) = inline-meta (counts + admin) — consistent floor
-  Using minmax gives a consistent minimum per column so rows align across the list.
+  trn-row-top uses fixed-width columns so every row aligns:
+    col 1 (1fr)    = name — fills remaining space, truncates
+    col 2 (120px)  = type badge — fixed so all badges align
+    col 3 (180px)  = inline-meta (counts + admin) — fixed so all stats align
+  Fixed px columns are the only reliable way to align across independent flex rows.
 */
 .trn-row-top {
   display: grid;
-  grid-template-columns: 1fr minmax(90px, auto) minmax(140px, auto);
+  grid-template-columns: 1fr 120px 180px;
   align-items: baseline;
   column-gap: 10px;
   margin-bottom: 2px;
@@ -293,8 +293,8 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  flex-shrink: 0;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .trn-row-stat {
@@ -306,6 +306,9 @@
 .trn-row-admin {
   font-size: .72rem;
   color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .trn-row-desc {
