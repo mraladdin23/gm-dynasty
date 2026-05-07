@@ -245,15 +245,65 @@
         return;
       }
 
+      // Build unique status and type values for filter dropdowns
+      const pubStatuses = [...new Set(entries.map(([,t]) => t.status || "draft"))].sort();
+      const pubTypes    = [...new Set(entries.map(([,t]) => t.playoffMode || "total_points"))].sort();
+
+      const TYPE_LABELS_PUB = {
+        points_rounds: "📈 Points Rounds",
+        h2h_bracket:   "🥊 H2H Bracket",
+        custom_rounds: "⚙️ Custom Rounds",
+        worldcup:      "🌍 World Cup",
+        total_points:  "🎯 Total Points",
+      };
+      const STATUS_LABELS_SHORT = {
+        draft:             "📝 Draft",
+        registration_open: "📬 Open",
+        active:            "🏈 Active",
+        playoffs:          "🏆 Playoffs",
+        completed:         "✅ Completed",
+      };
+
       content.innerHTML = `
-        <div style="margin-bottom:var(--space-6)">
-          <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 var(--space-1)">🏆 Tournaments</h1>
-          <p style="color:var(--color-text-dim);font-size:.88rem;margin:0">${entries.length} tournament${entries.length !== 1 ? "s" : ""}</p>
+        <div style="margin-bottom:var(--space-4)">
+          <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 var(--space-3)">🏆 Tournaments</h1>
+          <div class="trn-filter-row">
+            <select class="trn-filter-select" id="pub-status-filter">
+              <option value="all">All Statuses</option>
+              ${pubStatuses.map(s => `<option value="${s}">${STATUS_LABELS_SHORT[s] || s}</option>`).join("")}
+            </select>
+            <select class="trn-filter-select" id="pub-type-filter">
+              <option value="all">All Types</option>
+              ${pubTypes.map(t => `<option value="${t}">${TYPE_LABELS_PUB[t] || t}</option>`).join("")}
+            </select>
+          </div>
         </div>
         <div class="trn-list" id="pub-cards">
           ${entries.map(([tid, t]) => renderCard(tid, t)).join("")}
         </div>`;
 
+      // Filter wiring
+      function applyPubFilters() {
+        const sf = document.getElementById("pub-status-filter")?.value || "all";
+        const tf = document.getElementById("pub-type-filter")?.value   || "all";
+        let filtered = entries;
+        if (sf !== "all") filtered = filtered.filter(([,t]) => (t.status || "draft") === sf);
+        if (tf !== "all") filtered = filtered.filter(([,t]) => (t.playoffMode || "total_points") === tf);
+        document.getElementById("pub-cards").innerHTML =
+          filtered.length ? filtered.map(([tid, t]) => renderCard(tid, t)).join("") :
+          `<div style="padding:40px;text-align:center;color:var(--color-text-dim)">No tournaments match the current filters.</div>`;
+        // Re-wire view buttons after re-render
+        document.querySelectorAll("[data-pub-open]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            window.history.pushState({}, "", "?t=" + btn.dataset.pubOpen);
+            loadTournament(btn.dataset.pubOpen);
+          });
+        });
+      }
+      document.getElementById("pub-status-filter")?.addEventListener("change", applyPubFilters);
+      document.getElementById("pub-type-filter")?.addEventListener("change", applyPubFilters);
+
+      // Wire initial view buttons
       document.querySelectorAll("[data-pub-open]").forEach(btn => {
         btn.addEventListener("click", () => {
           const tid = btn.dataset.pubOpen;
@@ -283,15 +333,15 @@
             <div class="trn-row-top">
               <span class="trn-row-name">${esc(t.name || "Untitled Tournament")}</span>
               <span class="trn-type-badge ${tb.cls}">${tb.icon} ${tb.label}</span>
-              ${yearStr ? `<span class="trn-type-badge trn-type-total">📅 ${esc(yearStr)}</span>` : ""}
+              <span class="trn-row-inline-meta">
+                <span class="trn-row-stat">🏟 ${t.leagueCount || 0}</span>
+                ${!isDraft ? `<span class="trn-row-stat">👥 ${t.registrationCount || 0}</span>` : ""}
+                ${yearStr ? `<span class="trn-row-stat">📅 ${esc(yearStr)}</span>` : ""}
+              </span>
             </div>
             ${t.tagline ? `<div class="trn-row-desc">${esc(t.tagline)}</div>` : ""}
           </div>
           <div class="trn-row-right">
-            <div class="trn-row-meta">
-              <span class="trn-row-stat">🏟 ${t.leagueCount || 0} lg</span>
-              ${!isDraft ? `<span class="trn-row-stat">👥 ${t.registrationCount || 0}</span>` : ""}
-            </div>
             ${statusBadge}
             <div class="trn-row-actions">
               <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">
