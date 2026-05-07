@@ -1208,9 +1208,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${isFinal
             ? `<div style="font-size:.78rem;color:var(--color-text-dim)">Highest combined score wins. Winner is tournament champion.</div>`
             : `<div style="font-size:.78rem;color:var(--color-text-dim)">Winner advances; loser is eliminated.</div>`}
-          ${_blendRowHTML(\`trn-h2h-r\${idx}\`, round.blend)}
+          ${_blendRowHTML(`trn-h2h-r${idx}`, round.blend)}
         </div>
-      </div>\`;
+      </div>`;
   }
 
   // Points-round row
