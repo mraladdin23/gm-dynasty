@@ -5809,9 +5809,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _tournaments[tid] = { ..._tournaments[tid], registrations: regs };
 
       const regList  = Object.entries(regs);
-      const pending  = regList.filter(([, r]) => r.status === "pending");
-      const approved = regList.filter(([, r]) => r.status === "approved");
-      const denied   = regList.filter(([, r]) => r.status === "denied");
+      const pending  = regList.filter(([, r]) => (r.status || "").toLowerCase() === "pending");
+      const approved = regList.filter(([, r]) => (r.status || "").toLowerCase() === "approved");
+      const denied   = regList.filter(([, r]) => (r.status || "").toLowerCase() === "denied");
+      const other    = regList.filter(([, r]) => !["pending","approved","denied"].includes((r.status || "").toLowerCase()));
 
       body.innerHTML = `
         <div class="trn-reg-toolbar">
@@ -5839,12 +5840,30 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${denied.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, false)).join("")}
         ` : ""}
 
+        ${other.length ? `
+          <div class="trn-reg-section-title">⚠️ Unknown Status (${other.length}) — <small style="font-weight:400">These records have an unrecognized status value. <a href="#" id="trn-fix-status-btn" style="color:var(--color-accent)">Fix all → approved</a></small></div>
+          ${other.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, false)).join("")}
+        ` : ""}
+
         ${!regList.length ? `
           <div class="trn-empty">No registrations yet.</div>
         ` : ""}
       `;
 
     document.getElementById("trn-export-csv-btn")?.addEventListener("click", () => _exportRegistrantsCSV(tid, t, regs));
+    document.getElementById("trn-fix-status-btn")?.addEventListener("click", async e => {
+      e.preventDefault();
+      if (!confirm(`Normalize ${other.length} record(s) to "approved"?`)) return;
+      const fixes = {};
+      other.forEach(([rid]) => { fixes[`${rid}/status`] = "approved"; });
+      try {
+        await _tRegsRef(tid).update(fixes);
+        showToast(`${other.length} records normalized ✓`);
+        _renderRegistrantsTab(tid, _tournaments[tid], body);
+      } catch(err) {
+        showToast("Failed: " + err.message, "error");
+      }
+    });
     document.getElementById("trn-import-csv-btn")?.addEventListener("click", () => {
       document.getElementById("trn-csv-import-input")?.click();
     });
@@ -6157,7 +6176,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
         const rid = entry.rid || _genId();
         delete entry.rid;
-        if (!entry.status)      entry.status      = "pending";
+        if (!entry.status) entry.status = "pending";
+        else entry.status = entry.status.toLowerCase().trim(); // normalize "Approved" → "approved" etc.
         if (!entry.submittedAt) entry.submittedAt  = Date.now();
         entry.importedAt = Date.now();
 
