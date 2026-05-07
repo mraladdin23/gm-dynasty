@@ -453,7 +453,7 @@ const DLRTournament = (() => {
           </div>
           ${meta.tagline ? `<div class="trn-row-desc">${_esc(meta.tagline)}</div>` : ""}
         </div>
-        <div class="trn-row-right">
+        <div class="trn-row-right" data-meta="🏟 ${leagueCount}  👥 ${regCount}">
           <span class="trn-status-badge trn-status-${status}">
             ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
           </span>

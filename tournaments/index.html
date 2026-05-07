@@ -109,10 +109,57 @@
       flex-shrink: 0;
     }
 
+    @media (max-width: 700px) {
+      /* ── Tournament list rows: 3 stacked sections ──────── */
+      .trn-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 5px;
+        padding: 10px var(--space-3);
+      }
+      .trn-row-main        { width: 100%; }
+      .trn-row-top         { grid-template-columns: 1fr auto; margin-bottom: 3px; }
+      .trn-row-inline-meta { display: none; }
+      .trn-row-desc {
+        -webkit-line-clamp: 2;
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        font-size: .79rem;
+        margin-bottom: 4px;
+      }
+      .trn-row-right {
+        width: 100%;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 1px solid var(--color-border);
+        padding-top: 7px;
+        margin-top: 2px;
+      }
+      .trn-row-right::before {
+        content: attr(data-meta);
+        font-size: .72rem;
+        color: var(--color-text-dim);
+        white-space: nowrap;
+        flex: 1;
+      }
+      .trn-row-actions { width: auto; flex-shrink: 0; }
+      .trn-filter-row  { flex-wrap: wrap; gap: 4px; }
+      .trn-filter-select { flex: 1 1 130px; font-size: .76rem; }
+    }
+
     @media (max-width: 500px) {
-      .pub-nav { padding: var(--space-3); }
+      .pub-nav  { padding: var(--space-3); }
       .pub-main { padding: var(--space-4) var(--space-3) 120px; }
       .pub-signup-banner { padding: var(--space-3); }
+      /* Tighten tournament detail on very small screens */
+      .trn-detail-container { padding: var(--space-2) var(--space-3); font-size: .86rem; }
+      .trn-section-card     { padding: var(--space-2) var(--space-3); }
+      .trn-info-name        { font-size: 1.1rem; }
+      .trn-info-tagline     { font-size: .82rem; }
+      .trn-tab-select       { font-size: .82rem; }
     }
   </style>
 </head>
@@ -334,7 +381,7 @@
             </div>
             ${t.tagline ? `<div class="trn-row-desc">${esc(t.tagline)}</div>` : ""}
           </div>
-          <div class="trn-row-right">
+          <div class="trn-row-right" data-meta="🏟 ${t.leagueCount || 0}  👥 ${!isDraft ? (t.registrationCount || 0) : ''}">
             ${statusBadge}
             <div class="trn-row-actions">
               <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">
