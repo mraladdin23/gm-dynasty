@@ -335,6 +335,14 @@
   gap: 6px;
 }
 
+/* Lock button widths so rows with Manage+View and rows with only View stay the same width */
+.trn-row-actions .btn-primary,
+.trn-row-actions .btn-secondary {
+  min-width: 66px;
+  text-align: center;
+  justify-content: center;
+}
+
 /* ── Tournament type badges ──────────────────────────────── */
 .trn-type-badge {
   display: inline-flex;
