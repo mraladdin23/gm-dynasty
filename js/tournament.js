@@ -4565,15 +4565,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byYahooUsername   = {};
 
       for (const [username, u] of Object.entries(users)) {
-        // Sleeper: try all known field names stored under platforms.sleeper
+        // Sleeper: confirmed path is platforms/sleeper/sleeperUsername
         const sleeper = u?.platforms?.sleeper;
-        const s = (sleeper?.username || sleeper?.sleeperUsername || sleeper?.displayName || "").toLowerCase();
-        // MFL: stored email
+        const s = (sleeper?.sleeperUsername || "").toLowerCase();
+        // MFL: confirmed path is platforms/mfl/mflEmail
         const mfl = u?.platforms?.mfl;
-        const m = (mfl?.mflEmail || mfl?.email || "").toLowerCase();
-        // Yahoo: stored username/nickname
+        const m = (mfl?.mflEmail || "").toLowerCase();
+        // Yahoo: try known field names
         const yahoo = u?.platforms?.yahoo;
-        const y = (yahoo?.username || yahoo?.yahooUsername || yahoo?.nickname || "").toLowerCase();
+        const y = (yahoo?.username || yahoo?.yahooUsername || "").toLowerCase();
 
         if (s) bySleeperUsername[s] = username;
         if (m) byMflEmail[m]        = username;
@@ -4581,7 +4581,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
 
       console.log("[DLRMatch] User index — Sleeper:", Object.keys(bySleeperUsername).length,
-        "| MFL:", Object.keys(byMflEmail).length, "| Yahoo:", Object.keys(byYahooUsername).length);
+        "| MFL:", Object.keys(byMflEmail).length, "| Yahoo:", Object.keys(byYahooUsername).length,
+        "| Sample Sleeper keys:", Object.keys(bySleeperUsername).slice(0, 3));
 
       const matchUpdates = {};
       let alreadyLinked = 0;
@@ -4610,23 +4611,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const newMatches = Object.keys(matchUpdates).length / 2;
       if (newMatches > 0) {
         await _tParticipantsRef(tid).update(matchUpdates);
-        showToast(`${newMatches} participant${newMatches !== 1 ? "s" : ""} matched to DLR accounts ✓`);
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
-        const body = document.getElementById("trn-tab-body");
-        if (body && _activeAdminTab === "participants") _renderParticipantsTab(tid, _tournaments[tid], body);
-      } else {
-        const total = Object.keys(participantsMap).length;
-        showToast(
-          alreadyLinked === total
-            ? `All ${total} participants already linked ✓`
-            : `Sync complete — no new DLR matches found (${alreadyLinked}/${total} already linked)`,
-          "info"
-        );
       }
+      return { newMatches, alreadyLinked, total: Object.keys(participantsMap).length };
     } catch(err) {
       console.error("[DLRMatch] error:", err);
       showToast("DLR match failed: " + err.message, "error");
+      return { newMatches: 0, alreadyLinked: 0, total: 0 };
     }
   }
 
@@ -4834,33 +4824,41 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
 
       if (!Object.keys(updates).length) {
-        // Nothing new to write, but still run DLR match on existing participants
-        showToast("Participants already up to date — checking DLR links…");
-        const allParticipantsForMatch = existingParticipants;
-        await _matchParticipantsToDLR(tid, allParticipantsForMatch);
-        // Reload and re-render so DLR-linked badges update
-        const snap2 = await _tRef(tid).once("value");
-        _tournaments[tid] = snap2.val();
-        const body2 = document.getElementById("trn-tab-body");
-        if (body2) _renderParticipantsTab(tid, _tournaments[tid], body2);
-        return;
+        // Nothing new to write — run DLR match on existing participants
+        const matchResult = await _matchParticipantsToDLR(tid, existingParticipants);
+        const { newMatches = 0, alreadyLinked = 0, total = 0 } = matchResult || {};
+        if (newMatches > 0) {
+          showToast(`${newMatches} participant${newMatches !== 1 ? "s" : ""} linked to DLR ✓`);
+        } else {
+          showToast(
+            alreadyLinked === total && total > 0
+              ? `All ${total} participants already up to date ✓`
+              : `Up to date — no new DLR matches found`,
+            "info"
+          );
+        }
+      } else {
+        // Write all updates
+        const participantsRef = _tParticipantsRef(tid);
+        await Promise.all(Object.entries(updates).map(([pid, p]) =>
+          participantsRef.child(pid).set(p)
+        ));
+
+        // Run DLR match against all (existing + newly synced)
+        const allForMatch = { ...existingParticipants, ...updates };
+        const matchResult = await _matchParticipantsToDLR(tid, allForMatch);
+        const { newMatches = 0 } = matchResult || {};
+
+        const parts = [];
+        if (newCount)     parts.push(`${newCount} new`);
+        if (updatedCount) parts.push(`${updatedCount} updated`);
+        if (newMatches)   parts.push(`${newMatches} DLR linked`);
+        showToast(`Synced: ${parts.length ? parts.join(", ") : "no changes"} ✓`);
       }
 
-      // Write all updates in one Firebase multi-path update
-      const participantsRef = _tParticipantsRef(tid);
-      await Promise.all(Object.entries(updates).map(([pid, p]) =>
-        participantsRef.child(pid).set(p)
-      ));
-
-      showToast(`Synced: ${newCount} new, ${updatedCount} updated — matching DLR accounts…`);
-
-      // Run DLR match against ALL participants (existing + newly synced)
-      const allParticipantsForMatch = { ...existingParticipants, ...updates };
-      await _matchParticipantsToDLR(tid, allParticipantsForMatch);
-
-      // Reload tournament and re-render participants tab
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      // Single authoritative reload + re-render
+      const freshSnap = await _tRef(tid).once("value");
+      _tournaments[tid] = freshSnap.val();
       const body = document.getElementById("trn-tab-body");
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
 
@@ -7302,7 +7300,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const teams = Object.entries(teamSet).sort((a, b) => a[1].localeCompare(b[1]));
     const teamLabel = ([id, name]) => teamLeagueMap[id] ? `${name} — ${teamLeagueMap[id]}` : name;
 
-    const leagueOpts = leagues.map(l => `<option value="${_esc(l.cacheKey)}">${_esc(l.leagueName)}</option>`).join("");
+    const leagueOpts = leagues.map(l => `<option value="${_esc(l.cacheKey)}" ${_draftLeague === l.cacheKey ? "selected" : ""}>${_esc(l.leagueName)}</option>`).join("");
 
     // Auto-select current user's team for card view
     if (_draftView === "card" && !_draftCardTeam) {
