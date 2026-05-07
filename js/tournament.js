@@ -5799,44 +5799,52 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   // ── Admin: Registrants tab ─────────────────────────────
   function _renderRegistrantsTab(tid, t, body) {
-    const regs    = t.registrations || {};
-    const regList = Object.entries(regs);
-    const pending  = regList.filter(([, r]) => r.status === "pending");
-    const approved = regList.filter(([, r]) => r.status === "approved");
-    const denied   = regList.filter(([, r]) => r.status === "denied");
+    // Always fetch registrations fresh from Firebase — the t object may be
+    // stale or incomplete after a large import (Firebase snapshot size limits).
+    body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading registrations…</div>`;
 
-    body.innerHTML = `
-      <div class="trn-reg-toolbar">
-        <span class="trn-reg-count">${regList.length} total · <span class="trn-pending-count">${pending.length} pending</span></span>
-        <div style="display:flex;gap:var(--space-2)">
-          <button class="btn-secondary btn-sm" id="trn-export-csv-btn">⬇ Export CSV</button>
-          <button class="btn-secondary btn-sm" id="trn-import-csv-btn">⬆ Import CSV</button>
-          <button class="btn-ghost btn-sm" id="trn-template-reg-btn" title="Download a blank CSV template matching this tournament's registration form">⬇ Template</button>
+    _tRegsRef(tid).once("value").then(snap => {
+      const regs    = snap.val() || {};
+      // Merge into cached t so other parts of the app see the latest data
+      _tournaments[tid] = { ..._tournaments[tid], registrations: regs };
+
+      const regList  = Object.entries(regs);
+      const pending  = regList.filter(([, r]) => r.status === "pending");
+      const approved = regList.filter(([, r]) => r.status === "approved");
+      const denied   = regList.filter(([, r]) => r.status === "denied");
+
+      body.innerHTML = `
+        <div class="trn-reg-toolbar">
+          <span class="trn-reg-count">${regList.length} total · <span class="trn-pending-count">${pending.length} pending</span></span>
+          <div style="display:flex;gap:var(--space-2)">
+            <button class="btn-secondary btn-sm" id="trn-export-csv-btn">⬇ Export CSV</button>
+            <button class="btn-secondary btn-sm" id="trn-import-csv-btn">⬆ Import CSV</button>
+            <button class="btn-ghost btn-sm" id="trn-template-reg-btn" title="Download a blank CSV template matching this tournament's registration form">⬇ Template</button>
+          </div>
         </div>
-      </div>
-      <input type="file" id="trn-csv-import-input" accept=".csv" style="display:none" />
+        <input type="file" id="trn-csv-import-input" accept=".csv" style="display:none" />
 
-      ${pending.length ? `
-        <div class="trn-reg-section-title">⏳ Pending Review (${pending.length})</div>
-        ${pending.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, true)).join("")}
-      ` : ""}
+        ${pending.length ? `
+          <div class="trn-reg-section-title">⏳ Pending Review (${pending.length})</div>
+          ${pending.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, true)).join("")}
+        ` : ""}
 
-      ${approved.length ? `
-        <div class="trn-reg-section-title">✅ Approved (${approved.length})</div>
-        ${approved.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, false)).join("")}
-      ` : ""}
+        ${approved.length ? `
+          <div class="trn-reg-section-title">✅ Approved (${approved.length})</div>
+          ${approved.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, false)).join("")}
+        ` : ""}
 
-      ${denied.length ? `
-        <div class="trn-reg-section-title">❌ Denied (${denied.length})</div>
-        ${denied.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, false)).join("")}
-      ` : ""}
+        ${denied.length ? `
+          <div class="trn-reg-section-title">❌ Denied (${denied.length})</div>
+          ${denied.map(([rid, r]) => _renderRegistrantRow(tid, rid, r, false)).join("")}
+        ` : ""}
 
-      ${!regList.length ? `
-        <div class="trn-empty">No registrations yet.</div>
-      ` : ""}
-    `;
+        ${!regList.length ? `
+          <div class="trn-empty">No registrations yet.</div>
+        ` : ""}
+      `;
 
-    document.getElementById("trn-export-csv-btn")?.addEventListener("click", () => _exportRegistrantsCSV(t));
+    document.getElementById("trn-export-csv-btn")?.addEventListener("click", () => _exportRegistrantsCSV(tid, t, regs));
     document.getElementById("trn-import-csv-btn")?.addEventListener("click", () => {
       document.getElementById("trn-csv-import-input")?.click();
     });
@@ -5928,6 +5936,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     body.querySelectorAll("[data-view-reg]").forEach(btn =>
       btn.addEventListener("click", () => _openRegistrantDetail(tid, btn.dataset.viewReg, regs[btn.dataset.viewReg]))
     );
+  }).catch(err => {
+    body.innerHTML = `<div class="trn-empty">Failed to load registrations: ${_esc(err.message)}</div>`;
+  });
   }
 
   function _renderRegistrantRow(tid, rid, r, showActions) {
@@ -6034,9 +6045,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         await _tRegsRef(tid).child(rid).remove();
         showToast("Registration deleted ✓");
         _closeModal();
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
-        _writePublicSummary(tid, _tournaments[tid]);
+        // _renderRegistrantsTab fetches fresh from _tRegsRef — no need for full snapshot
         const body = document.getElementById("trn-tab-body");
         if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
       } catch(err) {
@@ -6053,9 +6062,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         reviewedBy: _currentUsername
       });
       showToast(`Registration ${status} ✓`);
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
-      // Re-render registrants tab in place
+      // Re-render registrants tab — it will fetch fresh from _tRegsRef directly
       const body = document.getElementById("trn-tab-body");
       if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
     } catch(err) {
@@ -6064,8 +6071,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── CSV Export ─────────────────────────────────────────
-  function _exportRegistrantsCSV(t) {
-    const regs = Object.entries(t.registrations || {});
+  function _exportRegistrantsCSV(tid, t, preloadedRegs) {
+    const regs = Object.entries(preloadedRegs || _tournaments[tid]?.registrations || t.registrations || {});
     if (!regs.length) { showToast("No registrants to export", "info"); return; }
 
     // Build header from all keys
