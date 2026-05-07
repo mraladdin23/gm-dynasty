@@ -1208,9 +1208,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${isFinal
             ? `<div style="font-size:.78rem;color:var(--color-text-dim)">Highest combined score wins. Winner is tournament champion.</div>`
             : `<div style="font-size:.78rem;color:var(--color-text-dim)">Winner advances; loser is eliminated.</div>`}
-          ${_blendRowHTML(\`trn-h2h-r\${idx}\`, round.blend)}
+          ${_blendRowHTML(`trn-h2h-r${idx}`, round.blend)}
         </div>
-      </div>\`;
+      </div>`;
   }
 
   // Points-round row
@@ -5538,6 +5538,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>
 
       <div class="trn-form-actions">
+        <button class="btn-secondary" id="trn-preview-form-btn">👁 Preview</button>
         <button class="btn-primary" id="trn-save-form-btn">Save Registration Form</button>
       </div>
     `;
@@ -5591,6 +5592,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     body.querySelectorAll(".trn-form-field-row").forEach(row => _wireFormFieldRow(row, _refreshAddSel));
 
     // Save
+    document.getElementById("trn-preview-form-btn")?.addEventListener("click", () => _previewRegistrationForm(tid, t));
     document.getElementById("trn-save-form-btn")?.addEventListener("click", () => _saveRegistrationForm(tid));
 
     // Drag-and-drop
@@ -5599,20 +5601,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   // Render one unified field row — works for std, opt, and custom types.
   function _renderFormFieldRow(f, i) {
+    // Detect row category. Saved fieldOrder entries always have type:"std"|"opt"|"custom".
+    // Legacy saved questions might have type:"text"|"textarea"|"select" — treat as custom.
     const isStd    = f.type === "std";
     const isOpt    = f.type === "opt";
-    const isCustom = f.type === "custom";
-    const label    = isCustom ? "" : _fieldLabel(f.key || "");
+    const isCustom = !isStd && !isOpt; // everything else is a custom question
 
-    const qTypeVal = isCustom
-      ? (["text","textarea","select"].includes(f.type) ? f.type : (f.inputType || "text"))
-      : "text";
-    // Disambiguate: if f.type is "custom" the question type comes from f.inputType or defaults to text
-    const qType    = isCustom
-      ? (["textarea","select"].includes(f.inputType || f.question_type) ? (f.inputType || f.question_type) : (["textarea","select"].includes(f.type) ? f.type : "text"))
+    const label = (isStd || isOpt) ? _fieldLabel(f.key || "") : "";
+
+    // Resolve question input type — prefer questionType, fall back to type if it looks like a q-type
+    const qType = isCustom
+      ? (f.questionType || (["textarea","select","text"].includes(f.type) ? f.type : "text"))
       : "text";
     const isSelect = qType === "select";
-    const qOpts    = (f.options || []).join("\n");
 
     const typeTag = isStd ? `<span class="trn-form-field-tag trn-form-field-tag--std">Required</span>`
                   : isOpt ? `<span class="trn-form-field-tag trn-form-field-tag--opt">Optional</span>`
@@ -5623,6 +5624,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       : `<button class="btn-ghost btn-sm trn-form-field-del" type="button" title="Remove from form" style="padding:2px 6px;font-size:.75rem">✕</button>`;
 
     if (isCustom) {
+      const savedOpts = f.options || [];
+      const optRows = savedOpts.length
+        ? savedOpts.map(o => _optRowHTML(o)).join("")
+        : _optRowHTML("");
+
       return `
         <div class="trn-form-field-row trn-form-field-row--custom"
              data-ftype="custom" data-fkey="" data-fidx="${i}" draggable="true">
@@ -5641,7 +5647,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               ${delBtn}
             </div>
             <div class="trn-cq-options-wrap" ${isSelect ? "" : 'style="display:none"'}>
-              <textarea class="trn-q-options" rows="2" placeholder="Option 1&#10;Option 2&#10;Option 3">${_esc(qOpts)}</textarea>
+              <div class="trn-cq-opt-list">${optRows}</div>
+              <button class="trn-cq-add-opt btn-secondary btn-xs" type="button" style="margin-top:4px">+ Add Option</button>
             </div>
           </div>
         </div>`;
@@ -5661,22 +5668,68 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>`;
   }
 
+  function _optRowHTML(value) {
+    return `<div class="trn-cq-opt-row">
+      <input type="text" class="trn-q-opt-input" value="${_esc(value)}" placeholder="Option text…" />
+      <button class="trn-cq-del-opt btn-ghost btn-xs" type="button" title="Remove option">✕</button>
+    </div>`;
+  }
+
   // Wire events on a single form field row (del, type-change for custom, drag handled separately).
   function _wireFormFieldRow(row, onDelete) {
     if (!row) return;
 
-    // Delete
+    // Delete row
     row.querySelector(".trn-form-field-del")?.addEventListener("click", () => {
       row.remove();
       if (onDelete) onDelete();
     });
 
-    // Custom question: type change shows/hides options
+    // Custom question: type change shows/hides options block
     const typeEl   = row.querySelector(".trn-q-type");
     const optsWrap = row.querySelector(".trn-cq-options-wrap");
     typeEl?.addEventListener("change", function() {
       if (optsWrap) optsWrap.style.display = this.value === "select" ? "" : "none";
     });
+
+    // Option rows: wire existing del buttons + add-option button
+    _wireOptRows(row);
+  }
+
+  function _wireOptRows(row) {
+    // Wire all existing delete-option buttons
+    row.querySelectorAll(".trn-cq-del-opt").forEach(btn => {
+      btn.removeEventListener("click", btn._delHandler);
+      btn._delHandler = () => {
+        const optRow = btn.closest(".trn-cq-opt-row");
+        const list   = optRow?.parentNode;
+        optRow?.remove();
+        // Always keep at least one option row
+        if (list && !list.querySelectorAll(".trn-cq-opt-row").length) {
+          const tmp = document.createElement("div");
+          tmp.innerHTML = _optRowHTML("");
+          list.appendChild(tmp.firstElementChild);
+          _wireOptRows(row);
+        }
+      };
+      btn.addEventListener("click", btn._delHandler);
+    });
+
+    // Wire add-option button
+    const addBtn = row.querySelector(".trn-cq-add-opt");
+    if (addBtn && !addBtn._wired) {
+      addBtn._wired = true;
+      addBtn.addEventListener("click", () => {
+        const list = row.querySelector(".trn-cq-opt-list");
+        if (!list) return;
+        const tmp = document.createElement("div");
+        tmp.innerHTML = _optRowHTML("");
+        const newRow = tmp.firstElementChild;
+        list.appendChild(newRow);
+        newRow.querySelector(".trn-q-opt-input")?.focus();
+        _wireOptRows(row);
+      });
+    }
   }
 
   // Native HTML5 drag-and-drop reordering for the field list.
@@ -5744,6 +5797,67 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     row.querySelector(".trn-q-text")?.focus();
   }
 
+  function _previewRegistrationForm(tid, t) {
+    // Collect the current (unsaved) state from the DOM
+    const rows = [...document.querySelectorAll("#trn-form-field-list .trn-form-field-row")];
+    const meta = t.meta || {};
+    let customIdx = 0;
+
+    const fieldsHTML = rows.map(row => {
+      const ftype = row.dataset.ftype;
+      if (ftype === "std" || ftype === "opt") {
+        const key = row.dataset.fkey;
+        if (!key) return "";
+        const isRequired = ftype === "std";
+        return `<div class="form-group">
+          <label>${_esc(_fieldLabel(key))}${isRequired ? ' <span class="required">*</span>' : ""}</label>
+          <input type="text" placeholder="${_esc(_fieldLabel(key))}" disabled style="opacity:.7" />
+        </div>`;
+      } else {
+        const qtext = row.querySelector(".trn-q-text")?.value.trim() || "(untitled question)";
+        const qtype = row.querySelector(".trn-q-type")?.value || "text";
+        const reqd  = row.querySelector(".trn-q-req-check")?.checked;
+        const opts  = [...row.querySelectorAll(".trn-q-opt-input")].map(el => el.value.trim()).filter(Boolean);
+        const i     = customIdx++;
+        return `<div class="form-group">
+          <label>${_esc(qtext)}${reqd ? ' <span class="required">*</span>' : ""}</label>
+          ${qtype === "textarea"
+            ? `<textarea rows="3" placeholder="Your answer…" disabled style="opacity:.7"></textarea>`
+            : qtype === "select" && opts.length
+            ? `<select disabled style="opacity:.7">
+                <option>— Select an option —</option>
+                ${opts.map(o => `<option>${_esc(o)}</option>`).join("")}
+               </select>`
+            : `<input type="text" placeholder="Your answer…" disabled style="opacity:.7" />`
+          }
+        </div>`;
+      }
+    }).join("");
+
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+    modal.style.zIndex = "800";
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width:560px;max-height:80vh;overflow-y:auto">
+        <div class="modal-header">
+          <h3>📋 Form Preview — ${_esc(meta.name || "Tournament")}</h3>
+          <button class="modal-close" id="trn-preview-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:.8rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
+            This is how the form will appear to registrants. Fields are disabled in preview mode.
+          </p>
+          ${fieldsHTML}
+          <div class="trn-form-actions" style="margin-top:var(--space-4)">
+            <button class="btn-primary" disabled style="opacity:.5">Submit Registration</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector("#trn-preview-close")?.addEventListener("click", () => modal.remove());
+    modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+  }
+
   async function _saveRegistrationForm(tid) {
     const regType = document.querySelector('input[name="trn-reg-type"]:checked')?.value || "open";
     const rows    = [...document.querySelectorAll("#trn-form-field-list .trn-form-field-row")];
@@ -5762,17 +5876,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         optFields.push(key);
       } else if (ftype === "custom") {
         const qtype   = row.querySelector(".trn-q-type")?.value || "text";
-        const rawOpts = row.querySelector(".trn-q-options")?.value || "";
         const options = qtype === "select"
-          ? rawOpts.split("\n").map(s => s.trim()).filter(Boolean)
+          ? [...row.querySelectorAll(".trn-q-opt-input")].map(el => el.value.trim()).filter(Boolean)
           : [];
         const q = {
-          question: row.querySelector(".trn-q-text")?.value.trim() || "",
-          type:     qtype,
-          required: row.querySelector(".trn-q-req-check")?.checked || false
+          question:     row.querySelector(".trn-q-text")?.value.trim() || "",
+          questionType: qtype,
+          required:     row.querySelector(".trn-q-req-check")?.checked || false
         };
         if (options.length) q.options = options;
         if (q.question) {
+          // Keep type:"custom" explicitly — never spread qtype into type
           fieldOrder.push({ type: "custom", ...q });
           customQuestions.push(q);
         }
@@ -13827,7 +13941,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           } else if (f.type === "custom") {
             const i   = customIdx++;
             const q   = f;
-            const qType = q.type && ["text","textarea","select"].includes(q.type) ? q.type : "text";
+            // questionType is the new field; fall back to type for legacy saved data
+            const qType = q.questionType || (["textarea","select"].includes(q.type) ? q.type : "text");
             return `
               <div class="form-group">
                 <label>${_esc(q.question || "")}${q.required ? ' <span class="required">*</span>' : ""}</label>

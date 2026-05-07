@@ -4233,23 +4233,61 @@
   color: var(--color-text-dim);
 }
 
-/* Options textarea — inside custom rows only */
-.trn-form-field-row .trn-cq-options-wrap {
-  width: 100%;
-}
-.trn-form-field-row .trn-cq-options-wrap textarea {
-  width: 100%;
-  min-height: 56px;
-  font-size: .78rem;
+/* Inputs inside custom rows — match site font and size exactly */
+.trn-form-field-row--custom input,
+.trn-form-field-row--custom select,
+.trn-form-field-row--custom textarea {
   font-family: var(--font-body);
-  padding: 4px 8px;
+  font-size: .82rem;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
-  resize: vertical;
   outline: none;
   box-sizing: border-box;
+}
+.trn-form-field-row--custom input:focus,
+.trn-form-field-row--custom select:focus,
+.trn-form-field-row--custom textarea:focus {
+  border-color: var(--color-accent, #6366f1);
+}
+
+/* Options section */
+.trn-form-field-row .trn-cq-options-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+/* One option row */
+.trn-cq-opt-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.trn-cq-opt-row .trn-q-opt-input {
+  flex: 1;
+  padding: 3px 8px;
+  height: 27px;
+}
+
+.trn-cq-del-opt {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: .72rem;
+  line-height: 1;
+  color: var(--color-text-dim);
+}
+.trn-cq-del-opt:hover { color: var(--color-text); }
+
+.trn-cq-add-opt {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: .75rem;
+  padding: 2px 8px;
 }
 
 /* Label for std/opt rows */
