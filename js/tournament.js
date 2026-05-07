@@ -4690,12 +4690,14 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 const u = userMap[r.owner_id];
                 if (!u) return;
                 rawTeams.push({
-                  platform:          "sleeper",
-                  sleeperUsername:   (u.username || "").toLowerCase() || null,
+                  platform:           "sleeper",
+                  dedupKey:           u.user_id,                                       // always unique
+                  sleeperUserId:      u.user_id      || null,
+                  sleeperUsername:    u.username     ? u.username.toLowerCase() : null, // null if not set
                   sleeperDisplayName: u.display_name || u.username || null,
-                  teamName:          (u.metadata?.team_name || u.display_name || u.username || "").trim() || null,
-                  mflEmail:          null,
-                  yahooUsername:     null,
+                  teamName:           (u.metadata?.team_name || u.display_name || u.username || "").trim() || null,
+                  mflEmail:           null,
+                  yahooUsername:      null,
                 });
               });
 
@@ -4709,6 +4711,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 if (!f) return;
                 rawTeams.push({
                   platform:        "mfl",
+                  dedupKey:        f.email ? f.email.toLowerCase() : (f.id || f.name || ""),
+                  sleeperUserId:   null,
                   sleeperUsername: null,
                   teamName:        f.name || f.id || null,
                   mflEmail:        f.email ? f.email.toLowerCase() : null,
@@ -4752,30 +4756,31 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const existingSnap = await _tParticipantsRef(tid).once("value");
       const existingParticipants = existingSnap.val() || {};
 
-      // Build lookup maps from existing participants — all three platform keys
-      const bySleeperUser = {};
-      const byMflEmail    = {};
-      const byYahooUser   = {};
+      // Build lookup maps from existing participants — all three platform keys + sleeperUserId
+      const bySleeperUser   = {};
+      const bySleeperUserId = {};
+      const byMflEmail      = {};
+      const byYahooUser     = {};
       Object.entries(existingParticipants).forEach(([pid, p]) => {
-        if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
-        if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]           = pid;
-        if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]      = pid;
+        if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()]  = pid;
+        if (p.sleeperUserId)   bySleeperUserId[p.sleeperUserId]                = pid;
+        if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]            = pid;
+        if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]       = pid;
       });
 
-      // Deduplicate raw teams (across multiple leagues) by platform identity key
-      // Skip any team whose key already exists in the existing participant lookup
+      // Deduplicate raw teams across leagues using dedupKey (user_id for Sleeper, email/id for MFL)
       const seen = new Set();
       const dedupedTeams = rawTeams.filter(tm => {
-        const key = tm.sleeperUsername || tm.mflEmail || tm.yahooUsername;
+        const key = tm.dedupKey || tm.sleeperUsername || tm.mflEmail || tm.yahooUsername;
         if (!key) return false;
-        // If already in existing participants, still include so we can patch missing fields
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
 
       console.log(`[AutoSync] ${Object.keys(existingParticipants).length} existing participants in Firebase`);
-      console.log(`[AutoSync] ${dedupedTeams.length} unique teams after dedup`);
+      console.log(`[AutoSync] ${dedupedTeams.length} unique teams after dedup (from ${rawTeams.length} raw)`);
+      console.log(`[AutoSync] Sample dedupKeys:`, dedupedTeams.slice(0,3).map(t => t.dedupKey || t.sleeperUsername));
 
       // Build registration lookup by platform username for cross-referencing
       const registrations = t.registrations || {};
@@ -4796,12 +4801,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const meKey = tm.mflEmail?.toLowerCase();
         const yuKey = tm.yahooUsername?.toLowerCase();
 
-        // Find existing participant — check each platform key independently
-        // (chained ternary would short-circuit on undefined, missing cross-platform fallback)
+        // Find existing participant — check all identity keys independently
         let pid = null;
-        if (suKey) pid = bySleeperUser[suKey] || null;
-        if (!pid && meKey) pid = byMflEmail[meKey] || null;
-        if (!pid && yuKey) pid = byYahooUser[yuKey] || null;
+        if (tm.sleeperUserId)  pid = bySleeperUserId[tm.sleeperUserId] || null;
+        if (!pid && suKey)     pid = bySleeperUser[suKey]   || null;
+        if (!pid && meKey)     pid = byMflEmail[meKey]      || null;
+        if (!pid && yuKey)     pid = byYahooUser[yuKey]     || null;
 
         // Find matching registration for extra data
         const reg = (suKey && regBySleeperUser[suKey])
@@ -4813,6 +4818,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           // Update — only fill missing fields
           const existing = existingParticipants[pid];
           const patch = {};
+          if (!existing.sleeperUserId   && tm.sleeperUserId)   patch.sleeperUserId   = tm.sleeperUserId;
           if (!existing.sleeperUsername && tm.sleeperUsername) patch.sleeperUsername = tm.sleeperUsername;
           if (!existing.mflEmail        && tm.mflEmail)        patch.mflEmail        = tm.mflEmail;
           if (!existing.yahooUsername   && tm.yahooUsername)   patch.yahooUsername   = tm.yahooUsername;
@@ -4835,6 +4841,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             displayName:     reg?.displayName    || tm.sleeperDisplayName || tm.teamName || null,
             teamName:        tm.teamName         || null,
             email:           reg?.email          || tm.mflEmail           || null,
+            sleeperUserId:   tm.sleeperUserId    || null,
             sleeperUsername: tm.sleeperUsername  || null,
             mflEmail:        tm.mflEmail         || null,
             yahooUsername:   tm.yahooUsername    || null,
@@ -4848,6 +4855,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           updates[pid] = newP;
           newCount++;
           // Register for lookups so later dedup entries in same batch don't duplicate
+          if (tm.sleeperUserId)  bySleeperUserId[tm.sleeperUserId] = pid;
           if (suKey) bySleeperUser[suKey] = pid;
           if (meKey) byMflEmail[meKey]    = pid;
           if (yuKey) byYahooUser[yuKey]   = pid;
