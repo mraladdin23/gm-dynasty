@@ -283,7 +283,7 @@
 
 .trn-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;  /* let both sides grow to full row height */
   gap: var(--space-3);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -298,7 +298,17 @@
 .trn-row-main {
   flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
+  /* no overflow:hidden here — children handle their own text overflow */
+}
+
+/* Right section: align its content to center vertically */
+.trn-row-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  width: 260px;
+  justify-content: flex-end;
 }
 
 /* Line 1: tournament name */
@@ -335,16 +345,6 @@
 
 .trn-row-stat  { font-size: .74rem; color: var(--color-text-dim); white-space: nowrap; }
 .trn-row-admin { font-size: .72rem; color: var(--color-text-dim); }
-
-/* Right section: status + buttons — fixed width so left always aligns */
-.trn-row-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
-  width: 260px;
-  justify-content: flex-end;
-}
 
 .trn-row-actions {
   display: flex;
