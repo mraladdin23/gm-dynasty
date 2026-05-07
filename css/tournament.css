@@ -140,20 +140,69 @@
 
 /* ── Mobile: list rows stack ─────────────────────────────── */
 @media (max-width: 700px) {
+  /* ── Tournament list rows: stack into 3 sections ──────── */
   .trn-row {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    padding: 7px var(--space-3);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+    padding: 10px var(--space-3);
   }
-  .trn-row-main        { flex: 1 1 100%; }
-  .trn-row-top         { grid-template-columns: 1fr 110px; } /* drop meta col on mobile */
-  .trn-row-inline-meta { display: none; }
-  .trn-row-right       { width: 100%; justify-content: space-between; }
-  .trn-filter-row      { flex-wrap: wrap; gap: var(--space-1); }
-  .trn-filter-select   { flex: 1 1 120px; font-size: .76rem; }
-  .trn-header-actions  { flex-wrap: wrap; }
-  .trn-guide-tabs      { gap: var(--space-1); }
-  .trn-guide-tab       { min-width: 60px; font-size: .72rem; padding: var(--space-1) var(--space-2); }
+
+  /* Section 1: name + type badge + inline-meta all on one line */
+  .trn-row-main        { width: 100%; }
+  .trn-row-top {
+    grid-template-columns: 1fr auto;  /* name | badge, drop meta col */
+    margin-bottom: 3px;
+  }
+  .trn-row-inline-meta { display: none; } /* shown in row-right instead */
+
+  /* Section 2: description — full width, allow 2 lines */
+  .trn-row-desc {
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: .79rem;
+    color: var(--color-text-dim);
+    margin-bottom: 4px;
+  }
+
+  /* Section 3: stats + status + buttons all on one line */
+  .trn-row-right {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-direction: row;
+    border-top: 1px solid var(--color-border);
+    padding-top: 7px;
+    margin-top: 2px;
+  }
+
+  /* Show counts inline in the right bar on mobile */
+  .trn-row-right::before {
+    content: attr(data-meta);
+    font-size: .72rem;
+    color: var(--color-text-dim);
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .trn-row-actions {
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  /* ── Filters ─────────────────────────────────────────── */
+  .trn-filter-row     { flex-wrap: wrap; gap: var(--space-1); }
+  .trn-filter-select  { flex: 1 1 120px; font-size: .76rem; }
+  .trn-header-actions { flex-wrap: wrap; }
+
+  /* ── Guide tabs ──────────────────────────────────────── */
+  .trn-guide-tabs { gap: var(--space-1); }
+  .trn-guide-tab  { min-width: 58px; font-size: .70rem; padding: 4px 6px; }
 }
 
 .trn-empty-inline {
@@ -1049,6 +1098,7 @@
    the scroll container. Override so the tournament view can scroll
    exactly like #view-hallway does (locker.css line 4519). ── */
 @media (max-width: 640px) {
+  /* ── Scroll/container fixes ──────────────────────────── */
   #view-tournament.active {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
@@ -1057,50 +1107,131 @@
 }
 
 @media (max-width: 640px) {
-  /* The app-view is the scroll container on mobile (locker.css sets
-     overflow-y:auto + height:calc(100vh-48px)). Do NOT set overflow
-     on child containers — it creates a nested scroll context that
-     clips content and breaks scrolling. Just constrain width. */
+  /* ── Container padding ───────────────────────────────── */
   .trn-container,
   .trn-detail-container {
-    padding: var(--space-3);
+    padding: var(--space-2) var(--space-3);
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
-    /* NO overflow-x: hidden here — causes WebKit scroll clipping */
   }
 
+  /* ── Overview grid ───────────────────────────────────── */
   .trn-overview-grid { grid-template-columns: repeat(2, 1fr); }
 
-  .trn-cards-grid {
-    grid-template-columns: 1fr;
-    width: 100%;
-  }
-
-  .trn-card {
-    min-width: 0;
-    box-sizing: border-box;
-    width: 100%;
-  }
-
+  /* ── Legacy card grid (keep for any remaining uses) ──── */
+  .trn-cards-grid { grid-template-columns: 1fr; width: 100%; }
+  .trn-card { min-width: 0; box-sizing: border-box; width: 100%; }
   .trn-card-header { flex-wrap: wrap; }
 
+  /* ── Tab bar → select on mobile ─────────────────────── */
   .trn-detail-title-row { flex-direction: column; gap: var(--space-2); }
-
-  /* Hide scrolling tab bar on mobile — show select instead */
   .trn-tabs       { display: none !important; }
   .trn-tab-select { display: block; }
 
-  .trn-reg-row { flex-direction: column; align-items: flex-start; }
-  .trn-reg-actions { width: 100%; justify-content: flex-end; }
+  /* ── Section cards — tighter, consistent font ────────── */
+  .trn-section-card {
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    border-radius: var(--radius-md);
+  }
+  .trn-section-card-title {
+    font-size: .72rem;
+    margin-bottom: var(--space-2);
+  }
+  .trn-section-help { font-size: .75rem; }
 
+  /* ── Registrants rows ────────────────────────────────── */
+  .trn-reg-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+  .trn-reg-toolbar > div {
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  .trn-reg-toolbar .btn-primary,
+  .trn-reg-toolbar .btn-secondary,
+  .trn-reg-toolbar .btn-ghost {
+    flex: 1 1 auto;
+    font-size: .75rem;
+    padding: 5px 8px;
+  }
+  .trn-reg-row {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: var(--space-2) var(--space-2);
+    gap: var(--space-1);
+  }
+  .trn-reg-main { width: 100%; }
+  .trn-reg-name { font-size: .84rem; }
+  .trn-reg-meta { font-size: .72rem; }
+  .trn-reg-actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: var(--space-1);
+  }
+  .trn-reg-actions .btn-primary,
+  .trn-reg-actions .btn-secondary,
+  .trn-reg-actions .btn-ghost {
+    font-size: .74rem;
+    padding: 4px 8px;
+  }
+
+  /* ── Participants rows (share .trn-reg-row) ──────────── */
+  .trn-participant-row .trn-reg-meta {
+    white-space: normal;   /* allow wrapping for long usernames */
+    overflow: visible;
+  }
+
+  /* ── Role rows ───────────────────────────────────────── */
+  .trn-role-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-2);
+  }
+  .trn-role-right { width: 100%; justify-content: flex-end; }
+  .trn-role-name  { font-size: .82rem; }
+  .trn-role-scope { font-size: .70rem; }
+
+  /* ── League rows ─────────────────────────────────────── */
   .trn-league-row { flex-direction: column; align-items: flex-start; }
   .trn-league-row-actions { width: 100%; justify-content: flex-end; }
 
-  .trn-role-row { flex-direction: column; align-items: flex-start; }
+  /* ── Registration form builder ───────────────────────── */
+  .trn-form-field-row {
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding: var(--space-2);
+  }
+  .trn-form-field-row .trn-q-type { width: 100%; }
+  .trn-form-field-label { font-size: .78rem; }
+  .trn-form-field-tag   { font-size: .65rem; }
 
+  /* ── Custom question rows ────────────────────────────── */
   .trn-custom-question-row { flex-direction: column; align-items: stretch; }
   .trn-q-type { width: 100%; }
+
+  /* ── Detail topbar ───────────────────────────────────── */
+  .trn-detail-topbar { flex-wrap: wrap; gap: var(--space-2); }
+  .trn-detail-title  { font-size: 1rem; }
+
+  /* ── Config section (playoff) ────────────────────────── */
+  .trn-pc-section-body { padding: var(--space-2); }
+  .trn-playoff-year-bar { flex-wrap: wrap; gap: var(--space-1); }
+
+  /* ── Global font consistency for tournament pages ─────── */
+  .trn-container      { font-size: .88rem; }
+  .trn-detail-container { font-size: .88rem; }
+
+  /* Buttons consistent across all section pages */
+  .trn-container    .btn-sm,
+  .trn-detail-container .btn-sm {
+    font-size: .75rem;
+    padding: 4px 10px;
+  }
 }
 
 /* ── Gender badges ───────────────────────────────────────── */
