@@ -442,18 +442,18 @@ const DLRTournament = (() => {
     return `
       <div class="trn-row" data-tid="${_esc(tid)}">
         <div class="trn-row-main">
-          <div class="trn-row-top">
+          <div class="trn-row-line1">
             <span class="trn-row-name">${_esc(meta.name || "Untitled Tournament")}</span>
-            <span class="trn-type-badge ${typeBadge.cls}">${typeBadge.icon} ${typeBadge.label}</span>
-            <span class="trn-row-inline-meta">
-              <span class="trn-row-stat">🏟 ${leagueCount}</span>
-              <span class="trn-row-stat">👥 ${regCount}</span>
-              ${adminBy}
-            </span>
           </div>
-          ${meta.tagline ? `<div class="trn-row-desc">${_esc(meta.tagline)}</div>` : ""}
+          ${meta.tagline ? `<div class="trn-row-line2">${_esc(meta.tagline)}</div>` : ""}
+          <div class="trn-row-line3">
+            <span class="trn-type-badge ${typeBadge.cls}">${typeBadge.icon} ${typeBadge.label}</span>
+            <span class="trn-row-stat">🏟 ${leagueCount}</span>
+            <span class="trn-row-stat">👥 ${regCount}</span>
+            ${adminBy}
+          </div>
         </div>
-        <div class="trn-row-right" data-meta="🏟 ${leagueCount}  👥 ${regCount}">
+        <div class="trn-row-right">
           <span class="trn-status-badge trn-status-${status}">
             ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
           </span>
