@@ -4585,29 +4585,35 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     try {
       const usersSnap = await GMD.child("users").once("value");
       const users = usersSnap.val() || {};
-      const bySleeperUsername = {};
+      const bySleeperUsername = {}; // sleeperUsername -> dlrUsername
+      const bySleeperDisplay  = {}; // displayName (lowercased) -> dlrUsername
       const byMflEmail        = {};
       const byYahooUsername   = {};
 
       for (const [username, u] of Object.entries(users)) {
-        // Sleeper: confirmed path is platforms/sleeper/sleeperUsername
         const sleeper = u?.platforms?.sleeper;
-        const s = (sleeper?.sleeperUsername || "").toLowerCase();
-        // MFL: confirmed path is platforms/mfl/mflEmail
-        const mfl = u?.platforms?.mfl;
-        const m = (mfl?.mflEmail || "").toLowerCase();
-        // Yahoo: try known field names
-        const yahoo = u?.platforms?.yahoo;
-        const y = (yahoo?.username || yahoo?.yahooUsername || "").toLowerCase();
+        // Index all three field names DLR might store under platforms.sleeper
+        const sUsername = (sleeper?.sleeperUsername || "").toLowerCase();
+        const sUsername2 = (sleeper?.username       || "").toLowerCase(); // alternate field name
+        const sDisplay   = (sleeper?.displayName    || "").toLowerCase(); // confirmed path for many users
 
-        if (s) bySleeperUsername[s] = username;
-        if (m) byMflEmail[m]        = username;
-        if (y) byYahooUsername[y]   = username;
+        if (sUsername)  bySleeperUsername[sUsername]  = username;
+        if (sUsername2 && !bySleeperUsername[sUsername2]) bySleeperUsername[sUsername2] = username;
+        if (sDisplay)   bySleeperDisplay[sDisplay]   = username;
+
+        const mfl  = u?.platforms?.mfl;
+        const m    = (mfl?.mflEmail || "").toLowerCase();
+        const yahoo = u?.platforms?.yahoo;
+        const y    = (yahoo?.username || yahoo?.yahooUsername || "").toLowerCase();
+
+        if (m) byMflEmail[m]       = username;
+        if (y) byYahooUsername[y]  = username;
       }
 
-      console.log("[DLRMatch] User index — Sleeper:", Object.keys(bySleeperUsername).length,
-        "| MFL:", Object.keys(byMflEmail).length, "| Yahoo:", Object.keys(byYahooUsername).length,
-        "| Sample Sleeper keys:", Object.keys(bySleeperUsername).slice(0, 3));
+      console.log("[DLRMatch] Index — Sleeper username:", Object.keys(bySleeperUsername).length,
+        "| Sleeper display:", Object.keys(bySleeperDisplay).length,
+        "| MFL:", Object.keys(byMflEmail).length,
+        "| Sample Sleeper display keys:", Object.keys(bySleeperDisplay).slice(0, 3));
 
       const matchUpdates = {};
       let alreadyLinked = 0;
@@ -4616,16 +4622,23 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         if (p.dlrLinked && p.dlrUsername) { alreadyLinked++; continue; }
 
         let matched = null;
-        const su = p.sleeperUsername?.toLowerCase();
-        const me = p.mflEmail?.toLowerCase();
-        const yu = p.yahooUsername?.toLowerCase();
+        const su   = p.sleeperUsername?.toLowerCase();
+        const disp = p.sleeperDisplayName?.toLowerCase() || p.displayName?.toLowerCase();
+        const me   = p.mflEmail?.toLowerCase();
+        const yu   = p.yahooUsername?.toLowerCase();
 
-        if (su) matched = bySleeperUsername[su];
-        if (!matched && me) matched = byMflEmail[me];
-        if (!matched && yu) matched = byYahooUsername[yu];
+        // Sleeper: try username, then display name against both indexes
+        if (su)               matched = bySleeperUsername[su];
+        if (!matched && su)   matched = bySleeperDisplay[su];
+        if (!matched && disp) matched = bySleeperUsername[disp];
+        if (!matched && disp) matched = bySleeperDisplay[disp];
+        // MFL: email match
+        if (!matched && me)   matched = byMflEmail[me];
+        // Yahoo: username match
+        if (!matched && yu)   matched = byYahooUsername[yu];
 
         console.log("[DLRMatch] Participant:", p.displayName,
-          "| sleeper:", su, "| mfl:", me, "| yahoo:", yu, "→ matched:", matched);
+          "| su:", su, "| disp:", disp, "| mfl:", me, "| yahoo:", yu, "→ matched:", matched);
 
         if (matched) {
           matchUpdates[pid + "/dlrLinked"]   = true;
@@ -4691,9 +4704,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 if (!u) return;
                 rawTeams.push({
                   platform:           "sleeper",
-                  dedupKey:           u.user_id,                                       // always unique
+                  dedupKey:           u.user_id,
                   sleeperUserId:      u.user_id      || null,
-                  sleeperUsername:    u.username     ? u.username.toLowerCase() : null, // null if not set
+                  // Use username if set, otherwise fall back to display_name (lowercased).
+                  // DLR stores either platforms/sleeper/sleeperUsername or /displayName —
+                  // both are lowercased display_name variants when no formal username exists.
+                  sleeperUsername:    (u.username || u.display_name || "").toLowerCase() || null,
                   sleeperDisplayName: u.display_name || u.username || null,
                   teamName:           (u.metadata?.team_name || u.display_name || u.username || "").trim() || null,
                   mflEmail:           null,
@@ -4709,14 +4725,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               const frArr = lData?.league?.franchises?.franchise || [];
               (Array.isArray(frArr) ? frArr : [frArr]).forEach(f => {
                 if (!f) return;
+                const email = f.email ? f.email.toLowerCase() : null;
                 rawTeams.push({
-                  platform:        "mfl",
-                  dedupKey:        f.email ? f.email.toLowerCase() : (f.id || f.name || ""),
-                  sleeperUserId:   null,
-                  sleeperUsername: null,
-                  teamName:        f.name || f.id || null,
-                  mflEmail:        f.email ? f.email.toLowerCase() : null,
-                  yahooUsername:   null,
+                  platform:           "mfl",
+                  dedupKey:           email || f.id || f.name || "",
+                  sleeperUserId:      null,
+                  sleeperUsername:    null,
+                  sleeperDisplayName: null,
+                  // team name is the best human-readable identity for MFL
+                  displayName:        f.name || email || null,
+                  teamName:           f.name || f.id  || null,
+                  mflEmail:           email,
+                  yahooUsername:      null,
                 });
               });
 
@@ -4730,12 +4750,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 body: JSON.stringify({ access_token: yahooToken, league_key: leagueId })
               }).then(r => r.ok ? r.json() : null).catch(() => null);
               (r?.teams || []).forEach(tm => {
+                const nick = tm.managerNickname ? tm.managerNickname.toLowerCase() : null;
                 rawTeams.push({
-                  platform:        "yahoo",
-                  sleeperUsername: null,
-                  teamName:        tm.name || null,
-                  mflEmail:        null,
-                  yahooUsername:   tm.managerNickname ? tm.managerNickname.toLowerCase() : null,
+                  platform:           "yahoo",
+                  dedupKey:           nick || tm.teamKey || tm.name || "",
+                  sleeperUserId:      null,
+                  sleeperUsername:    null,
+                  sleeperDisplayName: null,
+                  // nickname is the best identity for Yahoo; fall back to team name
+                  displayName:        tm.managerNickname || tm.name || null,
+                  teamName:           tm.name || null,
+                  mflEmail:           null,
+                  yahooUsername:      nick,
                 });
               });
             }
@@ -4820,9 +4846,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           const patch = {};
           if (!existing.sleeperUserId   && tm.sleeperUserId)   patch.sleeperUserId   = tm.sleeperUserId;
           if (!existing.sleeperUsername && tm.sleeperUsername) patch.sleeperUsername = tm.sleeperUsername;
+          if (!existing.sleeperDisplayName && tm.sleeperDisplayName) patch.sleeperDisplayName = tm.sleeperDisplayName;
           if (!existing.mflEmail        && tm.mflEmail)        patch.mflEmail        = tm.mflEmail;
           if (!existing.yahooUsername   && tm.yahooUsername)   patch.yahooUsername   = tm.yahooUsername;
           if (!existing.teamName        && tm.teamName)        patch.teamName        = tm.teamName;
+          // Fill displayName from platform identity if still missing
+          const platformDisplay = tm.displayName || tm.sleeperDisplayName || tm.teamName;
+          if (!existing.displayName && platformDisplay) patch.displayName = platformDisplay;
           // Pull in registration data if not already on participant
           if (reg) {
             if (!existing.displayName    && reg.displayName)    patch.displayName    = reg.displayName;
@@ -4838,19 +4868,21 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           // Create new participant record
           pid = _genId();
           const newP = {
-            displayName:     reg?.displayName    || tm.sleeperDisplayName || tm.teamName || null,
-            teamName:        tm.teamName         || null,
-            email:           reg?.email          || tm.mflEmail           || null,
-            sleeperUserId:   tm.sleeperUserId    || null,
-            sleeperUsername: tm.sleeperUsername  || null,
-            mflEmail:        tm.mflEmail         || null,
-            yahooUsername:   tm.yahooUsername    || null,
-            gender:          reg?.gender         || null,
-            twitterHandle:   reg?.twitterHandle  || null,
-            years:           [],
-            dlrLinked:       false,
-            autoRegister:    false,
-            syncedAt:        Date.now(),
+            // Priority: registration form > platform display name > team name
+            displayName:        reg?.displayName    || tm.displayName || tm.sleeperDisplayName || tm.teamName || null,
+            teamName:           tm.teamName         || null,
+            email:              reg?.email          || tm.mflEmail    || null,
+            sleeperUserId:      tm.sleeperUserId    || null,
+            sleeperUsername:    tm.sleeperUsername  || null,
+            sleeperDisplayName: tm.sleeperDisplayName || null,
+            mflEmail:           tm.mflEmail         || null,
+            yahooUsername:      tm.yahooUsername    || null,
+            gender:             reg?.gender         || null,
+            twitterHandle:      reg?.twitterHandle  || null,
+            years:              [],
+            dlrLinked:          false,
+            autoRegister:       false,
+            syncedAt:           Date.now(),
           };
           updates[pid] = newP;
           newCount++;
