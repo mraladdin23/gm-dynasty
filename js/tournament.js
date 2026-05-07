@@ -192,7 +192,7 @@ const DLRTournament = (() => {
     const adminUsernames = [...new Set(allEntries.map(([, t]) => t.meta?.createdBy).filter(Boolean))].sort();
 
     // Gather all unique tournament types across all tournaments
-    const usedTypes = [...new Set(allEntries.map(([, t]) => t.playoff?.mode || "total_points"))];
+    const usedTypes = [...new Set(allEntries.map(([, t]) => _tMode(t)))];
     const typeOptions = ["all", ...usedTypes];
 
     container.innerHTML = `
@@ -203,8 +203,10 @@ const DLRTournament = (() => {
             <p class="trn-subtitle">Large-scale multi-platform competition</p>
           </div>
           <div class="trn-header-actions">
-            <button class="btn-secondary btn-sm" id="trn-guide-btn">📖 Tournament Guide</button>
-            <button class="btn-primary btn-sm" id="trn-create-btn">+ New Tournament</button>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+              <button class="btn-primary btn-sm" id="trn-create-btn">+ New Tournament</button>
+              <button class="trn-guide-link" id="trn-guide-btn">📖 Tournament Type Guide</button>
+            </div>
           </div>
         </div>
 
@@ -274,10 +276,7 @@ const DLRTournament = (() => {
     // Filter by type
     let entries = baseEntries;
     if (_landingTypeFilter !== "all") {
-      entries = entries.filter(([, t]) => {
-        const mode = t.playoff?.mode || "total_points";
-        return mode === _landingTypeFilter;
-      });
+      entries = entries.filter(([, t]) => _tMode(t) === _landingTypeFilter);
     }
 
     // Filter by admin/creator
@@ -389,30 +388,41 @@ const DLRTournament = (() => {
     total_points:  { icon: "🎯", label: "Total Points",  cls: "trn-type-total"   },
   };
 
+  // Derive the active playoff mode from a tournament object (handles year-keyed + legacy flat)
+  function _tMode(t) {
+    const po = t.playoffs || {};
+    // Prefer most recent year-keyed config
+    const years = Object.keys(po).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
+    if (years.length) return po[years[0]]?.mode || "total_points";
+    // Legacy flat node
+    if (po.mode) return po.mode;
+    return "total_points";
+  }
+
   function _renderTournamentRow(tid, t, isAdmin = false) {
     const meta        = t.meta || {};
     const status      = meta.status || "draft";
     const leagueCount = t.leagues ? Object.keys(t.leagues).length : 0;
     const regCount    = t.registrations ? Object.keys(t.registrations).length : 0;
-    const mode        = t.playoff?.mode || "total_points";
+    const mode        = _tMode(t);
     const typeBadge   = TYPE_BADGE[mode] || { icon: "🏆", label: mode, cls: "trn-type-total" };
     const adminBy     = meta.createdBy ? `<span class="trn-row-admin">by ${_esc(meta.createdBy)}</span>` : "";
 
     return `
       <div class="trn-row" data-tid="${_esc(tid)}">
         <div class="trn-row-main">
-          <div class="trn-row-name">${_esc(meta.name || "Untitled Tournament")}</div>
-          <div class="trn-row-desc">${meta.tagline ? _esc(meta.tagline) : "<span class='dim'>No description</span>"}</div>
-          <div class="trn-row-tags">
+          <div class="trn-row-top">
+            <span class="trn-row-name">${_esc(meta.name || "Untitled Tournament")}</span>
             <span class="trn-type-badge ${typeBadge.cls}">${typeBadge.icon} ${typeBadge.label}</span>
             ${adminBy}
           </div>
-        </div>
-        <div class="trn-row-meta">
-          <span class="trn-row-stat">🏟 ${leagueCount} league${leagueCount !== 1 ? "s" : ""}</span>
-          <span class="trn-row-stat">👥 ${regCount} registered</span>
+          ${meta.tagline ? `<div class="trn-row-desc">${_esc(meta.tagline)}</div>` : ""}
         </div>
         <div class="trn-row-right">
+          <div class="trn-row-meta">
+            <span class="trn-row-stat">🏟 ${leagueCount} lg</span>
+            <span class="trn-row-stat">👥 ${regCount}</span>
+          </div>
           <span class="trn-status-badge trn-status-${status}">
             ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
           </span>
@@ -601,23 +611,25 @@ const DLRTournament = (() => {
         <button class="modal-close" id="trn-guide-close">✕</button>
       </div>
       <div class="modal-body trn-guide-body">
-        <p class="trn-guide-intro">Choose the format that fits your tournament structure. Each type has a different playoff engine — you can change it in Section D of the tournament config before the season starts.</p>
-        ${GUIDE.map(g => `
-          <div class="trn-guide-card">
-            <div class="trn-guide-card-header">
-              <span class="trn-guide-icon">${g.icon}</span>
-              <div>
-                <div class="trn-guide-card-title" style="color:${g.color}">${g.label}</div>
-                <div class="trn-guide-card-summary">${g.summary}</div>
-              </div>
-            </div>
-            <div class="trn-guide-when">💡 ${g.when}</div>
-            <div class="trn-guide-steps-label">Setup steps:</div>
-            <ol class="trn-guide-steps">
-              ${g.steps.map(s => `<li>${s}</li>`).join("")}
-            </ol>
-          </div>
-        `).join("")}
+        <p class="trn-guide-intro">Choose the format that fits your tournament. Each type has a different playoff engine — you can change it in Section D before the season starts.</p>
+        <div class="trn-guide-tabs">
+          ${GUIDE.map((g, i) => `
+            <button class="trn-guide-tab ${i === 0 ? "trn-guide-tab--active" : ""}" data-guide-idx="${i}" style="--guide-color:${g.color}">
+              <span class="trn-guide-tab-icon">${g.icon}</span>
+              <span class="trn-guide-tab-label">${g.label}</span>
+            </button>`).join("")}
+        </div>
+        <div class="trn-guide-panels">
+          ${GUIDE.map((g, i) => `
+            <div class="trn-guide-panel ${i === 0 ? "" : "hidden"}" data-guide-panel="${i}">
+              <div class="trn-guide-summary">${g.summary}</div>
+              <div class="trn-guide-when">💡 ${g.when}</div>
+              <div class="trn-guide-steps-label">Setup steps:</div>
+              <ol class="trn-guide-steps">
+                ${g.steps.map(s => `<li>${s}</li>`).join("")}
+              </ol>
+            </div>`).join("")}
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn-primary" id="trn-guide-close2">Got it</button>
@@ -626,6 +638,15 @@ const DLRTournament = (() => {
 
     document.getElementById("trn-guide-close")?.addEventListener("click",  _closeModal);
     document.getElementById("trn-guide-close2")?.addEventListener("click", _closeModal);
+
+    document.querySelectorAll("[data-guide-idx]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-guide-idx]").forEach(b => b.classList.remove("trn-guide-tab--active"));
+        document.querySelectorAll("[data-guide-panel]").forEach(p => p.classList.add("hidden"));
+        btn.classList.add("trn-guide-tab--active");
+        document.querySelector(`[data-guide-panel="${btn.dataset.guideIdx}"]`)?.classList.remove("hidden");
+      });
+    });
   }
 
   // ── Tournament detail view ─────────────────────────────
@@ -1772,6 +1793,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               }).join("")}
         </div>
         <button class="btn-secondary btn-xs" id="trn-playoff-new-year" title="Start config for next season">+ Season</button>
+        <button class="trn-guide-link trn-guide-link--xs" id="trn-playoff-guide-btn" title="Tournament type guide">📖 Guide</button>
       </div>
       <div class="trn-playoff-active-year-note" style="margin-bottom:var(--space-2)">
         Editing: <strong id="trn-playoff-editing-year">${activeYear || (years[0] || currentNFLYear)}</strong>
@@ -2371,6 +2393,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         await _rerender(_activePoYear);
       });
     });
+
+    document.getElementById("trn-playoff-guide-btn")?.addEventListener("click", () => _openTournamentGuideModal());
 
     document.getElementById("trn-playoff-new-year")?.addEventListener("click", async () => {
       const years       = _playoffYears(_tournaments[tid] || t);
@@ -4246,6 +4270,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${autoReg.length} auto-register
         </span>
         <div style="display:flex;gap:var(--space-2)">
+          <button class="btn-primary btn-sm" id="trn-auto-sync-participants-btn" title="Pull usernames from all linked leagues and upsert into participant list">⚡ Sync from Leagues</button>
           <button class="btn-primary btn-sm" id="trn-import-participants-btn">Import CSV</button>
           <button class="btn-secondary btn-sm" id="trn-export-participants-btn">Export CSV</button>
           <button class="btn-ghost btn-sm" id="trn-template-participants-btn" title="Download a blank CSV template with the correct column names">⬇ Template</button>
@@ -4287,6 +4312,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>
     `;
 
+    document.getElementById("trn-auto-sync-participants-btn")?.addEventListener("click", () =>
+      _autoSyncParticipants(tid, t)
+    );
     document.getElementById("trn-import-participants-btn")?.addEventListener("click", () =>
       document.getElementById("trn-participants-csv-input")?.click()
     );
@@ -4574,6 +4602,230 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     } catch(err) {
       console.error("[Tournament] DLR match error:", err);
       showToast("Match failed: " + err.message, "error");
+    }
+  }
+
+  // ── Auto-sync participants from league roster data ────
+  // Reads every league batch in t.leagues, fetches rosters/users from the
+  // platform API, and upserts a participant record for each unique manager.
+  // Existing participants are matched by platform username/email — if found,
+  // only missing fields are filled in. If not found, a new record is created.
+  // Registrations are also cross-referenced: if a registration has a matching
+  // platform username, that data is pulled in to the participant record too.
+
+  async function _autoSyncParticipants(tid, t) {
+    const btn = document.getElementById("trn-auto-sync-participants-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Syncing…"; }
+
+    try {
+      const batches = t.leagues || {};
+      const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
+      const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
+
+      if (!realBatches.length) {
+        showToast("No league batches found — add leagues first", "info");
+        return;
+      }
+
+      // Collect raw team records from all leagues across all platforms
+      const rawTeams = []; // { platform, leagueId, teamName, sleeperUsername, mflEmail, yahooUsername, sleeperDisplayName }
+
+      for (const [, batch] of realBatches) {
+        const platform = (batch.platform || "sleeper").toLowerCase();
+        const year     = batch.year || new Date().getFullYear();
+
+        for (const [leagueId] of Object.entries(batch.leagues || {})) {
+          try {
+            if (platform === "sleeper") {
+              // Fetch users + rosters in parallel
+              const [rU, rR] = await Promise.all([
+                fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`).then(r => r.ok ? r.json() : []),
+                fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`).then(r => r.ok ? r.json() : [])
+              ]);
+              const usersArr  = Array.isArray(rU) ? rU : [];
+              const rostersArr = Array.isArray(rR) ? rR : [];
+              const userMap = {};
+              usersArr.forEach(u => { if (u.user_id) userMap[u.user_id] = u; });
+              rostersArr.forEach(r => {
+                const u = userMap[r.owner_id];
+                if (!u) return;
+                rawTeams.push({
+                  platform:          "sleeper",
+                  sleeperUsername:   (u.username || "").toLowerCase() || null,
+                  sleeperDisplayName: u.display_name || u.username || null,
+                  teamName:          (u.metadata?.team_name || u.display_name || u.username || "").trim() || null,
+                  mflEmail:          null,
+                  yahooUsername:     null,
+                });
+              });
+
+            } else if (platform === "mfl") {
+              // Use MFL franchise list to get emails/names
+              const url = `https://api.myfantasyleague.com/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
+              const lData = await fetch(url, { headers: { "User-Agent": "DynastyLockerRoom/1.0" } })
+                .then(r => r.ok ? r.json() : null).catch(() => null);
+              const frArr = lData?.league?.franchises?.franchise || [];
+              (Array.isArray(frArr) ? frArr : [frArr]).forEach(f => {
+                if (!f) return;
+                rawTeams.push({
+                  platform:        "mfl",
+                  sleeperUsername: null,
+                  teamName:        f.name || f.id || null,
+                  mflEmail:        f.email ? f.email.toLowerCase() : null,
+                  yahooUsername:   null,
+                });
+              });
+
+            } else if (platform === "yahoo") {
+              // Yahoo requires auth token — read from Firebase user tokens
+              const yahooToken = await _getYahooAccessToken().catch(() => null);
+              if (!yahooToken) continue;
+              const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/yahoo/leagueBundle", {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ access_token: yahooToken, league_key: leagueId })
+              }).then(r => r.ok ? r.json() : null).catch(() => null);
+              (r?.teams || []).forEach(tm => {
+                rawTeams.push({
+                  platform:        "yahoo",
+                  sleeperUsername: null,
+                  teamName:        tm.name || null,
+                  mflEmail:        null,
+                  yahooUsername:   tm.managerNickname ? tm.managerNickname.toLowerCase() : null,
+                });
+              });
+            }
+          } catch(e) {
+            console.warn(`[AutoSync] Failed league ${leagueId} (${platform}):`, e.message);
+          }
+        }
+      }
+
+      if (!rawTeams.length) {
+        showToast("No managers found in leagues", "info");
+        return;
+      }
+
+      // Deduplicate raw teams by platform identity key
+      const seen = new Set();
+      const dedupedTeams = rawTeams.filter(tm => {
+        const key = tm.sleeperUsername || tm.mflEmail || tm.yahooUsername || tm.teamName;
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // Build lookup maps from existing participants
+      const existingParticipants = t.participants || {};
+      const bySleeperUser  = {}; // sleeperUsername -> pid
+      const byMflEmail     = {}; // mflEmail -> pid
+      const byYahooUser    = {}; // yahooUsername -> pid
+      Object.entries(existingParticipants).forEach(([pid, p]) => {
+        if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
+        if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]           = pid;
+        if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]      = pid;
+      });
+
+      // Build registration lookup by platform username for cross-referencing
+      const registrations = t.registrations || {};
+      const regBySleeperUser = {};
+      const regByMflEmail    = {};
+      const regByYahooUser   = {};
+      Object.values(registrations).forEach(reg => {
+        if (reg.sleeperUsername) regBySleeperUser[reg.sleeperUsername.toLowerCase()] = reg;
+        if (reg.mflEmail)        regByMflEmail[reg.mflEmail.toLowerCase()]           = reg;
+        if (reg.yahooUsername)   regByYahooUser[reg.yahooUsername.toLowerCase()]      = reg;
+      });
+
+      const updates = {};
+      let newCount = 0, updatedCount = 0;
+
+      for (const tm of dedupedTeams) {
+        const suKey = tm.sleeperUsername?.toLowerCase();
+        const meKey = tm.mflEmail?.toLowerCase();
+        const yuKey = tm.yahooUsername?.toLowerCase();
+
+        // Find existing participant
+        let pid = suKey ? bySleeperUser[suKey]
+                : meKey ? byMflEmail[meKey]
+                : yuKey ? byYahooUser[yuKey]
+                : null;
+
+        // Find matching registration for extra data
+        const reg = (suKey && regBySleeperUser[suKey])
+                 || (meKey && regByMflEmail[meKey])
+                 || (yuKey && regByYahooUser[yuKey])
+                 || null;
+
+        if (pid) {
+          // Update — only fill missing fields
+          const existing = existingParticipants[pid];
+          const patch = {};
+          if (!existing.sleeperUsername && tm.sleeperUsername) patch.sleeperUsername = tm.sleeperUsername;
+          if (!existing.mflEmail        && tm.mflEmail)        patch.mflEmail        = tm.mflEmail;
+          if (!existing.yahooUsername   && tm.yahooUsername)   patch.yahooUsername   = tm.yahooUsername;
+          if (!existing.teamName        && tm.teamName)        patch.teamName        = tm.teamName;
+          // Pull in registration data if not already on participant
+          if (reg) {
+            if (!existing.displayName    && reg.displayName)    patch.displayName    = reg.displayName;
+            if (!existing.email          && reg.email)          patch.email          = reg.email;
+            if (!existing.gender         && reg.gender)         patch.gender         = reg.gender;
+            if (!existing.twitterHandle  && reg.twitterHandle)  patch.twitterHandle  = reg.twitterHandle;
+          }
+          if (Object.keys(patch).length) {
+            updates[pid] = { ...existing, ...patch };
+            updatedCount++;
+          }
+        } else {
+          // Create new participant record
+          pid = _genId();
+          const newP = {
+            displayName:     reg?.displayName    || tm.sleeperDisplayName || tm.teamName || null,
+            teamName:        tm.teamName         || null,
+            email:           reg?.email          || tm.mflEmail           || null,
+            sleeperUsername: tm.sleeperUsername  || null,
+            mflEmail:        tm.mflEmail         || null,
+            yahooUsername:   tm.yahooUsername    || null,
+            gender:          reg?.gender         || null,
+            twitterHandle:   reg?.twitterHandle  || null,
+            years:           [],
+            dlrLinked:       false,
+            autoRegister:    false,
+            syncedAt:        Date.now(),
+          };
+          updates[pid] = newP;
+          newCount++;
+          // Register for lookups so later dedup entries in same batch don't duplicate
+          if (suKey) bySleeperUser[suKey] = pid;
+          if (meKey) byMflEmail[meKey]    = pid;
+          if (yuKey) byYahooUser[yuKey]   = pid;
+        }
+      }
+
+      if (!Object.keys(updates).length) {
+        showToast("Participants already up to date — nothing to sync", "info");
+        return;
+      }
+
+      // Write all updates in one Firebase multi-path update
+      const participantsRef = _tParticipantsRef(tid);
+      await Promise.all(Object.entries(updates).map(([pid, p]) =>
+        participantsRef.child(pid).set(p)
+      ));
+
+      showToast(`Synced: ${newCount} new, ${updatedCount} updated`);
+
+      // Reload tournament and re-render participants tab
+      const snap = await _tRef(tid).once("value");
+      _tournaments[tid] = snap.val();
+      const body = document.getElementById("trn-tab-body");
+      if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
+
+    } catch(err) {
+      showToast("Sync failed: " + err.message, "error");
+      console.error("[AutoSync]", err);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "⚡ Sync from Leagues"; }
     }
   }
 
@@ -14480,6 +14732,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         registrationYear:  meta.registrationYear || null,
         leagueCount,
         registrationCount: Object.keys(regs).length,
+        playoffMode:       _tMode(t),
         registrationForm:  meta.registrationForm || { fields: [], optionalFields: [], customQuestions: [] },
         standingsCache:    t.standingsCache  || {},
         rulesByYear:       t.rulesByYear      || {},
