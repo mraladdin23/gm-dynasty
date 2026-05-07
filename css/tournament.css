@@ -264,14 +264,14 @@
 
 /*
   trn-row-top grid:
-    col 1 (1fr)   = name — fills all available space, truncates
-    col 2 (auto)  = type badge — sizes to content
-    col 3 (auto)  = inline-meta (counts + admin) — sizes to content
-  All three cells are on the same baseline-aligned row.
+    col 1 (1fr, min 0)         = name — fills remaining space, truncates
+    col 2 (minmax 90px, auto)  = type badge — consistent minimum so badges align
+    col 3 (minmax 140px, auto) = inline-meta (counts + admin) — consistent floor
+  Using minmax gives a consistent minimum per column so rows align across the list.
 */
 .trn-row-top {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr minmax(90px, auto) minmax(140px, auto);
   align-items: baseline;
   column-gap: 10px;
   margin-bottom: 2px;

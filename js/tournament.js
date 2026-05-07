@@ -4565,30 +4565,41 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byYahooUsername   = {};
 
       for (const [username, u] of Object.entries(users)) {
-        // Sleeper: try all known field names the profile might store the handle under
+        // Sleeper: try all known field names stored under platforms.sleeper
         const sleeper = u?.platforms?.sleeper;
-        const s = (sleeper?.sleeperUsername || sleeper?.username || sleeper?.displayName || "").toLowerCase();
-        // MFL: email address
-        const m = (u?.platforms?.mfl?.mflEmail || "").toLowerCase();
-        // Yahoo: username
-        const y = (u?.platforms?.yahoo?.username || u?.platforms?.yahoo?.yahooUsername || "").toLowerCase();
+        const s = (sleeper?.username || sleeper?.sleeperUsername || sleeper?.displayName || "").toLowerCase();
+        // MFL: stored email
+        const mfl = u?.platforms?.mfl;
+        const m = (mfl?.mflEmail || mfl?.email || "").toLowerCase();
+        // Yahoo: stored username/nickname
+        const yahoo = u?.platforms?.yahoo;
+        const y = (yahoo?.username || yahoo?.yahooUsername || yahoo?.nickname || "").toLowerCase();
+
         if (s) bySleeperUsername[s] = username;
         if (m) byMflEmail[m]        = username;
         if (y) byYahooUsername[y]   = username;
       }
 
-      console.log("[Tournament] DLR index built — Sleeper:", Object.keys(bySleeperUsername).length,
-        "MFL:", Object.keys(byMflEmail).length, "Yahoo:", Object.keys(byYahooUsername).length);
+      console.log("[DLRMatch] User index — Sleeper:", Object.keys(bySleeperUsername).length,
+        "| MFL:", Object.keys(byMflEmail).length, "| Yahoo:", Object.keys(byYahooUsername).length);
 
       const matchUpdates = {};
+      let alreadyLinked = 0;
       for (const [pid, p] of Object.entries(participantsMap)) {
-        let matched = null;
-        if (p.sleeperUsername) matched = bySleeperUsername[p.sleeperUsername.toLowerCase()];
-        if (!matched && p.mflEmail)      matched = byMflEmail[p.mflEmail.toLowerCase()];
-        if (!matched && p.yahooUsername) matched = byYahooUsername[p.yahooUsername.toLowerCase()];
+        // Skip if already correctly linked
+        if (p.dlrLinked && p.dlrUsername) { alreadyLinked++; continue; }
 
-        console.log("[Tournament] Participant", p.displayName,
-          "sleeperUsername:", p.sleeperUsername, "-> matched:", matched);
+        let matched = null;
+        const su = p.sleeperUsername?.toLowerCase();
+        const me = p.mflEmail?.toLowerCase();
+        const yu = p.yahooUsername?.toLowerCase();
+
+        if (su) matched = bySleeperUsername[su];
+        if (!matched && me) matched = byMflEmail[me];
+        if (!matched && yu) matched = byYahooUsername[yu];
+
+        console.log("[DLRMatch] Participant:", p.displayName,
+          "| sleeper:", su, "| mfl:", me, "| yahoo:", yu, "→ matched:", matched);
 
         if (matched) {
           matchUpdates[pid + "/dlrLinked"]   = true;
@@ -4596,20 +4607,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         }
       }
 
-      if (Object.keys(matchUpdates).length) {
+      const newMatches = Object.keys(matchUpdates).length / 2;
+      if (newMatches > 0) {
         await _tParticipantsRef(tid).update(matchUpdates);
-        const mc = Object.keys(matchUpdates).length / 2;
-        showToast(mc + " participant" + (mc !== 1 ? "s" : "") + " matched to DLR accounts ✓");
+        showToast(`${newMatches} participant${newMatches !== 1 ? "s" : ""} matched to DLR accounts ✓`);
         const snap = await _tRef(tid).once("value");
         _tournaments[tid] = snap.val();
         const body = document.getElementById("trn-tab-body");
         if (body && _activeAdminTab === "participants") _renderParticipantsTab(tid, _tournaments[tid], body);
       } else {
-        showToast("Import complete — no DLR matches found");
+        const total = Object.keys(participantsMap).length;
+        showToast(
+          alreadyLinked === total
+            ? `All ${total} participants already linked ✓`
+            : `Sync complete — no new DLR matches found (${alreadyLinked}/${total} already linked)`,
+          "info"
+        );
       }
     } catch(err) {
-      console.error("[Tournament] DLR match error:", err);
-      showToast("Match failed: " + err.message, "error");
+      console.error("[DLRMatch] error:", err);
+      showToast("DLR match failed: " + err.message, "error");
     }
   }
 
@@ -4817,7 +4834,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
 
       if (!Object.keys(updates).length) {
-        showToast("Participants already up to date — nothing to sync", "info");
+        // Nothing new to write, but still run DLR match on existing participants
+        showToast("Participants already up to date — checking DLR links…");
+        const allParticipantsForMatch = existingParticipants;
+        await _matchParticipantsToDLR(tid, allParticipantsForMatch);
+        // Reload and re-render so DLR-linked badges update
+        const snap2 = await _tRef(tid).once("value");
+        _tournaments[tid] = snap2.val();
+        const body2 = document.getElementById("trn-tab-body");
+        if (body2) _renderParticipantsTab(tid, _tournaments[tid], body2);
         return;
       }
 
@@ -6952,7 +6977,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── ANALYTICS: Draft tab ───────────────────────────────────────────────────
-  let _draftCache     = null;  // { picks, adp, byLeague, fetchedAt, tid }
+  let _draftCache        = null;  // { picks, adp, byLeague, fetchedAt, tid }
+  let _draftForceRefresh = false; // set true by refresh button to bypass Firebase cache
   let _draftLeague    = "all"; // current league filter
   let _draftView      = "adp"; // "adp" | "board" | "card"
   let _draftCardTeam  = null;
@@ -6990,10 +7016,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
           const ck       = `${batch.year}_${leagueId}`;
           const existing = cached[ck];
-          // Use cache if < 24h old and has picks — but always bypass for active drafts
-          // so live pick updates are fetched on every load during the draft window.
-          const isActiveDraft = existing?.draft_status === "drafting";
-          if (!isActiveDraft && existing?.picks?.length && (Date.now() - (existing.fetchedAt || 0)) < 86400000) continue;
+          // Bypass cache if:
+          //   1. No existing cache entry
+          //   2. Cache entry shows draft is still in progress
+          //   3. Cache is older than 24h
+          //   4. User manually refreshed (_draftForceRefresh flag set)
+          const isActiveDraft   = existing?.draft_status === "drafting";
+          const cacheAge        = Date.now() - (existing?.fetchedAt || 0);
+          const cacheExpired    = cacheAge > 86400000;
+          const hasPickData     = existing?.picks?.length;
+          if (!_draftForceRefresh && !isActiveDraft && hasPickData && !cacheExpired) continue;
           toFetch.push({ leagueId, platform: batch.platform, year: batch.year, leagueName: l.name || leagueId, cacheKey: ck });
         }
       }
@@ -7037,6 +7069,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
       // Merge with cached, persist new to Firebase
       const allCached = { ...cached, ...results };
+      _draftForceRefresh = false; // clear force-refresh flag
       if (Object.keys(results).length) {
         await _tAnalyticsRef(tid).child("drafts").update(results).catch(() => {});
       }
@@ -7237,8 +7270,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
 
       if (changed) {
-        // Bust the cache and re-render the draft tab with fresh data
+        // Bust the in-memory and Firebase cache, re-render with fresh data
         _draftCache = null;
+        _draftForceRefresh = true;
         _renderAnalyticsDraft(tid, t, body);
       }
     }, 15000); // poll every 15 seconds
@@ -7340,6 +7374,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
     document.getElementById("trn-draft-refresh-btn")?.addEventListener("click", () => {
       _draftCache = null;
+      _draftForceRefresh = true;
       _draftPosFilter = "all";
       _draftSearch = "";
       _renderAnalyticsDraft(tid, t, body);
@@ -14747,6 +14782,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         donationLink:      meta.donationLink || "",
         socialLinks:       meta.socialLinks  || {},
         createdAt:         meta.createdAt        || 0,
+        createdBy:         meta.createdBy        || "",
         registrationYear:  meta.registrationYear || null,
         leagueCount,
         registrationCount: Object.keys(regs).length,
