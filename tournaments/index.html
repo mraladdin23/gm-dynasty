@@ -174,6 +174,13 @@
       playoffs:          "🏆",
       completed:         "✅"
     };
+    const TYPE_BADGE_PUB = {
+      points_rounds: { icon: "📈", label: "Points Rounds", cls: "trn-type-points"  },
+      h2h_bracket:   { icon: "🥊", label: "H2H Bracket",   cls: "trn-type-h2h"     },
+      custom_rounds: { icon: "⚙️", label: "Custom Rounds", cls: "trn-type-custom"  },
+      worldcup:      { icon: "🌍", label: "World Cup",     cls: "trn-type-wc"      },
+      total_points:  { icon: "🎯", label: "Total Points",  cls: "trn-type-total"   },
+    };
 
     // ── Check if a specific tournament was requested ────────
     const urlParams = new URLSearchParams(window.location.search);
@@ -221,7 +228,7 @@
           // Show draft tournaments only if they have prior standings data
           return t.standingsCache && Object.keys(t.standingsCache).length > 0;
         })
-        .sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+        .sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
 
       const loading = document.getElementById("pub-loading");
       const content = document.getElementById("pub-content");
@@ -243,7 +250,7 @@
           <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 var(--space-1)">🏆 Tournaments</h1>
           <p style="color:var(--color-text-dim);font-size:.88rem;margin:0">${entries.length} tournament${entries.length !== 1 ? "s" : ""}</p>
         </div>
-        <div class="trn-cards-grid" id="pub-cards">
+        <div class="trn-list" id="pub-cards">
           ${entries.map(([tid, t]) => renderCard(tid, t)).join("")}
         </div>`;
 
@@ -257,35 +264,42 @@
     }
 
     function renderCard(tid, t) {
-      const status    = t.status || "draft";
-      const isDraft   = status === "draft";
+      const status     = t.status || "draft";
+      const isDraft    = status === "draft";
       const hasHistory = t.standingsCache && Object.keys(t.standingsCache).length > 0;
-      // Get available years from standingsCache
-      const years = isDraft && hasHistory
+      const years      = isDraft && hasHistory
         ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a)
         : [];
-      const yearStr = years.length ? years.join(", ") : null;
+      const yearStr   = years.length ? years.join(", ") : null;
+      const mode      = t.playoffMode || "total_points";
+      const tb        = TYPE_BADGE_PUB[mode] || { icon: "🏆", label: mode, cls: "trn-type-total" };
+      const statusBadge = isDraft && hasHistory
+        ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
+        : `<span class="trn-status-badge trn-status-${status}">${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}</span>`;
 
       return `
-        <div class="trn-card">
-          <div class="trn-card-header">
-            <div class="trn-card-name">${esc(t.name || "Untitled Tournament")}</div>
-            ${isDraft && hasHistory
-              ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 View History</span>`
-              : `<span class="trn-status-badge trn-status-${status}">${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}</span>`
-            }
+        <div class="trn-row">
+          <div class="trn-row-main">
+            <div class="trn-row-top">
+              <span class="trn-row-name">${esc(t.name || "Untitled Tournament")}</span>
+              <span class="trn-type-badge ${tb.cls}">${tb.icon} ${tb.label}</span>
+              ${yearStr ? `<span class="trn-type-badge trn-type-total">📅 ${esc(yearStr)}</span>` : ""}
+            </div>
+            ${t.tagline ? `<div class="trn-row-desc">${esc(t.tagline)}</div>` : ""}
           </div>
-          <div class="trn-card-meta">
-            <span>🏟 ${t.leagueCount || 0} league${(t.leagueCount || 0) !== 1 ? "s" : ""}</span>
-            ${!isDraft ? `<span>👥 ${t.registrationCount || 0} registered</span>` : ""}
-            ${yearStr ? `<span>📅 ${esc(yearStr)}</span>` : ""}
+          <div class="trn-row-right">
+            <div class="trn-row-meta">
+              <span class="trn-row-stat">🏟 ${t.leagueCount || 0} lg</span>
+              ${!isDraft ? `<span class="trn-row-stat">👥 ${t.registrationCount || 0}</span>` : ""}
+            </div>
+            ${statusBadge}
+            <div class="trn-row-actions">
+              <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">
+                ${isDraft && hasHistory ? "History" : "View"}
+              </button>
+            </div>
           </div>
-          ${t.tagline ? `<div class="trn-card-tagline">${esc(t.tagline)}</div>` : ""}
-          <div class="trn-card-actions">
-            <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">
-              ${isDraft && hasHistory ? "View History" : "View"}
-            </button>
-          </div>
+        </div>`;
         </div>`;
     }
 
