@@ -110,6 +110,29 @@ const DLRTournament = (() => {
     return _tournaments;
   }
 
+  // Re-publish public summary for any tournament missing playoffMode or createdBy.
+  // Runs silently in the background after _loadTournaments.
+  async function _backfillPublicSummaries() {
+    try {
+      const pubSnap = await GMD.child("publicTournaments").once("value");
+      const pub = pubSnap.val() || {};
+      const promises = [];
+      for (const [tid, t] of Object.entries(_tournaments)) {
+        const node = pub[tid];
+        // Re-publish if playoffMode or createdBy is missing from the public node
+        if (!node || !node.playoffMode || !node.createdBy) {
+          promises.push(_writePublicSummary(tid, t));
+        }
+      }
+      if (promises.length) {
+        await Promise.all(promises);
+        console.log(`[Tournament] Backfilled public summaries for ${promises.length} tournament(s)`);
+      }
+    } catch(e) {
+      console.warn("[Tournament] Backfill failed:", e.message);
+    }
+  }
+
   // ── Auto-discovery: called from profile.js on sync ─────
   // Pass in the user's leagues object from Firebase
   async function runDiscovery(username, userLeagues) {
@@ -174,6 +197,8 @@ const DLRTournament = (() => {
 
     try {
       await _loadTournaments();
+      // Silently re-publish any stale public summaries (missing playoffMode/createdBy)
+      _backfillPublicSummaries().catch(() => {});
     } catch(err) {
       container.innerHTML = `<div class="trn-empty">Failed to load tournaments: ${_esc(err.message)}</div>`;
       return;
@@ -4721,6 +4746,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return;
       }
 
+      console.log(`[AutoSync] ${rawTeams.length} raw team records from ${realBatches.length} batch(es)`);
+
       // ── Fresh read of current participants from Firebase (not stale snapshot) ──
       const existingSnap = await _tParticipantsRef(tid).once("value");
       const existingParticipants = existingSnap.val() || {};
@@ -4747,6 +4774,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return true;
       });
 
+      console.log(`[AutoSync] ${Object.keys(existingParticipants).length} existing participants in Firebase`);
+      console.log(`[AutoSync] ${dedupedTeams.length} unique teams after dedup`);
+
       // Build registration lookup by platform username for cross-referencing
       const registrations = t.registrations || {};
       const regBySleeperUser = {};
@@ -4766,11 +4796,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const meKey = tm.mflEmail?.toLowerCase();
         const yuKey = tm.yahooUsername?.toLowerCase();
 
-        // Find existing participant
-        let pid = suKey ? bySleeperUser[suKey]
-                : meKey ? byMflEmail[meKey]
-                : yuKey ? byYahooUser[yuKey]
-                : null;
+        // Find existing participant — check each platform key independently
+        // (chained ternary would short-circuit on undefined, missing cross-platform fallback)
+        let pid = null;
+        if (suKey) pid = bySleeperUser[suKey] || null;
+        if (!pid && meKey) pid = byMflEmail[meKey] || null;
+        if (!pid && yuKey) pid = byYahooUser[yuKey] || null;
 
         // Find matching registration for extra data
         const reg = (suKey && regBySleeperUser[suKey])
@@ -4823,6 +4854,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         }
       }
 
+      console.log(`[AutoSync] ${newCount} new, ${updatedCount} updated, ${Object.keys(updates).length} total in updates`);
+
       if (!Object.keys(updates).length) {
         // Nothing new to write — run DLR match on existing participants
         const matchResult = await _matchParticipantsToDLR(tid, existingParticipants);
@@ -4838,11 +4871,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           );
         }
       } else {
-        // Write all updates
+        // Write all updates via single Firebase update (atomic, avoids partial writes)
         const participantsRef = _tParticipantsRef(tid);
-        await Promise.all(Object.entries(updates).map(([pid, p]) =>
-          participantsRef.child(pid).set(p)
-        ));
+        console.log(`[AutoSync] Writing ${Object.keys(updates).length} participant records to Firebase…`);
+        try {
+          await participantsRef.update(updates);
+          console.log("[AutoSync] Firebase write succeeded");
+        } catch(writeErr) {
+          console.error("[AutoSync] Firebase write failed:", writeErr.message, writeErr);
+          throw writeErr; // re-throw so outer catch handles it
+        }
 
         // Run DLR match against all (existing + newly synced)
         const allForMatch = { ...existingParticipants, ...updates };
