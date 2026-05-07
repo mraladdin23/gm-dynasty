@@ -140,54 +140,45 @@
 
 /* ── Mobile: list rows stack ─────────────────────────────── */
 @media (max-width: 700px) {
-  /* ── Tournament list rows: stack into 3 sections ──────── */
+  /* ── Tournament list rows: 4 stacked lines ─────────────── */
   .trn-row {
     flex-direction: column;
     align-items: stretch;
-    gap: 5px;
+    gap: 0;
     padding: 10px var(--space-3);
   }
 
-  /* Section 1: name + type badge + inline-meta all on one line */
-  .trn-row-main        { width: 100%; }
-  .trn-row-top {
-    grid-template-columns: 1fr auto;  /* name | badge, drop meta col */
-    margin-bottom: 3px;
-  }
-  .trn-row-inline-meta { display: none; } /* shown in row-right instead */
+  .trn-row-main  { width: 100%; }
 
-  /* Section 2: description — full width, allow 2 lines */
-  .trn-row-desc {
-    -webkit-line-clamp: 2;
+  /* Line 1: name full width */
+  .trn-row-line1 { margin-bottom: 3px; }
+  .trn-row-name  { font-size: .88rem; }
+
+  /* Line 2: description — wrap up to 2 lines */
+  .trn-row-line2 {
     white-space: normal;
     display: -webkit-box;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    font-size: .79rem;
-    color: var(--color-text-dim);
     margin-bottom: 4px;
   }
 
-  /* Section 3: stats + status + buttons all on one line */
-  .trn-row-right {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-    flex-direction: row;
-    border-top: 1px solid var(--color-border);
-    padding-top: 7px;
-    margin-top: 2px;
+  /* Line 3: type badge + stats */
+  .trn-row-line3 {
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
   }
 
-  /* Show counts inline in the right bar on mobile */
-  .trn-row-right::before {
-    content: attr(data-meta);
-    font-size: .72rem;
-    color: var(--color-text-dim);
-    white-space: nowrap;
-    flex: 1;
+  /* Line 4: status + buttons — full width, space-between */
+  .trn-row-right {
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--color-border);
+    padding-top: 6px;
   }
 
   .trn-row-actions {
@@ -196,8 +187,8 @@
   }
 
   /* ── Filters ─────────────────────────────────────────── */
-  .trn-filter-row     { flex-wrap: wrap; gap: var(--space-1); }
-  .trn-filter-select  { flex: 1 1 120px; font-size: .76rem; }
+  .trn-filter-row    { flex-wrap: wrap; gap: 4px; }
+  .trn-filter-select { flex: 1 1 120px; font-size: .76rem; }
   .trn-header-actions { flex-wrap: wrap; }
 
   /* ── Guide tabs ──────────────────────────────────────── */
@@ -250,7 +241,7 @@
 /* ── Landing filter row ───────────────────────────────────── */
 .trn-filter-row {
   display: flex;
-  flex-wrap: nowrap;       /* keep all three selects on one line */
+  flex-wrap: nowrap;
   gap: 6px;
   margin-bottom: var(--space-3);
   align-items: center;
@@ -265,8 +256,8 @@
   font-size: .80rem;
   font-weight: 500;
   cursor: pointer;
-  flex: 1 1 0;             /* equal-width columns, share available space */
-  min-width: 0;            /* allow shrinking below content width */
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .trn-filter-select:focus {
@@ -301,31 +292,17 @@
   transition: box-shadow .15s;
 }
 
-.trn-row:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,.1);
-}
+.trn-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); }
 
+/* Left section — grows to fill available width */
 .trn-row-main {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
 }
 
-/*
-  trn-row-top uses fixed-width columns so every row aligns:
-    col 1 (1fr)    = name — fills remaining space, truncates
-    col 2 (120px)  = type badge — fixed so all badges align
-    col 3 (180px)  = inline-meta (counts + admin) — fixed so all stats align
-  Fixed px columns are the only reliable way to align across independent flex rows.
-*/
-.trn-row-top {
-  display: grid;
-  grid-template-columns: 1fr 120px 180px;
-  align-items: baseline;
-  column-gap: 10px;
-  margin-bottom: 2px;
-  overflow: hidden;
-}
+/* Line 1: tournament name */
+.trn-row-line1 { margin-bottom: 2px; }
 
 .trn-row-name {
   font-weight: 700;
@@ -334,60 +311,49 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+  display: block;
 }
 
-/* Inline meta: counts + "by admin" — third grid column */
-.trn-row-inline-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.trn-row-stat {
-  font-size: .74rem;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-}
-
-.trn-row-admin {
-  font-size: .72rem;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.trn-row-desc {
+/* Line 2: tagline/description */
+.trn-row-line2 {
   font-size: .78rem;
   color: var(--color-text-dim);
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-bottom: 3px;
 }
 
-/* Right side: status badge + buttons — horizontal, no wrap */
+/* Line 3: type badge + stats + admin */
+.trn-row-line3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.trn-row-stat  { font-size: .74rem; color: var(--color-text-dim); white-space: nowrap; }
+.trn-row-admin { font-size: .72rem; color: var(--color-text-dim); }
+
+/* Right section: status + buttons — fixed width so left always aligns */
 .trn-row-right {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-  width: 260px;       /* fixed — largest size (admin: status + Manage + View) */
+  width: 260px;
   justify-content: flex-end;
 }
 
 .trn-row-actions {
   display: flex;
   gap: 6px;
-  width: 162px;        /* fixed: wide enough for Manage + View side by side */
+  width: 162px;
   flex-shrink: 0;
   justify-content: flex-end;
 }
 
-/* Each button takes equal share and never shrinks below its label */
 .trn-row-actions .btn-primary,
 .trn-row-actions .btn-secondary {
   flex: 1 1 0;
@@ -946,7 +912,7 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  font-size: .88rem;
+  font-size: .82rem;   /* matches trn-section-card body font */
   cursor: pointer;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
@@ -1158,43 +1124,54 @@
     font-size: .75rem;
     padding: 5px 8px;
   }
+
+  /* Keep reg/participant/role rows as single horizontal line on mobile —
+     just tighten padding and reduce font so they fit without wrapping */
   .trn-reg-row {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: var(--space-2) var(--space-2);
-    gap: var(--space-1);
+    padding: 6px var(--space-2);
+    gap: var(--space-2);
+    flex-wrap: nowrap;  /* stay on one line */
   }
-  .trn-reg-main { width: 100%; }
-  .trn-reg-name { font-size: .84rem; }
-  .trn-reg-meta { font-size: .72rem; }
+  .trn-reg-main { min-width: 0; flex: 1 1 0; }
+  .trn-reg-name {
+    font-size: .80rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .trn-reg-meta {
+    font-size: .68rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .trn-reg-date { font-size: .66rem; }
   .trn-reg-actions {
-    width: 100%;
-    justify-content: flex-end;
-    gap: var(--space-1);
+    flex-shrink: 0;
+    gap: 4px;
   }
   .trn-reg-actions .btn-primary,
   .trn-reg-actions .btn-secondary,
   .trn-reg-actions .btn-ghost {
-    font-size: .74rem;
-    padding: 4px 8px;
+    font-size: .70rem;
+    padding: 3px 7px;
   }
 
-  /* ── Participants rows (share .trn-reg-row) ──────────── */
+  /* Participants: allow meta to wrap since it has more fields */
   .trn-participant-row .trn-reg-meta {
-    white-space: normal;   /* allow wrapping for long usernames */
-    overflow: visible;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  /* ── Role rows ───────────────────────────────────────── */
+  /* ── Role rows — single line, tighter ────────────────── */
   .trn-role-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-1);
-    padding: var(--space-2) var(--space-2);
+    padding: 6px var(--space-2);
+    gap: var(--space-2);
   }
-  .trn-role-right { width: 100%; justify-content: flex-end; }
-  .trn-role-name  { font-size: .82rem; }
-  .trn-role-scope { font-size: .70rem; }
+  .trn-role-name  { font-size: .80rem; }
+  .trn-role-scope { font-size: .68rem; }
+  .trn-role-avatar { width: 26px; height: 26px; font-size: .65rem; }
 
   /* ── League rows ─────────────────────────────────────── */
   .trn-league-row { flex-direction: column; align-items: flex-start; }
@@ -1222,15 +1199,16 @@
   .trn-pc-section-body { padding: var(--space-2); }
   .trn-playoff-year-bar { flex-wrap: wrap; gap: var(--space-1); }
 
-  /* ── Global font consistency for tournament pages ─────── */
-  .trn-container      { font-size: .88rem; }
-  .trn-detail-container { font-size: .88rem; }
+  /* ── Global font consistency ─────────────────────────── */
+  .trn-container        { font-size: .86rem; }
+  .trn-detail-container { font-size: .86rem; }
+  .trn-section-card     { padding: var(--space-3); margin-bottom: var(--space-3); }
+  .trn-section-card-title { font-size: .70rem; margin-bottom: var(--space-2); }
 
-  /* Buttons consistent across all section pages */
   .trn-container    .btn-sm,
   .trn-detail-container .btn-sm {
-    font-size: .75rem;
-    padding: 4px 10px;
+    font-size: .74rem;
+    padding: 4px 9px;
   }
 }
 
