@@ -181,12 +181,13 @@ const DLRTournament = (() => {
 
     const allEntries   = Object.entries(_tournaments);
     const myEntries    = allEntries.filter(([, t]) => {
-      // Discovered via league auto-match, or has a role
-      if (t.meta?.discoveredBy?.[_currentUsername] || t.roles?.[_currentUsername]) return true;
-      // Also include if user appears as a linked participant (dlrUsername match)
-      return Object.values(t.participants || {}).some(p =>
-        p.dlrLinked && p.dlrUsername === _currentUsername
-      );
+      // Must have been discovered via league sync (their team is in a tournament league)
+      if (t.meta?.discoveredBy?.[_currentUsername]) return true;
+      // Or appear as a linked participant by dlrUsername
+      if (Object.values(t.participants || {}).some(p =>
+        p.dlrLinked && p.dlrUsername === _currentUsername)) return true;
+      // Being an admin alone does NOT make it "my" tournament
+      return false;
     });
     const adminEntries = allEntries.filter(([, t]) =>
       t.roles?.[_currentUsername]?.role === "admin" ||
@@ -4713,24 +4714,30 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return;
       }
 
-      // Deduplicate raw teams by platform identity key
-      const seen = new Set();
-      const dedupedTeams = rawTeams.filter(tm => {
-        const key = tm.sleeperUsername || tm.mflEmail || tm.yahooUsername || tm.teamName;
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // ── Fresh read of current participants from Firebase (not stale snapshot) ──
+      const existingSnap = await _tParticipantsRef(tid).once("value");
+      const existingParticipants = existingSnap.val() || {};
 
-      // Build lookup maps from existing participants
-      const existingParticipants = t.participants || {};
-      const bySleeperUser  = {}; // sleeperUsername -> pid
-      const byMflEmail     = {}; // mflEmail -> pid
-      const byYahooUser    = {}; // yahooUsername -> pid
+      // Build lookup maps from existing participants — all three platform keys
+      const bySleeperUser = {};
+      const byMflEmail    = {};
+      const byYahooUser   = {};
       Object.entries(existingParticipants).forEach(([pid, p]) => {
         if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
         if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]           = pid;
         if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]      = pid;
+      });
+
+      // Deduplicate raw teams (across multiple leagues) by platform identity key
+      // Skip any team whose key already exists in the existing participant lookup
+      const seen = new Set();
+      const dedupedTeams = rawTeams.filter(tm => {
+        const key = tm.sleeperUsername || tm.mflEmail || tm.yahooUsername;
+        if (!key) return false;
+        // If already in existing participants, still include so we can patch missing fields
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
 
       // Build registration lookup by platform username for cross-referencing
@@ -4822,8 +4829,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
       showToast(`Synced: ${newCount} new, ${updatedCount} updated — matching DLR accounts…`);
 
-      // Now run DLR match against the freshly written participants
-      await _matchParticipantsToDLR(tid, updates);
+      // Run DLR match against ALL participants (existing + newly synced)
+      const allParticipantsForMatch = { ...existingParticipants, ...updates };
+      await _matchParticipantsToDLR(tid, allParticipantsForMatch);
 
       // Reload tournament and re-render participants tab
       const snap = await _tRef(tid).once("value");
