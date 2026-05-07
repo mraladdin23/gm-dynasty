@@ -151,6 +151,21 @@ const DLRTournament = (() => {
   let _landingTab = "all"; // "mine" | "all" | "managing"
 
   // ── Main render ────────────────────────────────────────
+  // Landing filter state
+  let _landingTypeFilter  = "all"; // po.mode value or "all"
+  let _landingAdminFilter = "all"; // username or "all"
+  let _landingPage        = 1;
+  const LANDING_PAGE_SIZE = 10;
+
+  const TYPE_LABELS = {
+    all:           "All Types",
+    points_rounds: "📈 Points Rounds",
+    h2h_bracket:   "🥊 H2H Bracket",
+    custom_rounds: "⚙️ Custom Rounds",
+    worldcup:      "🌍 World Cup",
+    total_points:  "🎯 Total Points",
+  };
+
   async function _renderView(tab) {
     if (tab) _landingTab = tab;
     const container = document.getElementById("view-tournament");
@@ -173,7 +188,12 @@ const DLRTournament = (() => {
       t.roles?.[_currentUsername]?.role === "sub_admin"
     );
 
-    // Tab counts inline in select options — badges not needed
+    // Build admin (creator) options from all tournaments
+    const adminUsernames = [...new Set(allEntries.map(([, t]) => t.meta?.createdBy).filter(Boolean))].sort();
+
+    // Gather all unique tournament types across all tournaments
+    const usedTypes = [...new Set(allEntries.map(([, t]) => t.playoff?.mode || "total_points"))];
+    const typeOptions = ["all", ...usedTypes];
 
     container.innerHTML = `
       <div class="trn-container">
@@ -182,14 +202,26 @@ const DLRTournament = (() => {
             <h2 class="trn-title">🏆 Tournaments</h2>
             <p class="trn-subtitle">Large-scale multi-platform competition</p>
           </div>
-          <button class="btn-primary btn-sm" id="trn-create-btn">+ New Tournament</button>
+          <div class="trn-header-actions">
+            <button class="btn-secondary btn-sm" id="trn-guide-btn">📖 Tournament Guide</button>
+            <button class="btn-primary btn-sm" id="trn-create-btn">+ New Tournament</button>
+          </div>
         </div>
 
         <div class="trn-filter-row">
           <select class="trn-filter-select" id="trn-landing-select">
-            <option value="all"      ${_landingTab === "all"      ? "selected" : ""}>All Tournaments</option>
+            <option value="all"      ${_landingTab === "all"      ? "selected" : ""}>All Tournaments${allEntries.length   ? ` (${allEntries.length})`   : ""}</option>
             <option value="mine"     ${_landingTab === "mine"     ? "selected" : ""}>My Tournaments${myEntries.length     ? ` (${myEntries.length})`    : ""}</option>
             <option value="managing" ${_landingTab === "managing" ? "selected" : ""}>Managing${adminEntries.length ? ` (${adminEntries.length})` : ""}</option>
+          </select>
+
+          <select class="trn-filter-select" id="trn-type-select">
+            ${typeOptions.map(v => `<option value="${v}" ${_landingTypeFilter === v ? "selected" : ""}>${TYPE_LABELS[v] || v}</option>`).join("")}
+          </select>
+
+          <select class="trn-filter-select" id="trn-admin-select">
+            <option value="all" ${_landingAdminFilter === "all" ? "selected" : ""}>All Admins</option>
+            ${adminUsernames.map(u => `<option value="${_esc(u)}" ${_landingAdminFilter === u ? "selected" : ""}>${_esc(u)}</option>`).join("")}
           </select>
         </div>
 
@@ -198,9 +230,21 @@ const DLRTournament = (() => {
     `;
 
     document.getElementById("trn-create-btn")?.addEventListener("click", () => _openCreateModal());
+    document.getElementById("trn-guide-btn")?.addEventListener("click", () => _openTournamentGuideModal());
 
     document.getElementById("trn-landing-select")?.addEventListener("change", function() {
-      _landingTab = this.value;
+      _landingTab  = this.value;
+      _landingPage = 1;
+      _renderLandingBody(allEntries, myEntries, adminEntries);
+    });
+    document.getElementById("trn-type-select")?.addEventListener("change", function() {
+      _landingTypeFilter = this.value;
+      _landingPage = 1;
+      _renderLandingBody(allEntries, myEntries, adminEntries);
+    });
+    document.getElementById("trn-admin-select")?.addEventListener("change", function() {
+      _landingAdminFilter = this.value;
+      _landingPage = 1;
       _renderLandingBody(allEntries, myEntries, adminEntries);
     });
 
@@ -211,44 +255,86 @@ const DLRTournament = (() => {
     const body = document.getElementById("trn-landing-body");
     if (!body) return;
 
-    let entries, emptyIcon, emptyTitle, emptySub;
+    let baseEntries, emptyIcon, emptyTitle, emptySub;
 
     if (_landingTab === "mine") {
-      entries   = myEntries;
-      emptyIcon = "🏆";
-      emptyTitle = "No tournaments yet";
-      emptySub  = "Sync your leagues to auto-discover tournaments you're part of, or create one.";
+      baseEntries = myEntries;
+      emptyIcon   = "🏆"; emptyTitle = "No tournaments yet";
+      emptySub    = "Sync your leagues to auto-discover tournaments you're part of, or create one.";
     } else if (_landingTab === "managing") {
-      entries   = adminEntries;
-      emptyIcon = "🛠";
-      emptyTitle = "You're not managing any tournaments";
-      emptySub  = "Create a new tournament to get started.";
+      baseEntries = adminEntries;
+      emptyIcon   = "🛠"; emptyTitle = "You're not managing any tournaments";
+      emptySub    = "Create a new tournament to get started.";
     } else {
-      entries   = allEntries;
-      emptyIcon = "🏆";
-      emptyTitle = "No tournaments found";
-      emptySub  = "Be the first to create one.";
+      baseEntries = allEntries;
+      emptyIcon   = "🏆"; emptyTitle = "No tournaments found";
+      emptySub    = "Be the first to create one.";
     }
+
+    // Filter by type
+    let entries = baseEntries;
+    if (_landingTypeFilter !== "all") {
+      entries = entries.filter(([, t]) => {
+        const mode = t.playoff?.mode || "total_points";
+        return mode === _landingTypeFilter;
+      });
+    }
+
+    // Filter by admin/creator
+    if (_landingAdminFilter !== "all") {
+      entries = entries.filter(([, t]) => t.meta?.createdBy === _landingAdminFilter);
+    }
+
+    // Sort alphabetically by name
+    entries = [...entries].sort(([, a], [, b]) =>
+      (a.meta?.name || "").localeCompare(b.meta?.name || "")
+    );
 
     if (!entries.length) {
       body.innerHTML = `
         <div class="trn-empty">
           <div class="trn-empty-icon">${emptyIcon}</div>
           <div class="trn-empty-title">${emptyTitle}</div>
-          <div class="trn-empty-sub">${emptySub}</div>
+          <div class="trn-empty-sub">${_landingTypeFilter !== "all" || _landingAdminFilter !== "all"
+            ? "No tournaments match the current filters." : emptySub}</div>
         </div>`;
       return;
     }
 
+    // Pagination
+    const totalPages = Math.ceil(entries.length / LANDING_PAGE_SIZE);
+    if (_landingPage > totalPages) _landingPage = totalPages;
+    const pageEntries = entries.slice((_landingPage - 1) * LANDING_PAGE_SIZE, _landingPage * LANDING_PAGE_SIZE);
     const isManagingTab = _landingTab === "managing";
+
+    const pagerHTML = totalPages > 1 ? `
+      <div class="trn-pager">
+        <button class="trn-pager-btn" id="trn-pg-prev" ${_landingPage <= 1 ? "disabled" : ""}>‹ Prev</button>
+        <span class="trn-pager-info">${_landingPage} / ${totalPages} <span class="trn-pager-count">(${entries.length} total)</span></span>
+        <button class="trn-pager-btn" id="trn-pg-next" ${_landingPage >= totalPages ? "disabled" : ""}>Next ›</button>
+      </div>` : `<div class="trn-pager-count-only">${entries.length} tournament${entries.length !== 1 ? "s" : ""}</div>`;
+
     body.innerHTML = `
-      <div class="trn-cards-grid">
-        ${entries.map(([tid, t]) => {
+      ${pagerHTML}
+      <div class="trn-list">
+        ${pageEntries.map(([tid, t]) => {
           const isAdmin = t.roles?.[_currentUsername]?.role === "admin" ||
                           t.roles?.[_currentUsername]?.role === "sub_admin";
-          return _renderTournamentCard(tid, t, isManagingTab || isAdmin);
+          return _renderTournamentRow(tid, t, isManagingTab || isAdmin);
         }).join("")}
-      </div>`;
+      </div>
+      ${totalPages > 1 ? pagerHTML.replace("trn-pg-prev", "trn-pg-prev2").replace("trn-pg-next", "trn-pg-next2") : ""}
+    `;
+
+    // Pagination wiring
+    const goPage = (delta) => {
+      _landingPage = Math.max(1, Math.min(totalPages, _landingPage + delta));
+      _renderLandingBody(allEntries, myEntries, adminEntries);
+    };
+    body.querySelector("#trn-pg-prev")?.addEventListener("click",  () => goPage(-1));
+    body.querySelector("#trn-pg-next")?.addEventListener("click",  () => goPage(+1));
+    body.querySelector("#trn-pg-prev2")?.addEventListener("click", () => goPage(-1));
+    body.querySelector("#trn-pg-next2")?.addEventListener("click", () => goPage(+1));
 
     body.querySelectorAll("[data-trn-open]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -290,6 +376,54 @@ const DLRTournament = (() => {
           ` : `
             <button class="btn-secondary btn-sm" data-trn-open="${_esc(tid)}">View</button>
           `}
+        </div>
+      </div>`;
+  }
+
+  // ── Tournament list-row (landing page) ────────────────
+  const TYPE_BADGE = {
+    points_rounds: { icon: "📈", label: "Points Rounds", cls: "trn-type-points"  },
+    h2h_bracket:   { icon: "🥊", label: "H2H Bracket",   cls: "trn-type-h2h"     },
+    custom_rounds: { icon: "⚙️", label: "Custom Rounds", cls: "trn-type-custom"  },
+    worldcup:      { icon: "🌍", label: "World Cup",     cls: "trn-type-wc"      },
+    total_points:  { icon: "🎯", label: "Total Points",  cls: "trn-type-total"   },
+  };
+
+  function _renderTournamentRow(tid, t, isAdmin = false) {
+    const meta        = t.meta || {};
+    const status      = meta.status || "draft";
+    const leagueCount = t.leagues ? Object.keys(t.leagues).length : 0;
+    const regCount    = t.registrations ? Object.keys(t.registrations).length : 0;
+    const mode        = t.playoff?.mode || "total_points";
+    const typeBadge   = TYPE_BADGE[mode] || { icon: "🏆", label: mode, cls: "trn-type-total" };
+    const adminBy     = meta.createdBy ? `<span class="trn-row-admin">by ${_esc(meta.createdBy)}</span>` : "";
+
+    return `
+      <div class="trn-row" data-tid="${_esc(tid)}">
+        <div class="trn-row-main">
+          <div class="trn-row-name">${_esc(meta.name || "Untitled Tournament")}</div>
+          <div class="trn-row-desc">${meta.tagline ? _esc(meta.tagline) : "<span class='dim'>No description</span>"}</div>
+          <div class="trn-row-tags">
+            <span class="trn-type-badge ${typeBadge.cls}">${typeBadge.icon} ${typeBadge.label}</span>
+            ${adminBy}
+          </div>
+        </div>
+        <div class="trn-row-meta">
+          <span class="trn-row-stat">🏟 ${leagueCount} league${leagueCount !== 1 ? "s" : ""}</span>
+          <span class="trn-row-stat">👥 ${regCount} registered</span>
+        </div>
+        <div class="trn-row-right">
+          <span class="trn-status-badge trn-status-${status}">
+            ${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}
+          </span>
+          <div class="trn-row-actions">
+            ${isAdmin ? `
+              <button class="btn-primary btn-sm" data-trn-manage="${_esc(tid)}">🛠 Manage</button>
+              <button class="btn-secondary btn-sm" data-trn-open="${_esc(tid)}">👁 View</button>
+            ` : `
+              <button class="btn-secondary btn-sm" data-trn-open="${_esc(tid)}">View</button>
+            `}
+          </div>
         </div>
       </div>`;
   }
@@ -379,6 +513,119 @@ const DLRTournament = (() => {
       if (btn) { btn.disabled = false; btn.textContent = "Create Tournament"; }
       if (errEl) { errEl.textContent = err.message; errEl.classList.remove("hidden"); }
     }
+  }
+
+  // ── Tournament Guide modal ─────────────────────────────
+  function _openTournamentGuideModal() {
+    const GUIDE = [
+      {
+        mode:  "points_rounds",
+        icon:  "📈",
+        label: "Points Rounds",
+        color: "var(--color-gold)",
+        summary: "Teams qualify through a regular season, then advance each week by finishing in the top score tier. One pool of teams per round — no brackets.",
+        when: "Best for: large pools where you want a continuous weekly \"survive and advance\" feel. Great for tournaments with 20–100+ teams.",
+        steps: [
+          "Section A — Add leagues (Sleeper, MFL, or Yahoo).",
+          "Section B — Set your regular season weeks and qualification method (top N, top %, or point threshold).",
+          "Section C — Configure playoff rounds: weeks per round, how many advance, and whether to blend season avg.",
+          "Section D — Set tiebreakers and whether to reseed each round.",
+          "Set status → Registration Open, share your link, then flip to Active when the season starts."
+        ]
+      },
+      {
+        mode:  "h2h_bracket",
+        icon:  "🥊",
+        label: "H2H Bracket",
+        color: "#60a5fa",
+        summary: "System-managed single-elimination bracket. Teams are seeded after the regular season and face off head-to-head each round. The bracket is auto-drawn and auto-advanced.",
+        when: "Best for: traditional playoff feel with a bracket. Works well for 8, 16, or 32 team brackets.",
+        steps: [
+          "Section A — Add leagues.",
+          "Section B — Set regular season weeks and qualification method to fill your bracket.",
+          "Section D (Round Config H2H) — Set how many weeks each round runs and optionally blend season avg.",
+          "Section D (Byes & Seeding) — Choose bracket size, seeding method, and whether to reseed.",
+          "Flip to Playoffs when ready — the system will manage matchup draws and advancement automatically."
+        ]
+      },
+      {
+        mode:  "custom_rounds",
+        icon:  "⚙️",
+        label: "Custom Rounds",
+        color: "#a78bfa",
+        summary: "You author every round manually: define groups, set teams per group, write advancement rules, and decide the scoring blend. Maximum flexibility.",
+        when: "Best for: formats that don't fit a standard bracket or points structure — custom group play, multi-conference formats, commissioner-curated rounds.",
+        steps: [
+          "Section A — Add leagues.",
+          "Section B — Configure regular season (or skip if you start with a custom round immediately).",
+          "Section D — Add rounds one by one. For each round: set group count, teams per group, weeks, and advancement criteria.",
+          "Manually assign or confirm team placement each round from the Playoffs tab.",
+          "finalRankings are computed automatically after all rounds complete."
+        ]
+      },
+      {
+        mode:  "worldcup",
+        icon:  "🌍",
+        label: "World Cup",
+        color: "#4ade80",
+        summary: "Teams are assigned to groups and play a round-robin regular season schedule. Top finishers from each group advance to an admin-seeded H2H bracket (2 weeks per round by default).",
+        when: "Best for: large commissioner-organized tournaments where you want a group stage with narrative (conferences, countries, divisions) before a bracket.",
+        steps: [
+          "Section A — Add leagues.",
+          "Section D (World Cup Config) — Create groups, assign teams, set weekly matchup schedule.",
+          "Set regular season weeks (wcRegWeeks) and how many teams advance per group.",
+          "When the regular season ends, seed the H2H bracket from the Playoffs tab.",
+          "The bracket runs like H2H Bracket mode from that point — system advances winners each round."
+        ]
+      },
+      {
+        mode:  "total_points",
+        icon:  "🎯",
+        label: "Total Points",
+        color: "var(--color-text-dim)",
+        summary: "No weekly elimination. Teams accumulate points across the entire season (or a defined championship window) and are ranked by total score at the end.",
+        when: "Best for: season-long leaderboards, survivor-style scoring, or a championship window that spans multiple weeks without week-by-week drama.",
+        steps: [
+          "Section A — Add leagues.",
+          "Section B — Set the scoring weeks (can be a single multi-week window).",
+          "No playoff rounds needed — standings update live throughout the window.",
+          "Set status → Active when scoring begins; → Completed to lock the final rankings.",
+          "Use the public site to share a live leaderboard with participants."
+        ]
+      }
+    ];
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>📖 Tournament Type Guide</h3>
+        <button class="modal-close" id="trn-guide-close">✕</button>
+      </div>
+      <div class="modal-body trn-guide-body">
+        <p class="trn-guide-intro">Choose the format that fits your tournament structure. Each type has a different playoff engine — you can change it in Section D of the tournament config before the season starts.</p>
+        ${GUIDE.map(g => `
+          <div class="trn-guide-card">
+            <div class="trn-guide-card-header">
+              <span class="trn-guide-icon">${g.icon}</span>
+              <div>
+                <div class="trn-guide-card-title" style="color:${g.color}">${g.label}</div>
+                <div class="trn-guide-card-summary">${g.summary}</div>
+              </div>
+            </div>
+            <div class="trn-guide-when">💡 ${g.when}</div>
+            <div class="trn-guide-steps-label">Setup steps:</div>
+            <ol class="trn-guide-steps">
+              ${g.steps.map(s => `<li>${s}</li>`).join("")}
+            </ol>
+          </div>
+        `).join("")}
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="trn-guide-close2">Got it</button>
+      </div>
+    `);
+
+    document.getElementById("trn-guide-close")?.addEventListener("click",  _closeModal);
+    document.getElementById("trn-guide-close2")?.addEventListener("click", _closeModal);
   }
 
   // ── Tournament detail view ─────────────────────────────
