@@ -46,7 +46,7 @@ const DraftTicker = (() => {
     if (_mySleeperUserId) return _mySleeperUserId;
     if (!_username) return null;
     try {
-      const snap = await GMD.child(`users/${_username}/platforms/sleeper/userId`).once("value");
+      const snap = await GMD.child(`users/${_username}/platforms/sleeper/sleeperUserId`).once("value");
       _mySleeperUserId = snap.val() || null;
     } catch(e) {}
     return _mySleeperUserId;
@@ -329,7 +329,7 @@ const DraftTicker = (() => {
 
         let detail = "";
         if (item.nextPick && !isPaused) {
-          const nextStr = `Next: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+          const nextStr = `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
           let myStr = "";
           if (item.myNextPick) {
             if (item.onTheClock) {

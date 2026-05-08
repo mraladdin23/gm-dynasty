@@ -850,6 +850,28 @@
     </div>
   </div>
 
+  <!-- Global Draft Modal -->
+  <div id="global-draft-modal" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3>📋 Drafts</h3>
+        <button class="modal-close" onclick="document.getElementById('global-draft-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div class="modal-body" id="global-draft-modal-body" style="padding:var(--space-4)"></div>
+    </div>
+  </div>
+
+  <!-- Global Notifications Modal -->
+  <div id="global-notif-modal" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3>🔔 Notifications</h3>
+        <button class="modal-close" onclick="document.getElementById('global-notif-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div class="modal-body" id="global-notif-modal-body" style="padding:var(--space-4)"></div>
+    </div>
+  </div>
+
   <div id="manager-search-panel" class="ms-panel ms-panel--hidden">
     <div class="ms-header">
       <div class="ms-title">🔍 Find a Manager</div>
@@ -930,7 +952,7 @@
   <script src="js/playercard.js"></script>
   <script src="js/tournament.js?v=2"></script>
   <script src="js/profile.js?v=20"></script>
-  <script src="js/app.js?v=19"></script>
+  <script src="js/app.js?v=20"></script>
 
   <script>
     // Global safety net: if loading overlay is still visible after 10 seconds,
