@@ -5748,6 +5748,15 @@ select option { background: var(--color-bg-2); }
   flex-shrink: 0;
 }
 
+/* nav-links fills remaining space and centers its links between brand and actions */
+.nav-links {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
 .nav-pill-wrap {
   position: relative;
   display: flex;
@@ -5859,6 +5868,15 @@ select option { background: var(--color-bg-2); }
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Desktop: override base space-between now that nav-links has flex:1 */
+@media (min-width: 641px) {
+  .top-nav {
+    justify-content: flex-start;
+    gap: 0;
+  }
+  .nav-links { flex: 1; }
 }
 
 /* Hide activity pills on mobile — live in drawer instead */

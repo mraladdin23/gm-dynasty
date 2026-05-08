@@ -480,6 +480,6 @@ const DraftTicker = (() => {
     _wrap()?.classList.remove("has-drafts");
   }
 
-  return { init, stop };
+  return { init, stop, getLastItems: () => _lastItems };
 
 })();
