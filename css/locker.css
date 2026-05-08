@@ -5748,9 +5748,8 @@ select option { background: var(--color-bg-2); }
   margin-right: var(--space-4);
 }
 
-/* nav-links fills remaining space and centers its links between brand and actions */
+/* nav-links base — desktop positioning handled in @media (min-width: 641px) below */
 .nav-links {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5870,24 +5869,48 @@ select option { background: var(--color-bg-2); }
   gap: var(--space-2);
 }
 
-/* Desktop: nav-brand and nav-user/nav-actions are fixed on left/right.
-   nav-links is absolutely centered so it's always mid-page regardless
-   of how wide the side elements are. */
+/* Desktop: flexbox with absolutely-positioned nav-links for true centering.
+   nav-actions and nav-user sit naturally on the right via space-between.
+   nav-links is taken out of flow so it doesn't affect side element widths. */
 @media (min-width: 641px) {
   .top-nav {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
-    position: relative; /* needed for absolute child */
+    position: relative;
   }
+  /* Brand stays left naturally */
+  .nav-identity { display: none !important; }
+
+  /* Links: absolutely centered on the page, not relative to flex siblings */
   .nav-links {
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
+    display: flex !important;
     flex: none;
-    /* pointer-events still work; z-index keeps it above bg, below pills */
+    width: auto;
+    justify-content: center;
     z-index: 1;
+    pointer-events: auto;
   }
-  /* Right side: actions + user grouped together */
-  .nav-user { margin-left: var(--space-3); }
+
+  /* Right side: actions then user, separated by a small gap */
+  .nav-actions {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+    /* margin-left: auto not needed — space-between handles right-alignment */
+  }
+  .nav-user {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-3);
+    flex-shrink: 0;
+    margin-left: var(--space-3); /* buffer between contact btn and username */
+  }
+  .nav-hamburger { display: none !important; }
 }
 
 /* Hide activity pills on mobile — live in drawer instead */
