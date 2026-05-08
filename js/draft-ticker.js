@@ -1,19 +1,14 @@
 // ─────────────────────────────────────────────────────────
 //  GM Dynasty — Global Draft Ticker
 //  Boots at login, independent of any other module.
-//  Watches ALL active leagues (regular + tournament) for:
+//  Watches all active leagues (regular + tournament) for:
 //    - Upcoming drafts with a scheduled start time
-//    - Live drafts (currently drafting)
-//    - On-the-clock alerts when it's the logged-in user's pick
+//    - Live/paused drafts with pick details
+//    - On-the-clock alerts when it's the user's pick
 //
-//  Data sources:
-//    - gmd/users/{username}/leagues  → regular leagues (all platforms)
-//    - gmd/tournaments/              → tournament leagues (Sleeper only for live)
-//  Sleeper public API used directly (no auth needed).
-//  MFL/Yahoo: shown as live from cache if status = "drafting",
-//             no pick-count available (manual refresh required).
-//
-//  Polls every 30 seconds. Resets on logout via DraftTicker.stop().
+//  Only checks Sleeper leagues for the current/upcoming NFL
+//  season to avoid hammering hundreds of old league endpoints.
+//  Polls every 30 seconds.
 // ─────────────────────────────────────────────────────────
 
 const DraftTicker = (() => {
@@ -24,10 +19,8 @@ const DraftTicker = (() => {
   let _tickerInterval    = null;
   let _tickerOpen        = false;
   let _lastItems         = { live: [], upcoming: [] };
-  // Per-leagueId timestamp of last upcoming check (5-min TTL)
-  let _upcomingChecked   = {};
-  // Cache of fetched Sleeper draft objects per leagueId
-  let _sleeperDraftCache = {};
+  // In-memory cache of raw Sleeper draft arrays per leagueId
+  let _draftCache        = {}; // leagueId → [...drafts, _fetchedAt]
 
   // ── DOM shortcuts ──────────────────────────────────────
   const _pill  = () => document.getElementById("draft-ticker-btn");
@@ -36,9 +29,16 @@ const DraftTicker = (() => {
   const _wrap  = () => document.getElementById("draft-ticker-wrap");
   const _label = () => document.getElementById("draft-ticker-label");
 
-  // ── Escape HTML ────────────────────────────────────────
   function _esc(s) {
     return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  // ── Relevant NFL seasons ───────────────────────────────
+  // Include current year ± 1 to cover both "2025 NFL season" and
+  // "2026 startup" leagues (which draft summer 2026).
+  function _relevantSeasons() {
+    const y = new Date().getFullYear();
+    return new Set([y - 1, y, y + 1, String(y - 1), String(y), String(y + 1)]);
   }
 
   // ── Get logged-in user's Sleeper user_id ──────────────
@@ -48,26 +48,28 @@ const DraftTicker = (() => {
     try {
       const snap = await GMD.child(`users/${_username}/platforms/sleeper/userId`).once("value");
       _mySleeperUserId = snap.val() || null;
-    } catch(e) { /* non-fatal */ }
+    } catch(e) {}
     return _mySleeperUserId;
   }
 
-  // ── Fetch all leagues the user has stored ─────────────
-  // Returns a flat array of { leagueId, platform, year, leagueName, source }
+  // ── Fetch all relevant leagues ─────────────────────────
   async function _getAllLeagues() {
-    const leagues = [];
+    const leagues  = [];
+    const relevant = _relevantSeasons();
 
-    // ── 1. Regular user leagues from Firebase ────────────
+    // 1. Regular user leagues (Sleeper only)
     try {
-      const snap = await GMD.child(`users/${_username}/leagues`).once("value");
+      const snap   = await GMD.child(`users/${_username}/leagues`).once("value");
       const stored = snap.val() || {};
       for (const [, l] of Object.entries(stored)) {
         if (!l.leagueId && !l.league_id) continue;
+        if (l.platform !== "sleeper") continue;
+        const season = l.season || l.year || 0;
+        if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
         leagues.push({
           leagueId:   String(l.leagueId || l.league_id || ""),
-          platform:   l.platform || "sleeper",
-          year:       l.season   || l.year || new Date().getFullYear(),
-          leagueName: l.leagueName || l.name || l.leagueId || "",
+          leagueName: l.leagueName || l.name || "",
+          year:       season,
           source:     "league"
         });
       }
@@ -75,19 +77,16 @@ const DraftTicker = (() => {
       console.warn("[DraftTicker] Failed to load user leagues:", e.message);
     }
 
-    // ── 2. Tournament leagues from Firebase ──────────────
+    // 2. Tournament leagues (Sleeper batches only)
     try {
       const snap = await GMD.child("tournaments").once("value");
       const all  = snap.val() || {};
       for (const [tid, t] of Object.entries(all)) {
         if (!t?.meta || !t?.leagues) continue;
-        // Only include tournaments this user is involved in
-        const isAdmin      = t.roles?.[_username]?.role === "admin" || t.roles?.[_username]?.role === "sub_admin";
-        const isDiscovered = t.meta?.discoveredBy?.[_username];
-        const isParticipant = Object.values(t.participants || {}).some(p =>
-          p.dlrLinked && p.dlrUsername === _username
-        );
-        const notDraft = t.meta?.status !== "draft";
+        const isAdmin       = t.roles?.[_username]?.role === "admin" || t.roles?.[_username]?.role === "sub_admin";
+        const isDiscovered  = t.meta?.discoveredBy?.[_username];
+        const isParticipant = Object.values(t.participants || {}).some(p => p.dlrLinked && p.dlrUsername === _username);
+        const notDraft      = t.meta?.status !== "draft";
         if (!isAdmin && !isDiscovered && !isParticipant && !notDraft) continue;
 
         const tournamentName = t.meta?.name || "";
@@ -95,16 +94,17 @@ const DraftTicker = (() => {
 
         for (const [, batch] of Object.entries(t.leagues)) {
           if (!isBatch(batch)) continue;
+          if ((batch.platform || "sleeper") !== "sleeper") continue;
+          const season = batch.year || 0;
+          if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+
           for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
-            // Avoid duplicates — regular leagues already added above
-            const alreadyAdded = leagues.some(x => x.leagueId === leagueId && x.platform === batch.platform);
-            if (alreadyAdded) continue;
+            if (leagues.some(x => x.leagueId === leagueId)) continue;
             leagues.push({
-              leagueId:      String(leagueId),
-              platform:      batch.platform || "sleeper",
-              year:          batch.year || new Date().getFullYear(),
+              leagueId,
               leagueName:    l.name || leagueId,
               tournamentName,
+              year:          season,
               source:        "tournament",
               tid
             });
@@ -115,59 +115,72 @@ const DraftTicker = (() => {
       console.warn("[DraftTicker] Failed to load tournament leagues:", e.message);
     }
 
-    console.log(`[DraftTicker] Found ${leagues.length} leagues to check:`, leagues.map(l => `${l.platform}:${l.leagueId} (${l.leagueName})`));
+    console.log(`[DraftTicker] ${leagues.length} relevant leagues to check`);
     return leagues;
   }
 
-  // ── Check one Sleeper league for live/upcoming drafts ──
-  // Returns { live: [...], upcoming: [...] }
-  async function _checkSleeperLeague(league, mySleeperUid) {
-    const { leagueId, leagueName, tournamentName } = league;
-    const now = Date.now();
-
-    // Cache Sleeper draft objects for 60s to avoid redundant fetches
-    let drafts = _sleeperDraftCache[leagueId];
-    if (!drafts || (now - (drafts._fetchedAt || 0)) > 60000) {
-      try {
-        const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
-        if (!r.ok) return { live: [], upcoming: [] };
-        const data = await r.json();
-        drafts = Array.isArray(data) ? data : [];
-        drafts._fetchedAt = now;
-        _sleeperDraftCache[leagueId] = drafts;
-        console.log(`[DraftTicker] ${leagueId}: fetched ${drafts.length} draft(s)`, drafts.map(d => `${d.draft_id} status=${d.status} start_time=${d.start_time}`));
-      } catch(e) {
-        return { live: [], upcoming: [] };
-      }
+  // ── Fetch draft list for one league (60s cache) ────────
+  async function _fetchDrafts(leagueId, bustCache) {
+    const now    = Date.now();
+    const cached = _draftCache[leagueId];
+    if (!bustCache && cached && (now - (cached._fetchedAt || 0)) < 60000) {
+      return cached;
     }
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+      if (!r.ok) return null;
+      const data   = await r.json();
+      const drafts = Array.isArray(data) ? data : [];
+      drafts._fetchedAt = now;
+      _draftCache[leagueId] = drafts;
+      return drafts;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  // ── Process one league's drafts ────────────────────────
+  async function _processLeague(league, mySleeperUid, bustCache) {
+    const { leagueId, leagueName, tournamentName, source, tid } = league;
+    const now    = Date.now();
+    const drafts = await _fetchDrafts(leagueId, bustCache);
+    if (!drafts) return { live: [], upcoming: [] };
 
     const live     = [];
     const upcoming = [];
 
     for (const d of drafts) {
-      // ── Live draft ──────────────────────────────────
-      if (d.status === "drafting") {
-        let picksUntilMe = null;
+      if (d.status === "complete") continue; // skip all completed drafts
+
+      // ── Live or paused ──────────────────────────────
+      if (d.status === "drafting" || d.status === "paused") {
         let onTheClock   = false;
+        let picksUntilMe = null;
+        let picksMade    = 0;
+        let totalPicks   = null;
+        let nextPick     = null;
 
-        if (mySleeperUid && d.draft_order) {
-          try {
-            const mySlot = Object.entries(d.draft_order)
-              .find(([uid]) => uid === mySleeperUid)?.[1];
+        try {
+          const picksR = await fetch(`https://api.sleeper.app/v1/draft/${d.draft_id}/picks`);
+          if (picksR.ok) {
+            const picksArr   = await picksR.json();
+            picksMade        = Array.isArray(picksArr) ? picksArr.length : 0;
+            const totalTeams = Object.keys(d.draft_order || d.slot_to_roster_id || {}).length
+                               || d.settings?.teams || 12;
+            const totalRounds = d.settings?.rounds || 1;
+            totalPicks        = totalTeams * totalRounds;
 
-            if (mySlot != null) {
-              const totalTeams = Object.keys(d.draft_order).length || 12;
-              const picksR     = await fetch(`https://api.sleeper.app/v1/draft/${d.draft_id}/picks`);
-              if (picksR.ok) {
-                const picksArr    = await picksR.json();
-                const nextOverall = (Array.isArray(picksArr) ? picksArr.length : 0) + 1;
-                const currentRound= Math.ceil(nextOverall / totalTeams);
-                const pickInRound = ((nextOverall - 1) % totalTeams) + 1;
-                // Snake: even rounds reverse slot order
+            const nextOverall  = picksMade + 1;
+            const currentRound = Math.ceil(nextOverall / totalTeams);
+            const pickInRound  = ((nextOverall - 1) % totalTeams) + 1;
+            nextPick = { overall: nextOverall, round: currentRound, pick: pickInRound };
+
+            if (mySleeperUid && d.draft_order) {
+              const mySlot = Object.entries(d.draft_order)
+                .find(([uid]) => uid === mySleeperUid)?.[1];
+              if (mySlot != null) {
                 const slotThisRound = currentRound % 2 === 1
-                  ? mySlot
-                  : (totalTeams + 1 - mySlot);
-
+                  ? mySlot : (totalTeams + 1 - mySlot);
                 if (pickInRound === slotThisRound) {
                   onTheClock   = true;
                   picksUntilMe = 0;
@@ -176,89 +189,85 @@ const DraftTicker = (() => {
                 }
               }
             }
-          } catch(e) { /* non-fatal — show as live without pick count */ }
-        }
+          }
+        } catch(e) {}
 
         live.push({
-          leagueId, leagueName, tournamentName,
-          platform: "sleeper",
-          source:   league.source,
-          tid:      league.tid || null,
-          onTheClock,
-          picksUntilMe,
-          draftId:  d.draft_id
+          leagueId, leagueName, tournamentName, source, tid,
+          draftId:     d.draft_id,
+          status:      d.status,
+          onTheClock,  picksUntilMe,
+          picksMade,   totalPicks,  nextPick
         });
+        continue;
       }
 
-      // ── Upcoming draft with scheduled time ──────────
-      if (d.status === "pre_draft" && d.start_time) {
+      // ── Upcoming — only if scheduled ────────────────
+      if (d.status === "pre_draft") {
+        if (!d.start_time) continue;
         const startMs = d.start_time > 1e12 ? d.start_time : d.start_time * 1000;
-        if (startMs > now) {
-          upcoming.push({
-            leagueId, leagueName, tournamentName,
-            platform: "sleeper",
-            source:   league.source,
-            tid:      league.tid || null,
-            startTime: startMs,
-            draftId:   d.draft_id
-          });
-        }
+        if (startMs <= now) continue;
+        upcoming.push({
+          leagueId, leagueName, tournamentName, source, tid,
+          draftId:  d.draft_id,
+          startTime: startMs
+        });
       }
     }
 
     return { live, upcoming };
   }
 
-  // ── Main gather pass ───────────────────────────────────
+  // ── Main gather ────────────────────────────────────────
   async function _gatherItems() {
     const allLeagues   = await _getAllLeagues();
     const mySleeperUid = await _getMySleeperUserId();
-    const now          = Date.now();
-    const UPCOMING_TTL = 5 * 60 * 1000; // 5 minutes
+
+    // Bust cache for leagues that were live last cycle (picks change fast)
+    const liveIds = new Set(_lastItems.live.map(i => i.leagueId));
 
     const liveItems     = [];
     const upcomingItems = [];
 
     for (const league of allLeagues) {
-      if (league.platform === "sleeper") {
-        // Rate-limit upcoming checks per league (5-min TTL)
-        const lastCheck = _upcomingChecked[league.leagueId] || 0;
-        const stale     = (now - lastCheck) > UPCOMING_TTL;
-        if (stale) {
-          _upcomingChecked[league.leagueId] = now;
-          const { live, upcoming } = await _checkSleeperLeague(league, mySleeperUid);
-          liveItems.push(...live);
-          upcomingItems.push(...upcoming);
-        } else {
-          // Still check for live (picks change fast) but skip upcoming refetch
-          const { live } = await _checkSleeperLeague(league, mySleeperUid);
-          liveItems.push(...live);
-        }
-      }
-      // MFL / Yahoo: no public draft API, nothing to check without auth.
-      // They'll appear if we add authenticated draft-status checks in future.
+      const bustCache = liveIds.has(league.leagueId);
+      const { live, upcoming } = await _processLeague(league, mySleeperUid, bustCache);
+      liveItems.push(...live);
+      upcomingItems.push(...upcoming);
     }
 
-    // Deduplicate by draftId in case a league appears in both regular + tournament
+    // Deduplicate by draftId
     const dedup = (arr) => {
       const seen = new Set();
       return arr.filter(item => {
-        const key = item.draftId || `${item.leagueId}:${item.platform}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
+        if (seen.has(item.draftId)) return false;
+        seen.add(item.draftId);
         return true;
       });
     };
 
     upcomingItems.sort((a, b) => a.startTime - b.startTime);
-
-    return {
-      live:     dedup(liveItems),
-      upcoming: dedup(upcomingItems)
-    };
+    return { live: dedup(liveItems), upcoming: dedup(upcomingItems) };
   }
 
-  // ── Render the dropdown panel body ────────────────────
+  // ── Time formatting ────────────────────────────────────
+  function _fmtDateTime(ms) {
+    const d = new Date(ms);
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+      + " · " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+  function _timeUntil(ms) {
+    const diff = ms - Date.now();
+    if (diff <= 0) return "Starting soon";
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    if (h >= 48) return `in ${Math.floor(h / 24)} days`;
+    if (h >= 24) return `in ${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0)   return `in ${h}h ${m}m`;
+    return `in ${m}m`;
+  }
+
+  // ── Render panel ───────────────────────────────────────
   function _renderPanel(items) {
     const body = _body();
     if (!body) return;
@@ -273,27 +282,43 @@ const DraftTicker = (() => {
     if (items.live.length) {
       html += `<div class="draft-ticker-section-label">🔴 Live Drafts</div>`;
       for (const item of items.live) {
-        const icon   = item.onTheClock ? "🔔" : "📋";
-        const meta   = [item.tournamentName, item.platform].filter(Boolean).join(" · ");
-        const status = item.onTheClock
-          ? `<div class="draft-ticker-row-status draft-ticker-row-status--alarm">ON THE CLOCK!</div>`
-          : item.picksUntilMe != null
-            ? `<div class="draft-ticker-row-status draft-ticker-row-status--live">${item.picksUntilMe} pick${item.picksUntilMe !== 1 ? "s" : ""} away</div>`
-            : `<div class="draft-ticker-row-status draft-ticker-row-status--live">LIVE</div>`;
+        const isPaused = item.status === "paused";
+        const icon     = item.onTheClock ? "🔔" : (isPaused ? "⏸" : "📋");
 
-        // Navigation: go to tournament draft tab if tid present, else locker
-        const navAttr = item.tid
+        let statusHtml;
+        if (item.onTheClock) {
+          statusHtml = `<div class="draft-ticker-row-status draft-ticker-row-status--alarm">ON THE CLOCK!</div>`;
+        } else if (isPaused) {
+          statusHtml = `<div class="draft-ticker-row-status" style="color:var(--color-text-dim)">Paused</div>`;
+        } else if (item.picksUntilMe != null) {
+          statusHtml = `<div class="draft-ticker-row-status draft-ticker-row-status--live">${item.picksUntilMe} pick${item.picksUntilMe !== 1 ? "s" : ""} away</div>`;
+        } else {
+          statusHtml = `<div class="draft-ticker-row-status draft-ticker-row-status--live">LIVE</div>`;
+        }
+
+        let detail = "";
+        if (item.picksMade != null && item.totalPicks) {
+          const pct = Math.round((item.picksMade / item.totalPicks) * 100);
+          detail = `<div class="draft-ticker-row-detail">${item.picksMade}/${item.totalPicks} picks · ${pct}%`;
+          if (item.nextPick && !isPaused) {
+            detail += ` · Next: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+          }
+          detail += `</div>`;
+        }
+
+        const nav = item.tid
           ? `data-ticker-tid="${_esc(item.tid)}"`
           : `data-ticker-league="${_esc(item.leagueId)}"`;
 
         html += `
-          <div class="draft-ticker-row" ${navAttr}>
+          <div class="draft-ticker-row" ${nav}>
             <div class="draft-ticker-row-icon">${icon}</div>
             <div class="draft-ticker-row-info">
               <div class="draft-ticker-row-name">${_esc(item.leagueName)}</div>
-              ${meta ? `<div class="draft-ticker-row-meta">${_esc(meta)}</div>` : ""}
+              ${item.tournamentName ? `<div class="draft-ticker-row-meta">${_esc(item.tournamentName)}</div>` : ""}
+              ${detail}
             </div>
-            ${status}
+            ${statusHtml}
           </div>`;
       }
     }
@@ -301,74 +326,54 @@ const DraftTicker = (() => {
     if (items.upcoming.length) {
       html += `<div class="draft-ticker-section-label">📅 Upcoming Drafts</div>`;
       for (const item of items.upcoming) {
-        const d       = new Date(item.startTime);
-        const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-        const meta    = [item.tournamentName, item.platform].filter(Boolean).join(" · ");
-
-        const navAttr = item.tid
+        const nav = item.tid
           ? `data-ticker-tid="${_esc(item.tid)}"`
           : `data-ticker-league="${_esc(item.leagueId)}"`;
-
         html += `
-          <div class="draft-ticker-row" ${navAttr}>
+          <div class="draft-ticker-row" ${nav}>
             <div class="draft-ticker-row-icon">📅</div>
             <div class="draft-ticker-row-info">
               <div class="draft-ticker-row-name">${_esc(item.leagueName)}</div>
-              ${meta ? `<div class="draft-ticker-row-meta">${_esc(meta)}</div>` : ""}
+              ${item.tournamentName ? `<div class="draft-ticker-row-meta">${_esc(item.tournamentName)}</div>` : ""}
+              <div class="draft-ticker-row-detail">${_esc(_fmtDateTime(item.startTime))}</div>
             </div>
-            <div class="draft-ticker-row-status draft-ticker-row-status--soon">${dateStr}<br>${timeStr}</div>
+            <div class="draft-ticker-row-status draft-ticker-row-status--soon">${_timeUntil(item.startTime)}</div>
           </div>`;
       }
     }
 
     body.innerHTML = html;
 
-    // Wire row clicks
     body.querySelectorAll("[data-ticker-tid]").forEach(row => {
       row.addEventListener("click", () => {
         _closePanel();
-        // Navigate to tournaments view → open that tournament's draft tab
-        if (typeof DLRTournament !== "undefined" && typeof DLRNav !== "undefined") {
-          DLRNav.go("tournament");
-          // Give the tournament view a moment to render before opening detail
-          setTimeout(() => {
-            if (typeof _openTournamentView === "function") {
-              _openTournamentView(row.dataset.tickerTid);
-            }
-          }, 150);
-        }
+        if (typeof DLRNav !== "undefined") DLRNav.go("tournament");
+        setTimeout(() => {
+          if (typeof _openTournamentView === "function") _openTournamentView(row.dataset.tickerTid);
+        }, 150);
       });
     });
 
     body.querySelectorAll("[data-ticker-league]").forEach(row => {
       row.addEventListener("click", () => {
         _closePanel();
-        // Open the league detail panel to its draft tab
         const leagueId = row.dataset.tickerLeague;
-        if (typeof Profile !== "undefined") {
-          // Find the league key that matches this leagueId
-          const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
-          if (profile?.leagues) {
-            const match = Object.entries(profile.leagues)
-              .find(([, l]) => String(l.leagueId || l.league_id || "") === leagueId);
-            if (match) {
-              Profile.openLeagueDetail(match[0]);
-              setTimeout(() => {
-                const sel = document.getElementById("detail-tab-select");
-                if (sel) {
-                  sel.value = "draft";
-                  Profile.onDetailTabChange("draft");
-                }
-              }, 350);
-            }
-          }
+        const profile  = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+        if (!profile?.leagues) return;
+        const match = Object.entries(profile.leagues)
+          .find(([, l]) => String(l.leagueId || l.league_id || "") === leagueId);
+        if (match && typeof Profile !== "undefined") {
+          Profile.openLeagueDetail(match[0]);
+          setTimeout(() => {
+            const sel = document.getElementById("detail-tab-select");
+            if (sel) { sel.value = "draft"; Profile.onDetailTabChange("draft"); }
+          }, 350);
         }
       });
     });
   }
 
-  // ── Update pill appearance ────────────────────────────
+  // ── Update pill ────────────────────────────────────────
   function _updatePill(items) {
     const pill = _pill();
     const wrap = _wrap();
@@ -380,25 +385,22 @@ const DraftTicker = (() => {
     const alarm   = items.live.some(i => i.onTheClock);
 
     wrap.classList.toggle("has-drafts", hasAny);
-
     pill.classList.toggle("draft-ticker-pill--live",  hasLive && !alarm);
     pill.classList.toggle("draft-ticker-pill--alarm", alarm);
-
-    // Remove old badge
     pill.querySelector(".draft-ticker-badge")?.remove();
 
     if (alarm) {
-      const badge = document.createElement("span");
-      badge.className = "draft-ticker-badge";
-      badge.textContent = "🔔";
-      badge.style.cssText = "background:transparent;font-size:.8rem";
-      pill.appendChild(badge);
+      const b = document.createElement("span");
+      b.className = "draft-ticker-badge";
+      b.textContent = "🔔";
+      b.style.cssText = "background:transparent;font-size:.8rem";
+      pill.appendChild(b);
       if (lbl) lbl.textContent = "Your Turn!";
     } else if (hasLive) {
-      const badge = document.createElement("span");
-      badge.className = "draft-ticker-badge";
-      badge.textContent = String(items.live.length);
-      pill.appendChild(badge);
+      const b = document.createElement("span");
+      b.className = "draft-ticker-badge";
+      b.textContent = String(items.live.length);
+      pill.appendChild(b);
       if (lbl) lbl.textContent = items.live.length === 1 ? "Live Draft" : "Live Drafts";
     } else if (items.upcoming.length) {
       if (lbl) lbl.textContent = `${items.upcoming.length} Draft${items.upcoming.length > 1 ? "s" : ""} Soon`;
@@ -408,24 +410,15 @@ const DraftTicker = (() => {
   }
 
   // ── Panel open / close ────────────────────────────────
-  function _openPanel() {
-    const p = _panel();
-    if (p) p.style.display = "";
-    _tickerOpen = true;
-  }
+  function _openPanel()  { const p = _panel(); if (p) p.style.display = ""; _tickerOpen = true; }
+  function _closePanel() { const p = _panel(); if (p) p.style.display = "none"; _tickerOpen = false; }
 
-  function _closePanel() {
-    const p = _panel();
-    if (p) p.style.display = "none";
-    _tickerOpen = false;
-  }
-
-  // ── Full refresh cycle ────────────────────────────────
+  // ── Refresh ────────────────────────────────────────────
   async function _refresh() {
     try {
       const items = await _gatherItems();
-      _lastItems = items;
-      console.log(`[DraftTicker] refresh complete — ${items.live.length} live, ${items.upcoming.length} upcoming`);
+      _lastItems  = items;
+      console.log(`[DraftTicker] ${items.live.length} live, ${items.upcoming.length} upcoming`);
       _updatePill(items);
       if (_tickerOpen) _renderPanel(items);
     } catch(e) {
@@ -433,48 +426,32 @@ const DraftTicker = (() => {
     }
   }
 
-  // ── Public: init — called from app.js after login ─────
+  // ── Public: init ──────────────────────────────────────
   function init(username) {
     _username = username;
 
-    // Wire pill toggle
-    document.getElementById("draft-ticker-btn")?.addEventListener("click", (e) => {
+    document.getElementById("draft-ticker-btn")?.addEventListener("click", e => {
       e.stopPropagation();
-      if (_tickerOpen) {
-        _closePanel();
-      } else {
-        _renderPanel(_lastItems);
-        _openPanel();
-      }
+      _tickerOpen ? _closePanel() : (_renderPanel(_lastItems), _openPanel());
+    });
+    document.getElementById("draft-ticker-close")?.addEventListener("click", e => {
+      e.stopPropagation(); _closePanel();
+    });
+    document.addEventListener("click", e => {
+      if (_tickerOpen && !e.target.closest("#draft-ticker-wrap")) _closePanel();
     });
 
-    // Close button
-    document.getElementById("draft-ticker-close")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      _closePanel();
-    });
-
-    // Click outside to close
-    document.addEventListener("click", (e) => {
-      if (_tickerOpen && !e.target.closest("#draft-ticker-wrap")) {
-        _closePanel();
-      }
-    });
-
-    // Run immediately then every 30s
     _refresh();
     if (_tickerInterval) clearInterval(_tickerInterval);
     _tickerInterval = setInterval(_refresh, 30000);
   }
 
-  // ── Public: stop — called on logout ──────────────────
+  // ── Public: stop ─────────────────────────────────────
   function stop() {
     if (_tickerInterval) { clearInterval(_tickerInterval); _tickerInterval = null; }
-    _username          = null;
-    _mySleeperUserId   = null;
-    _lastItems         = { live: [], upcoming: [] };
-    _upcomingChecked   = {};
-    _sleeperDraftCache = {};
+    _username = _mySleeperUserId = null;
+    _lastItems  = { live: [], upcoming: [] };
+    _draftCache = {};
     _closePanel();
     _wrap()?.classList.remove("has-drafts");
   }
