@@ -41,6 +41,11 @@ const AppState = {
       );
     }
 
+    // Init global draft ticker (all leagues + tournaments)
+    if (typeof DraftTicker !== "undefined") {
+      DraftTicker.init(profile.username);
+    }
+
     // Restore last active view after refresh
     const savedView = sessionStorage.getItem("dlr_active_view");
     if (savedView && savedView !== "locker") {
@@ -427,6 +432,7 @@ document.getElementById("drawer-leagues-btn")?.addEventListener("click", e => {
 document.getElementById("drawer-logout-btn")?.addEventListener("click", async e => {
   e.preventDefault();
   DLRNav.close();
+  if (typeof DraftTicker !== "undefined") DraftTicker.stop();
   await Auth.logout();
   AppState.showScreen("auth-screen");
 });
@@ -667,6 +673,7 @@ document.getElementById("league-label-modal")?.addEventListener("click", e => {
 
 // ── Logout ─────────────────────────────────────────────────
 document.getElementById("nav-logout-btn")?.addEventListener("click", async () => {
+  if (typeof DraftTicker !== "undefined") DraftTicker.stop();
   await Auth.logout();
   AppState.showScreen("auth-screen");
 });
