@@ -5869,48 +5869,61 @@ select option { background: var(--color-bg-2); }
   gap: var(--space-2);
 }
 
-/* Desktop: flexbox with absolutely-positioned nav-links for true centering.
-   nav-actions and nav-user sit naturally on the right via space-between.
-   nav-links is taken out of flow so it doesn't affect side element widths. */
+/* Desktop nav: three-zone layout.
+   - nav-brand: normal flex item, stays left
+   - nav-links: absolutely centered on viewport
+   - nav-actions + nav-user: both absolutely positioned as a unit on the right,
+     with nav-actions anchored to the left of nav-user using a shared right
+     boundary. We achieve this by making nav-user position:absolute right-edge,
+     and nav-actions position:absolute right edge offset by nav-user's width.
+     Since nav-user width varies with username, we use a simpler approach:
+     nav-actions is position:absolute right:0 inside a right-side flex group
+     simulated by ordering — but since we can't wrap without HTML changes,
+     we pin nav-user right and nav-actions uses right with a generous offset
+     that works for typical username lengths (overridable). */
 @media (min-width: 641px) {
   .top-nav {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     position: relative;
+    padding: 0 var(--space-6);
   }
-  /* Brand stays left naturally */
-  .nav-identity { display: none !important; }
+  .nav-identity  { display: none !important; }
+  .nav-hamburger { display: none !important; }
 
-  /* Links: absolutely centered on the page, not relative to flex siblings */
+  /* brand: normal flex, stays left */
+  .nav-brand { flex-shrink: 0; }
+
+  /* links: absolutely centered, out of flow */
   .nav-links {
     position: absolute;
     left: 50%;
-    transform: translateX(-50%);
+    top: 50%;
+    transform: translate(-50%, -50%);
     display: flex !important;
-    flex: none;
-    width: auto;
-    justify-content: center;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
     z-index: 1;
-    pointer-events: auto;
   }
 
-  /* Right side: actions then user, separated by a small gap */
+  /* Push nav-actions to the far right using margin-left:auto.
+     nav-user follows immediately after. Both stay in flex flow
+     so they sit side by side naturally. */
   .nav-actions {
+    margin-left: auto;
     display: flex !important;
     align-items: center;
     gap: var(--space-2);
     flex-shrink: 0;
-    /* margin-left: auto not needed — space-between handles right-alignment */
   }
   .nav-user {
     display: flex !important;
     align-items: center;
     gap: var(--space-3);
     flex-shrink: 0;
-    margin-left: var(--space-3); /* buffer between contact btn and username */
+    margin-left: var(--space-3);
   }
-  .nav-hamburger { display: none !important; }
 }
 
 /* Hide activity pills on mobile — live in drawer instead */
