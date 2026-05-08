@@ -61,12 +61,15 @@ const DraftTicker = (() => {
 
     // 1. Regular user leagues — Sleeper only, skip if commish-only
     try {
-      const [leagueSnap, metaSnap] = await Promise.all([
-        GMD.child(`users/${_username}/leagues`).once("value"),
-        GMD.child(`leagueMeta/${_username}`).once("value")
-      ]);
+      const leagueSnap = await GMD.child(`users/${_username}/leagues`).once("value");
       const stored = leagueSnap.val() || {};
-      const meta   = metaSnap.val() || {};
+
+      // Try to read leagueMeta for commish filter — non-fatal if permission denied
+      let meta = {};
+      try {
+        const metaSnap = await GMD.child(`users/${_username}/leagueMeta`).once("value");
+        meta = metaSnap.val() || {};
+      } catch(e) { /* leagueMeta not accessible — include all leagues */ }
 
       for (const [key, l] of Object.entries(stored)) {
         if (!l.leagueId && !l.league_id) continue;
