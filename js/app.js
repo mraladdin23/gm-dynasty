@@ -46,6 +46,14 @@ const AppState = {
       DraftTicker.init(profile.username);
     }
 
+    // Init notification tracker
+    _startNotifMonitor(profile);
+
+    // Init notification tracker
+    if (typeof NotifTracker !== "undefined") {
+      NotifTracker.init(profile.username);
+    }
+
     // Restore last active view after refresh
     const savedView = sessionStorage.getItem("dlr_active_view");
     if (savedView && savedView !== "locker") {
@@ -433,6 +441,7 @@ document.getElementById("drawer-logout-btn")?.addEventListener("click", async e 
   e.preventDefault();
   DLRNav.close();
   if (typeof DraftTicker !== "undefined") DraftTicker.stop();
+  _stopNotifMonitor();
   await Auth.logout();
   AppState.showScreen("auth-screen");
 });
@@ -674,6 +683,7 @@ document.getElementById("league-label-modal")?.addEventListener("click", e => {
 // ── Logout ─────────────────────────────────────────────────
 document.getElementById("nav-logout-btn")?.addEventListener("click", async () => {
   if (typeof DraftTicker !== "undefined") DraftTicker.stop();
+  _stopNotifMonitor();
   await Auth.logout();
   AppState.showScreen("auth-screen");
 });
@@ -822,6 +832,7 @@ function _startGlobalChatMonitor(profile) {
 
 function _updateChatBadges() {
   const total = Object.values(_chatUnreadCounts).reduce((s, n) => s + n, 0);
+  _updateNotifPill(); // keep notification pill in sync with chat counts
 
   // Update badge on each league card that has unread messages
   document.querySelectorAll(".league-card[data-key]").forEach(card => {
@@ -858,52 +869,118 @@ function _updateChatBadges() {
 function _updateGlobalAucPill(liveByLeague) {
   const totalLive = Object.values(liveByLeague).reduce((s, v) => s + v.live.length, 0);
 
-  const mobilePillHTML = totalLive === 0 ? "" : `
-    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
-      🏷 ${totalLive}<span class="global-auc-pill-dot"></span>
-    </button>`;
+  // ── Desktop nav pill ──────────────────────────────────
+  const aucWrap = document.getElementById("nav-auc-wrap");
+  const aucLbl  = document.getElementById("nav-auc-label");
+  if (aucWrap) aucWrap.style.display = totalLive > 0 ? "flex" : "none";
+  if (aucLbl)  aucLbl.textContent = `${totalLive} Auction${totalLive !== 1 ? "s" : ""}`;
 
-  const desktopPillHTML = totalLive === 0 ? "" : `
-    <button class="global-auc-pill" onclick="_openGlobalAucModal()">
-      🏷 ${totalLive} Live Auction${totalLive !== 1 ? "s" : ""}
-      <span class="global-auc-pill-dot"></span>
-    </button>`;
+  // ── Mobile drawer badge ───────────────────────────────
+  const drawerSec   = document.getElementById("drawer-auc-section");
+  const drawerBadge = document.getElementById("drawer-auc-badge");
+  if (drawerSec) drawerSec.style.display = totalLive > 0 ? "" : "none";
+  if (drawerBadge) drawerBadge.textContent = totalLive > 0 ? String(totalLive) : "";
+  _syncDrawerActivity();
+}
 
-  // Mobile: inside nav-identity strip
-  const mobile = document.getElementById("global-auc-pill");
-  if (mobile) mobile.innerHTML = mobilePillHTML;
+// ── Show/hide the Activity drawer section ──────────────────
+function _syncDrawerActivity() {
+  const aucVisible   = document.getElementById("drawer-auc-section")?.style.display   !== "none";
+  const draftVisible = document.getElementById("drawer-draft-section")?.style.display !== "none";
+  const notifVisible = document.getElementById("drawer-notif-section")?.style.display !== "none";
+  const activity     = document.getElementById("drawer-activity-section");
+  if (activity) activity.style.display = (aucVisible || draftVisible || notifVisible) ? "" : "none";
+}
 
-  // Desktop: in locker-header-actions
-  const desktop = document.getElementById("global-auc-pill-desktop");
-  if (desktop) desktop.innerHTML = desktopPillHTML;
+// ── Notification tracker ────────────────────────────────────
+// Watches: league chat unread counts, tournament board messages,
+//          sticky notes on the user's locker.
+let _notifListeners       = [];
+let _trnBoardUnread       = {}; // tid_year → unread count
+let _stickyNoteUnread     = 0;
 
-  // Drawer live auctions section
-  const drawerSection = document.getElementById("drawer-auc-section");
-  const drawerList    = document.getElementById("drawer-auc-list");
-  if (drawerSection && drawerList) {
-    if (totalLive === 0) {
-      drawerSection.style.display = "none";
-    } else {
-      drawerSection.style.display = "";
-      drawerList.innerHTML = Object.entries(liveByLeague)
-        .flatMap(([leagueKey, { league, live }]) => live.map(a => ({ ...a, leagueKey, league })))
-        .sort((a, b) => a.expiresAt - b.expiresAt)
-        .map(a => {
-          const { leagueKey, league } = a;
-          const displayBid = _computeDisplayBid(a);
-          const bidCount   = a.proxies ? Object.keys(a.proxies).length : (a.bidCount || 1);
-          const mins    = Math.max(0, Math.floor((a.expiresAt - Date.now()) / 60000));
-          const timeStr = mins > 60 ? `${Math.floor(mins/60)}h` : `${mins}m`;
-          return `<div class="nav-drawer-item" onclick="DLRNav.close();Profile.openLeagueDetail('${leagueKey}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='auction';Profile.onDetailTabChange('auction');}},350)">
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(a.playerName||"Player")}</div>
-              <div style="font-size:.7rem;color:var(--color-text-dim)">${_escHtml(league.leagueName||leagueKey)} · ${timeStr}</div>
-            </div>
-            <span style="font-family:var(--font-display);font-weight:700;color:var(--color-green);font-size:.82rem;flex-shrink:0">$${(displayBid/1e6).toFixed(1)}M</span>
-          </div>`;
-        }).join("");
+function _stopNotifMonitor() {
+  _notifListeners.forEach(fn => fn());
+  _notifListeners = [];
+  _trnBoardUnread = {};
+  _stickyNoteUnread = 0;
+}
+
+function _startNotifMonitor(profile) {
+  _stopNotifMonitor();
+  const username  = profile.username;
+  const startedAt = Date.now();
+
+  // ── 1. Sticky notes on user's own locker ──────────────
+  const stickyRef = GMD.child(`social/${username}/stickyNotes`).orderByChild("createdAt").startAfter(startedAt);
+  const stickyHandler = stickyRef.on("child_added", snap => {
+    const note = snap.val() || {};
+    if (note.isRemoved) return;
+    if ((note.createdAt || 0) <= startedAt) return;
+    _stickyNoteUnread++;
+    _updateNotifPill();
+    showToast(`📌 ${note.authorUsername || "Someone"} left you a sticky note!`, "info", 5000);
+  });
+  _notifListeners.push(() => stickyRef.off("child_added", stickyHandler));
+
+  // ── 2. Tournament message boards ───────────────────────
+  // Watch boards for tournaments where user is a participant or admin
+  GMD.child("tournaments").once("value").then(snap => {
+    const all = snap.val() || {};
+    for (const [tid, t] of Object.entries(all)) {
+      if (!t?.meta) continue;
+      const isAdmin       = t.roles?.[username]?.role === "admin" || t.roles?.[username]?.role === "sub_admin";
+      const isDiscovered  = t.meta?.discoveredBy?.[username];
+      const isParticipant = Object.values(t.participants || {}).some(p => p.dlrLinked && p.dlrUsername === username);
+      if (!isAdmin && !isDiscovered && !isParticipant) continue;
+
+      const year    = Object.keys(t.playoffs || {}).map(Number).filter(Boolean).sort((a,b) => b-a)[0]
+                      || new Date().getFullYear();
+      const chatKey = `${tid}_${year}`;
+      const ref     = GMD.child(`tournamentChats/${chatKey}`).orderByChild("ts").startAfter(startedAt);
+
+      const handler = ref.on("child_added", snap => {
+        const msg = snap.val() || {};
+        if ((msg.ts || 0) <= startedAt) return;
+        if ((msg.user || "").toLowerCase() === username.toLowerCase()) return;
+        _trnBoardUnread[chatKey] = (_trnBoardUnread[chatKey] || 0) + 1;
+        _updateNotifPill();
+        const tName = t.meta?.name || "Tournament";
+        const sender = msg.user || "Someone";
+        showToast(`💬 ${tName} board · ${sender}: ${(msg.text||"").slice(0,40)}`, "info", 5000);
+      });
+      _notifListeners.push(() => ref.off("child_added", handler));
+    }
+  }).catch(() => {});
+}
+
+function _updateNotifPill() {
+  const chatTotal  = Object.values(_chatUnreadCounts).reduce((s, n) => s + n, 0);
+  const boardTotal = Object.values(_trnBoardUnread).reduce((s, n) => s + n, 0);
+  const total      = chatTotal + boardTotal + _stickyNoteUnread;
+
+  // ── Desktop nav pill ──────────────────────────────────
+  const wrap = document.getElementById("nav-notif-wrap");
+  const lbl  = document.getElementById("nav-notif-label");
+  const btn  = document.getElementById("nav-notif-btn");
+  if (wrap) wrap.style.display = total > 0 ? "flex" : "none";
+  if (lbl)  lbl.textContent = `${total} New`;
+  if (btn) {
+    btn.querySelector(".nav-pill-badge")?.remove();
+    if (total > 0) {
+      const b = document.createElement("span");
+      b.className = "nav-pill-badge";
+      b.textContent = total > 99 ? "99+" : String(total);
+      btn.appendChild(b);
     }
   }
+
+  // ── Mobile drawer badge ───────────────────────────────
+  const drawerSec   = document.getElementById("drawer-notif-section");
+  const drawerBadge = document.getElementById("drawer-notif-badge");
+  if (drawerSec) drawerSec.style.display = total > 0 ? "" : "none";
+  if (drawerBadge) drawerBadge.textContent = total > 0 ? String(total) : "";
+  _syncDrawerActivity();
 }
 
 function _openGlobalAucModal() {
@@ -946,6 +1023,39 @@ function _openGlobalAucModal() {
 function _escHtml(s) {
   return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
+
+// ── Notification panel toggle ──────────────────────────────
+(function() {
+  let _notifOpen = false;
+  const panel = () => document.getElementById("nav-notif-panel");
+  const open  = () => { const p = panel(); if (p) p.style.display = ""; _notifOpen = true; };
+  const close = () => { const p = panel(); if (p) p.style.display = "none"; _notifOpen = false; };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("nav-notif-btn")?.addEventListener("click", e => {
+      e.stopPropagation();
+      _notifOpen ? close() : open();
+    });
+    document.getElementById("nav-notif-close")?.addEventListener("click", e => {
+      e.stopPropagation(); close();
+    });
+    document.addEventListener("click", e => {
+      if (_notifOpen && !e.target.closest("#nav-notif-wrap")) close();
+    });
+
+    // Mobile drawer: draft row click opens draft panel in drawer context
+    document.getElementById("drawer-draft-btn")?.addEventListener("click", () => {
+      DLRNav.close();
+      // Scroll to / open draft panel — navigate to locker and open draft detail
+    });
+
+    // Mobile drawer: notif row click navigates by type
+    document.getElementById("drawer-notif-btn")?.addEventListener("click", () => {
+      DLRNav.close();
+      // Just close for now — user sees toast notifications inline
+    });
+  });
+})();
 
 // ── Utility ────────────────────────────────────────────────
 function showError(el, message) {

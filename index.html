@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
   <link rel="stylesheet" href="css/base.css?v=19" />
   <link rel="stylesheet" href="css/auth.css?v=7" />
-  <link rel="stylesheet" href="css/locker.css?v=23" />
+  <link rel="stylesheet" href="css/locker.css?v=24" />
   <link rel="stylesheet" href="css/tournament.css?v=3" />
 
   <!-- Firebase v9 compat — loaded async to avoid blocking page render on mobile -->
@@ -283,24 +283,6 @@
             <div class="nav-id-dscore" id="nav-id-dscore"></div>
           </div>
         </div>
-        <div id="global-auc-pill"></div>
-        <div id="draft-ticker-wrap">
-          <div style="position:relative">
-            <button class="draft-ticker-pill" id="draft-ticker-btn">
-              <span class="draft-ticker-dot"></span>
-              <span id="draft-ticker-label">Drafts</span>
-            </button>
-            <div class="draft-ticker-panel" id="draft-ticker-panel" style="display:none">
-              <div class="draft-ticker-panel-header">
-                <span>📋 Draft Status</span>
-                <button class="draft-ticker-panel-close" id="draft-ticker-close">✕</button>
-              </div>
-              <div class="draft-ticker-panel-body" id="draft-ticker-body">
-                <div class="draft-ticker-empty">Loading…</div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
       <div class="nav-links">
         <a href="#" class="nav-link active" data-view="locker">My Locker</a>
@@ -308,8 +290,53 @@
         <a href="#" class="nav-link" data-view="trophies">Trophies</a>
         <a href="#" class="nav-link" data-view="tournament">Tournaments</a>
       </div>
+      <!-- Activity pills: Auctions | Drafts | Notifications | Contact (desktop only — mobile in drawer) -->
+      <div class="nav-actions" id="nav-actions">
+        <!-- Auction pill -->
+        <div class="nav-pill-wrap" id="nav-auc-wrap" style="display:none;position:relative">
+          <button class="nav-pill nav-pill--gold" id="nav-auc-btn" onclick="_openGlobalAucModal()">
+            <span class="nav-pill-dot" id="nav-auc-dot"></span>
+            <span class="nav-pill-icon">🏷</span>
+            <span class="nav-pill-label" id="nav-auc-label">Auctions</span>
+          </button>
+        </div>
+        <!-- Draft ticker -->
+        <div class="nav-pill-wrap" id="draft-ticker-wrap" style="display:none;position:relative">
+          <button class="nav-pill" id="draft-ticker-btn">
+            <span class="nav-pill-dot" id="draft-ticker-dot"></span>
+            <span class="nav-pill-icon">📋</span>
+            <span class="nav-pill-label" id="draft-ticker-label">Drafts</span>
+          </button>
+          <div class="draft-ticker-panel" id="draft-ticker-panel" style="display:none">
+            <div class="draft-ticker-panel-header">
+              <span>📋 Draft Status</span>
+              <button class="draft-ticker-panel-close" id="draft-ticker-close">✕</button>
+            </div>
+            <div class="draft-ticker-panel-body" id="draft-ticker-body">
+              <div class="draft-ticker-empty">Loading…</div>
+            </div>
+          </div>
+        </div>
+        <!-- Notification pill -->
+        <div class="nav-pill-wrap" id="nav-notif-wrap" style="display:none;position:relative">
+          <button class="nav-pill" id="nav-notif-btn">
+            <span class="nav-pill-icon">🔔</span>
+            <span class="nav-pill-label" id="nav-notif-label">Activity</span>
+          </button>
+          <div class="draft-ticker-panel" id="nav-notif-panel" style="display:none;right:0">
+            <div class="draft-ticker-panel-header">
+              <span>🔔 Activity</span>
+              <button class="draft-ticker-panel-close" id="nav-notif-close">✕</button>
+            </div>
+            <div class="draft-ticker-panel-body" id="nav-notif-body">
+              <div class="draft-ticker-empty">No new activity.</div>
+            </div>
+          </div>
+        </div>
+        <!-- Contact -->
+        <a href="mailto:dynastylockerroom.support@gmail.com" class="btn-secondary btn-sm" style="text-decoration:none;flex-shrink:0">✉️ Contact</a>
+      </div>
       <div class="nav-user">
-        <a href="mailto:dynastylockerroom.support@gmail.com" class="btn-secondary btn-sm" style="text-decoration:none">✉️ Contact</a>
         <span id="nav-username" class="nav-username"></span>
         <button id="nav-logout-btn" class="btn-icon" title="Sign Out">⬡</button>
       </div>
@@ -320,6 +347,28 @@
     </nav>
     <!-- Mobile drawer -->
     <div class="nav-drawer" id="nav-drawer">
+      <!-- Activity section — shown only when something is active -->
+      <div class="nav-drawer-section" id="drawer-activity-section" style="display:none">
+        <div class="nav-drawer-label">Activity</div>
+        <div id="drawer-auc-section" style="display:none">
+          <a href="#" class="nav-drawer-item nav-drawer-activity-row" onclick="DLRNav.close();_openGlobalAucModal()">
+            <span>🏷 Live Auctions</span>
+            <span class="drawer-activity-badge" id="drawer-auc-badge"></span>
+          </a>
+        </div>
+        <div id="drawer-draft-section" style="display:none">
+          <a href="#" class="nav-drawer-item nav-drawer-activity-row" id="drawer-draft-btn">
+            <span>📋 Active Drafts</span>
+            <span class="drawer-activity-badge" id="drawer-draft-badge"></span>
+          </a>
+        </div>
+        <div id="drawer-notif-section" style="display:none">
+          <a href="#" class="nav-drawer-item nav-drawer-activity-row" id="drawer-notif-btn">
+            <span>🔔 Notifications</span>
+            <span class="drawer-activity-badge" id="drawer-notif-badge"></span>
+          </a>
+        </div>
+      </div>
       <div class="nav-drawer-section">
         <div class="nav-drawer-label">Views</div>
         <a href="#" class="nav-drawer-item" data-view="locker" onclick="DLRNav.go('locker')">🏠 My Locker</a>
@@ -339,6 +388,7 @@
         <a href="#" class="nav-drawer-item nav-drawer-item--danger" id="drawer-logout-btn">⬡ Sign Out</a>
       </div>
     </div>
+
     <div class="nav-drawer-backdrop hidden" id="nav-drawer-backdrop" onclick="DLRNav.close()"></div>
 
     <div id="view-locker" class="app-view active">
@@ -357,8 +407,6 @@
             </div>
           </div>
           <div class="locker-header-actions">
-            <div id="global-auc-pill-desktop"></div>
-            <div id="draft-ticker-wrap-desktop" style="position:relative"></div>
             <button class="btn-secondary btn-sm" id="career-summary-btn" title="Career Summary">📊 Career Stats</button>
             <button class="btn-secondary btn-sm" id="player-report-btn" title="Cross-League Player Report">📋 My Players</button>
             <button class="btn-secondary btn-sm" id="edit-profile-btn">✏ Edit Profile</button>
@@ -859,7 +907,7 @@
   <script src="js/yahoo.js"></script>
   <script src="js/leaguegroups.js"></script>
   <script src="js/chat.js"></script>
-  <script src="js/draft-ticker.js?v=1"></script>
+  <script src="js/draft-ticker.js?v=2"></script>
   <script src="js/standings.js"></script>
   <script src="js/roster.js"></script>
   <script src="js/draft.js"></script>
