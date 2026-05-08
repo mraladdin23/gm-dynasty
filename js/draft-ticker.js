@@ -53,17 +53,26 @@ const DraftTicker = (() => {
   }
 
   // ── Fetch all relevant leagues ─────────────────────────
+  // Excludes: commish-only leagues, admin-only tournaments,
+  //           old seasons, MFL/Yahoo (no public draft API).
   async function _getAllLeagues() {
     const leagues  = [];
     const relevant = _relevantSeasons();
 
-    // 1. Regular user leagues (Sleeper only)
+    // 1. Regular user leagues — Sleeper only, skip if commish-only
     try {
-      const snap   = await GMD.child(`users/${_username}/leagues`).once("value");
-      const stored = snap.val() || {};
-      for (const [, l] of Object.entries(stored)) {
+      const [leagueSnap, metaSnap] = await Promise.all([
+        GMD.child(`users/${_username}/leagues`).once("value"),
+        GMD.child(`leagueMeta/${_username}`).once("value")
+      ]);
+      const stored = leagueSnap.val() || {};
+      const meta   = metaSnap.val() || {};
+
+      for (const [key, l] of Object.entries(stored)) {
         if (!l.leagueId && !l.league_id) continue;
         if (l.platform !== "sleeper") continue;
+        // Skip if user is only commissioner (not an owner/player)
+        if (meta[key]?.isCommissioner && !meta[key]?.isOwner) continue;
         const season = l.season || l.year || 0;
         if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
         leagues.push({
@@ -77,17 +86,18 @@ const DraftTicker = (() => {
       console.warn("[DraftTicker] Failed to load user leagues:", e.message);
     }
 
-    // 2. Tournament leagues (Sleeper batches only)
+    // 2. Tournament leagues — only if user is participant/discovered, NOT admin-only
     try {
       const snap = await GMD.child("tournaments").once("value");
       const all  = snap.val() || {};
       for (const [tid, t] of Object.entries(all)) {
         if (!t?.meta || !t?.leagues) continue;
-        const isAdmin       = t.roles?.[_username]?.role === "admin" || t.roles?.[_username]?.role === "sub_admin";
+        // Only include if user is a real participant — exclude admin-only
         const isDiscovered  = t.meta?.discoveredBy?.[_username];
-        const isParticipant = Object.values(t.participants || {}).some(p => p.dlrLinked && p.dlrUsername === _username);
-        const notDraft      = t.meta?.status !== "draft";
-        if (!isAdmin && !isDiscovered && !isParticipant && !notDraft) continue;
+        const isParticipant = Object.values(t.participants || {}).some(
+          p => p.dlrLinked && p.dlrUsername === _username
+        );
+        if (!isDiscovered && !isParticipant) continue;
 
         const tournamentName = t.meta?.name || "";
         const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
@@ -384,21 +394,22 @@ const DraftTicker = (() => {
     const hasLive = items.live.length > 0;
     const alarm   = items.live.some(i => i.onTheClock);
 
-    wrap.classList.toggle("has-drafts", hasAny);
-    pill.classList.toggle("draft-ticker-pill--live",  hasLive && !alarm);
-    pill.classList.toggle("draft-ticker-pill--alarm", alarm);
-    pill.querySelector(".draft-ticker-badge")?.remove();
+    // Desktop pill visibility + state
+    wrap.style.display = hasAny ? "flex" : "none";
+    pill.classList.toggle("pill-live",  hasLive && !alarm);
+    pill.classList.toggle("pill-alarm", alarm);
+    pill.querySelector(".nav-pill-badge")?.remove();
 
     if (alarm) {
       const b = document.createElement("span");
-      b.className = "draft-ticker-badge";
+      b.className = "nav-pill-badge";
       b.textContent = "🔔";
       b.style.cssText = "background:transparent;font-size:.8rem";
       pill.appendChild(b);
       if (lbl) lbl.textContent = "Your Turn!";
     } else if (hasLive) {
       const b = document.createElement("span");
-      b.className = "draft-ticker-badge";
+      b.className = "nav-pill-badge";
       b.textContent = String(items.live.length);
       pill.appendChild(b);
       if (lbl) lbl.textContent = items.live.length === 1 ? "Live Draft" : "Live Drafts";
@@ -407,6 +418,16 @@ const DraftTicker = (() => {
     } else {
       if (lbl) lbl.textContent = "Drafts";
     }
+
+    // Mobile drawer badge
+    const drawerSec   = document.getElementById("drawer-draft-section");
+    const drawerBadge = document.getElementById("drawer-draft-badge");
+    const draftCount  = items.live.length + items.upcoming.length;
+    if (drawerSec) drawerSec.style.display = hasAny ? "" : "none";
+    if (drawerBadge) drawerBadge.textContent = hasAny ? String(draftCount) : "";
+
+    // Sync drawer activity section visibility
+    if (typeof _syncDrawerActivity === "function") _syncDrawerActivity();
   }
 
   // ── Panel open / close ────────────────────────────────
