@@ -5565,3 +5565,184 @@ select option { background: var(--color-bg-2); }
     font-size: 16px !important;
   }
 }
+
+
+/* ── Global draft ticker ─────────────────────────────── */
+.draft-ticker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: linear-gradient(135deg, rgba(99,102,241,.2), rgba(99,102,241,.08));
+  border: 1px solid rgba(99,102,241,.3);
+  color: #a78bfa;
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  position: relative;
+  flex-shrink: 0;
+}
+.draft-ticker-pill:hover { background: rgba(99,102,241,.25); }
+
+/* Live draft — flashing gold */
+.draft-ticker-pill--live {
+  background: linear-gradient(135deg, rgba(240,180,41,.2), rgba(240,180,41,.08));
+  border-color: var(--color-gold-dim);
+  color: var(--color-gold);
+  animation: draft-ticker-pulse 1.8s ease infinite;
+}
+@keyframes draft-ticker-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(240,180,41,0); }
+  50%      { box-shadow: 0 0 0 4px rgba(240,180,41,.2); }
+}
+
+/* On the clock — red alarm */
+.draft-ticker-pill--alarm {
+  background: linear-gradient(135deg, rgba(239,68,68,.22), rgba(239,68,68,.08));
+  border-color: rgba(239,68,68,.5);
+  color: #f87171;
+  animation: draft-alarm-pulse 0.9s ease infinite;
+}
+@keyframes draft-alarm-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+  50%      { box-shadow: 0 0 0 5px rgba(239,68,68,.25); }
+}
+
+.draft-ticker-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: dot-blink 1.2s ease infinite;
+  flex-shrink: 0;
+}
+
+.draft-ticker-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #f87171;
+  color: #fff;
+  font-size: .6rem;
+  font-weight: 800;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Dropdown panel */
+.draft-ticker-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-width: 92vw;
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 600;
+  overflow: hidden;
+}
+.draft-ticker-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-display);
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-dim);
+}
+.draft-ticker-panel-close {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.draft-ticker-panel-close:hover { color: var(--color-text); }
+.draft-ticker-panel-body {
+  max-height: 380px;
+  overflow-y: auto;
+}
+.draft-ticker-section-label {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--color-text-dim);
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+.draft-ticker-section-label:first-child { border-top: none; }
+.draft-ticker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  transition: background var(--transition);
+  border-bottom: 1px solid var(--color-border);
+}
+.draft-ticker-row:last-child { border-bottom: none; }
+.draft-ticker-row:hover { background: var(--color-surface); }
+.draft-ticker-row-icon { font-size: 1.1rem; flex-shrink: 0; }
+.draft-ticker-row-info { flex: 1; min-width: 0; }
+.draft-ticker-row-name {
+  font-weight: 600;
+  font-size: .82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.draft-ticker-row-meta {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}
+.draft-ticker-row-status {
+  font-family: var(--font-display);
+  font-size: .72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  text-align: right;
+}
+.draft-ticker-row-status--live   { color: var(--color-gold); }
+.draft-ticker-row-status--alarm  { color: #f87171; }
+.draft-ticker-row-status--soon   { color: #a78bfa; }
+.draft-ticker-empty {
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  color: var(--color-text-dim);
+  font-size: .82rem;
+}
+
+/* Container for the pill — placed in nav alongside global-auc-pill */
+#draft-ticker-wrap {
+  display: none; /* hidden until there's something to show */
+  align-items: center;
+}
+#draft-ticker-wrap.has-drafts { display: flex; }
+
+/* Mobile compact */
+@media (max-width: 768px) {
+  .draft-ticker-pill { font-size: 0 !important; padding: 5px 8px !important; }
+  .draft-ticker-pill::before { content: "📋"; font-size: .85rem; }
+  .draft-ticker-pill--alarm::before { content: "🔔"; }
+  .draft-ticker-pill--live::before  { content: "📋"; }
+  .draft-ticker-panel { right: -8px; }
+}
+@media (min-width: 769px) {
+  .draft-ticker-pill::before { display: none; }
+}

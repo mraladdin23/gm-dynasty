@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: May 6, 2026 — Tournament message board, weekly matchups tab, form builder, H2H bracket, registration import all resolved.*
+*Updated: May 7, 2026 — Tournament landing page overhaul, participant sync, mobile fixes all complete.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -44,9 +44,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 ## 🟢 Tournament — New Features & Polish
 
 ### T5 — Total Points Mode: Single-Round Multi-Week Championship Window
-**Status:** ✅ Partially done — admin can now delete all non-championship rounds leaving one window. Config UI (Section D rounds tab) allows setting weeks for the single championship round.
-**Remaining:** Verify the scoring path in `_renderTotalPointsTab` correctly sums across multiple weeks for this single-round configuration. May need a session to validate end-to-end.
-**Files:** `tournament.js`
+**Status:** ✅ Complete — validated end-to-end. Admin can configure a single championship round spanning multiple weeks.
 
 ---
 
@@ -135,6 +133,9 @@ await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
 console.log("Bundles cleared");
 ```
 
+### Force-republish public summaries (if playoffMode/createdBy missing)
+Open DLR while logged in as admin — `_backfillPublicSummaries()` runs automatically on tournament page load and republishes any stale public nodes.
+
 ---
 
 *⚠️ NEVER run bulk Firebase reset scripts. Fix stale data surgically, one league at a time.*
@@ -143,91 +144,98 @@ console.log("Bundles cleared");
 
 ## ✅ Completed
 
+### May 7, 2026 — Tournament Landing Page Overhaul, Participant Sync, Mobile Fixes
+
+**🏆 Tournament Landing Page — List Row Layout (`tournament.js`, `tournament.css`, `tournaments/index.html`)**
+- Replaced card grid with compact single-line list rows on desktop
+- Row structure: 4-line mobile layout — (1) name, (2) description, (3) type badge + stats, (4) status + buttons
+- Desktop: `trn-row-main` (flex:1) + `trn-row-right` (fixed 260px) with `trn-row-actions` (fixed 162px)
+- Fixed column alignment using `align-items: stretch` on `.trn-row` with `align-items: center` on right panel
+- `overflow: hidden` removed from `trn-row-main` (was clipping rows)
+- Mobile (`≤700px`): rows stack to 4 lines; `trn-row-right` goes full width with border-top separator
+- Desktop fixed widths moved to `@media (min-width: 701px)` block — mobile no longer fights overrides
+- Internal app mobile fix: `overflow-x: hidden !important` on `#view-tournament.active` at both 640px and 700px to counteract `locker.css .screen.active { overflow: hidden }` which was causing horizontal clipping
+
+**🔍 Tournament Filters (`tournament.js`, `tournament.css`)**
+- Three filter dropdowns (View/Type/Admin) now on one line using `flex: 1 1 0` with `flex-wrap: nowrap`
+- Type filter uses `_tMode(t)` helper which reads `playoffs[mostRecentYear].mode` correctly (was reading wrong key `t.playoff`)
+- Admin filter populated from `meta.createdBy` across all tournaments
+- Alphabetical sort on tournament name
+- Pagination: 10 per page with Prev/Next at top and bottom
+- "My Tournaments" — shows only `discoveredBy` (league match) or `dlrLinked` participant match; admin-only excluded
+- Public site: same Type + Admin filters; Type filter left, Admin filter right
+
+**📖 Tournament Type Guide (`tournament.js`, `tournament.css`)**
+- `📖 Tournament Type Guide` button as subtle text link below `+ New Tournament`
+- Also appears as `📖 Type Guide` link below `+ Season` in playoff config year bar
+- Tabbed modal — 5 type buttons across top, one panel at a time (Points Rounds / H2H Bracket / Custom Rounds / World Cup / Total Points)
+- Each panel: summary, "Best for" callout, numbered setup steps
+
+**🏷 Tournament Type Badges**
+- Color-coded inline badges: gold (Points Rounds), blue (H2H Bracket), purple (Custom Rounds), green (World Cup), gray (Total Points)
+- Appear on both internal list rows and public site
+
+**🌐 Public Site Parity (`tournaments/index.html`)**
+- Same list-row layout as internal app
+- `playoffMode` and `createdBy` written to `gmd/publicTournaments/{tid}` via `_writePublicSummary`
+- `_backfillPublicSummaries()` auto-runs on page load to republish any stale public nodes missing these fields
+- Public site filters match internal: Type (left) + Admin (right)
+
+**👥 Participant Auto-Sync (`tournament.js`)**
+- `⚡ Sync from Leagues` button in Participants toolbar
+- `_autoSyncParticipants(tid, t)`: iterates all league batches, fetches rosters from Sleeper/MFL/Yahoo APIs
+- Sleeper: uses `user_id` as `dedupKey` (always unique), `username || display_name` as `sleeperUsername`
+- MFL: `email` as `dedupKey` and `mflEmail`; team name as `displayName`
+- Yahoo: `managerNickname` as `dedupKey` and `yahooUsername`; nickname/team name as `displayName`
+- All platforms: if no registration data, platform identity value populates `displayName`
+- Fresh Firebase read before building dedup lookup (avoids stale snapshot duplicates)
+- Single `participantsRef.update(updates)` write (atomic, surfaces errors)
+- `_matchParticipantsToDLR` called automatically after sync on all participants
+- DLR match indexes: `platforms/sleeper/sleeperUsername`, `platforms/sleeper/username`, `platforms/sleeper/displayName` (all three checked); `platforms/mfl/mflEmail`; `platforms/yahoo/username`
+- Single authoritative reload + re-render after all writes complete
+- Existing participants: patch only fills missing fields (no overwrite of existing data)
+
+**📱 Mobile UI Polish (`tournament.css`)**
+- Section pages (roles, registrants, participants, registration form): stay single-row on mobile with tighter font sizes
+- Registrant/participant rows: `flex-wrap: nowrap`, name `.80rem` truncates, meta `.68rem` truncates, buttons `3px 7px`
+- Role rows: single line, avatar shrinks to 26×26, name `.80rem`, scope `.68rem`
+- Registration Type radio labels: `.82rem` to match section card body font (was `.88rem`)
+- Global baseline: `.trn-container` and `.trn-detail-container` set to `.86rem` on mobile
+
+**🔄 Draft Tab Fixes (`tournament.js`)**
+- Draft updates live on refresh: `_draftForceRefresh` flag bypasses both Firebase and in-memory cache
+- Set `true` by refresh button and by live poll when picks change; cleared after fetch
+- Draft league dropdown no longer snaps back on selection (`selected` attribute on current `_draftLeague`)
+
+---
+
 ### May 6, 2026 — Tournament Message Board, Matchups Tab, Form Builder, H2H Bracket, Registration Import
 
-**💬 Tournament Message Board (`tournament.js`, `tournament.css`, `tournaments/index.html`)**
-- Real-time Firebase-backed message board per tournament per year (`gmd/tournamentChats/{tid}_{year}/`)
-- Full chat feature parity with league chat: emoji picker, GIF search (Tenor), smack talk presets, poll creator
-- Messages render as chat bubbles (yours right/accent, theirs left)
-- Admin can delete any message; users can delete their own
-- Available on both internal admin/user view and public tournament page
-- Public page: read-only for anonymous visitors, sign-in prompt for posting
-
-**🏈 Weekly Matchups Tab (ESPN-style) (`tournament.js`, `tournament.css`)**
-- New "Matchups" tab (renamed old "Matchups" → "Match Analysis" for highlights/blowouts)
-- Week selector defaulting to latest played week; conference/division/league filter dropdown
-- Always-visible filter: individual league names even when no conf/div structure configured
-- 3-per-row cards desktop, 2-per-row tablet, 1-per-row mobile
-- Fetches from Sleeper (direct), MFL + Yahoo (via worker)
-- Stale cache cleared on tournament switch and year change
-
-**📋 Registration Form Builder (`tournament.js`, `tournament.css`)**
-- Unified drag-and-drop field list — all field types (standard, optional, custom) in one list
-- Native HTML5 drag-and-drop reordering across all field types
-- Standard fields (displayName, email): can reorder, can't delete (🔒 icon)
-- Optional fields: "Add field" dropdown, appear/disappear correctly
-- Custom questions: compact inline rows with type selector, Required checkbox, dropdown option rows (add/delete per option), textarea for paragraph type
-- Saves `fieldOrder[]` array preserving order for user-facing form
-- User-facing form respects `fieldOrder` — custom questions can be interleaved with std/opt fields
-- 👁 Preview button shows modal of exact form appearance before saving
-- Backwards compatible — existing tournaments auto-migrate from old format on first save
-
-**🏆 H2H Bracket Rounds Builder (`tournament.js`)**
-- Moved from Byes & Seeding section to Section D "Round Config (H2H)" tab
-- Full round list: Round 1, Round 2… 🏆 Championship (fixed last, can't delete)
-- Each round: weeks per round input + season-avg blend toggle (same as points_rounds)
-- "+ Add Round" inserts before championship; ✕ removes non-championship rounds
-- Saves as `po.h2hRounds: [{weeksPerRound, blend}]` + `po.h2hRoundWeeks[]` for backward compat
-- Tight WC-style bracket canvas (T7): absolute-position centreR0/centreOf/topOf math, same as World Cup
-- Reseed after each round toggle in Byes & Seeding
-- Multi-week scoring: `_wprFor(ri)` + `_roundStart(ri)` sum across correct NFL weeks per round
-- Blend applied to H2H scores same as points_rounds
-
-**📥 Registration Import Fixes (`tournament.js`)**
-- Template column order now respects `fieldOrder` (admin-configured form order)
-- Custom question columns exported as `custom_0`, `custom_1` etc (never raw question text)
-- Template includes `# custom_0 = Question text` comment lines for reference
-- Importer strips comment lines, sanitizes all CSV headers via `_sanitizeKey` — strips `.#$/[]` from keys
-- Import normalizes `status` to lowercase (`"Approved"` → `"approved"`)
-- Registrants tab now fetches directly from `_tRegsRef(tid)` (not from stale tournament snapshot) — fixes large-batch display issue
-- Unknown status bucket: records with unrecognized status shown in "⚠️ Unknown Status" section with one-click "Fix all → approved" bulk normalizer
-- `_setRegistrationStatus` and delete handler no longer do full `_tRef` reload (avoided stale snapshot on re-render)
+*(see previous entries)*
 
 ---
 
 ### May 5, 2026 — B1, B2, X1, X2: Bug Fix Session
 
-**B1 — Password Reset** — Moved entirely to Cloudflare Worker. Worker fetches real email via DB secret, mints Google OAuth token from service account JWT, calls Firebase Auth Admin REST API with `returnOobLink: true`, sends via Resend.
-
-**B2 — Salary Cap Manual Entry Not Persisting** — Force-reads from Firebase immediately after `_saveSalaryData()` to bust SDK cache.
-
-**X1 — Registration Stickiness** — Success message targets correct overlay body. Duplicate check fetches fresh registrations via `_tRegsRef`.
-
-**X2 — Tournament Draft Not Updating Live** — Worker prefers `"drafting"` draft. 24h Firebase + 5-min memory caches bypassed for active drafts. `_startDraftPoll`/`_stopDraftPoll` 15s Sleeper polling added.
+*(see previous entries)*
 
 ---
 
 ### May 5, 2026 — World Cup Tournament Mode: Full Implementation
 
-Full World Cup bracket + group standings + players tab. See previous entry for full detail.
+*(see previous entries)*
 
 ---
 
 ### April 30, 2026 — T1–T4: Tournament Polish + Public Players Tab Parity
 
-T1 multi-week playoff rounds, T2 public players tab, T3 custom rounds finalRankings, T4 H2H bracket finalRankings.
+*(see previous entries)*
 
 ---
 
-### April 29, 2026 — F5-P4-ext: Players Tab, Most Rostered, ADP vs Finish, finalRankings
+### April 29, 2026 — F5-P4-ext / F5-P4: Custom Playoffs, Players Tab, finalRankings
 
-Players tab (internal + public), finalRankings authoritative rank, Most Rostered, ADP vs Finish.
-
----
-
-### April 29, 2026 — F5-P4: Custom Playoffs — FULLY COMPLETE
-
-Full playoff configuration, display, live scoring, and public site integration for Tournament Mode.
+*(see previous entries)*
 
 ---
 

@@ -6,7 +6,7 @@
   <title>Dynasty Locker Room — Your Fantasy Legacy</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
   <link rel="stylesheet" href="css/base.css?v=19" />
-  <link rel="stylesheet" href="css/auth.css?v=6" />
+  <link rel="stylesheet" href="css/auth.css?v=7" />
   <link rel="stylesheet" href="css/locker.css?v=23" />
   <link rel="stylesheet" href="css/tournament.css?v=3" />
 
@@ -104,6 +104,11 @@
         </div>
         <div id="register-error" class="auth-error hidden"></div>
         <button id="register-btn" class="btn-primary">Claim My Locker</button>
+      </div>
+
+      <!-- Contact Support -->
+      <div class="auth-contact">
+        <a href="mailto:dynastylockerroom.support@gmail.com">✉️ Contact Support</a>
       </div>
     </div>
   </div>
@@ -279,6 +284,23 @@
           </div>
         </div>
         <div id="global-auc-pill"></div>
+        <div id="draft-ticker-wrap">
+          <div style="position:relative">
+            <button class="draft-ticker-pill" id="draft-ticker-btn">
+              <span class="draft-ticker-dot"></span>
+              <span id="draft-ticker-label">Drafts</span>
+            </button>
+            <div class="draft-ticker-panel" id="draft-ticker-panel" style="display:none">
+              <div class="draft-ticker-panel-header">
+                <span>📋 Draft Status</span>
+                <button class="draft-ticker-panel-close" id="draft-ticker-close">✕</button>
+              </div>
+              <div class="draft-ticker-panel-body" id="draft-ticker-body">
+                <div class="draft-ticker-empty">Loading…</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="nav-links">
         <a href="#" class="nav-link active" data-view="locker">My Locker</a>
@@ -334,6 +356,7 @@
           </div>
           <div class="locker-header-actions">
             <div id="global-auc-pill-desktop"></div>
+            <div id="draft-ticker-wrap-desktop" style="position:relative"></div>
             <button class="btn-secondary btn-sm" id="career-summary-btn" title="Career Summary">📊 Career Stats</button>
             <button class="btn-secondary btn-sm" id="player-report-btn" title="Cross-League Player Report">📋 My Players</button>
             <button class="btn-secondary btn-sm" id="edit-profile-btn">✏ Edit Profile</button>

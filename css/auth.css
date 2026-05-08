@@ -133,3 +133,27 @@
   text-align: center;
 }
 .auth-success.hidden { display: none; }
+
+/* ── Contact support link ─────────────────────────────── */
+.auth-contact {
+  text-align: center;
+  margin-top: var(--space-4);
+}
+
+.auth-contact a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .8rem;
+  color: var(--color-text-dim);
+  text-decoration: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.auth-contact a:hover {
+  color: var(--color-gold);
+  border-color: var(--color-gold-dim);
+}
