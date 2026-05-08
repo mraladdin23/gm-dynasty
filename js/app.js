@@ -1111,6 +1111,190 @@ function _escHtml(s) {
   return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
+// ── Global Draft Modal ─────────────────────────────────────
+function _openGlobalDraftModal() {
+  const modal = document.getElementById("global-draft-modal");
+  const body  = document.getElementById("global-draft-modal-body");
+  if (!modal || !body) return;
+
+  const items = typeof DraftTicker !== "undefined" ? DraftTicker.getLastItems?.() : null;
+  const live     = items?.live     || [];
+  const upcoming = items?.upcoming || [];
+
+  if (!live.length && !upcoming.length) {
+    body.innerHTML = `<div class="dim" style="padding:var(--space-4)">No active or upcoming drafts.</div>`;
+    modal.classList.remove("hidden");
+    return;
+  }
+
+  function _navigateToDraft(item) {
+    modal.classList.add("hidden");
+    if (item.tid) {
+      DLRNav.go("tournament");
+      setTimeout(() => {
+        if (typeof _openTournamentView === "function") _openTournamentView(item.tid);
+      }, 150);
+    } else {
+      const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+      const match   = Object.entries(profile?.leagues || {})
+        .find(([, l]) => String(l.leagueId || l.league_id || "") === item.leagueId);
+      if (match && typeof Profile !== "undefined") {
+        Profile.openLeagueDetail(match[0]);
+        setTimeout(() => {
+          const sel = document.getElementById("detail-tab-select");
+          if (sel) { sel.value = "draft"; Profile.onDetailTabChange("draft"); }
+        }, 350);
+      }
+    }
+  }
+
+  let html = "";
+
+  if (live.length) {
+    html += `<div class="global-auc-league-block"><div class="global-auc-league-name" style="cursor:default">🔴 Live Drafts</div>`;
+    for (const item of live) {
+      const icon    = item.onTheClock ? "🔔" : (item.status === "paused" ? "⏸" : "📋");
+      const context = item.tournamentName ? `<span style="font-size:.72rem;color:var(--color-text-dim)"> · ${_escHtml(item.tournamentName)}</span>` : "";
+      let detail = "";
+      if (item.nextPick) detail += `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+      if (item.myNextPick) detail += ` · My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`;
+      if (item.onTheClock) detail = `<strong style="color:#f87171">ON THE CLOCK!</strong>`;
+
+      html += `<div class="global-auc-row" onclick="(function(){`;
+      // encode navigation inline
+      const id    = _escHtml(item.leagueId);
+      const tid   = _escHtml(item.tid || "");
+      html += `var items=DraftTicker.getLastItems?.();var item=(items?.live||[]).find(function(x){return x.leagueId==='${id}'});if(item)_navigateToDraftItem(item);`;
+      html += `})()">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">${icon} ${_escHtml(item.leagueName)}${context}</div>
+          <div class="dim" style="font-size:.72rem;margin-top:2px">${detail}</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (upcoming.length) {
+    html += `<div class="global-auc-league-block"><div class="global-auc-league-name" style="cursor:default">📅 Upcoming Drafts</div>`;
+    for (const item of upcoming) {
+      const d      = new Date(item.startTime);
+      const dateStr = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      const context = item.tournamentName ? ` · ${_escHtml(item.tournamentName)}` : "";
+      const id      = _escHtml(item.leagueId);
+
+      html += `<div class="global-auc-row" onclick="(function(){var items=DraftTicker.getLastItems?.();var item=(items?.upcoming||[]).find(function(x){return x.leagueId==='${id}'});if(item)_navigateToDraftItem(item);})()">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">📅 ${_escHtml(item.leagueName)}${context}</div>
+          <div class="dim" style="font-size:.72rem;margin-top:2px">${dateStr} · ${timeStr}</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  body.innerHTML = html;
+  modal.classList.remove("hidden");
+}
+
+// Called from inline onclick in draft modal rows
+function _navigateToDraftItem(item) {
+  document.getElementById("global-draft-modal")?.classList.add("hidden");
+  if (!item) return;
+  if (item.tid) {
+    DLRNav.go("tournament");
+    setTimeout(() => {
+      if (typeof _openTournamentView === "function") _openTournamentView(item.tid);
+    }, 150);
+  } else {
+    const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+    const match   = Object.entries(profile?.leagues || {})
+      .find(([, l]) => String(l.leagueId || l.league_id || "") === item.leagueId);
+    if (match && typeof Profile !== "undefined") {
+      Profile.openLeagueDetail(match[0]);
+      setTimeout(() => {
+        const sel = document.getElementById("detail-tab-select");
+        if (sel) { sel.value = "draft"; Profile.onDetailTabChange("draft"); }
+      }, 350);
+    }
+  }
+}
+
+// ── Global Notifications Modal ─────────────────────────────
+function _openGlobalNotifModal() {
+  const modal = document.getElementById("global-notif-modal");
+  const body  = document.getElementById("global-notif-modal-body");
+  if (!modal || !body) return;
+
+  const chatTotal  = Object.values(_chatUnreadCounts || {}).reduce((s, n) => s + n, 0);
+  const boardTotal = Object.values(_trnBoardUnread   || {}).reduce((s, n) => s + n, 0);
+  const sticky     = _stickyNoteUnread || 0;
+  const total      = chatTotal + boardTotal + sticky;
+
+  if (total === 0) {
+    body.innerHTML = `<div class="dim" style="padding:var(--space-4)">No new notifications.</div>`;
+    modal.classList.remove("hidden");
+    return;
+  }
+
+  let html = "";
+
+  if (chatTotal > 0) {
+    html += `<div class="global-auc-league-block">
+      <div class="global-auc-league-name" style="cursor:default">💬 League Chat (${chatTotal} unread)</div>`;
+    // Show each league with unread count
+    for (const [leagueKey, count] of Object.entries(_chatUnreadCounts || {})) {
+      if (!count) continue;
+      const leagues = Auth.getCurrentProfile()?.leagues || {};
+      const league  = leagues[leagueKey];
+      const name    = league?.leagueName || leagueKey;
+      html += `<div class="global-auc-row" onclick="document.getElementById('global-notif-modal').classList.add('hidden');Profile.openLeagueDetail('${_escHtml(leagueKey)}');setTimeout(()=>{const s=document.getElementById('detail-tab-select');if(s){s.value='chat';Profile.onDetailTabChange('chat');}},350)">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">💬 ${_escHtml(name)}</div>
+          <div class="dim" style="font-size:.72rem">${count} unread message${count !== 1 ? "s" : ""}</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (boardTotal > 0) {
+    html += `<div class="global-auc-league-block">
+      <div class="global-auc-league-name" style="cursor:default">🏟 Tournament Boards (${boardTotal} unread)</div>`;
+    for (const [chatKey, count] of Object.entries(_trnBoardUnread || {})) {
+      if (!count) continue;
+      const tid  = chatKey.split("_")[0];
+      html += `<div class="global-auc-row" onclick="document.getElementById('global-notif-modal').classList.add('hidden');DLRNav.go('tournament');setTimeout(()=>{if(typeof _openTournamentView==='function')_openTournamentView('${_escHtml(tid)}');},150)">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">🏟 Tournament Board</div>
+          <div class="dim" style="font-size:.72rem">${count} unread message${count !== 1 ? "s" : ""}</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (sticky > 0) {
+    html += `<div class="global-auc-league-block">
+      <div class="global-auc-row" onclick="document.getElementById('global-notif-modal').classList.add('hidden');DLRNav.go('locker')">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">📌 Sticky Notes</div>
+          <div class="dim" style="font-size:.72rem">${sticky} new note${sticky !== 1 ? "s" : ""} on your locker</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>
+    </div>`;
+  }
+
+  body.innerHTML = html;
+  modal.classList.remove("hidden");
+}
+
 // ── Notification panel toggle ──────────────────────────────
 (function() {
   let _notifOpen = false;
@@ -1121,7 +1305,7 @@ function _escHtml(s) {
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("nav-notif-btn")?.addEventListener("click", e => {
       e.stopPropagation();
-      _notifOpen ? close() : open();
+      _openGlobalNotifModal();
     });
     document.getElementById("nav-notif-close")?.addEventListener("click", e => {
       e.stopPropagation(); close();
@@ -1130,38 +1314,16 @@ function _escHtml(s) {
       if (_notifOpen && !e.target.closest("#nav-notif-wrap")) close();
     });
 
-    // Mobile drawer: draft row — open first live draft's league detail, or go to tournaments
+    // Mobile drawer: draft row — open draft selection modal
     document.getElementById("drawer-draft-btn")?.addEventListener("click", () => {
       DLRNav.close();
-      const items = typeof DraftTicker !== "undefined" ? DraftTicker.getLastItems?.() : null;
-      const first = items?.live?.[0] || items?.upcoming?.[0];
-      if (first?.tid) {
-        // Tournament draft — go to tournaments view and open it
-        DLRNav.go("tournament");
-        setTimeout(() => {
-          if (typeof _openTournamentView === "function") _openTournamentView(first.tid);
-        }, 150);
-      } else if (first?.leagueId) {
-        // Regular league draft — open league detail on draft tab
-        const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
-        const match = Object.entries(profile?.leagues || {})
-          .find(([, l]) => String(l.leagueId || l.league_id || "") === first.leagueId);
-        if (match && typeof Profile !== "undefined") {
-          Profile.openLeagueDetail(match[0]);
-          setTimeout(() => {
-            const sel = document.getElementById("detail-tab-select");
-            if (sel) { sel.value = "draft"; Profile.onDetailTabChange("draft"); }
-          }, 350);
-        }
-      }
+      _openGlobalDraftModal();
     });
 
-    // Mobile drawer: notif row — navigate based on what's unread
+    // Mobile drawer: notif row — open notification modal
     document.getElementById("drawer-notif-btn")?.addEventListener("click", () => {
       DLRNav.close();
-      // If there are tournament board unreads, go to tournaments; else stay on locker for chat
-      const boardTotal = Object.values(_trnBoardUnread || {}).reduce((s, n) => s + n, 0);
-      if (boardTotal > 0) DLRNav.go("tournament");
+      _openGlobalNotifModal();
     });
   });
 })();
