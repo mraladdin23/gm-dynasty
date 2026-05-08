@@ -182,20 +182,15 @@
 
   /* Line 4: status + buttons — full width, space-between */
   .trn-row-right {
-    width: 100%;          /* override desktop 260px */
-    min-width: 0;
+    width: 100%;
     flex-direction: row;
     justify-content: space-between;
-    align-items: center;
     border-top: 1px solid var(--color-border);
     padding-top: 6px;
   }
 
   .trn-row-actions {
-    width: auto;          /* override desktop 162px */
-    min-width: 0;
-    flex-shrink: 0;
-    justify-content: flex-end;
+    width: auto;
   }
 
   /* ── Filters ─────────────────────────────────────────── */
@@ -318,9 +313,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex-shrink: 0;
-  width: 260px;
   justify-content: flex-end;
+  /* width set per breakpoint below */
 }
 
 /* Line 1: tournament name */
@@ -361,9 +355,8 @@
 .trn-row-actions {
   display: flex;
   gap: 6px;
-  width: 162px;
-  flex-shrink: 0;
   justify-content: flex-end;
+  /* width set per breakpoint below */
 }
 
 .trn-row-actions .btn-primary,
@@ -373,6 +366,18 @@
   text-align: center;
   justify-content: center;
   white-space: nowrap;
+}
+
+/* ── Desktop only: fixed widths keep columns aligned across rows ── */
+@media (min-width: 701px) {
+  .trn-row-right {
+    flex-shrink: 0;
+    width: 260px;
+  }
+  .trn-row-actions {
+    flex-shrink: 0;
+    width: 162px;
+  }
 }
 
 /* ── Tournament type badges ──────────────────────────────── */
