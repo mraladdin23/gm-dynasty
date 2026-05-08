@@ -140,6 +140,11 @@
 
 /* ── Mobile: list rows stack ─────────────────────────────── */
 @media (max-width: 700px) {
+  /* ── Prevent horizontal bleed from locker.css .screen.active ── */
+  #view-tournament.active {
+    overflow-x: hidden !important;
+  }
+
   /* ── Container — prevent horizontal overflow of row content ── */
   .trn-container {
     padding-left: var(--space-3);
@@ -1084,6 +1089,7 @@
   /* ── Scroll/container fixes ──────────────────────────── */
   #view-tournament.active {
     overflow-y: auto !important;
+    overflow-x: hidden !important;   /* prevent horizontal bleed under locker.css .screen.active */
     -webkit-overflow-scrolling: touch;
     height: calc(100dvh - 48px) !important;
   }
