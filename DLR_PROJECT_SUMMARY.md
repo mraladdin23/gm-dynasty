@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: May 6, 2026 — Tournament message board, weekly matchups tab, form builder overhaul, H2H bracket rounds builder, registration import fixes all complete.*
+*Updated: May 7, 2026 — Tournament landing page overhaul, participant sync, mobile fixes complete.*
 
 ---
 
@@ -37,14 +37,14 @@ GitHub Pages (dynastylockerroom.com)
 ## File Map — Every File and Its Purpose
 
 ### Root
-- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted: `locker.css v=22`, `auth.css v=6`, `tournament.css v=5`. Viewport meta includes `viewport-fit=cover` for PWA safe area support.
+- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted: `locker.css v=22`, `auth.css v=6`, `tournament.css v=6`. Viewport meta includes `viewport-fit=cover` for PWA safe area support.
 - `worker.js` — Cloudflare Worker. MFL bundle fetches, Yahoo OAuth flow + bundle + playerStats + tournament draft + tournament rosters. Deploy by pasting into Cloudflare dashboard.
 
 ### `css/`
 - `base.css` — Global variables, reset, typography. `.screen` uses `min-height: 100dvh`. `.screen.active { overflow: hidden }` on mobile.
 - `auth.css` — Login/register screen styles
 - `locker.css` — All app UI styles. v=22. Mobile: `100dvh` for app-view height, `env(safe-area-inset-top)` for nav + detail panel.
-- `tournament.css` — Tournament module styles. **v=5.** Contains all playoff UI styles, Players tab list view, year pips, analytics tabs, World Cup bracket canvas, weekly matchup cards (`.trn-wmu-*`), message board (`.trn-board-*`), unified registration form field list (`.trn-form-field-*`).
+- `tournament.css` — Tournament module styles. **v=6.** Contains all playoff UI styles, Players tab list view, year pips, analytics tabs, World Cup bracket canvas, weekly matchup cards (`.trn-wmu-*`), message board (`.trn-board-*`), unified registration form field list (`.trn-form-field-*`), tournament landing page list rows (`.trn-row-*`, `.trn-list`), tournament guide modal (`.trn-guide-*`).
 
 ### `js/` — Core modules (all vanilla JS IIFEs)
 
@@ -71,7 +71,7 @@ GitHub Pages (dynastylockerroom.com)
 | Other modules | `auction.js`, `playercard.js`, `idb-cache.js`, `chat.js`, `leaguegroups.js`, `manager-search.js`, `playerreport.js`, `config.js` |
 
 ### `tournaments/`
-- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/bracket rendering. Players tab fully at parity with internal. World Cup mode: group dropdown in Standings, tight bracket canvas in Playoffs. Message board tab (💬 Board) — read-only for anonymous, shows sign-in prompt.
+- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/bracket rendering. Players tab fully at parity with internal. World Cup mode: group dropdown in Standings, tight bracket canvas in Playoffs. Message board tab (💬 Board) — read-only for anonymous, shows sign-in prompt. Landing page uses same `.trn-row-*` list layout as internal app. Filters: Type (playoff mode) + Admin (createdBy).
 
 ---
 
@@ -88,14 +88,16 @@ GitHub Pages (dynastylockerroom.com)
 ### Firebase paths
 ```
 gmd/tournaments/{tid}/
-  meta/             — name, tagline, status, regType, rankBy, playoffStartWeek, bio, createdAt
+  meta/             — name, tagline, status, regType, rankBy, playoffStartWeek, bio, createdAt, createdBy
   leagues/          — batch structure: {batchId: {platform, year, leagues: {leagueId: {name, conference, division}}}}
   roles/            — {username: {role: "admin"|"sub_admin"}}
   registrationForm/ — {fields, optionalFields, customQuestions, fieldOrder}
                       fieldOrder: [{type:"std"|"opt"|"custom", key?, question?, questionType?, required?, options?}]
   registrations/    — {rid: {displayName, email, status, custom_0, custom_1, ..., importedAt, reviewedAt, reviewedBy}}
-  participants/     — {pid: {displayName, teamName, email, sleeperUsername, mflEmail,
-                             yahooUsername, twitterHandle, gender, years[], dlrLinked, dlrUsername}}
+  participants/     — {pid: {displayName, teamName, email,
+                             sleeperUserId, sleeperUsername, sleeperDisplayName,
+                             mflEmail, yahooUsername,
+                             twitterHandle, gender, years[], dlrLinked, dlrUsername, syncedAt}}
   standingsCache/   — {year_leagueId: {leagueName, platform, year, conference, division, champion,
                                         leagueStatus, teams:[{teamId, userId, sleeperUsername,
                                         teamName, wins, losses, ties, pf, pa}], lastSynced}}
@@ -115,11 +117,27 @@ gmd/tournamentChats/{tid}_{year}/
 
 gmd/publicTournaments/{tid}/
   — Meta fields + leagueCount, registrationCount, standingsCache, participantMap
+  — playoffMode (string) — written by _writePublicSummary via _tMode(t)
+  — createdBy (string) — written by _writePublicSummary from meta.createdBy
   — playoffs/{year} — published snapshot with computedRounds, leagueChamps, standings,
                        finalRankings (all with displayName), worldcup config fields,
                        h2hRounds, h2hRoundWeeks, h2hReseed
   — adpByYear/{year} — published ADP data for public site
 ```
+
+### Key tournament helper functions
+
+**`_tMode(t)`** — Derives the active playoff mode from a tournament object. Reads `t.playoffs[mostRecentYear].mode` (year-keyed), falls back to `t.playoffs.mode` (legacy flat), then `"total_points"`. Always use this instead of reading `t.playoff?.mode` (wrong key).
+
+**`_backfillPublicSummaries()`** — Runs silently after `_loadTournaments()` on every page load. Re-publishes any public tournament node missing `playoffMode` or `createdBy`. No-op once all nodes are up to date.
+
+**`_autoSyncParticipants(tid, t)`** — Fetches rosters from all league batches (Sleeper/MFL/Yahoo), deduplicates by `dedupKey` (Sleeper: `user_id`, MFL: email, Yahoo: nickname), upserts participant records, then calls `_matchParticipantsToDLR` on all participants. Does a fresh Firebase read before dedup to avoid stale-snapshot duplicates. Single `participantsRef.update(updates)` write.
+
+**`_matchParticipantsToDLR(tid, participantsMap)`** — Reads `gmd/users/*/platforms` and builds lookup indexes for all three platforms:
+- Sleeper: `platforms/sleeper/sleeperUsername`, `platforms/sleeper/username`, `platforms/sleeper/displayName`
+- MFL: `platforms/mfl/mflEmail`
+- Yahoo: `platforms/yahoo/username`, `platforms/yahoo/yahooUsername`
+Returns `{ newMatches, alreadyLinked, total }` — caller handles toast and re-render.
 
 ### Key behaviors
 
@@ -132,23 +150,49 @@ gmd/publicTournaments/{tid}/
 **Publish:** Fetches all playoff weeks, computes `computedRounds` and `finalRankings`. Writes to both `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`. **Players tab stats (PO apps, rank, titles, pips) only activate after publish with a champion in `finalRankings`.**
 
 **Regular season gating (all modes):**
-- `_regSeasonComplete(t, po, year)` — returns true when `latestWeekPlayed >= po.startWeek - 1`. Controls advance/cut badge visibility in standings.
-- `_playoffsUnderway(t, po, year)` — returns true when `latestWeekPlayed >= po.startWeek`. Gates the playoff tab for non-admin users (shows "Regular Season In Progress" message otherwise).
-- `_computeQualCount(t, po)` — derives playoff qualifier count for cut-line positioning.
-- Both check `po.startWeek` against max games played from `standingsCache`.
+- `_regSeasonComplete(t, po, year)` — returns true when `latestWeekPlayed >= po.startWeek - 1`
+- `_playoffsUnderway(t, po, year)` — returns true when `latestWeekPlayed >= po.startWeek`
+- `_computeQualCount(t, po)` — derives playoff qualifier count for cut-line positioning
 
 **finalRankings:** Rank 1 = overall champion. Mode-specific:
 - `total_points`: ranked by PF desc
 - `points_rounds`: backwards from round simulation (supports multi-week rounds via `weeksPerRound`)
 - `custom_rounds`: simulates PF-based group advancement; includes `customRounds.matchups` for H2H assignment
 - `h2h_bracket`: simulates bracket from `_weekScoreCache`; falls back to seed order
-- `worldcup`: reads actual `{a,b,scoreA,scoreB}` bracket objects; bracket champion first, then eliminated by deepest round, then group-stage eliminated, then non-qualifiers by group PF.
+- `worldcup`: reads actual `{a,b,scoreA,scoreB}` bracket objects; bracket champion first, then eliminated by deepest round, then group-stage eliminated, then non-qualifiers by group PF
+
+---
+
+### Tournament Landing Page
+
+**Internal app list rows** use `.trn-row` → `.trn-row-main` + `.trn-row-right`:
+```
+.trn-row-main (flex:1)
+  .trn-row-line1  ← tournament name
+  .trn-row-line2  ← tagline/description
+  .trn-row-line3  ← type badge + league count + reg count + admin
+.trn-row-right (260px desktop, 100% mobile)
+  trn-status-badge
+  .trn-row-actions (162px desktop, auto mobile)
+    btn-primary (Manage)
+    btn-secondary (View)
+```
+
+Desktop fixed widths live in `@media (min-width: 701px)` — not the base rule — so mobile never has to fight overrides.
+
+Mobile (`≤700px`): rows stack to column, `trn-row-right` goes full width with `border-top` separator. `overflow-x: hidden !important` on `#view-tournament.active` prevents horizontal clipping from `locker.css .screen.active`.
+
+**Filter row:** Three selects (View/Type/Admin) using `flex: 1 1 0` + `flex-wrap: nowrap`. Type built from `_tMode(t)` across all tournaments. Admin from `meta.createdBy`.
+
+**"My Tournaments"** tab: `discoveredBy[currentUsername]` OR `dlrLinked + dlrUsername === currentUsername` as participant. Being admin-only does NOT qualify.
+
+**Public site:** Same row structure, same `tournament.css`. Type + Admin filters only (no status filter). `playoffMode` and `createdBy` must be present in the public node — auto-backfilled by `_backfillPublicSummaries()`.
 
 ---
 
 ### Registration Form — fieldOrder
 
-The form builder now saves `fieldOrder[]` — an ordered array of all fields including std, opt, and custom questions interleaved. This is the authoritative order for both the admin builder and user-facing form.
+The form builder saves `fieldOrder[]` — an ordered array of all fields including std, opt, and custom questions interleaved. This is the authoritative order for both the admin builder and user-facing form.
 
 ```js
 fieldOrder: [
@@ -161,19 +205,11 @@ fieldOrder: [
 ]
 ```
 
-Custom question answers are stored as `custom_0`, `custom_1` etc in Firebase — never the raw question text. The import template uses these same safe keys. The template's comment lines map `custom_N` back to the question text.
-
-**Import notes:**
-- Status values are normalized to lowercase on import (`"Approved"` → `"approved"`)
-- CSV headers are sanitized via `_sanitizeKey` — all Firebase-illegal characters stripped
-- Records with unrecognized status show in "⚠️ Unknown Status" section with bulk fix link
-- `_renderRegistrantsTab` always fetches from `_tRegsRef(tid)` directly (avoids stale tournament snapshot for large datasets)
+Custom question answers are stored as `custom_0`, `custom_1` etc in Firebase — never the raw question text. The import template uses these same safe keys.
 
 ---
 
 ### H2H Bracket Rounds
-
-H2H bracket now supports fully configurable rounds in Section D "Round Config (H2H)":
 
 ```js
 po.h2hRounds: [
@@ -184,10 +220,6 @@ po.h2hRounds: [
 po.h2hRoundWeeks: [1, 1, 2]             // derived array for backward compat
 po.h2hReseed: true|null                 // reseed after each round
 ```
-
-`_wprFor(ri)` — prefers `h2hRounds[ri].weeksPerRound`, falls back to `h2hRoundWeeks[ri]`, then legacy `h2hWeeksPerRound` scalar.
-`_roundStart(ri)` — sums all prior rounds' wpr to compute absolute NFL start week.
-Bracket canvas uses the same tight absolute-position math as World Cup (T7 complete).
 
 ---
 
@@ -201,11 +233,6 @@ User tabs:  Info | Rules | Standings | Playoffs | Draft | Match Analysis | Match
             Rosters | Players | Most Rostered | ADP vs Finish | Board
 ```
 
-Tab routing:
-- **Matchups** → `_renderWeeklyMatchups` (ESPN-style weekly card view, week + conf/div/league filter)
-- **Match Analysis** → `_renderAnalyticsMatchups` (highlights, high scores, blowouts, histogram)
-- **Board** → `_renderBoardTab` (Firebase real-time message board with emoji/GIF/poll)
-
 ---
 
 ### Message Board
@@ -214,58 +241,27 @@ Firebase path: `gmd/tournamentChats/{tid}_{year}/`
 Message types: `text`, `gif`, `poll`
 Poll votes stored as: `{messageId}/votes/{username} = optionIndex`
 
-Features:
-- Real-time Firebase listener (`limitToLast(100)`)
-- Emoji picker (30 emojis), GIF search (Tenor API), smack talk presets, poll creator (up to 4 options)
-- Chat bubble layout: yours right/accent, theirs left
-- Admin deletes any; users delete own
-- Public page: read-only, "Sign in to Dynasty Locker Room" prompt
-
-Firebase rules needed:
-```json
-"tournamentChats": {
-  ".read": true,
-  ".write": "auth != null"
-}
-```
-
 ---
 
 ### Weekly Matchups Tab
 
-`_renderWeeklyMatchups(tid, t, body)` — the ESPN-style matchups tab.
-
-Filter dropdown always visible with three tiers:
-- All Leagues
-- 📂 Conference name / 🗂 Division name (if configured on batch leagues)
-- 🏈 Individual league names (always present, grouped under "By League" when conf/div also exist)
-
 State variables: `_weeklyMuWeek`, `_weeklyMuFilter`, `_weeklyMuPage`, `_weeklyMuCache`
-All four cleared on tournament switch (`_openTournamentView`) and year change.
-Cache TTL: 5 minutes. Refresh button clears cache for current week.
+All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 
 ---
 
-### Points Rounds — Multi-Week Support
-- Each round has optional `weeksPerRound` field (default 1)
-- `_wsCombined_(tm, startWk, numWks)` sums scores across weeks
-- Round header shows "Weeks 14–15" format when wpr > 1
-- Single championship window: admin can delete all non-championship rounds (min 1 round)
+### Draft Tab
 
----
-
-### World Cup Mode — Key Details
-- Group standings computed from `worldcupSchedule` + Sleeper scores (not Sleeper league records)
-- Tight bracket canvas: `centreR0(mi)`, `centreOf(ri,mi)`, `topOf(ri,mi)`, `cardH=44`, `pairG=8`
-- `_wcRegSeasonComplete()` gates advance/eliminate badges and bracket setup
-- `_wcQualified()` sorts by in-group W/L/PF/tiebreaker
+- **Live updates:** `_draftForceRefresh` flag bypasses Firebase + in-memory cache when set. Set by refresh button and by live poll when new picks detected. Cleared after fetch completes.
+- **League dropdown:** `selected` attribute applied to current `_draftLeague` so it doesn't snap back on re-render.
+- **Live poll:** `_startDraftPoll` / `_stopDraftPoll` — Sleeper every 15s for `draft_status === "drafting"`. MFL/Yahoo still require manual refresh.
 
 ---
 
 ## Worker Endpoints
 
 | Path | Method | Purpose |
-|------|--------|---------|
+|------|--------|---------|\
 | `/auth/yahoo/login` | GET | Start Yahoo OAuth flow |
 | `/auth/yahoo/callback` | GET | OAuth callback, redirect to app |
 | `/auth/yahoo/refresh` | POST | Refresh Yahoo token |
@@ -294,34 +290,38 @@ Cache TTL: 5 minutes. Refresh button clears cache for current week.
 - Always use `.update()` for merges, never `.set()` on existing nodes with data you want to keep
 - Firebase Realtime DB keys cannot contain: `. # $ / [ ]` — sanitize user-supplied strings
 - `GMDB.saveLeagues` (plural) is correct — `saveLeague` (singular) does not exist
-- For large datasets (e.g. 300+ registrations), always fetch the specific child ref (`_tRegsRef`) directly rather than reading the full tournament snapshot — the SDK can truncate large payloads
+- For large datasets (e.g. 300+ registrations), always fetch the specific child ref (`_tRegsRef`) directly rather than reading the full tournament snapshot
 
 ### Mobile scroll
 - `base.css`: `.screen.active { overflow: hidden }` — clips everything at mobile
-- To make a view scrollable on mobile: add `#view-{name}.active { overflow-y: auto !important; height: calc(100dvh - 48px) !important; }` to the relevant CSS file
+- To make a view scrollable: add `#view-{name}.active { overflow-y: auto !important; overflow-x: hidden !important; height: calc(100dvh - 48px) !important; }` to the relevant CSS file
+- Setting `overflow-y` explicitly also sets `overflow-x: auto` — always set both explicitly
 
 ### CSS versioning
-- `locker.css` is at **v=22**, `auth.css` at **v=6**, `tournament.css` at **v=5**
+- `locker.css` is at **v=22**, `auth.css` at **v=6**, `tournament.css` at **v=6**
 - Bump `?v=N` in the `<link>` tag in `index.html` when deploying CSS changes
+
+### Tournament type detection
+- Always use `_tMode(t)` — never `t.playoff?.mode` (wrong key, no 's') or `t.playoffs?.mode` (misses year-keyed config)
+- `_tMode` reads `t.playoffs[mostRecentYear].mode` first, then flat `t.playoffs.mode`, then defaults to `"total_points"`
 
 ### Tournament year/string normalization
 - `lc.year` in standingsCache can be a **number** (e.g. `2025`); `Object.keys(poByYear)` returns **strings**
 - Always normalize with `String(yr)` when comparing or using as Set/Map keys
 
+### Participant sync
+- Sleeper `u.username` can be null for users who never set one — fall back to `u.display_name`
+- Use `u.user_id` as `dedupKey`, not username (user_id is always present and unique)
+- DLR stores Sleeper identity at `platforms/sleeper/sleeperUsername` (primary), also check `platforms/sleeper/username` and `platforms/sleeper/displayName`
+- Always do a fresh `_tParticipantsRef(tid).once("value")` read before building dedup maps — never rely on the tournament snapshot's `participants` node which may be stale
+
 ### Worker deployment
 - Changes to `worker.js` require a **separate paste into Cloudflare dashboard** — git push alone does nothing
 - `YAHOO_REDIRECT_URI` must be `https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback`
 
-### Tournament Draft Live Polling
-- `_startDraftPoll` / `_stopDraftPoll` poll Sleeper every 15s when `draft_status === "drafting"`
-- Both the 24h Firebase cache and 5-min in-memory cache are bypassed entirely for active drafts
-- Worker prefers `"drafting"` draft over completed ones
-- MFL/Yahoo still require manual refresh (↺) during live drafts
-
 ### Registration Import
 - Status values in CSV must be lowercase (`approved`, `pending`, `denied`) — importer normalizes automatically
 - Custom question columns must use `custom_0`, `custom_1` etc as headers (not question text)
-- Download the template first — it reflects current `fieldOrder` and includes `# custom_N = Question` comments
 
 ### Yahoo
 - Test on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
