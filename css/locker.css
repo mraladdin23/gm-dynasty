@@ -5738,7 +5738,6 @@ select option { background: var(--color-bg-2); }
   display: none;
   align-items: center;
 }
-}
 /* ── Nav activity pills (desktop: Auctions | Drafts | Notifications | Contact) ── */
 
 .nav-actions {
