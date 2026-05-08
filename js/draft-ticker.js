@@ -42,14 +42,29 @@ const DraftTicker = (() => {
   }
 
   // ── Get logged-in user's Sleeper user_id ──────────────
+  // Tries multiple storage locations since the field name has varied.
   async function _getMySleeperUserId() {
     if (_mySleeperUserId) return _mySleeperUserId;
     if (!_username) return null;
     try {
-      const snap = await GMD.child(`users/${_username}/platforms/sleeper/sleeperUserId`).once("value");
-      _mySleeperUserId = snap.val() || null;
-    } catch(e) {}
-    return _mySleeperUserId;
+      // Try all known field name variants under platforms/sleeper
+      const snap = await GMD.child(`users/${_username}/platforms/sleeper`).once("value");
+      const data = snap.val() || {};
+      const uid  = data.sleeperUserId || data.userId || data.user_id || data.id || null;
+      if (uid) { _mySleeperUserId = String(uid); return _mySleeperUserId; }
+
+      // Fallback: read sleeperUserId from the first stored Sleeper league
+      const leaguesSnap = await GMD.child(`users/${_username}/leagues`).once("value");
+      const leagues     = leaguesSnap.val() || {};
+      for (const l of Object.values(leagues)) {
+        if (l.platform === "sleeper" && l.sleeperUserId) {
+          _mySleeperUserId = String(l.sleeperUserId);
+          console.log("[DraftTicker] Resolved Sleeper UID from league data:", _mySleeperUserId);
+          return _mySleeperUserId;
+        }
+      }
+    } catch(e) { console.warn("[DraftTicker] Could not resolve Sleeper UID:", e.message); }
+    return null;
   }
 
   // ── Fetch all relevant leagues ─────────────────────────
