@@ -140,6 +140,15 @@
 
 /* ── Mobile: list rows stack ─────────────────────────────── */
 @media (max-width: 700px) {
+  /* ── Container — prevent horizontal overflow of row content ── */
+  .trn-container {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+  }
+
   /* ── Tournament list rows: 4 stacked lines ─────────────── */
   .trn-row {
     flex-direction: column;
@@ -173,7 +182,8 @@
 
   /* Line 4: status + buttons — full width, space-between */
   .trn-row-right {
-    width: 100%;
+    width: 100%;          /* override desktop 260px */
+    min-width: 0;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
@@ -182,8 +192,10 @@
   }
 
   .trn-row-actions {
-    width: auto;
+    width: auto;          /* override desktop 162px */
+    min-width: 0;
     flex-shrink: 0;
+    justify-content: flex-end;
   }
 
   /* ── Filters ─────────────────────────────────────────── */
