@@ -5870,13 +5870,24 @@ select option { background: var(--color-bg-2); }
   gap: var(--space-2);
 }
 
-/* Desktop: override base space-between now that nav-links has flex:1 */
+/* Desktop: nav-brand and nav-user/nav-actions are fixed on left/right.
+   nav-links is absolutely centered so it's always mid-page regardless
+   of how wide the side elements are. */
 @media (min-width: 641px) {
   .top-nav {
-    justify-content: flex-start;
-    gap: 0;
+    justify-content: space-between;
+    position: relative; /* needed for absolute child */
   }
-  .nav-links { flex: 1; }
+  .nav-links {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    flex: none;
+    /* pointer-events still work; z-index keeps it above bg, below pills */
+    z-index: 1;
+  }
+  /* Right side: actions + user grouped together */
+  .nav-user { margin-left: var(--space-3); }
 }
 
 /* Hide activity pills on mobile — live in drawer instead */

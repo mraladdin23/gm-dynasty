@@ -172,33 +172,51 @@ const DraftTicker = (() => {
         let picksMade    = 0;
         let totalPicks   = null;
         let nextPick     = null;
+        let myNextPick   = null;
 
         try {
           const picksR = await fetch(`https://api.sleeper.app/v1/draft/${d.draft_id}/picks`);
           if (picksR.ok) {
-            const picksArr   = await picksR.json();
-            picksMade        = Array.isArray(picksArr) ? picksArr.length : 0;
-            const totalTeams = Object.keys(d.draft_order || d.slot_to_roster_id || {}).length
-                               || d.settings?.teams || 12;
+            const picksArr    = await picksR.json();
+            picksMade         = Array.isArray(picksArr) ? picksArr.length : 0;
+            const totalTeams  = Object.keys(d.draft_order || d.slot_to_roster_id || {}).length
+                                || d.settings?.teams || 12;
             const totalRounds = d.settings?.rounds || 1;
             totalPicks        = totalTeams * totalRounds;
 
+            // ── Next pick overall ────────────────────────────
             const nextOverall  = picksMade + 1;
             const currentRound = Math.ceil(nextOverall / totalTeams);
             const pickInRound  = ((nextOverall - 1) % totalTeams) + 1;
             nextPick = { overall: nextOverall, round: currentRound, pick: pickInRound };
 
+            // ── My next pick — scan forward through all rounds ─
             if (mySleeperUid && d.draft_order) {
               const mySlot = Object.entries(d.draft_order)
                 .find(([uid]) => uid === mySleeperUid)?.[1];
+
               if (mySlot != null) {
-                const slotThisRound = currentRound % 2 === 1
-                  ? mySlot : (totalTeams + 1 - mySlot);
-                if (pickInRound === slotThisRound) {
-                  onTheClock   = true;
-                  picksUntilMe = 0;
-                } else {
-                  picksUntilMe = (slotThisRound - pickInRound + totalTeams) % totalTeams || totalTeams;
+                // Find the next pick overall that belongs to my slot
+                let myNextOverall = null;
+                for (let overall = nextOverall; overall <= totalPicks; overall++) {
+                  const round   = Math.ceil(overall / totalTeams);
+                  const inRound = ((overall - 1) % totalTeams) + 1;
+                  // Snake: odd rounds 1→N, even rounds N→1
+                  const slotForThisPick = round % 2 === 1
+                    ? inRound
+                    : (totalTeams + 1 - inRound);
+                  if (slotForThisPick === mySlot) {
+                    myNextOverall = overall;
+                    break;
+                  }
+                }
+
+                if (myNextOverall != null) {
+                  const myRound   = Math.ceil(myNextOverall / totalTeams);
+                  const myInRound = ((myNextOverall - 1) % totalTeams) + 1;
+                  myNextPick = { overall: myNextOverall, round: myRound, pick: myInRound };
+                  picksUntilMe = myNextOverall - nextOverall;
+                  onTheClock   = (myNextOverall === nextOverall);
                 }
               }
             }
@@ -210,7 +228,7 @@ const DraftTicker = (() => {
           draftId:     d.draft_id,
           status:      d.status,
           onTheClock,  picksUntilMe,
-          picksMade,   totalPicks,  nextPick
+          picksMade,   totalPicks,  nextPick, myNextPick
         });
         continue;
       }
@@ -310,13 +328,17 @@ const DraftTicker = (() => {
         }
 
         let detail = "";
-        if (item.picksMade != null && item.totalPicks) {
-          const pct = Math.round((item.picksMade / item.totalPicks) * 100);
-          detail = `<div class="draft-ticker-row-detail">${item.picksMade}/${item.totalPicks} picks · ${pct}%`;
-          if (item.nextPick && !isPaused) {
-            detail += ` · Next: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+        if (item.nextPick && !isPaused) {
+          const nextStr = `Next: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+          let myStr = "";
+          if (item.myNextPick) {
+            if (item.onTheClock) {
+              myStr = ` · <strong style="color:#f87171">My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}</strong>`;
+            } else {
+              myStr = ` · My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`;
+            }
           }
-          detail += `</div>`;
+          detail = `<div class="draft-ticker-row-detail">${nextStr}${myStr}</div>`;
         }
 
         const nav = item.tid

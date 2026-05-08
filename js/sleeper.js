@@ -176,7 +176,88 @@ const SleeperAPI = (() => {
     return chain; // oldest first
   }
 
-  // ── Full import ────────────────────────────────────────
+  // ── Batch helper — run promises N at a time ───────────
+  async function _batch(items, concurrency, fn) {
+    const results = [];
+    for (let i = 0; i < items.length; i += concurrency) {
+      const chunk = items.slice(i, i + concurrency);
+      results.push(...await Promise.allSettled(chunk.map(fn)));
+    }
+    return results;
+  }
+
+  // ── Process one league into the leaguesMap ─────────────
+  async function _processLeague(leagueId, franchiseId, userId, currentYear, mostRecentSeason, leaguesMap) {
+    try {
+      const [leagueData, rosters, leagueUsers] = await Promise.all([
+        getLeague(leagueId),
+        getRosters(leagueId),
+        getLeagueUsers(leagueId)
+      ]);
+      if (!leagueData) return;
+
+      const me        = leagueUsers.find(u => u.user_id === userId);
+      const isComm    = me?.is_owner === true;
+      const myRoster  = rosters.find(r => r.owner_id === userId)
+                     || rosters.find(r => (r.co_owners||[]).includes(userId));
+      const isCoOwner = !rosters.find(r => r.owner_id === userId) && !!myRoster;
+
+      if (!myRoster && !isComm) return;
+
+      const season = leagueData.season || currentYear.toString();
+      const status = leagueData.status;
+
+      const wins       = myRoster?.settings?.wins   || 0;
+      const losses     = myRoster?.settings?.losses || 0;
+      const ties       = myRoster?.settings?.ties   || 0;
+      const ptsFor     = (myRoster?.settings?.fpts         || 0) + (myRoster?.settings?.fpts_decimal         || 0) / 100;
+      const ptsAgainst = (myRoster?.settings?.fpts_against || 0) + (myRoster?.settings?.fpts_against_decimal || 0) / 100;
+
+      const [standings, finish] = await Promise.all([
+        myRoster ? getStandings(leagueId) : Promise.resolve([]),
+        (status === "complete" && myRoster) ? getPlayoffFinish(leagueId, userId) : Promise.resolve(null)
+      ]);
+
+      const myStanding = standings.find(s => s.userId === userId);
+      const rank       = myStanding?.rank || null;
+
+      leaguesMap[`sleeper_${leagueId}`] = {
+        platform:       "sleeper",
+        leagueId,
+        franchiseId,
+        leagueName:     leagueData.name,
+        season,
+        status,
+        mostRecentSeason,
+        leagueType:     _mapLeagueType(leagueData.settings?.type),
+        totalTeams:     leagueData.total_rosters || 12,
+        teamName: (() => {
+          if (me?.metadata?.team_name) return me.metadata.team_name;
+          if (me?.display_name)        return me.display_name;
+          if (isCoOwner) {
+            const primaryUser = leagueUsers.find(u => u.user_id === myRoster?.owner_id);
+            return primaryUser?.metadata?.team_name || primaryUser?.display_name || "My Team";
+          }
+          return isComm ? "Commissioner" : "My Team";
+        })(),
+        isCommissioner: isComm,
+        isCoOwner:      isCoOwner || false,
+        myRosterId:     myRoster?.roster_id || null,
+        sleeperUserId:  userId,
+        wins, losses, ties,
+        pointsFor:      ptsFor,
+        pointsAgainst:  ptsAgainst,
+        standing:       rank,
+        playoffFinish:  finish,
+        isChampion:     finish === 1,
+        playoffResult:  _finishLabel(finish)
+      };
+    } catch (err) {
+      console.warn(`[Sleeper] Skipping ${leagueId}:`, err.message);
+    }
+  }
+
+  // ── Full import (first-time sync, all years) ───────────
   async function importUserLeagues(sleeperUsername) {
     const currentYear = new Date().getFullYear();
 
@@ -184,127 +265,111 @@ const SleeperAPI = (() => {
     if (!sleeperUser) throw new Error(`Sleeper user "${sleeperUsername}" not found.`);
     const userId = sleeperUser.user_id;
 
-    // Fetch leagues across all years since Sleeper launched (2017)
-    // Some leagues aren't renewed each season so their chains never get started
-    // if we only look at recent years
+    // ── Step 1: Fetch all years in parallel (2017–present) ─
     const yearsToFetch = [];
-    for (let y = currentYear; y >= 2017; y--) {
-      yearsToFetch.push(y.toString());
-    }
+    for (let y = currentYear; y >= 2017; y--) yearsToFetch.push(y.toString());
 
-    // Collect all unique league IDs the user appears in across all years
     const allStartingLeagueIds = new Set();
     let mostRecentSeason = (currentYear - 1).toString();
 
-    for (const year of yearsToFetch) {
-      const yearLeagues = await getUserLeagues(userId, "nfl", year);
-      if (yearLeagues.length && year > mostRecentSeason) {
-        mostRecentSeason = year;
-      }
-      yearLeagues.forEach(l => allStartingLeagueIds.add(l.league_id));
+    const yearResults = await _batch(yearsToFetch, 8, async (year) => {
+      const leagues = await getUserLeagues(userId, "nfl", year);
+      return { year, leagues: leagues || [] };
+    });
+    for (const r of yearResults) {
+      if (r.status !== "fulfilled") continue;
+      const { year, leagues } = r.value;
+      if (leagues.length && year > mostRecentSeason) mostRecentSeason = year;
+      leagues.forEach(l => allStartingLeagueIds.add(l.league_id));
     }
 
-    const leaguesMap    = {};
-    const seenLeagueIds = new Set();
+    // ── Step 2: Resolve lineage chains in parallel ────────
+    const lineageResults = await _batch([...allStartingLeagueIds], 6, async (id) => {
+      const lineage = await getLeagueLineage(id);
+      return { lineage };
+    });
 
-    for (const startLeagueId of allStartingLeagueIds) {
-      // Walk prev_league_id chain oldest → newest
-      const lineage     = await getLeagueLineage(startLeagueId);
-      const franchiseId = lineage[0]; // oldest = franchise anchor
-
-      // Mark all IDs in this chain as seen so we don't re-process from another year
-      lineage.forEach(id => allStartingLeagueIds.delete(id));
-
+    const seenLeagueIds  = new Set();
+    const leaguesToProcess = [];
+    for (const r of lineageResults) {
+      if (r.status !== "fulfilled") continue;
+      const { lineage } = r.value;
+      const franchiseId = lineage[0];
       for (const leagueId of lineage) {
         if (seenLeagueIds.has(leagueId)) continue;
         seenLeagueIds.add(leagueId);
-
-        try {
-          const [leagueData, rosters, leagueUsers] = await Promise.all([
-            getLeague(leagueId),
-            getRosters(leagueId),
-            getLeagueUsers(leagueId)
-          ]);
-
-          if (!leagueData) continue;
-
-          const me     = leagueUsers.find(u => u.user_id === userId);
-          const isComm = me?.is_owner === true;
-          // Primary owner match OR co-owner match
-          const myRoster = rosters.find(r => r.owner_id === userId)
-                        || rosters.find(r => (r.co_owners||[]).includes(userId));
-          const isCoOwner = !rosters.find(r => r.owner_id === userId) && !!myRoster;
-
-          // Skip if not a member AND not the commissioner
-          if (!myRoster && !isComm) continue;
-
-          const season = leagueData.season || currentYear.toString();
-          const status = leagueData.status;
-
-          const wins       = myRoster?.settings?.wins   || 0;
-          const losses     = myRoster?.settings?.losses || 0;
-          const ties       = myRoster?.settings?.ties   || 0;
-          const ptsFor     = (myRoster?.settings?.fpts         || 0) + (myRoster?.settings?.fpts_decimal         || 0) / 100;
-          const ptsAgainst = (myRoster?.settings?.fpts_against || 0) + (myRoster?.settings?.fpts_against_decimal || 0) / 100;
-
-          // Standings rank
-          const standings  = myRoster ? await getStandings(leagueId) : [];
-          const myStanding = standings.find(s => s.userId === userId);
-          const rank       = myStanding?.rank || null;
-
-          // Playoff finish only for completed seasons
-          const finish = (status === "complete" && myRoster)
-            ? await getPlayoffFinish(leagueId, userId)
-            : null;
-
-          const key = `sleeper_${leagueId}`;
-          leaguesMap[key] = {
-            platform:         "sleeper",
-            leagueId,
-            franchiseId,
-            leagueName:       leagueData.name,
-            season,
-            status,
-            mostRecentSeason,
-            leagueType:       _mapLeagueType(leagueData.settings?.type),
-            totalTeams:       leagueData.total_rosters || 12,
-            // For co-owners, get team name from the primary owner's user record
-            teamName: (() => {
-              if (me?.metadata?.team_name) return me.metadata.team_name;
-              if (me?.display_name) return me.display_name;
-              if (isCoOwner) {
-                const primaryUser = leagueUsers.find(u => u.user_id === myRoster?.owner_id);
-                return primaryUser?.metadata?.team_name || primaryUser?.display_name || "My Team";
-              }
-              return isComm ? "Commissioner" : "My Team";
-            })(),
-            isCommissioner:   isComm,
-            isCoOwner:        isCoOwner || false,
-            myRosterId:       myRoster?.roster_id || null,
-            sleeperUserId:    userId,  // Sleeper user_id for roster matching in auction
-            wins,
-            losses,
-            ties,
-            pointsFor:        ptsFor,
-            pointsAgainst:    ptsAgainst,
-            standing:         rank,
-            playoffFinish:    finish,
-            isChampion:       finish === 1,
-            playoffResult:    _finishLabel(finish)
-          };
-        } catch (err) {
-          console.warn(`[Sleeper] Skipping ${leagueId}:`, err.message);
-        }
+        leaguesToProcess.push({ leagueId, franchiseId });
       }
     }
 
+    // ── Step 3: Process all leagues in parallel (8 at a time) ─
+    const leaguesMap = {};
+    await _batch(leaguesToProcess, 8, ({ leagueId, franchiseId }) =>
+      _processLeague(leagueId, franchiseId, userId, currentYear, mostRecentSeason, leaguesMap)
+    );
+
     return {
-      sleeperUserId:    userId,
-      sleeperUsername:  sleeperUser.username,
-      displayName:      sleeperUser.display_name,
-      avatar:           sleeperUser.avatar,
+      sleeperUserId:   userId,
+      sleeperUsername: sleeperUser.username,
+      displayName:     sleeperUser.display_name,
+      avatar:          sleeperUser.avatar,
       mostRecentSeason,
-      leagues:          leaguesMap
+      leagues:         leaguesMap
+    };
+  }
+
+  // ── Refresh current season only ────────────────────────
+  // Fast update: only fetches the active season, updates records
+  // for known leagues, and discovers any new leagues from this year.
+  // Does NOT walk prev_league_id chains — relies on existing franchiseIds
+  // already stored in Firebase.
+  async function refreshCurrentSeason(sleeperUserId, sleeperUsername, existingLeagues) {
+    const currentYear    = new Date().getFullYear();
+    const activeSeason   = getActiveSeason(); // respects Jan-15 cutoff
+    const seasonsToCheck = new Set([activeSeason, currentYear.toString()]);
+
+    // ── Step 1: Get this season's leagues from Sleeper ────
+    const thisYearLeagues = await getUserLeagues(sleeperUserId, "nfl", activeSeason);
+    const thisYearIds     = new Set((thisYearLeagues || []).map(l => l.league_id));
+
+    // Build the set of leagueIds to refresh:
+    // - All existing Sleeper leagues from active/current season
+    // - Any new leagues from this year not yet in the profile
+    const existingSleeperLeagues = Object.entries(existingLeagues || {})
+      .filter(([, l]) => l.platform === "sleeper");
+
+    const toRefresh = new Map(); // leagueId → franchiseId
+
+    // Add existing active-season leagues
+    for (const [, l] of existingSleeperLeagues) {
+      if (seasonsToCheck.has(String(l.season))) {
+        toRefresh.set(l.leagueId, l.franchiseId || l.leagueId);
+      }
+    }
+
+    // Add brand-new leagues from this year (not yet in profile)
+    const existingIds = new Set(existingSleeperLeagues.map(([, l]) => l.leagueId));
+    for (const id of thisYearIds) {
+      if (!existingIds.has(id)) {
+        // New league — use itself as franchiseId placeholder; full sync will fix lineage
+        toRefresh.set(id, id);
+      }
+    }
+
+    // ── Step 2: Process all in parallel ──────────────────
+    const leaguesMap = {};
+    const mostRecentSeason = activeSeason;
+
+    await _batch([...toRefresh.entries()], 8, ([leagueId, franchiseId]) =>
+      _processLeague(leagueId, franchiseId, sleeperUserId, currentYear, mostRecentSeason, leaguesMap)
+    );
+
+    return {
+      sleeperUserId,
+      sleeperUsername,
+      mostRecentSeason,
+      leagues: leaguesMap,
+      newCount: [...thisYearIds].filter(id => !existingIds.has(id)).length
     };
   }
 
@@ -332,7 +397,8 @@ const SleeperAPI = (() => {
     getPlayoffFinish,
     isCommissioner,
     getLeagueLineage,
-    importUserLeagues
+    importUserLeagues,
+    refreshCurrentSeason
   };
 
 })();
