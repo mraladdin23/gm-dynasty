@@ -5745,6 +5745,7 @@ select option { background: var(--color-bg-2); }
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  margin-right: var(--space-4);
 }
 
 /* nav-links fills remaining space and centers its links between brand and actions */
