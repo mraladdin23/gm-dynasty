@@ -5727,6 +5727,11 @@ select option { background: var(--color-bg-2); }
   color: var(--color-text-dim);
   font-size: .82rem;
 }
+.draft-ticker-row-detail {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  margin-top: 3px;
+}
 
 /* Container for the pill — placed in nav alongside global-auc-pill */
 #draft-ticker-wrap {
