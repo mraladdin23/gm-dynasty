@@ -151,7 +151,13 @@
         </div>
         <div class="platform-body">
           <input type="text" id="sleeper-username-input" placeholder="Your Sleeper username" />
-          <button class="btn-link-platform" id="sleeper-link-btn">Find My Leagues</button>
+          <button class="btn-link-platform" id="sleeper-link-btn">🔁 Full Sync (all seasons)</button>
+          <!-- Refresh button — shown via JS only when already synced -->
+          <button class="btn-link-platform hidden" id="sleeper-refresh-btn" style="background:var(--color-surface)">🔄 Refresh Current Season</button>
+          <span class="field-hint">
+            <strong>Refresh</strong> — updates current season records and adds new leagues. Fast (~10s).<br>
+            <strong>Full Sync</strong> — re-imports all seasons since 2017. Use when first connecting or after a long break (30–90s).
+          </span>
         </div>
         <div id="sleeper-leagues-preview" class="leagues-preview hidden"></div>
       </div>
@@ -668,7 +674,8 @@
             <span class="platform-badge-name">Sleeper</span>
             <span id="sleeper-linked-user" class="platform-relink-user"></span>
           </div>
-          <button class="btn-secondary btn-sm" id="relink-sleeper-btn">Reconnect</button>
+          <button class="btn-secondary btn-sm" id="relink-sleeper-btn" title="Update current season records and add new leagues from this year">🔄 Refresh</button>
+          <button class="btn-secondary btn-sm" id="fullsync-sleeper-btn" title="Re-import all seasons from 2017 to present (slow)">🔁 Full Sync</button>
           <button class="btn-danger btn-sm" id="delete-sleeper-leagues-btn" title="Remove all Sleeper leagues from your profile">🗑 Remove All</button>
         </div>
         <div class="platform-relink-row">

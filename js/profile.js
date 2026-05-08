@@ -39,9 +39,43 @@ const Profile = (() => {
       sleeperUsername:  result.sleeperUsername,
       displayName:      result.displayName,
       avatar:           result.avatar,
-      mostRecentSeason: result.mostRecentSeason
+      mostRecentSeason: result.mostRecentSeason,
+      lastFullSync:     Date.now()
     });
     await GMDB.saveLeagues(gmdUsername, result.leagues);
+    await GMDB.recomputeStats(gmdUsername);
+    return result;
+  }
+
+  // ── Refresh current season only (fast update) ──────────
+  // Updates win/loss/standings for active-season leagues and adds
+  // any new leagues from this year. Does not re-walk historical chains.
+  async function refreshSleeper(gmdUsername) {
+    const profile  = Auth.getCurrentProfile();
+    const sleeper  = profile?.platforms?.sleeper;
+    if (!sleeper?.sleeperUserId) {
+      throw new Error("Sleeper not connected. Use Full Sync first.");
+    }
+
+    // Read existing leagues from Firebase
+    const existing = await GMDB.getLeagues(gmdUsername);
+
+    const result = await SleeperAPI.refreshCurrentSeason(
+      sleeper.sleeperUserId,
+      sleeper.sleeperUsername,
+      existing
+    );
+
+    if (Object.keys(result.leagues).length === 0) {
+      throw new Error("No active-season leagues found to refresh.");
+    }
+
+    // Merge: only update/add leagues returned by refresh (don't touch historical)
+    await GMDB.saveLeagues(gmdUsername, result.leagues);
+    await GMDB.linkPlatform(gmdUsername, "sleeper", {
+      mostRecentSeason: result.mostRecentSeason,
+      lastRefresh:      Date.now()
+    });
     await GMDB.recomputeStats(gmdUsername);
     return result;
   }
@@ -2602,12 +2636,30 @@ const Profile = (() => {
     document.getElementById("edit-visibility").value =
       profile.visibility?.profile || "public";
 
-    // Show linked usernames
+    // Show linked usernames + sync status
     const sleeper = profile.platforms?.sleeper;
     const mfl     = profile.platforms?.mfl;
     const yahoo   = profile.platforms?.yahoo;
-    document.getElementById("sleeper-linked-user").textContent =
-      sleeper?.sleeperUsername ? `@${sleeper.sleeperUsername}` : "Not connected";
+
+    const sleeperLinkedEl = document.getElementById("sleeper-linked-user");
+    if (sleeperLinkedEl) {
+      let sleeperText = sleeper?.sleeperUsername ? `@${sleeper.sleeperUsername}` : "Not connected";
+      if (sleeper?.lastRefresh) {
+        const ago = _timeAgo(sleeper.lastRefresh);
+        sleeperText += ` · refreshed ${ago}`;
+      } else if (sleeper?.lastFullSync) {
+        const ago = _timeAgo(sleeper.lastFullSync);
+        sleeperText += ` · synced ${ago}`;
+      }
+      sleeperLinkedEl.textContent = sleeperText;
+    }
+
+    // Show/hide refresh button based on whether already synced
+    const refreshBtn   = document.getElementById("relink-sleeper-btn");
+    const fullsyncBtn  = document.getElementById("fullsync-sleeper-btn");
+    const hasSleeper   = !!(sleeper?.sleeperUserId);
+    if (refreshBtn)  { refreshBtn.style.display  = hasSleeper ? "" : "none"; }
+    if (fullsyncBtn) { fullsyncBtn.textContent = hasSleeper ? "Full Sync" : "Connect Sleeper"; }
     document.getElementById("mfl-linked-user").textContent =
       mfl?.mflEmail ? mfl.mflEmail : (mfl?.mflUsername ? `@${mfl.mflUsername}` : "Not connected");
     const yahooEl = document.getElementById("yahoo-linked-user");
@@ -2701,6 +2753,18 @@ const Profile = (() => {
     if (p === "mfl")     return d.mflEmail || d.mflUsername || "";
     return "";
   }
+  function _timeAgo(ts) {
+    if (!ts) return "";
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    const h = Math.floor(diff / 3600000);
+    const d = Math.floor(diff / 86400000);
+    if (m < 2)  return "just now";
+    if (m < 60) return `${m}m ago`;
+    if (h < 24) return `${h}h ago`;
+    return `${d}d ago`;
+  }
+
   function _escHtml(str) {
     return String(str || "")
       .replace(/&/g,"&amp;").replace(/</g,"&lt;")
@@ -3296,6 +3360,7 @@ const Profile = (() => {
   // ── Public API ─────────────────────────────────────────
   return {
     linkSleeper,
+    refreshSleeper,
     linkMFL,
     linkYahoo,
     renderLocker,

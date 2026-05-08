@@ -226,6 +226,44 @@ document.getElementById("onboarding-back-btn")?.addEventListener("click", () => 
   AppState.showScreen("welcome-screen");
 });
 
+// ── Onboarding: show Refresh button if already synced ─────
+(function() {
+  const profile = Auth.getCurrentProfile ? Auth.getCurrentProfile() : null;
+  const hasSleeper = !!(profile?.platforms?.sleeper?.sleeperUserId);
+  const refreshBtn = document.getElementById("sleeper-refresh-btn");
+  if (refreshBtn && hasSleeper) refreshBtn.classList.remove("hidden");
+  const input = document.getElementById("sleeper-username-input");
+  if (input && hasSleeper && profile.platforms.sleeper.sleeperUsername) {
+    input.value = profile.platforms.sleeper.sleeperUsername;
+  }
+})();
+
+document.getElementById("sleeper-refresh-btn")?.addEventListener("click", async () => {
+  const statusEl = document.getElementById("sleeper-status");
+  const btn      = document.getElementById("sleeper-refresh-btn");
+  const profile  = Auth.getCurrentProfile();
+  if (!profile) return;
+  btn.disabled = true;
+  btn.textContent = "Refreshing...";
+  statusEl.textContent = "Refreshing current season…";
+  try {
+    const result = await Profile.refreshSleeper(profile.username);
+    const n    = Object.keys(result.leagues).length;
+    const news = result.newCount > 0 ? ` (+${result.newCount} new)` : "";
+    statusEl.textContent = `✓ Refreshed — ${n} leagues updated${news}`;
+    statusEl.classList.add("status-connected");
+    Profile.renderLeaguePreview("sleeper-leagues-preview", result.leagues);
+    document.getElementById("onboarding-save-btn").disabled = false;
+    btn.textContent = "🔄 Refresh Current Season";
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.add("status-error");
+    btn.textContent = "🔄 Refresh Current Season";
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ── Onboarding: Sleeper link ───────────────────────────────
 document.getElementById("sleeper-link-btn")?.addEventListener("click", async () => {
   const sleeperUsername = document.getElementById("sleeper-username-input").value.trim();
@@ -235,12 +273,18 @@ document.getElementById("sleeper-link-btn")?.addEventListener("click", async () 
   if (!profile) return;
 
   btn.disabled = true;
-  btn.textContent = "Searching...";
-  statusEl.textContent = "Looking up leagues...";
+  btn.textContent = "Syncing...";
+  statusEl.textContent = "Importing all seasons — may take 30–90s for large accounts…";
 
   try {
-    const result = await Profile.linkSleeper(profile.username, sleeperUsername);
+    const importPromise = Profile.linkSleeper(profile.username, sleeperUsername);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timed out — Sleeper may be slow. Try again.")), 120000)
+    );
+    const result = await Promise.race([importPromise, timeoutPromise]);
     statusEl.textContent = `✓ Connected — ${Object.keys(result.leagues).length} leagues`;
+    // Show refresh button now that we're synced
+    document.getElementById("sleeper-refresh-btn")?.classList.remove("hidden");
     statusEl.classList.add("status-connected");
     Profile.renderLeaguePreview("sleeper-leagues-preview", result.leagues);
     document.getElementById("onboarding-save-btn").disabled = false;
@@ -502,24 +546,59 @@ document.getElementById("edit-profile-save")?.addEventListener("click", async ()
   }
 });
 
-// Relink platform buttons inside edit profile modal
-document.getElementById("relink-sleeper-btn")?.addEventListener("click", async () => {
-  const username = prompt("Enter your Sleeper username:");
-  if (!username) return;
+// ── Sleeper: Refresh current season (fast) ────────────────
+async function _sleeperRefresh(afterFn) {
   const profile = Auth.getCurrentProfile();
+  if (!profile) return;
   try {
-    setLoading(true, "Relinking Sleeper...");
-    const result = await Profile.linkSleeper(profile.username, username);
+    setLoading(true, "Refreshing current season leagues…");
+    const result = await Profile.refreshSleeper(profile.username);
     setLoading(false);
-    showToast(`Sleeper relinked — ${Object.keys(result.leagues).length} leagues`);
+    const n    = Object.keys(result.leagues).length;
+    const news = result.newCount > 0 ? ` (+${result.newCount} new)` : "";
+    showToast(`Sleeper refreshed — ${n} league${n !== 1 ? "s" : ""} updated${news}`);
     const updated = await Auth.refreshProfile();
     Profile.renderLocker(updated);
-    Profile.openEditProfileModal(updated);
+    afterFn?.(updated);
   } catch (err) {
     setLoading(false);
     showToast(err.message, "error");
   }
-});
+}
+
+// ── Sleeper: Full sync (all years, slow) ──────────────────
+async function _sleeperFullSync(afterFn) {
+  const profile = Auth.getCurrentProfile();
+  if (!profile) return;
+  const sleeper  = profile.platforms?.sleeper;
+  const username = sleeper?.sleeperUsername
+    || prompt("Enter your Sleeper username:");
+  if (!username?.trim()) return;
+  try {
+    setLoading(true, "Full Sleeper sync — importing all seasons (30–90s)…");
+    const importPromise  = Profile.linkSleeper(profile.username, username.trim());
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Request timed out. Sleeper may be slow — please try again.")), 120000)
+    );
+    const result = await Promise.race([importPromise, timeoutPromise]);
+    setLoading(false);
+    showToast(`Full sync complete — ${Object.keys(result.leagues).length} leagues imported`);
+    const updated = await Auth.refreshProfile();
+    Profile.renderLocker(updated);
+    afterFn?.(updated);
+  } catch (err) {
+    setLoading(false);
+    showToast(err.message, "error");
+  }
+}
+
+// Relink platform buttons inside edit profile modal
+document.getElementById("relink-sleeper-btn")?.addEventListener("click", () =>
+  _sleeperRefresh(u => Profile.openEditProfileModal(u))
+);
+document.getElementById("fullsync-sleeper-btn")?.addEventListener("click", () =>
+  _sleeperFullSync(u => Profile.openEditProfileModal(u))
+);
 document.getElementById("relink-yahoo-btn")?.addEventListener("click", async () => {
   const profile = Auth.getCurrentProfile();
   if (!profile) return;
@@ -609,6 +688,14 @@ document.getElementById("manage-leagues-btn")?.addEventListener("click", () => {
   _prefillOnboardingMFL();
   AppState.showOnboarding();
 });
+
+// Sleeper refresh/sync buttons in the manage-leagues onboarding header
+document.getElementById("sleeper-refresh-btn")?.addEventListener("click", () =>
+  _sleeperRefresh()
+);
+document.getElementById("sleeper-fullsync-btn")?.addEventListener("click", () =>
+  _sleeperFullSync()
+);
 
 // ── Add league button ──────────────────────────────────────
 document.getElementById("add-league-btn")?.addEventListener("click", () => {
