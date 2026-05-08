@@ -1043,16 +1043,38 @@ function _escHtml(s) {
       if (_notifOpen && !e.target.closest("#nav-notif-wrap")) close();
     });
 
-    // Mobile drawer: draft row click opens draft panel in drawer context
+    // Mobile drawer: draft row — open first live draft's league detail, or go to tournaments
     document.getElementById("drawer-draft-btn")?.addEventListener("click", () => {
       DLRNav.close();
-      // Scroll to / open draft panel — navigate to locker and open draft detail
+      const items = typeof DraftTicker !== "undefined" ? DraftTicker.getLastItems?.() : null;
+      const first = items?.live?.[0] || items?.upcoming?.[0];
+      if (first?.tid) {
+        // Tournament draft — go to tournaments view and open it
+        DLRNav.go("tournament");
+        setTimeout(() => {
+          if (typeof _openTournamentView === "function") _openTournamentView(first.tid);
+        }, 150);
+      } else if (first?.leagueId) {
+        // Regular league draft — open league detail on draft tab
+        const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+        const match = Object.entries(profile?.leagues || {})
+          .find(([, l]) => String(l.leagueId || l.league_id || "") === first.leagueId);
+        if (match && typeof Profile !== "undefined") {
+          Profile.openLeagueDetail(match[0]);
+          setTimeout(() => {
+            const sel = document.getElementById("detail-tab-select");
+            if (sel) { sel.value = "draft"; Profile.onDetailTabChange("draft"); }
+          }, 350);
+        }
+      }
     });
 
-    // Mobile drawer: notif row click navigates by type
+    // Mobile drawer: notif row — navigate based on what's unread
     document.getElementById("drawer-notif-btn")?.addEventListener("click", () => {
       DLRNav.close();
-      // Just close for now — user sees toast notifications inline
+      // If there are tournament board unreads, go to tournaments; else stay on locker for chat
+      const boardTotal = Object.values(_trnBoardUnread || {}).reduce((s, n) => s + n, 0);
+      if (boardTotal > 0) DLRNav.go("tournament");
     });
   });
 })();
