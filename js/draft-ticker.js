@@ -63,9 +63,6 @@ const DraftTicker = (() => {
       const stored = snap.val() || {};
       for (const [, l] of Object.entries(stored)) {
         if (!l.leagueId && !l.league_id) continue;
-        // Only include current/recent seasons — skip leagues older than 2 years
-        const season = parseInt(l.season || l.year || 0);
-        if (season && season < new Date().getFullYear() - 1) continue;
         leagues.push({
           leagueId:   String(l.leagueId || l.league_id || ""),
           platform:   l.platform || "sleeper",
@@ -118,6 +115,7 @@ const DraftTicker = (() => {
       console.warn("[DraftTicker] Failed to load tournament leagues:", e.message);
     }
 
+    console.log(`[DraftTicker] Found ${leagues.length} leagues to check:`, leagues.map(l => `${l.platform}:${l.leagueId} (${l.leagueName})`));
     return leagues;
   }
 
@@ -137,6 +135,7 @@ const DraftTicker = (() => {
         drafts = Array.isArray(data) ? data : [];
         drafts._fetchedAt = now;
         _sleeperDraftCache[leagueId] = drafts;
+        console.log(`[DraftTicker] ${leagueId}: fetched ${drafts.length} draft(s)`, drafts.map(d => `${d.draft_id} status=${d.status} start_time=${d.start_time}`));
       } catch(e) {
         return { live: [], upcoming: [] };
       }
@@ -426,6 +425,7 @@ const DraftTicker = (() => {
     try {
       const items = await _gatherItems();
       _lastItems = items;
+      console.log(`[DraftTicker] refresh complete — ${items.live.length} live, ${items.upcoming.length} upcoming`);
       _updatePill(items);
       if (_tickerOpen) _renderPanel(items);
     } catch(e) {
