@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: May 7, 2026 — Tournament landing page overhaul, participant sync, mobile fixes all complete.*
+*Updated: May 9, 2026 — Global Draft Ticker complete (Worker cron + Firebase architecture, traded picks, slot_to_roster_id).*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -66,10 +66,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🟢 UX / Notification
 
-### U1 — Global Draft Ticker (Tournament Drafts)
-**Idea:** A global sticky ticker bar (like the auction ticker) that shows currently active tournament drafts, who is on the clock, what pick number, and how many picks until the logged-in user is up. Notification when it's their turn.
-**Files:** `tournament.js`, `draft.js`, `locker.css`
-**Note:** The auction module already has a ticker — study that pattern. Draft live polling (15s interval for Sleeper) is already in place from X2 fix — ticker can piggyback on that. MFL/Yahoo still need manual refresh.
+
 
 ---
 
@@ -143,6 +140,47 @@ Open DLR while logged in as admin — `_backfillPublicSummaries()` runs automati
 ---
 
 ## ✅ Completed
+
+### May 9, 2026 — Global Draft Ticker (U1): Cloudflare Worker Cron + Firebase Architecture
+
+**Global Draft Ticker (`draft-ticker.js`, `worker.js`, `firebase-db.js`, `locker.css`)**
+
+Complete rewrite of the draft ticker from direct Sleeper polling to a Worker cron + Firebase pub/sub architecture:
+
+**Worker cron (`runDraftWatcher`):**
+- Runs every minute via Cloudflare Workers Paid plan (required for cron CPU time)
+- `wrangler.toml` added with `crons = ["* * * * *"]`
+- Reads `gmd/draftWatchList` (set by client on init), fetches Sleeper for each watched league
+- For live drafts: fetches `/draft/{id}` (full object with `slot_to_roster_id`), `/picks`, `/traded_picks` in parallel
+- Smart filtering: only checks `urgent` (live/paused/starting soon) + 15 `pending` per run — avoids timeout on 135-league watch list
+- Skip-if-unchanged: only writes to `gmd/draftStatus/{leagueId}` when `picks_hash` or status changes, OR when `slot_to_roster_id` is missing
+- Removes completed drafts from both `draftWatchList` and `draftStatus`
+
+**Client (`draft-ticker.js`):**
+- `_buildWatchList()` — reads leagues/tournaments from Firebase, writes `gmd/draftWatchList` with metadata
+- `_initialLoad()` — reads all `gmd/draftStatus/` in one Firebase call at startup
+- Firebase `.on("value")` listeners for live drafts; polling for upcoming (60s/5min/15min by proximity)
+- `_computeMyNextPick()` — trade-aware using correct Sleeper data model:
+  - `draft_order[userId]` → my draft slot
+  - `slot_to_roster_id[mySlot]` → my rosterId
+  - `traded_picks`: `roster_id` = original slot, `owner_id` = current owner
+  - Builds `tradeMap["round-originalRosterId"] → currentOwnerRosterId`
+  - Scans forward: `originalRosterId = slot_to_roster_id[slotAtPos]`, then checks tradeMap
+- Duplicate listener guard (`dataset.tickerBound`) prevents double-binding on `stop()`/`init()` calls
+- Shows pick details (Current/My Next) for both `drafting` and `paused` status
+
+**`firebase-db.js`:**
+- `linkPlatform` changed from `.set()` to `.update()` — critical fix preventing `sleeperUserId`, `avatar`, `displayName` from being wiped on every Sleeper refresh
+
+**Key architectural notes:**
+- Cloudflare paid plan required ($5/month) — free plan 10ms CPU limit kills the cron
+- `/league/{id}/drafts` does NOT include `slot_to_roster_id` — must fetch `/draft/{id}` separately
+- `gmd/draftWatchList`: `.read: auth != null, .write: auth != null`
+- `gmd/draftStatus`: `.read: auth != null, .write: false` (Worker writes via DB secret, bypasses rules)
+- Debug routes in worker: `/draft/status` (read Firebase draftStatus), `/draft/test` (step-by-step diagnostics), `/draft/forcecheck` (force-write Ballers 6 status)
+- Seeded `draftStatus` with `picks_hash: "seeded"` for all 135 leagues to prevent first-run timeout
+
+---
 
 ### May 7, 2026 — Tournament Landing Page Overhaul, Participant Sync, Mobile Fixes
 
