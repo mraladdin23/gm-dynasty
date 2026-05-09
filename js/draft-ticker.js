@@ -434,14 +434,15 @@ const DraftTicker = (() => {
         }
 
         let detail = "";
-        if (item.nextPick && !isPaused) {
-          const nextStr  = `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
-          const myLabel  = item.myNextPick
+        if (item.nextPick) {
+          const pauseNote = isPaused ? " · <span style="color:var(--color-text-dim)">⏸ Paused</span>" : "";
+          const nextStr   = `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+          const myLabel   = item.myNextPick
             ? (item.onTheClock
                 ? `<strong style="color:#f87171">My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}</strong>`
                 : `My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`)
             : "";
-          detail = `<div class="draft-ticker-row-detail">${nextStr}${myLabel ? " · " + myLabel : ""}</div>`;
+          detail = `<div class="draft-ticker-row-detail">${nextStr}${myLabel ? " · " + myLabel : ""}${pauseNote}</div>`;
         }
 
         const nav = item.tid
