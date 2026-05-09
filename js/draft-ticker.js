@@ -410,6 +410,7 @@ const DraftTicker = (() => {
                 ? `<strong style="color:#f87171">My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}</strong>`
                 : `My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`)
             : "";
+          detail = `<div class="draft-ticker-row-detail">${nextStr}${myLabel ? " · " + myLabel : ""}</div>`;
         }
 
         const nav = item.tid
