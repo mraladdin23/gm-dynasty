@@ -3,6 +3,10 @@
 // ─────────────────────────────────────────────────────────
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runDraftWatcher(env));
+  },
+
   async fetch(req, env, ctx) {
     const url  = new URL(req.url);
     const path = url.pathname;
@@ -487,6 +491,13 @@ export default {
         }
 
         return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders() });
+      }
+
+      if (path === "/draft/status" && req.method === "GET") {
+        const fbUrl = `https://sleeperbid-default-rtdb.firebaseio.com/gmd/draftStatus.json?auth=${env.FIREBASE_DB_SECRET}`;
+        const res   = await fetch(fbUrl);
+        const data  = await res.json();
+        return new Response(JSON.stringify(data || {}), { headers: corsHeaders() });
       }
 
       return new Response("Worker running", { headers: corsHeaders() });
@@ -1531,6 +1542,115 @@ Write a 3-4 paragraph weekly recap in an engaging, sports-analyst style. Mention
     return new Response(JSON.stringify({ recap }), { headers: corsHeaders() });
   } catch(e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders() });
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  DRAFT WATCHER — runs on cron (every minute via wrangler.toml)
+//  Reads gmd/draftWatchList, fetches Sleeper draft state,
+//  writes gmd/draftStatus/{leagueId} only when state changes.
+//  Clients subscribe to draftStatus — zero direct Sleeper calls.
+// ══════════════════════════════════════════════════════════
+async function runDraftWatcher(env) {
+  const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
+  const auth = `auth=${env.FIREBASE_DB_SECRET}`;
+
+  // Read watch list: { leagueId: { leagueName, tid?, source } }
+  let watchList = {};
+  try {
+    const res = await fetch(`${FB}/draftWatchList.json?${auth}`);
+    watchList = (await res.json()) || {};
+  } catch(e) { console.error("[DraftWatcher] watchList read failed:", e.message); return; }
+
+  const ids = Object.keys(watchList);
+  if (!ids.length) return;
+
+  // Read existing status for hash comparison (avoid writes when unchanged)
+  let existing = {};
+  try {
+    const res = await fetch(`${FB}/draftStatus.json?${auth}`);
+    existing  = (await res.json()) || {};
+  } catch(e) {}
+
+  const writes  = {};
+  const deletes = [];
+
+  await Promise.allSettled(ids.map(async leagueId => {
+    const meta = watchList[leagueId] || {};
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+      if (!r.ok) return;
+      const drafts = await r.json();
+      if (!Array.isArray(drafts)) return;
+
+      // Priority: drafting > paused > pre_draft; ignore complete
+      const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
+      const draft = drafts
+        .filter(d => d.status !== "complete")
+        .sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9))[0];
+
+      if (!draft) { deletes.push(leagueId); return; }
+
+      let picksMade = 0, picks_hash = draft.status, nextPick = null, totalPicks = null;
+
+      if (draft.status === "drafting" || draft.status === "paused") {
+        const pr = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
+        if (pr.ok) {
+          const arr  = await pr.json();
+          picksMade  = Array.isArray(arr) ? arr.length : 0;
+          const last = Array.isArray(arr) ? arr[arr.length - 1] : null;
+          picks_hash = `${picksMade}:${last?.player_id || ""}`;
+
+          const teams   = Object.keys(draft.draft_order || draft.slot_to_roster_id || {}).length || draft.settings?.teams || 12;
+          const rounds  = draft.settings?.rounds || 1;
+          totalPicks    = teams * rounds;
+          const next    = picksMade + 1;
+          nextPick      = { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 };
+        }
+      }
+
+      // Skip write if nothing changed
+      const prev = existing[leagueId];
+      if (prev && prev.picks_hash === picks_hash && prev.status === draft.status) return;
+
+      const startMs = draft.start_time
+        ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
+        : null;
+
+      writes[leagueId] = {
+        status:            draft.status,
+        draftId:           draft.draft_id,
+        draftType:         draft.type || "snake",
+        picksMade,
+        totalPicks,
+        nextPick,
+        draft_order:       draft.draft_order       || null,
+        slot_to_roster_id: draft.slot_to_roster_id || null,
+        picks_hash,
+        startTime:         startMs,
+        leagueName:        meta.leagueName || leagueId,
+        tid:               meta.tid        || null,
+        source:            meta.source     || "league",
+        updatedAt:         Date.now()
+      };
+    } catch(e) { console.warn(`[DraftWatcher] ${leagueId}:`, e.message); }
+  }));
+
+  if (Object.keys(writes).length) {
+    await fetch(`${FB}/draftStatus.json?${auth}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(writes)
+    });
+    console.log(`[DraftWatcher] wrote ${Object.keys(writes).length} updates`);
+  }
+
+  if (deletes.length) {
+    await Promise.allSettled(deletes.map(id => Promise.all([
+      fetch(`${FB}/draftWatchList/${id}.json?${auth}`, { method: "DELETE" }),
+      fetch(`${FB}/draftStatus/${id}.json?${auth}`,    { method: "DELETE" })
+    ])));
+    console.log(`[DraftWatcher] removed ${deletes.length} completed`);
   }
 }
 
