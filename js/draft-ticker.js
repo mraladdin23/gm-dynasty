@@ -435,7 +435,7 @@ const DraftTicker = (() => {
 
         let detail = "";
         if (item.nextPick) {
-          const pauseNote = isPaused ? " · <span style="color:var(--color-text-dim)">⏸ Paused</span>" : "";
+          const pauseNote = isPaused ? " · <span style='color:var(--color-text-dim)'>⏸ Paused</span>" : "";
           const nextStr   = `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
           const myLabel   = item.myNextPick
             ? (item.onTheClock
