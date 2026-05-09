@@ -499,6 +499,119 @@ export default {
         const data  = await res.json();
         return new Response(JSON.stringify(data || {}), { headers: corsHeaders() });
       }
+// ── TEMPORARY DEBUG ROUTE — remove after testing ─────────
+if (path === "/draft/test" && req.method === "GET") {
+  const log = [];
+  try {
+    const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
+    const auth = `auth=${env.FIREBASE_DB_SECRET}`;
+
+    // Step 1: read watchList
+    const watchRes  = await fetch(`${FB}/draftWatchList.json?${auth}`);
+    const watchList = (await watchRes.json()) || {};
+    const allIds    = Object.keys(watchList);
+    log.push({ step: "watchList", status: watchRes.status, count: allIds.length });
+
+    // Step 2: read existing draftStatus
+    const statusRes = await fetch(`${FB}/draftStatus.json?${auth}`);
+    const existing  = (await statusRes.json()) || {};
+    log.push({ step: "draftStatus", status: statusRes.status, count: Object.keys(existing).length });
+
+    // Step 3: figure out what toCheck looks like
+    const now     = Date.now();
+    const toCheck = [], toSkip = [];
+    for (const id of allIds) {
+      const prev = existing[id];
+      if (!prev)                                        { toCheck.push(id); continue; }
+      if (prev.status === "complete")                   { toSkip.push(id);  continue; }
+      if (prev.status === "drafting" || prev.status === "paused") { toCheck.push(id); continue; }
+      if (prev.status === "pre_draft" && prev.startTime) {
+        if ((prev.startTime - now) > 15 * 60 * 1000)  continue;
+        toCheck.push(id); continue;
+      }
+      toCheck.push(id);
+    }
+    log.push({ step: "filter", total: allIds.length, toCheck: toCheck.length, toSkip: toSkip.length });
+
+    // Step 4: test just the FIRST toCheck league end-to-end
+    if (toCheck.length > 0) {
+      const testId  = toCheck[0];
+      const meta    = watchList[testId] || {};
+      const dr      = await fetch(`https://api.sleeper.app/v1/league/${testId}/drafts`);
+      const drafts  = dr.ok ? await dr.json() : null;
+      const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
+      const draft   = Array.isArray(drafts)
+        ? drafts.filter(d => d.status !== "complete")
+            .sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9))[0]
+        : null;
+      log.push({ step: "firstLeague", leagueId: testId, sleeperStatus: dr.status, draftStatus: draft?.status || "none", draftId: draft?.draft_id });
+
+      // Step 5: test the Firebase PATCH write
+      const testWrite = { [testId]: { status: draft?.status || "pre_draft", picks_hash: "test", updatedAt: now } };
+      const wr = await fetch(`${FB}/draftStatus.json?${auth}`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(testWrite)
+      });
+      log.push({ step: "patchWrite", status: wr.status, body: await wr.text() });
+    }
+
+    return new Response(JSON.stringify({ ok: true, log }, null, 2), { headers: corsHeaders() });
+  } catch(e) {
+    return new Response(JSON.stringify({ ok: false, error: e.message, stack: e.stack, log }, null, 2), 
+      { status: 500, headers: corsHeaders() });
+  }
+}
+
+if (path === "/draft/forcecheck" && req.method === "GET") {
+  const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
+  const auth = `auth=${env.FIREBASE_DB_SECRET}`;
+  const id   = "1312644275434946560";
+  
+  // Delete the seeded entry so cron treats it as unknown → urgent
+  await fetch(`${FB}/draftStatus/${id}.json?${auth}`, { method: "DELETE" });
+  
+  // Then immediately check it
+  const r      = await fetch(`https://api.sleeper.app/v1/league/${id}/drafts`);
+  const drafts = await r.json();
+  const draft  = drafts.find(d => d.status === "drafting" || d.status === "paused");
+  
+  if (!draft) {
+    return new Response(JSON.stringify({ error: "No active draft found" }), { headers: corsHeaders() });
+  }
+
+  const pr       = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
+  const arr      = await pr.json();
+  const picksMade = arr.length;
+  const last      = arr[arr.length - 1];
+  const picks_hash = `${picksMade}:${last?.player_id || ""}`;
+  const teams     = Object.keys(draft.draft_order || {}).length || 12;
+  const rounds    = draft.settings?.rounds || 1;
+  const next      = picksMade + 1;
+
+  const status = {
+    status:            draft.status,
+    draftId:           draft.draft_id,
+    draftType:         draft.type || "snake",
+    picksMade,
+    totalPicks:        teams * rounds,
+    nextPick:          { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 },
+    draft_order:       draft.draft_order       || null,
+    slot_to_roster_id: draft.slot_to_roster_id || null,
+    picks_hash,
+    startTime:         draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000,
+    leagueName:        "Ballers 6",
+    updatedAt:         Date.now()
+  };
+
+  await fetch(`${FB}/draftStatus/${id}.json?${auth}`, {
+    method:  "PUT",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(status)
+  });
+
+  return new Response(JSON.stringify({ ok: true, status }, null, 2), { headers: corsHeaders() });
+}
 
       return new Response("Worker running", { headers: corsHeaders() });
     } catch (err) {
@@ -1555,103 +1668,167 @@ async function runDraftWatcher(env) {
   const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
   const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-  // Read watch list: { leagueId: { leagueName, tid?, source } }
-  let watchList = {};
-  try {
-    const res = await fetch(`${FB}/draftWatchList.json?${auth}`);
-    watchList = (await res.json()) || {};
-  } catch(e) { console.error("[DraftWatcher] watchList read failed:", e.message); return; }
+  const [watchRes, statusRes] = await Promise.all([
+    fetch(`${FB}/draftWatchList.json?${auth}`),
+    fetch(`${FB}/draftStatus.json?${auth}`)
+  ]);
+  const watchList = (await watchRes.json()) || {};
+  const existing  = (await statusRes.json()) || {};
 
-  const ids = Object.keys(watchList);
-  if (!ids.length) return;
+  const allIds = Object.keys(watchList);
+  if (!allIds.length) return;
 
-  // Read existing status for hash comparison (avoid writes when unchanged)
-  let existing = {};
-  try {
-    const res = await fetch(`${FB}/draftStatus.json?${auth}`);
-    existing  = (await res.json()) || {};
-  } catch(e) {}
+  const now     = Date.now();
+  const urgent  = []; // live/paused/starting-soon — always check immediately
+  const pending = []; // seeded or unknown — check a few per run
+  const toSkip  = []; // complete — remove
+
+  for (const id of allIds) {
+    const prev = existing[id];
+
+    if (!prev || prev.picks_hash === "seeded") {
+      pending.push(id); // never properly checked
+      continue;
+    }
+    if (prev.status === "complete") {
+      toSkip.push(id);
+      continue;
+    }
+    if (prev.status === "drafting" || prev.status === "paused") {
+      urgent.push(id);
+      continue;
+    }
+    if (prev.status === "pre_draft") {
+      if (!prev.startTime) {
+        // Already checked, no draft found — skip for a while
+        // Re-check every 30 minutes using updatedAt
+        if (!prev.updatedAt || (now - prev.updatedAt) > 30 * 60 * 1000) {
+          pending.push(id);
+        }
+        continue;
+      }
+      const diff = prev.startTime - now;
+      if (diff < 0)              { urgent.push(id);  continue; } // overdue
+      if (diff < 15 * 60 * 1000){ urgent.push(id);  continue; } // <15 min
+      if (diff < 60 * 60 * 1000){ pending.push(id); continue; } // <1 hour
+      // >1 hour away — re-check every 15 min
+      if (!prev.updatedAt || (now - prev.updatedAt) > 15 * 60 * 1000) {
+        pending.push(id);
+      }
+      continue;
+    }
+  }
+
+  // Process all urgent (live drafts) immediately — should be a small number
+  // Process only 15 pending per run — spreads initial scan across ~9 cron runs
+  const PENDING_PER_RUN = 15;
+  const toCheck = [...urgent, ...pending.slice(0, PENDING_PER_RUN)];
+
+  console.log(`[DraftWatcher] urgent=${urgent.length} pending=${pending.length} checking=${toCheck.length} skipping=${toSkip.length}`);
+  if (!toCheck.length && !toSkip.length) return;
 
   const writes  = {};
-  const deletes = [];
+  const deletes = [...toSkip];
 
-  await Promise.allSettled(ids.map(async leagueId => {
-    const meta = watchList[leagueId] || {};
-    try {
-      const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
-      if (!r.ok) return;
-      const drafts = await r.json();
-      if (!Array.isArray(drafts)) return;
+  const BATCH = 10;
+  for (let i = 0; i < toCheck.length; i += BATCH) {
+    const batch = toCheck.slice(i, i + BATCH);
+    await Promise.allSettled(batch.map(async leagueId => {
+      const meta = watchList[leagueId] || {};
+      try {
+        const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+        if (!r.ok) return;
+        const drafts = await r.json();
+        if (!Array.isArray(drafts)) return;
 
-      // Priority: drafting > paused > pre_draft; ignore complete
-      const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
-      const draft = drafts
-        .filter(d => d.status !== "complete")
-        .sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9))[0];
+        const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
+        const draft = drafts
+          .filter(d => d.status !== "complete")
+          .sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9))[0];
 
-      if (!draft) { deletes.push(leagueId); return; }
-
-      let picksMade = 0, picks_hash = draft.status, nextPick = null, totalPicks = null;
-
-      if (draft.status === "drafting" || draft.status === "paused") {
-        const pr = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
-        if (pr.ok) {
-          const arr  = await pr.json();
-          picksMade  = Array.isArray(arr) ? arr.length : 0;
-          const last = Array.isArray(arr) ? arr[arr.length - 1] : null;
-          picks_hash = `${picksMade}:${last?.player_id || ""}`;
-
-          const teams   = Object.keys(draft.draft_order || draft.slot_to_roster_id || {}).length || draft.settings?.teams || 12;
-          const rounds  = draft.settings?.rounds || 1;
-          totalPicks    = teams * rounds;
-          const next    = picksMade + 1;
-          nextPick      = { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 };
+        if (!draft) {
+          // No active draft — mark as pre_draft with no startTime so we
+          // re-check in 30 min rather than removing from watch list entirely
+          writes[leagueId] = {
+            status:     "pre_draft",
+            picks_hash: "checked",
+            startTime:  null,
+            leagueName: meta.leagueName || leagueId,
+            tid:        meta.tid  || null,
+            source:     meta.source || "league",
+            updatedAt:  now
+          };
+          return;
         }
+
+        let picksMade = 0, picks_hash = draft.status, nextPick = null, totalPicks = null;
+
+        if (draft.status === "drafting" || draft.status === "paused") {
+          const [pr, tpr] = await Promise.all([
+            fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`),
+            fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`)
+          ]);
+          const tradedPicks = tpr.ok ? await tpr.json() : [];
+          if (pr.ok) {
+            const arr  = await pr.json();
+            picksMade  = Array.isArray(arr) ? arr.length : 0;
+            const last = Array.isArray(arr) ? arr[arr.length - 1] : null;
+            picks_hash = `${picksMade}:${last?.player_id || ""}`;
+            const teams  = Object.keys(draft.draft_order || draft.slot_to_roster_id || {}).length
+                           || draft.settings?.teams || 12;
+            const rounds = draft.settings?.rounds || 1;
+            totalPicks   = teams * rounds;
+            const next   = picksMade + 1;
+            nextPick     = {
+              overall: next,
+              round:   Math.ceil(next / teams),
+              pick:    ((next - 1) % teams) + 1
+            };
+          }
+        }
+
+        const prev = existing[leagueId];
+        if (prev && prev.picks_hash === picks_hash && prev.status === draft.status) return;
+
+        const startMs = draft.start_time
+          ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
+          : null;
+
+        writes[leagueId] = {
+          status:            draft.status,
+          draftId:           draft.draft_id,
+          draftType:         draft.type || "snake",
+          picksMade,         totalPicks,  nextPick,
+          draft_order:       draft.draft_order       || null,
+          slot_to_roster_id: draft.slot_to_roster_id || null,
+          traded_picks:      tradedPicks             || null,
+          picks_hash,        startTime: startMs,
+          leagueName:        meta.leagueName || leagueId,
+          tid:               meta.tid        || null,
+          source:            meta.source     || "league",
+          updatedAt:         now
+        };
+      } catch(e) {
+        console.warn(`[DraftWatcher] ${leagueId}:`, e.message);
       }
-
-      // Skip write if nothing changed
-      const prev = existing[leagueId];
-      if (prev && prev.picks_hash === picks_hash && prev.status === draft.status) return;
-
-      const startMs = draft.start_time
-        ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
-        : null;
-
-      writes[leagueId] = {
-        status:            draft.status,
-        draftId:           draft.draft_id,
-        draftType:         draft.type || "snake",
-        picksMade,
-        totalPicks,
-        nextPick,
-        draft_order:       draft.draft_order       || null,
-        slot_to_roster_id: draft.slot_to_roster_id || null,
-        picks_hash,
-        startTime:         startMs,
-        leagueName:        meta.leagueName || leagueId,
-        tid:               meta.tid        || null,
-        source:            meta.source     || "league",
-        updatedAt:         Date.now()
-      };
-    } catch(e) { console.warn(`[DraftWatcher] ${leagueId}:`, e.message); }
-  }));
-
-  if (Object.keys(writes).length) {
-    await fetch(`${FB}/draftStatus.json?${auth}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(writes)
-    });
-    console.log(`[DraftWatcher] wrote ${Object.keys(writes).length} updates`);
+    }));
   }
 
-  if (deletes.length) {
-    await Promise.allSettled(deletes.map(id => Promise.all([
+  await Promise.all([
+    Object.keys(writes).length
+      ? fetch(`${FB}/draftStatus.json?${auth}`, {
+          method:  "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(writes)
+        })
+      : Promise.resolve(),
+    ...deletes.map(id => Promise.all([
       fetch(`${FB}/draftWatchList/${id}.json?${auth}`, { method: "DELETE" }),
       fetch(`${FB}/draftStatus/${id}.json?${auth}`,    { method: "DELETE" })
-    ])));
-    console.log(`[DraftWatcher] removed ${deletes.length} completed`);
-  }
+    ]))
+  ]);
+
+  console.log(`[DraftWatcher] done — ${Object.keys(writes).length} writes, ${deletes.length} removed`);
 }
 
 function corsHeaders() {

@@ -153,8 +153,9 @@ const GMDB = (() => {
 
   async function linkPlatform(username, platform, data) {
     // platform: "sleeper" | "mfl"
-    // data: platform-specific fields
-    await userRef(username).child(`platforms/${platform}`).set({
+    // Uses update() not set() so existing fields (sleeperUserId, avatar, etc)
+    // are preserved when only partial data is written (e.g. refresh timestamps)
+    await userRef(username).child(`platforms/${platform}`).update({
       linked: true,
       linkedAt: Date.now(),
       ...data
