@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: May 7, 2026 — Tournament landing page overhaul, participant sync, mobile fixes complete.*
+*Updated: May 9, 2026 — Global Draft Ticker complete (Worker cron + Firebase pub/sub, traded picks, slot_to_roster_id).*
 
 ---
 
@@ -14,7 +14,8 @@
 - **Firebase project:** `sleeperbid-default-rtdb` (Realtime Database URL: `sleeperbid-default-rtdb.firebaseio.com`)
 - **Firebase DB root node:** `gmd/`
 - **Cloudflare Worker:** `mfl-proxy.mraladdin23.workers.dev` (file: `worker.js`)
-  - Deployed by **pasting into Cloudflare dashboard editor** (no wrangler.toml)
+  - Deployed by **pasting into Cloudflare dashboard editor**
+  - `wrangler.toml` added for cron trigger: `crons = ["* * * * *"]` (requires Cloudflare Workers Paid plan)
   - All code references `mfl-proxy.mraladdin23.workers.dev` directly
 - **DNS:** GoDaddy nameservers (moved from Cloudflare — Cloudflare proxy broke Firebase mobile auth)
 
@@ -64,6 +65,7 @@ GitHub Pages (dynastylockerroom.com)
 | `analytics.js` | Analytics tab — Sleeper + MFL + Yahoo. |
 | `rules-and-fa.js` | League Rules + Players/Free Agents tab. |
 | `tournament.js` | Tournament module — full admin + user UI. See Tournament section below. |
+| `draft-ticker.js` | Global draft ticker — Worker cron + Firebase pub/sub. Monitors live/upcoming drafts across all leagues, trade-aware "My Next Pick" via `slot_to_roster_id` + `traded_picks`. |
 | `hallway.js` | The Hallway social feature |
 | `trophy-room.js` | Trophy room display |
 | `players-db.js` | Cross-platform player DB. DynastyProcess CSV. `MAPPINGS_VERSION = "2026-04b"`. |
@@ -87,6 +89,18 @@ GitHub Pages (dynastylockerroom.com)
 
 ### Firebase paths
 ```
+gmd/draftWatchList/
+  {leagueId}: { leagueName, tid?, source: "league"|"tournament", tournamentName? }
+  — Written by client on DraftTicker.init(). Read by Worker cron every minute.
+
+gmd/draftStatus/
+  {leagueId}: { status, draftId, draftType, picksMade, totalPicks, nextPick,
+                draft_order, slot_to_roster_id, traded_picks, picks_hash,
+                startTime, leagueName, tid, source, updatedAt }
+  — Written ONLY by Worker (clients: .read=auth, .write=false).
+  — slot_to_roster_id from /draft/{id} endpoint (NOT /league/{id}/drafts)
+  — traded_picks: [{ roster_id, owner_id, round }] — original→current owner mapping
+
 gmd/tournaments/{tid}/
   meta/             — name, tagline, status, regType, rankBy, playoffStartWeek, bio, createdAt, createdBy
   leagues/          — batch structure: {batchId: {platform, year, leagues: {leagueId: {name, conference, division}}}}
@@ -281,6 +295,9 @@ All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 | `/tournament/rosters` | POST | Rosters for one league |
 | `/tournament/recap` | POST | AI-generated weekly recap via Claude Haiku |
 | `/auth/passwordReset` | POST | Look up real email, generate Firebase reset link, send via Resend |
+| `/draft/status` | GET | Read `gmd/draftStatus` from Firebase (debug) |
+| `/draft/test` | GET | Step-by-step diagnostic: watchList → Sleeper → Firebase write |
+| `/draft/forcecheck` | GET | Force-write Ballers 6 draft status with full draft object fetch |
 
 ---
 
@@ -322,6 +339,16 @@ All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 ### Registration Import
 - Status values in CSV must be lowercase (`approved`, `pending`, `denied`) — importer normalizes automatically
 - Custom question columns must use `custom_0`, `custom_1` etc as headers (not question text)
+
+### Global Draft Ticker
+- **Cloudflare Workers Paid plan required** — free plan has 10ms CPU limit on cron triggers, paid gives 30s
+- `/league/{id}/drafts` does NOT include `slot_to_roster_id` — must fetch `/draft/{id}` separately
+- `gmd/draftWatchList` security rules: `.read: auth != null, .write: auth != null`
+- `gmd/draftStatus` security rules: `.read: auth != null, .write: false` (Worker writes via DB secret)
+- `linkPlatform` in `firebase-db.js` must use `.update()` not `.set()` — `.set()` wipes `sleeperUserId` on every Sleeper refresh
+- `slot_to_roster_id`: maps draft slot → rosterId. `traded_picks.roster_id` = original slot, `.owner_id` = current owner rosterId
+- Skip-if-unchanged check must also check `prev.slot_to_roster_id` — always rewrite if missing
+- Seeded all 135 leagues with `picks_hash: "seeded"` to prevent first-run timeout; cron processes 15 pending/run
 
 ### Yahoo
 - Test on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
