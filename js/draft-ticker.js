@@ -143,48 +143,88 @@ const DraftTicker = (() => {
   }
 
   // ── Compute "my next pick" from Worker-provided status ─
-  // Uses slot_to_roster_id which already reflects traded picks
+  // Handles traded picks via two methods:
+  // 1. slot_to_roster_id (Sleeper snake drafts — pre-built map)
+  // 2. traded_picks array (linear drafts — build map from trade records)
   function _computeMyNextPick(status, mySleeperUid) {
     if (!mySleeperUid || !status.draft_order) return null;
 
-    const draft_order       = status.draft_order;
-    const slot_to_roster_id = status.slot_to_roster_id || {};
-    const totalTeams        = Object.keys(draft_order).length || 12;
-    const totalPicks        = status.totalPicks || totalTeams;
-    const nextOverall       = (status.picksMade || 0) + 1;
-    const isLinear          = (status.draftType || "snake") === "linear";
+    const draft_order = status.draft_order;
+    const totalTeams  = Object.keys(draft_order).length || 12;
+    const totalRounds = status.totalPicks ? Math.ceil(status.totalPicks / totalTeams) : 1;
+    const totalPicks  = status.totalPicks || totalTeams * totalRounds;
+    const nextOverall = (status.picksMade || 0) + 1;
+    const isLinear    = (status.draftType || "snake") === "linear";
 
-    // Find my original draft slot
+    // Find my original draft slot from draft_order (userId → slot)
     let myOriginalSlot = null;
     for (const [uid, slot] of Object.entries(draft_order)) {
       if (String(uid) === String(mySleeperUid)) { myOriginalSlot = slot; break; }
     }
     if (myOriginalSlot == null) return null;
 
-    // Find my roster_id via slot_to_roster_id (trade-aware)
-    const myRosterId = slot_to_roster_id[String(myOriginalSlot)] ?? null;
-
-    // Find all slots currently mapping to my roster_id (I may have acquired picks)
-    const mySlotsSet = new Set();
-    if (myRosterId != null) {
-      for (const [slot, rid] of Object.entries(slot_to_roster_id)) {
-        if (String(rid) === String(myRosterId)) mySlotsSet.add(Number(slot));
+    // Build effective slot ownership map for future picks
+    // Start with identity mapping: slot → original_slot (each team owns their own slot)
+    // Then apply traded_picks to update ownership per round
+    // traded_picks format: { round, roster_id (original slot), owner_id (current owner slot) }
+    // Note: owner_id in traded_picks is a roster_id, not a slot number
+    // We need to map roster_id → slot via draft_order inversion
+    
+    // Build rosterId → slot map from draft_order
+    // draft_order: userId → slot; we need rosterId → slot
+    // slot_to_roster_id gives slot → rosterId directly if available
+    const slotToRoster = {}; // slot → current_owner_roster_id
+    
+    if (status.slot_to_roster_id) {
+      // Use Sleeper's pre-built map (snake drafts)
+      for (const [slot, rid] of Object.entries(status.slot_to_roster_id)) {
+        slotToRoster[Number(slot)] = Number(rid);
       }
     } else {
-      mySlotsSet.add(myOriginalSlot);
+      // Linear drafts: build from draft_order (slot = rosterId in linear drafts)
+      // In linear Sleeper drafts, the slot number == roster_id
+      for (let s = 1; s <= totalTeams; s++) {
+        slotToRoster[s] = s; // slot n is owned by roster n initially
+      }
+      
+      // Apply traded_picks to update ownership
+      // traded_picks: { roster_id: original_slot, owner_id: current_owner_slot, round }
+      if (status.traded_picks) {
+        for (const tp of status.traded_picks) {
+          const originalSlot = tp.roster_id;  // the slot that was traded away
+          const newOwnerSlot = tp.owner_id;   // the roster that now owns it
+          const round        = tp.round;
+          // We'll store per-round overrides
+          if (!slotToRoster[`${round}-${originalSlot}`]) {
+            slotToRoster[`${round}-${originalSlot}`] = newOwnerSlot;
+          }
+        }
+      }
     }
-    if (!mySlotsSet.size) return null;
 
-    // Scan forward from next overall pick to find my next turn
+    // Find my roster_id — in linear drafts, slot == roster_id
+    const myRosterId = status.slot_to_roster_id
+      ? (status.slot_to_roster_id[String(myOriginalSlot)] ?? myOriginalSlot)
+      : myOriginalSlot; // linear: slot == roster_id
+
+    // Scan forward: for each future overall pick, determine which roster picks
+    // and check if it's mine (accounting for traded picks per round)
     for (let overall = nextOverall; overall <= totalPicks; overall++) {
       const round   = Math.ceil(overall / totalTeams);
       const inRound = ((overall - 1) % totalTeams) + 1;
-      // Snake: even rounds go right-to-left (slot = teams+1-position)
+      
+      // Which slot position picks here?
       const slotAtPos = isLinear
         ? inRound
         : (round % 2 === 1 ? inRound : totalTeams + 1 - inRound);
 
-      if (mySlotsSet.has(slotAtPos)) {
+      // Who owns this slot in this round? Check per-round traded pick first
+      const roundKey    = `${round}-${slotAtPos}`;
+      const currentOwner = slotToRoster[roundKey] !== undefined
+        ? slotToRoster[roundKey]
+        : slotToRoster[slotAtPos];
+
+      if (String(currentOwner) === String(myRosterId)) {
         return { overall, round, pick: inRound, picksAway: overall - nextOverall };
       }
     }
@@ -518,16 +558,26 @@ const DraftTicker = (() => {
   async function init(username) {
     _username = username;
 
-    document.getElementById("draft-ticker-btn")?.addEventListener("click", e => {
-      e.stopPropagation();
-      _tickerOpen ? _closePanel() : (_renderPanel(_lastItems), _openPanel());
-    });
-    document.getElementById("draft-ticker-close")?.addEventListener("click", e => {
-      e.stopPropagation(); _closePanel();
-    });
-    document.addEventListener("click", e => {
-      if (_tickerOpen && !e.target.closest("#draft-ticker-wrap")) _closePanel();
-    });
+    // Guard against duplicate listeners if init() is called more than once
+    const btn   = document.getElementById("draft-ticker-btn");
+    const close = document.getElementById("draft-ticker-close");
+    if (btn && !btn.dataset.tickerBound) {
+      btn.dataset.tickerBound = "1";
+      btn.addEventListener("click", e => {
+        e.stopPropagation();
+        _tickerOpen ? _closePanel() : (_renderPanel(_lastItems), _openPanel());
+      });
+    }
+    if (close && !close.dataset.tickerBound) {
+      close.dataset.tickerBound = "1";
+      close.addEventListener("click", e => { e.stopPropagation(); _closePanel(); });
+    }
+    if (!document._tickerOutsideClick) {
+      document._tickerOutsideClick = true;
+      document.addEventListener("click", e => {
+        if (_tickerOpen && !e.target.closest("#draft-ticker-wrap")) _closePanel();
+      });
+    }
 
     // Build watch list (one-time Firebase read, writes gmd/draftWatchList)
     const watchList = await _buildWatchList();
