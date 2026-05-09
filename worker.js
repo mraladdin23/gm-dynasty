@@ -580,8 +580,15 @@ if (path === "/draft/forcecheck" && req.method === "GET") {
     return new Response(JSON.stringify({ error: "No active draft found" }), { headers: corsHeaders() });
   }
 
-  const pr       = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
-  const arr      = await pr.json();
+  const [fullDraftRes, pr, tpr] = await Promise.all([
+    fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}`),
+    fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`),
+    fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`)
+  ]);
+  const fullDraft   = fullDraftRes.ok ? await fullDraftRes.json() : draft;
+  const tradedPicks = tpr.ok ? await tpr.json() : [];
+  const arr         = await pr.json();
+
   const picksMade = arr.length;
   const last      = arr[arr.length - 1];
   const picks_hash = `${picksMade}:${last?.player_id || ""}`;
@@ -596,8 +603,9 @@ if (path === "/draft/forcecheck" && req.method === "GET") {
     picksMade,
     totalPicks:        teams * rounds,
     nextPick:          { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 },
-    draft_order:       draft.draft_order       || null,
-    slot_to_roster_id: draft.slot_to_roster_id || null,
+    draft_order:       fullDraft.draft_order       || draft.draft_order       || null,
+    slot_to_roster_id: fullDraft.slot_to_roster_id || draft.slot_to_roster_id || null,
+    traded_picks:      tradedPicks             || null,  
     picks_hash,
     startTime:         draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000,
     leagueName:        "Ballers 6",
@@ -1764,19 +1772,21 @@ async function runDraftWatcher(env) {
         let picksMade = 0, picks_hash = draft.status, nextPick = null, totalPicks = null;
 
         if (draft.status === "drafting" || draft.status === "paused") {
-          const [pr, tpr] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`),
-            fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`)
-          ]);
-          const tradedPicks = tpr.ok ? await tpr.json() : [];
+        const [fullDraftRes, pr, tpr] = await Promise.all([
+          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}`),
+          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`),
+          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`)
+        ]);
+        const fullDraft   = fullDraftRes.ok ? await fullDraftRes.json() : draft;
+        const tradedPicks = tpr.ok ? await tpr.json() : [];
           if (pr.ok) {
             const arr  = await pr.json();
             picksMade  = Array.isArray(arr) ? arr.length : 0;
             const last = Array.isArray(arr) ? arr[arr.length - 1] : null;
             picks_hash = `${picksMade}:${last?.player_id || ""}`;
-            const teams  = Object.keys(draft.draft_order || draft.slot_to_roster_id || {}).length
-                           || draft.settings?.teams || 12;
-            const rounds = draft.settings?.rounds || 1;
+            const teams  = Object.keys(fullDraft.draft_order || fullDraft.slot_to_roster_id || {}).length
+                          || fullDraft.settings?.teams || 12;
+            const rounds = fullDraft.settings?.rounds || 1;
             totalPicks   = teams * rounds;
             const next   = picksMade + 1;
             nextPick     = {
@@ -1788,7 +1798,7 @@ async function runDraftWatcher(env) {
         }
 
         const prev = existing[leagueId];
-        if (prev && prev.picks_hash === picks_hash && prev.status === draft.status) return;
+        if (prev && prev.picks_hash === picks_hash && prev.status === draft.status && prev.slot_to_roster_id) return;
 
         const startMs = draft.start_time
           ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
@@ -1799,8 +1809,8 @@ async function runDraftWatcher(env) {
           draftId:           draft.draft_id,
           draftType:         draft.type || "snake",
           picksMade,         totalPicks,  nextPick,
-          draft_order:       draft.draft_order       || null,
-          slot_to_roster_id: draft.slot_to_roster_id || null,
+          draft_order:       fullDraft.draft_order       || draft.draft_order       || null,
+          slot_to_roster_id: fullDraft.slot_to_roster_id || draft.slot_to_roster_id || null,
           traded_picks:      tradedPicks             || null,
           picks_hash,        startTime: startMs,
           leagueName:        meta.leagueName || leagueId,
