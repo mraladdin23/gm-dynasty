@@ -143,54 +143,71 @@ const DraftTicker = (() => {
   }
 
   // ── Compute "my next pick" from Worker-provided status ─
-  // Compute my next pick accounting for traded picks.
+  // Compute my next pick using the correct Sleeper data model:
   //
-  // Sleeper traded_picks:
-  //   roster_id = original slot that owned the pick
-  //   owner_id  = current roster that now owns it
-  //   round     = which round
+  // draft_order:       userId    → draftSlot (which position I pick from)
+  // slot_to_roster_id: draftSlot → rosterId  (which team occupies each slot)
+  // traded_picks:      { roster_id: originalRosterId, owner_id: currentOwnerRosterId, round }
   //
-  // In linear drafts: slot == roster_id
-  // draft_order: userId → draftSlot
+  // To find my picks:
+  //   1. mySlot     = draft_order[myUserId]
+  //   2. myRosterId = slot_to_roster_id[mySlot]
+  //   3. For each future board position, find originalRosterId = slot_to_roster_id[slotAtPos]
+  //   4. Check if traded: traded_picks entry where roster_id===originalRosterId && round===round
+  //      → current owner is owner_id from that entry
+  //   5. If currentOwner === myRosterId → it's my pick
   function _computeMyNextPick(status, mySleeperUid) {
     if (!mySleeperUid || !status.draft_order) return null;
 
-    const draft_order = status.draft_order;
-    const totalTeams  = Object.keys(draft_order).length || 12;
-    const totalPicks  = status.totalPicks || totalTeams;
-    const nextOverall = (status.picksMade || 0) + 1;
-    const isLinear    = (status.draftType || "snake") === "linear";
+    const draft_order       = status.draft_order;
+    const slot_to_roster_id = status.slot_to_roster_id || null;
+    const totalTeams        = Object.keys(draft_order).length || 12;
+    const totalPicks        = status.totalPicks || totalTeams;
+    const nextOverall       = (status.picksMade || 0) + 1;
+    const isLinear          = (status.draftType || "snake") === "linear";
 
-    // Find my draft slot (userId → slot number)
+    // Step 1: find my draft slot
     let mySlot = null;
     for (const [uid, slot] of Object.entries(draft_order)) {
       if (String(uid) === String(mySleeperUid)) { mySlot = Number(slot); break; }
     }
     if (mySlot == null) return null;
 
-    // My roster_id: use slot_to_roster_id for snake, slot == rosterId for linear
-    const myRosterId = status.slot_to_roster_id
-      ? Number(status.slot_to_roster_id[String(mySlot)] ?? mySlot)
+    // Step 2: find my rosterId via slot_to_roster_id
+    // If not available (shouldn't happen for live drafts), fall back to slot
+    const myRosterId = slot_to_roster_id
+      ? Number(slot_to_roster_id[String(mySlot)] ?? mySlot)
       : mySlot;
 
-    // Build trade map: "round-originalSlot" → currentOwnerRosterId
+    // Step 3: build trade lookup — key: "round-originalRosterId" → currentOwnerRosterId
+    // traded_picks.roster_id = the original roster that owned this pick
+    // traded_picks.owner_id  = the current roster that now owns it
     const tradeMap = {};
     for (const tp of (status.traded_picks || [])) {
+      // A roster may have traded the same pick multiple times; last entry wins
       tradeMap[`${tp.round}-${tp.roster_id}`] = Number(tp.owner_id);
     }
 
-    // Scan forward to find next pick owned by me
+    // Step 4: scan forward through remaining picks
     for (let overall = nextOverall; overall <= totalPicks; overall++) {
-      const round        = Math.ceil(overall / totalTeams);
-      const inRound      = ((overall - 1) % totalTeams) + 1;
-      const originalSlot = isLinear
+      const round   = Math.ceil(overall / totalTeams);
+      const inRound = ((overall - 1) % totalTeams) + 1;
+
+      // Which draft slot picks at this board position?
+      const slotAtPos = isLinear
         ? inRound
         : (round % 2 === 1 ? inRound : totalTeams + 1 - inRound);
 
-      // Current owner: check trades first, fall back to original
-      const currentOwner = tradeMap[`${round}-${originalSlot}`] !== undefined
-        ? tradeMap[`${round}-${originalSlot}`]
-        : originalSlot; // linear: slot == rosterId
+      // Who originally owns this slot?
+      const originalRosterId = slot_to_roster_id
+        ? Number(slot_to_roster_id[String(slotAtPos)] ?? slotAtPos)
+        : slotAtPos;
+
+      // Has it been traded? Check by originalRosterId (not slot)
+      const tradeKey     = `${round}-${originalRosterId}`;
+      const currentOwner = tradeMap[tradeKey] !== undefined
+        ? tradeMap[tradeKey]
+        : originalRosterId;
 
       if (currentOwner === myRosterId) {
         return { overall, round, pick: inRound, picksAway: overall - nextOverall };
