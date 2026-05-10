@@ -1315,10 +1315,12 @@ function _openGlobalNotifModal() {
     });
 
     // Mobile drawer: draft row — open ticker panel (same as desktop pill click).
-    // setTimeout defers openPanel past the current click event so the ticker's
-    // outside-click handler fires first while _tickerOpen is still false,
-    // rather than immediately closing the panel we just opened.
-    document.getElementById("drawer-draft-btn")?.addEventListener("click", () => {
+    // preventDefault stops <a> href navigation; stopPropagation stops the event
+    // reaching the ticker's outside-click handler before openPanel runs.
+    // setTimeout(0) defers openPanel past any remaining bubbling.
+    document.getElementById("drawer-draft-btn")?.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
       DLRNav.close();
       if (typeof DraftTicker !== "undefined") setTimeout(() => DraftTicker.openPanel(), 0);
     });

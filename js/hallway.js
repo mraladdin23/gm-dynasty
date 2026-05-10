@@ -345,7 +345,7 @@ const DLRHallway = (() => {
       try {
         const h2h = await _computeH2HForChain(seasons);
         _patchH2HCell(displayKey, h2h, modal);
-        if (h2h) {
+        if (h2h && !h2h.syncNeeded && (h2h.wins > 0 || h2h.losses > 0)) {
           combinedWins   += h2h.wins;
           combinedLosses += h2h.losses;
           combinedFound   = true;
@@ -375,7 +375,7 @@ const DLRHallway = (() => {
   // Returns { wins, losses, pf, pa } from the current user's perspective,
   // or null if we couldn't determine (missing roster IDs, no data, etc.)
   async function _computeH2HForChain(seasons) {
-    let totalWins = 0, totalLosses = 0, totalPF = 0, totalPA = 0, found = false;
+    let totalWins = 0, totalLosses = 0, totalPF = 0, totalPA = 0, found = false, skipped = false;
 
     await Promise.allSettled(seasons.map(async s => {
       // For Sleeper: attempt to resolve missing roster IDs on the fly via user ID
@@ -397,6 +397,7 @@ const DLRHallway = (() => {
 
       if (!s.myRosterId || !s.theirRosterId) {
         console.log(`[H2H] Skipping ${s.leagueId} (${s.season}) — could not resolve rosterId. mine=${s.myRosterId} theirs=${s.theirRosterId}`);
+        skipped = true;
         return;
       }
       if (String(s.myRosterId) === String(s.theirRosterId)) return;
@@ -419,8 +420,8 @@ const DLRHallway = (() => {
       }
     }));
 
-    if (!found) return null;
-    return { wins: totalWins, losses: totalLosses, pf: totalPF, pa: totalPA };
+    if (!found) return { wins: 0, losses: 0, pf: 0, pa: 0, syncNeeded: skipped };
+    return { wins: totalWins, losses: totalLosses, pf: totalPF, pa: totalPA, syncNeeded: skipped };
   }
 
   // ── Sleeper H2H ───────────────────────────────────────────────────────────
@@ -569,13 +570,19 @@ const DLRHallway = (() => {
     const cell = modal.querySelector(`#hl-h2h-${CSS.escape(displayKey)}`);
     if (!cell) return;
 
+    // syncNeeded: roster IDs missing, can't compute — prompt to resync
+    if (h2h?.syncNeeded && h2h.wins === 0 && h2h.losses === 0) {
+      cell.innerHTML = `<span style="font-size:.68rem;color:var(--color-text-dim)" title="Re-sync your league to enable H2H">↻ Sync needed</span>`;
+      return;
+    }
+
     if (!h2h || (h2h.wins === 0 && h2h.losses === 0 && h2h.pf === 0)) {
       cell.innerHTML = `<span style="font-size:.72rem;color:var(--color-text-dim)">—</span>`;
       return;
     }
 
-    const pfStr = h2h.pf   > 0 ? h2h.pf.toFixed(1)  : null;
-    const paStr = h2h.pa   > 0 ? h2h.pa.toFixed(1)   : null;
+    const pfStr = h2h.pf > 0 ? h2h.pf.toFixed(1) : null;
+    const paStr = h2h.pa > 0 ? h2h.pa.toFixed(1) : null;
     const winColor = h2h.wins > h2h.losses
       ? "var(--color-green)"
       : h2h.losses > h2h.wins
@@ -589,6 +596,7 @@ const DLRHallway = (() => {
           H2H ${h2h.wins}–${h2h.losses}
         </div>
         ${pfStr && paStr ? `<div style="font-size:.68rem;color:var(--color-text-dim)">${pfStr}–${paStr} pts</div>` : ""}
+        ${h2h.syncNeeded ? `<div style="font-size:.65rem;color:var(--color-text-dim)">↻ partial</div>` : ""}
       </div>`;
   }
 
