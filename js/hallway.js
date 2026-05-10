@@ -246,14 +246,16 @@ const DLRHallway = (() => {
       });
 
       chainLeagueMap[displayKey] = matchingKeys.map(k => ({
-        leagueKey:    k,
-        leagueId:     myLeagues[k].leagueId,
-        platform:     myLeagues[k].platform,
-        season:       myLeagues[k].season,
-        leagueKey_my: k,
-        myRosterId:   myLeagues[k].myRosterId   || null,
-        theirRosterId: data.leagues[k]?.myRosterId || null,
-        leagueKey_yahoo: myLeagues[k].leagueKey || null,  // Yahoo full key e.g. "nfl.l.12345"
+        leagueKey:          k,
+        leagueId:           myLeagues[k].leagueId,
+        platform:           myLeagues[k].platform,
+        season:             myLeagues[k].season,
+        myRosterId:         myLeagues[k].myRosterId    || null,
+        theirRosterId:      data.leagues[k]?.myRosterId || null,
+        // Fallback user IDs for resolving missing roster IDs on the fly (Sleeper only)
+        mySleeperUserId:    myLeagues[k].sleeperUserId    || myProfile?.platforms?.sleeper?.sleeperUserId || null,
+        theirSleeperUserId: data.leagues[k]?.sleeperUserId || null,
+        leagueKey_yahoo:    myLeagues[k].leagueKey || null,
       }));
     });
 
@@ -288,7 +290,12 @@ const DLRHallway = (() => {
             <div class="ms-stat-card"><div class="ms-stat-val">${data.leagueCount}</div><div class="ms-stat-lbl">Lg. Seasons</div></div>
           </div>
           ${commonLeagues.length ? `
-          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);margin-bottom:var(--space-3)">Common Leagues</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)">
+            <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim)">Common Leagues</div>
+            <div id="hl-h2h-combined" style="display:flex;align-items:center;gap:var(--space-3)">
+              <div style="display:flex;align-items:center;gap:4px"><div class="spinner spinner--sm"></div></div>
+            </div>
+          </div>
           <div id="hl-common-leagues">
             ${commonLeagues.map(l => `
               <div class="hl-common-row" id="hl-row-${_esc(l.key)}" style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
@@ -325,21 +332,43 @@ const DLRHallway = (() => {
   // ── H2H loading orchestrator ─────────────────────────────────────────────
   // Fires one H2H computation per displayed league row concurrently,
   // patching each row's placeholder as results arrive.
+  // When all rows are done, patches a combined total row.
   async function _loadAllH2H(commonLeagues, chainLeagueMap, modal) {
+    let combinedWins = 0, combinedLosses = 0, combinedFound = false;
+
     await Promise.allSettled(commonLeagues.map(async displayLeague => {
       const displayKey = displayLeague.key;
       const seasons    = chainLeagueMap[displayKey] || [];
 
-      // Skip if modal was closed before we started
       if (!modal.isConnected) return;
 
       try {
         const h2h = await _computeH2HForChain(seasons);
         _patchH2HCell(displayKey, h2h, modal);
+        if (h2h) {
+          combinedWins   += h2h.wins;
+          combinedLosses += h2h.losses;
+          combinedFound   = true;
+        }
       } catch(e) {
         _patchH2HCell(displayKey, null, modal);
       }
     }));
+
+    // Patch the combined total header once all rows are done
+    if (!modal.isConnected) return;
+    const combined = modal.querySelector("#hl-h2h-combined");
+    if (!combined) return;
+    if (!combinedFound || (combinedWins === 0 && combinedLosses === 0)) {
+      combined.remove();
+      return;
+    }
+    const winColor = combinedWins > combinedLosses ? "var(--color-green)"
+                   : combinedLosses > combinedWins ? "var(--color-red)"
+                   : "var(--color-text-dim)";
+    combined.innerHTML = `
+      <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-dim)">Overall H2H</span>
+      <span style="font-family:var(--font-display);font-weight:800;font-size:1rem;color:${winColor}">${combinedWins}–${combinedLosses}</span>`;
   }
 
   // ── Compute H2H across all seasons for one chain ─────────────────────────
@@ -349,8 +378,25 @@ const DLRHallway = (() => {
     let totalWins = 0, totalLosses = 0, totalPF = 0, totalPA = 0, found = false;
 
     await Promise.allSettled(seasons.map(async s => {
+      // For Sleeper: attempt to resolve missing roster IDs on the fly via user ID
+      if (s.platform === "sleeper" && (!s.myRosterId || !s.theirRosterId)) {
+        if (s.mySleeperUserId || s.theirSleeperUserId) {
+          try {
+            const rosters = await SleeperAPI.getRosters(s.leagueId);
+            if (!s.myRosterId && s.mySleeperUserId) {
+              const r = rosters.find(r => String(r.owner_id) === String(s.mySleeperUserId));
+              if (r) s = { ...s, myRosterId: r.roster_id };
+            }
+            if (!s.theirRosterId && s.theirSleeperUserId) {
+              const r = rosters.find(r => String(r.owner_id) === String(s.theirSleeperUserId));
+              if (r) s = { ...s, theirRosterId: r.roster_id };
+            }
+          } catch(e) { /* can't resolve, will skip below */ }
+        }
+      }
+
       if (!s.myRosterId || !s.theirRosterId) {
-        console.log(`[H2H] Skipping ${s.leagueId} (${s.season}) — missing rosterId. mine=${s.myRosterId} theirs=${s.theirRosterId}`);
+        console.log(`[H2H] Skipping ${s.leagueId} (${s.season}) — could not resolve rosterId. mine=${s.myRosterId} theirs=${s.theirRosterId}`);
         return;
       }
       if (String(s.myRosterId) === String(s.theirRosterId)) return;
@@ -363,8 +409,6 @@ const DLRHallway = (() => {
       } catch(e) {
         console.warn(`[H2H] Error computing ${s.platform} ${s.leagueId}:`, e.message);
       }
-
-      console.log(`[H2H] ${s.platform} ${s.leagueId} (${s.season}):`, result);
 
       if (result) {
         totalWins   += result.wins;
