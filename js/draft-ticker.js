@@ -607,7 +607,6 @@ const DraftTicker = (() => {
         const next        = picksMade + 1;
 
         // Update status cache with fresh data
-        const cached = _statusCache.get(item.leagueId) || {};
         const updated = {
           ...cached,
           picksMade,
