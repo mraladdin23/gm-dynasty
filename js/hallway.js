@@ -346,18 +346,25 @@ const DLRHallway = (() => {
   // Returns { wins, losses, pf, pa } from the current user's perspective,
   // or null if we couldn't determine (missing roster IDs, no data, etc.)
   async function _computeH2HForChain(seasons) {
-    // Aggregate across all seasons; bail early if any season has missing IDs
-    // but still count the ones we can resolve
     let totalWins = 0, totalLosses = 0, totalPF = 0, totalPA = 0, found = false;
 
     await Promise.allSettled(seasons.map(async s => {
-      if (!s.myRosterId || !s.theirRosterId) return;
-      if (String(s.myRosterId) === String(s.theirRosterId)) return; // same team (shouldn't happen)
+      if (!s.myRosterId || !s.theirRosterId) {
+        console.log(`[H2H] Skipping ${s.leagueId} (${s.season}) — missing rosterId. mine=${s.myRosterId} theirs=${s.theirRosterId}`);
+        return;
+      }
+      if (String(s.myRosterId) === String(s.theirRosterId)) return;
 
       let result = null;
-      if      (s.platform === "sleeper") result = await _h2hSleeper(s);
-      else if (s.platform === "mfl")     result = await _h2hMFL(s);
-      else if (s.platform === "yahoo")   result = await _h2hYahoo(s);
+      try {
+        if      (s.platform === "sleeper") result = await _h2hSleeper(s);
+        else if (s.platform === "mfl")     result = await _h2hMFL(s);
+        else if (s.platform === "yahoo")   result = await _h2hYahoo(s);
+      } catch(e) {
+        console.warn(`[H2H] Error computing ${s.platform} ${s.leagueId}:`, e.message);
+      }
+
+      console.log(`[H2H] ${s.platform} ${s.leagueId} (${s.season}):`, result);
 
       if (result) {
         totalWins   += result.wins;
@@ -376,21 +383,24 @@ const DLRHallway = (() => {
   // Fetches all regular-season weeks in parallel, finds weeks where the two
   // roster IDs share a matchup_id.
   async function _h2hSleeper({ leagueId, season, myRosterId, theirRosterId }) {
-    // Determine week count: fetch the league to get settings.leg (current week)
-    // or fall back to 17. We only care about regular-season weeks (before playoff_start_week).
+    // Get the league to find how many weeks were played and when playoffs started
     let totalWeeks = 17;
     let playoffStart = 99;
     try {
       const league = await SleeperAPI.getLeague(leagueId);
+      // leg = last scored week; use it as the max week to fetch
       totalWeeks   = league?.settings?.leg || league?.settings?.week || 17;
-      playoffStart = league?.settings?.playoff_week_start || league?.settings?.playoff_start || 99;
-      // Cap to regular season only
-      totalWeeks   = Math.min(totalWeeks, playoffStart - 1);
+      // playoff_week_start is the most reliable field; fall back to common alternatives
+      playoffStart = league?.settings?.playoff_week_start
+                  || league?.settings?.playoff_start
+                  || league?.settings?.playoffs_start
+                  || 99;
+      // Cap to regular season only (exclude playoff matchups from H2H)
+      if (playoffStart < 99) totalWeeks = Math.min(totalWeeks, playoffStart - 1);
     } catch(e) { /* use defaults */ }
 
-    const weeks = Array.from({ length: totalWeeks }, (_, i) => i + 1);
+    const weeks = Array.from({ length: Math.max(1, totalWeeks) }, (_, i) => i + 1);
 
-    // Fetch all weeks in parallel
     const results = await Promise.allSettled(
       weeks.map(w => SleeperAPI.getMatchups(leagueId, w))
     );
@@ -401,14 +411,9 @@ const DLRHallway = (() => {
 
     results.forEach(r => {
       if (r.status !== "fulfilled" || !Array.isArray(r.value)) return;
-      const weekMatchups = r.value;
-
-      // Find my entry and their entry
-      const mine  = weekMatchups.find(m => String(m.roster_id) === myId);
-      const theirs = weekMatchups.find(m => String(m.roster_id) === theirId);
+      const mine   = r.value.find(m => String(m.roster_id) === myId);
+      const theirs = r.value.find(m => String(m.roster_id) === theirId);
       if (!mine || !theirs) return;
-
-      // They faced each other if they share the same matchup_id
       if (mine.matchup_id == null || mine.matchup_id !== theirs.matchup_id) return;
 
       const myPts    = mine.points  || 0;
@@ -417,7 +422,6 @@ const DLRHallway = (() => {
       pa += theirPts;
       if      (myPts > theirPts) wins++;
       else if (theirPts > myPts) losses++;
-      // ties: neither W nor L (rare)
     });
 
     return { wins, losses, pf, pa };
