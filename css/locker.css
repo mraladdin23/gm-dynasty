@@ -5635,6 +5635,13 @@ select option { background: var(--color-bg-2); }
   flex-shrink: 0;
 }
 
+.draft-ticker-nonsleeper-note {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  padding: var(--space-2) var(--space-3);
+  line-height: 1.4;
+}
+
 /* Dropdown panel */
 .draft-ticker-panel {
   position: absolute;
