@@ -23,7 +23,7 @@ const DraftTicker = (() => {
   let _mySleeperUserId = null;
   let _lastItems       = { live: [], upcoming: [] };
   let _tickerOpen         = false;
-  const _nonSleeperLeagues = new Map(); // leagueId → { leagueName, platform } — display only
+  let _hasMflOrYahoo = false; // true if user has any MFL or Yahoo leagues — shows note in panel
 
   // Per-league timer/listener state: leagueId → { timer, fbListener, ref }
   const _timers      = new Map();
@@ -92,17 +92,7 @@ const DraftTicker = (() => {
       for (const [key, l] of Object.entries(stored)) {
         if (!l.leagueId && !l.league_id) continue;
         if (l.platform !== "sleeper") {
-          if (l.platform === "mfl" || l.platform === "yahoo") {
-            const season = l.season || l.year || 0;
-            if (!season || relevant.has(season) || relevant.has(String(season))) {
-              const id = String(l.leagueId || l.league_id);
-              _nonSleeperLeagues.set(id, {
-                leagueName: l.leagueName || l.name || id,
-                platform:   l.platform,
-                source:     "league"
-              });
-            }
-          }
+          if (l.platform === "mfl" || l.platform === "yahoo") _hasMflOrYahoo = true;
           continue;
         }
         if (meta[key]?.isCommissioner && !meta[key]?.isOwner) continue;
@@ -480,23 +470,9 @@ const DraftTicker = (() => {
       }
     }
 
-    // Non-Sleeper leagues — display only, no live tracking
-    if (_nonSleeperLeagues.size > 0) {
-      html += `<div class="draft-ticker-section-label" style="margin-top:var(--space-3)">⚠️ MFL / Yahoo Drafts</div>`;
-      html += `<div class="draft-ticker-nonsleeper-note">Live tracking is only available for Sleeper leagues. For MFL and Yahoo drafts, open the league directly to see the latest picks.</div>`;
-      for (const [leagueId, meta] of _nonSleeperLeagues) {
-        const platformLabel = meta.platform === "mfl" ? "MFL" : "Yahoo";
-        const nav = `data-ticker-league="${_esc(leagueId)}"`;
-        html += `
-          <div class="draft-ticker-row" ${nav} style="opacity:0.75">
-            <div class="draft-ticker-row-icon">📋</div>
-            <div class="draft-ticker-row-info">
-              <div class="draft-ticker-row-name">${_esc(meta.leagueName)}</div>
-              <div class="draft-ticker-row-detail">${platformLabel} · Open league to refresh</div>
-            </div>
-            <div class="draft-ticker-row-status" style="color:var(--color-text-dim);font-size:.75rem">Manual</div>
-          </div>`;
-      }
+    // Non-Sleeper note — shown if user has any MFL or Yahoo leagues linked
+    if (_hasMflOrYahoo) {
+      html += `<div class="draft-ticker-nonsleeper-note">⚠️ MFL and Yahoo drafts aren't tracked live — open the league directly to see the latest picks.</div>`;
     }
 
     body.innerHTML = html;
@@ -683,7 +659,7 @@ const DraftTicker = (() => {
     _lastItems = { live: [], upcoming: [] };
     _statusCache.clear();
     _leagueMeta.clear();
-    _nonSleeperLeagues.clear();
+    _hasMflOrYahoo = false;
     _closePanel();
     const w = _wrap();
     if (w) w.style.display = "none";

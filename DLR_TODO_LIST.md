@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: May 9, 2026 — Global Draft Ticker complete (Worker cron + Firebase architecture, traded picks, slot_to_roster_id).*
+*Updated: May 9, 2026 — Global Draft Ticker complete + on-demand refresh on panel open + MFL/Yahoo display-only support.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -66,7 +66,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🟢 UX / Notification
 
-
+*(none currently)*
 
 ---
 
@@ -179,6 +179,21 @@ Complete rewrite of the draft ticker from direct Sleeper polling to a Worker cro
 - `gmd/draftStatus`: `.read: auth != null, .write: false` (Worker writes via DB secret, bypasses rules)
 - Debug routes in worker: `/draft/status` (read Firebase draftStatus), `/draft/test` (step-by-step diagnostics), `/draft/forcecheck` (force-write Ballers 6 status)
 - Seeded `draftStatus` with `picks_hash: "seeded"` for all 135 leagues to prevent first-run timeout
+
+**On-demand refresh on panel open (`draft-ticker.js`):**
+- `_refreshLiveDrafts()` fires every time the ticker panel is opened
+- Fetches `/picks` + `/traded_picks` directly from Sleeper for all live/paused drafts
+- Updates `_statusCache` with fresh pick count, nextPick, myNextPick — re-renders panel
+- Panel shows cached state instantly, then updates after fetch — eliminates stale state without cron dependency
+- Fixed duplicate `const cached` declaration bug (syntax error on line 610)
+
+**MFL / Yahoo display-only support (`draft-ticker.js`):**
+- `_nonSleeperLeagues` map collects current-season MFL/Yahoo leagues during `_buildWatchList`
+- Live tracking not feasible for MFL/Yahoo — requires per-user auth in cron (security tradeoff not worth it)
+- Panel renders "⚠️ MFL / Yahoo Drafts" section at reduced opacity with each league listed
+- Each row shows platform label + "Open league to refresh" CTA; clicking navigates to league draft tab
+- `_nonSleeperLeagues.clear()` called on `stop()` for clean re-init
+- CSS: `.draft-ticker-nonsleeper-note` added to `locker.css`
 
 ---
 
