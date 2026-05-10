@@ -22,7 +22,8 @@ const DraftTicker = (() => {
   let _username        = null;
   let _mySleeperUserId = null;
   let _lastItems       = { live: [], upcoming: [] };
-  let _tickerOpen      = false;
+  let _tickerOpen         = false;
+  const _nonSleeperLeagues = new Map(); // leagueId → { leagueName, platform } — display only
 
   // Per-league timer/listener state: leagueId → { timer, fbListener, ref }
   const _timers      = new Map();
@@ -90,7 +91,20 @@ const DraftTicker = (() => {
 
       for (const [key, l] of Object.entries(stored)) {
         if (!l.leagueId && !l.league_id) continue;
-        if (l.platform !== "sleeper") continue;
+        if (l.platform !== "sleeper") {
+          if (l.platform === "mfl" || l.platform === "yahoo") {
+            const season = l.season || l.year || 0;
+            if (!season || relevant.has(season) || relevant.has(String(season))) {
+              const id = String(l.leagueId || l.league_id);
+              _nonSleeperLeagues.set(id, {
+                leagueName: l.leagueName || l.name || id,
+                platform:   l.platform,
+                source:     "league"
+              });
+            }
+          }
+          continue;
+        }
         if (meta[key]?.isCommissioner && !meta[key]?.isOwner) continue;
         const season = l.season || l.year || 0;
         if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
@@ -466,6 +480,25 @@ const DraftTicker = (() => {
       }
     }
 
+    // Non-Sleeper leagues — display only, no live tracking
+    if (_nonSleeperLeagues.size > 0) {
+      html += `<div class="draft-ticker-section-label" style="margin-top:var(--space-3)">⚠️ MFL / Yahoo Drafts</div>`;
+      html += `<div class="draft-ticker-nonsleeper-note">Live tracking is only available for Sleeper leagues. For MFL and Yahoo drafts, open the league directly to see the latest picks.</div>`;
+      for (const [leagueId, meta] of _nonSleeperLeagues) {
+        const platformLabel = meta.platform === "mfl" ? "MFL" : "Yahoo";
+        const nav = `data-ticker-league="${_esc(leagueId)}"`;
+        html += `
+          <div class="draft-ticker-row" ${nav} style="opacity:0.75">
+            <div class="draft-ticker-row-icon">📋</div>
+            <div class="draft-ticker-row-info">
+              <div class="draft-ticker-row-name">${_esc(meta.leagueName)}</div>
+              <div class="draft-ticker-row-detail">${platformLabel} · Open league to refresh</div>
+            </div>
+            <div class="draft-ticker-row-status" style="color:var(--color-text-dim);font-size:.75rem">Manual</div>
+          </div>`;
+      }
+    }
+
     body.innerHTML = html;
 
     body.querySelectorAll("[data-ticker-tid]").forEach(row => {
@@ -537,8 +570,65 @@ const DraftTicker = (() => {
     if (typeof _syncDrawerActivity === "function") _syncDrawerActivity();
   }
 
-  function _openPanel()  { const p = _panel(); if (p) p.style.display = ""; _tickerOpen = true; }
+  function _openPanel()  {
+    const p = _panel();
+    if (p) p.style.display = "";
+    _tickerOpen = true;
+    // Show cached state immediately, then refresh from Sleeper
+    _renderPanel(_lastItems);
+    // Fetch fresh data from Sleeper on every open — avoids stale state
+    _refreshLiveDrafts();
+  }
   function _closePanel() { const p = _panel(); if (p) p.style.display = "none"; _tickerOpen = false; }
+
+  // Fetch fresh pick counts from Sleeper for all live/paused drafts on demand
+  async function _refreshLiveDrafts() {
+    const live = _lastItems.live;
+    if (!live.length) return;
+
+    const mySleeperUid = await _getMySleeperUserId();
+    let changed = false;
+
+    await Promise.allSettled(live.map(async item => {
+      try {
+        const [pr, tpr] = await Promise.all([
+          fetch(`https://api.sleeper.app/v1/draft/${item.draftId}/picks`),
+          item.draftId ? fetch(`https://api.sleeper.app/v1/draft/${item.draftId}/traded_picks`) : Promise.resolve(null)
+        ]);
+        if (!pr.ok) return;
+
+        const arr         = await pr.json();
+        const tradedPicks = tpr?.ok ? await tpr.json() : [];
+        const picksMade   = Array.isArray(arr) ? arr.length : 0;
+        const last        = Array.isArray(arr) ? arr[arr.length - 1] : null;
+        const cached      = _statusCache.get(item.leagueId) || {};
+        const teams       = Object.keys(cached.draft_order || {}).length || 12;
+        const totalPicks  = cached.totalPicks || item.totalPicks || teams;
+        const next        = picksMade + 1;
+
+        // Update status cache with fresh data
+        const cached = _statusCache.get(item.leagueId) || {};
+        const updated = {
+          ...cached,
+          picksMade,
+          traded_picks: tradedPicks,
+          nextPick: picksMade < totalPicks
+            ? { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 }
+            : null,
+          picks_hash: `${picksMade}:${last?.player_id || ""}`
+        };
+        _statusCache.set(item.leagueId, updated);
+        changed = true;
+      } catch(e) {
+        console.warn("[DraftTicker] refresh failed for", item.leagueId, e.message);
+      }
+    }));
+
+    if (changed) {
+      _lastItems = _deriveItems(mySleeperUid);
+      _renderPanel(_lastItems);
+    }
+  }
 
   // ── Public: init ──────────────────────────────────────
   async function init(username) {
@@ -594,6 +684,7 @@ const DraftTicker = (() => {
     _lastItems = { live: [], upcoming: [] };
     _statusCache.clear();
     _leagueMeta.clear();
+    _nonSleeperLeagues.clear();
     _closePanel();
     const w = _wrap();
     if (w) w.style.display = "none";
