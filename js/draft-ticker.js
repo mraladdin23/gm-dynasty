@@ -665,6 +665,6 @@ const DraftTicker = (() => {
     if (w) w.style.display = "none";
   }
 
-  return { init, stop, getLastItems: () => _lastItems };
+  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, getLastItems: () => _lastItems };
 
 })();

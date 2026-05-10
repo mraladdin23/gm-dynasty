@@ -1314,10 +1314,10 @@ function _openGlobalNotifModal() {
       if (_notifOpen && !e.target.closest("#nav-notif-wrap")) close();
     });
 
-    // Mobile drawer: draft row — open draft selection modal
+    // Mobile drawer: draft row — open ticker panel (same as desktop pill click)
     document.getElementById("drawer-draft-btn")?.addEventListener("click", () => {
       DLRNav.close();
-      _openGlobalDraftModal();
+      if (typeof DraftTicker !== "undefined") DraftTicker.openPanel();
     });
 
     // Mobile drawer: notif row — open notification modal
