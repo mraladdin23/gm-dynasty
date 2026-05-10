@@ -206,11 +206,19 @@ const DLRHallway = (() => {
     const initials  = (username || "?")[0].toUpperCase();
     const isPinned  = _pinned.includes(username);
 
-    const myLeagueKeys  = new Set(Object.keys(Auth.getCurrentProfile()?.leagues || {}));
-    const seenDynasty   = {};
+    const myProfile     = Auth.getCurrentProfile();
+    const myLeagues     = myProfile?.leagues || {};
+    const myLeagueKeys  = new Set(Object.keys(myLeagues));
+
+    // ── Build common leagues (deduped display rows) ──────────────────────────
+    // Also build a map from display key → all matching league keys (for H2H
+    // aggregation across dynasty chain seasons).
+    const seenDynasty    = {};
+    const chainLeagueMap = {}; // displayKey → [{ leagueId, platform, season, myRosterId, theirRosterId, leagueKey }]
+
     const commonLeagues = Object.entries(data.leagues)
       .filter(([key]) => myLeagueKeys.has(key))
-      .map(([, l]) => l)
+      .map(([key, l]) => ({ key, ...l }))
       .sort((a, b) => (b.season||"").localeCompare(a.season||""))
       .filter(l => {
         const isDynasty = l.leagueType === 'dynasty' || l.leagueType === 'keeper';
@@ -221,6 +229,35 @@ const DLRHallway = (() => {
         return true;
       });
 
+    // For each displayed league row, collect all seasons of that chain
+    // (same platform + same leagueName for dynasty/keeper, or exact key match for redraft)
+    commonLeagues.forEach(displayLeague => {
+      const isDynasty = displayLeague.leagueType === 'dynasty' || displayLeague.leagueType === 'keeper';
+      const nameKey   = (displayLeague.leagueName || '').toLowerCase().trim();
+      const displayKey = displayLeague.key;
+
+      // Gather all matching keys from both users' perspectives
+      const matchingKeys = Object.keys(myLeagues).filter(k => {
+        const ml = myLeagues[k];
+        if (ml.platform !== displayLeague.platform) return false;
+        if (!myLeagueKeys.has(k) || !data.leagues[k]) return false; // must be common
+        if (!isDynasty) return k === displayKey;
+        return (ml.leagueName || '').toLowerCase().trim() === nameKey;
+      });
+
+      chainLeagueMap[displayKey] = matchingKeys.map(k => ({
+        leagueKey:    k,
+        leagueId:     myLeagues[k].leagueId,
+        platform:     myLeagues[k].platform,
+        season:       myLeagues[k].season,
+        leagueKey_my: k,
+        myRosterId:   myLeagues[k].myRosterId   || null,
+        theirRosterId: data.leagues[k]?.myRosterId || null,
+        leagueKey_yahoo: myLeagues[k].leagueKey || null,  // Yahoo full key e.g. "nfl.l.12345"
+      }));
+    });
+
+    // ── Render modal immediately with H2H placeholders ───────────────────────
     modal.innerHTML = `
       <div class="modal-box modal-box--wide">
         <div class="modal-header">
@@ -252,23 +289,259 @@ const DLRHallway = (() => {
           </div>
           ${commonLeagues.length ? `
           <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);margin-bottom:var(--space-3)">Common Leagues</div>
-          ${commonLeagues.map(l => `
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
-              <div>
-                <div style="font-weight:600">${_esc(l.leagueName||"—")}</div>
-                <div class="dim" style="font-size:.72rem">${l.season||"—"} · ${l.leagueType||"—"}</div>
-              </div>
-              <div style="text-align:right">
-                <div style="font-family:var(--font-display);font-weight:700">${l.wins||0}–${l.losses||0}</div>
-                ${l.isChampion ? `<div style="color:var(--color-gold);font-size:.7rem">🏆 Champion</div>` : ""}
-              </div>
-            </div>`).join("")}` : `
+          <div id="hl-common-leagues">
+            ${commonLeagues.map(l => `
+              <div class="hl-common-row" id="hl-row-${_esc(l.key)}" style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
+                <div>
+                  <div style="font-weight:600">${_esc(l.leagueName||"—")}</div>
+                  <div class="dim" style="font-size:.72rem">${l.season||"—"} · ${l.leagueType||"—"}${(l.leagueType==='dynasty'||l.leagueType==='keeper') && (chainLeagueMap[l.key]?.length||0) > 1 ? ` · ${chainLeagueMap[l.key].length} seasons` : ""}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:var(--space-4)">
+                  <div style="text-align:right">
+                    <div style="font-family:var(--font-display);font-weight:700">${l.wins||0}–${l.losses||0}</div>
+                    ${l.isChampion ? `<div style="color:var(--color-gold);font-size:.7rem">🏆 Champion</div>` : ""}
+                  </div>
+                  <div class="hl-h2h" id="hl-h2h-${_esc(l.key)}" style="text-align:right;min-width:52px">
+                    <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <div class="spinner spinner--sm"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>`).join("")}
+          </div>` : `
           <div style="font-size:.83rem;color:var(--color-text-dim);padding:var(--space-4) 0;">No leagues in common.</div>`}
         </div>
       </div>`;
 
     document.body.appendChild(modal);
     modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+
+    // ── Load H2H records async, patch each row when ready ───────────────────
+    if (commonLeagues.length) {
+      _loadAllH2H(commonLeagues, chainLeagueMap, modal);
+    }
+  }
+
+  // ── H2H loading orchestrator ─────────────────────────────────────────────
+  // Fires one H2H computation per displayed league row concurrently,
+  // patching each row's placeholder as results arrive.
+  async function _loadAllH2H(commonLeagues, chainLeagueMap, modal) {
+    await Promise.allSettled(commonLeagues.map(async displayLeague => {
+      const displayKey = displayLeague.key;
+      const seasons    = chainLeagueMap[displayKey] || [];
+
+      // Skip if modal was closed before we started
+      if (!modal.isConnected) return;
+
+      try {
+        const h2h = await _computeH2HForChain(seasons);
+        _patchH2HCell(displayKey, h2h, modal);
+      } catch(e) {
+        _patchH2HCell(displayKey, null, modal);
+      }
+    }));
+  }
+
+  // ── Compute H2H across all seasons for one chain ─────────────────────────
+  // Returns { wins, losses, pf, pa } from the current user's perspective,
+  // or null if we couldn't determine (missing roster IDs, no data, etc.)
+  async function _computeH2HForChain(seasons) {
+    // Aggregate across all seasons; bail early if any season has missing IDs
+    // but still count the ones we can resolve
+    let totalWins = 0, totalLosses = 0, totalPF = 0, totalPA = 0, found = false;
+
+    await Promise.allSettled(seasons.map(async s => {
+      if (!s.myRosterId || !s.theirRosterId) return;
+      if (String(s.myRosterId) === String(s.theirRosterId)) return; // same team (shouldn't happen)
+
+      let result = null;
+      if      (s.platform === "sleeper") result = await _h2hSleeper(s);
+      else if (s.platform === "mfl")     result = await _h2hMFL(s);
+      else if (s.platform === "yahoo")   result = await _h2hYahoo(s);
+
+      if (result) {
+        totalWins   += result.wins;
+        totalLosses += result.losses;
+        totalPF     += result.pf;
+        totalPA     += result.pa;
+        found = true;
+      }
+    }));
+
+    if (!found) return null;
+    return { wins: totalWins, losses: totalLosses, pf: totalPF, pa: totalPA };
+  }
+
+  // ── Sleeper H2H ───────────────────────────────────────────────────────────
+  // Fetches all regular-season weeks in parallel, finds weeks where the two
+  // roster IDs share a matchup_id.
+  async function _h2hSleeper({ leagueId, season, myRosterId, theirRosterId }) {
+    // Determine week count: fetch the league to get settings.leg (current week)
+    // or fall back to 17. We only care about regular-season weeks (before playoff_start_week).
+    let totalWeeks = 17;
+    let playoffStart = 99;
+    try {
+      const league = await SleeperAPI.getLeague(leagueId);
+      totalWeeks   = league?.settings?.leg || league?.settings?.week || 17;
+      playoffStart = league?.settings?.playoff_week_start || league?.settings?.playoff_start || 99;
+      // Cap to regular season only
+      totalWeeks   = Math.min(totalWeeks, playoffStart - 1);
+    } catch(e) { /* use defaults */ }
+
+    const weeks = Array.from({ length: totalWeeks }, (_, i) => i + 1);
+
+    // Fetch all weeks in parallel
+    const results = await Promise.allSettled(
+      weeks.map(w => SleeperAPI.getMatchups(leagueId, w))
+    );
+
+    let wins = 0, losses = 0, pf = 0, pa = 0;
+    const myId    = String(myRosterId);
+    const theirId = String(theirRosterId);
+
+    results.forEach(r => {
+      if (r.status !== "fulfilled" || !Array.isArray(r.value)) return;
+      const weekMatchups = r.value;
+
+      // Find my entry and their entry
+      const mine  = weekMatchups.find(m => String(m.roster_id) === myId);
+      const theirs = weekMatchups.find(m => String(m.roster_id) === theirId);
+      if (!mine || !theirs) return;
+
+      // They faced each other if they share the same matchup_id
+      if (mine.matchup_id == null || mine.matchup_id !== theirs.matchup_id) return;
+
+      const myPts    = mine.points  || 0;
+      const theirPts = theirs.points || 0;
+      pf += myPts;
+      pa += theirPts;
+      if      (myPts > theirPts) wins++;
+      else if (theirPts > myPts) losses++;
+      // ties: neither W nor L (rare)
+    });
+
+    return { wins, losses, pf, pa };
+  }
+
+  // ── MFL H2H ───────────────────────────────────────────────────────────────
+  // Fetches all regular-season weeks via getLiveScoring in parallel,
+  // finds weeks where the two franchise IDs appear as home/away in the same matchup.
+  async function _h2hMFL({ leagueId, season, myRosterId, theirRosterId }) {
+    // Fetch the bundle just to get week range — reuse if already cached by standings tab
+    let startWeek = 1, endWeek = 17, playoffStart = 99;
+    try {
+      const bundle     = await MFLAPI.getLeagueBundle(leagueId, season);
+      const l          = bundle?.league?.league || {};
+      startWeek        = Math.max(1, parseInt(l.startWeek || l.firstRegularSeasonWeek || 1));
+      playoffStart     = parseInt(l.lastRegularSeasonWeek || l.endWeek || 17) + 1;
+      endWeek          = playoffStart - 1;
+    } catch(e) { /* use defaults */ }
+
+    const weeks = Array.from({ length: endWeek - startWeek + 1 }, (_, i) => startWeek + i);
+
+    const results = await Promise.allSettled(
+      weeks.map(w => MFLAPI.getLiveScoring(leagueId, season, w))
+    );
+
+    let wins = 0, losses = 0, pf = 0, pa = 0;
+    const myId    = String(myRosterId);
+    const theirId = String(theirRosterId);
+
+    results.forEach(r => {
+      if (r.status !== "fulfilled") return;
+      const matchups = MFLAPI.normalizeMatchups(r.value);
+      matchups.forEach(m => {
+        const hId = String(m.home?.teamId || "");
+        const aId = String(m.away?.teamId || "");
+
+        const iAmHome   = hId === myId   && aId === theirId;
+        const iAmAway   = aId === myId   && hId === theirId;
+        if (!iAmHome && !iAmAway) return;
+
+        const myPts    = iAmHome ? m.home.score : m.away.score;
+        const theirPts = iAmHome ? m.away.score : m.home.score;
+        if (myPts === 0 && theirPts === 0) return; // unplayed week
+
+        pf += myPts;
+        pa += theirPts;
+        if      (myPts > theirPts) wins++;
+        else if (theirPts > myPts) losses++;
+      });
+    });
+
+    return { wins, losses, pf, pa };
+  }
+
+  // ── Yahoo H2H ─────────────────────────────────────────────────────────────
+  // Fetches the league bundle (allMatchups already included) and scans
+  // regular-season weeks for matchups between the two team IDs.
+  async function _h2hYahoo({ leagueId, season, myRosterId, theirRosterId, leagueKey_yahoo }) {
+    const yahooKey = leagueKey_yahoo || `nfl.l.${leagueId}`;
+    let bundle;
+    try {
+      bundle = await YahooAPI.getLeagueBundle(yahooKey);
+    } catch(e) { return null; }
+
+    const lm           = bundle.leagueMeta || {};
+    const playoffStart = lm.playoff_start_week || 99;
+    const allMatchups  = bundle.allMatchups || {};
+
+    let wins = 0, losses = 0, pf = 0, pa = 0;
+    const myId    = String(myRosterId);
+    const theirId = String(theirRosterId);
+
+    Object.entries(allMatchups).forEach(([weekStr, weekMus]) => {
+      const week = parseInt(weekStr);
+      if (week >= playoffStart) return; // regular season only
+
+      (weekMus || []).forEach(m => {
+        const hId = String(m.home?.teamId || "");
+        const aId = String(m.away?.teamId || "");
+
+        const iAmHome = hId === myId   && aId === theirId;
+        const iAmAway = aId === myId   && hId === theirId;
+        if (!iAmHome && !iAmAway) return;
+
+        const myPts    = iAmHome ? (m.home?.score || 0) : (m.away?.score || 0);
+        const theirPts = iAmHome ? (m.away?.score || 0) : (m.home?.score || 0);
+        if (myPts === 0 && theirPts === 0) return; // unplayed
+
+        pf += myPts;
+        pa += theirPts;
+        if      (myPts > theirPts) wins++;
+        else if (theirPts > myPts) losses++;
+      });
+    });
+
+    return { wins, losses, pf, pa };
+  }
+
+  // ── Patch H2H cell in place ───────────────────────────────────────────────
+  function _patchH2HCell(displayKey, h2h, modal) {
+    const cell = modal.querySelector(`#hl-h2h-${CSS.escape(displayKey)}`);
+    if (!cell) return;
+
+    if (!h2h || (h2h.wins === 0 && h2h.losses === 0 && h2h.pf === 0)) {
+      cell.innerHTML = `<span style="font-size:.72rem;color:var(--color-text-dim)">—</span>`;
+      return;
+    }
+
+    const pfStr = h2h.pf   > 0 ? h2h.pf.toFixed(1)  : null;
+    const paStr = h2h.pa   > 0 ? h2h.pa.toFixed(1)   : null;
+    const winColor = h2h.wins > h2h.losses
+      ? "var(--color-green)"
+      : h2h.losses > h2h.wins
+        ? "var(--color-red)"
+        : "var(--color-text-dim)";
+
+    cell.innerHTML = `
+      <div style="text-align:right">
+        <div style="font-family:var(--font-display);font-weight:700;font-size:.85rem;color:${winColor}"
+             title="Head-to-head record">
+          H2H ${h2h.wins}–${h2h.losses}
+        </div>
+        ${pfStr && paStr ? `<div style="font-size:.68rem;color:var(--color-text-dim)">${pfStr}–${paStr} pts</div>` : ""}
+      </div>`;
   }
 
   function togglePin(username) {
