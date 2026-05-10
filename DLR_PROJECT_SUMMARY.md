@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: May 9, 2026 — Global Draft Ticker complete (Worker cron + Firebase pub/sub, traded picks, slot_to_roster_id).*
+*Updated: May 9, 2026 — Global Draft Ticker complete + on-demand refresh + MFL/Yahoo display-only support.*
 
 ---
 
@@ -349,6 +349,9 @@ All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 - `slot_to_roster_id`: maps draft slot → rosterId. `traded_picks.roster_id` = original slot, `.owner_id` = current owner rosterId
 - Skip-if-unchanged check must also check `prev.slot_to_roster_id` — always rewrite if missing
 - Seeded all 135 leagues with `picks_hash: "seeded"` to prevent first-run timeout; cron processes 15 pending/run
+- On-demand refresh: `_refreshLiveDrafts()` fires on every panel open — fetches Sleeper directly, bypasses cron timing issues
+- MFL/Yahoo live tracking not supported — requires per-user auth in cron (security tradeoff); shown as display-only rows with "Open league to refresh" CTA
+- `_nonSleeperLeagues` map collects MFL/Yahoo leagues during `_buildWatchList`; cleared on `stop()`
 
 ### Yahoo
 - Test on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
