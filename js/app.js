@@ -1112,44 +1112,12 @@ function _escHtml(s) {
 }
 
 // ── Global Draft Modal ─────────────────────────────────────
-function _openGlobalDraftModal() {
-  const modal = document.getElementById("global-draft-modal");
-  const body  = document.getElementById("global-draft-modal-body");
-  if (!modal || !body) return;
-
-  const items = typeof DraftTicker !== "undefined" ? DraftTicker.getLastItems?.() : null;
-  const live     = items?.live     || [];
-  const upcoming = items?.upcoming || [];
-
+function _renderGlobalDraftBody(body, live, upcoming) {
   if (!live.length && !upcoming.length) {
     body.innerHTML = `<div class="dim" style="padding:var(--space-4)">No active or upcoming drafts.</div>`;
-    modal.classList.remove("hidden");
     return;
   }
-
-  function _navigateToDraft(item) {
-    modal.classList.add("hidden");
-    if (item.tid) {
-      DLRNav.go("tournament");
-      setTimeout(() => {
-        if (typeof _openTournamentView === "function") _openTournamentView(item.tid);
-      }, 150);
-    } else {
-      const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
-      const match   = Object.entries(profile?.leagues || {})
-        .find(([, l]) => String(l.leagueId || l.league_id || "") === item.leagueId);
-      if (match && typeof Profile !== "undefined") {
-        Profile.openLeagueDetail(match[0]);
-        setTimeout(() => {
-          const sel = document.getElementById("detail-tab-select");
-          if (sel) { sel.value = "draft"; Profile.onDetailTabChange("draft"); }
-        }, 350);
-      }
-    }
-  }
-
   let html = "";
-
   if (live.length) {
     html += `<div class="global-auc-league-block"><div class="global-auc-league-name" style="cursor:default">🔴 Live Drafts</div>`;
     for (const item of live) {
@@ -1159,13 +1127,8 @@ function _openGlobalDraftModal() {
       if (item.nextPick) detail += `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
       if (item.myNextPick) detail += ` · My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`;
       if (item.onTheClock) detail = `<strong style="color:#f87171">ON THE CLOCK!</strong>`;
-
-      html += `<div class="global-auc-row" onclick="(function(){`;
-      // encode navigation inline
-      const id    = _escHtml(item.leagueId);
-      const tid   = _escHtml(item.tid || "");
-      html += `var items=DraftTicker.getLastItems?.();var item=(items?.live||[]).find(function(x){return x.leagueId==='${id}'});if(item)_navigateToDraftItem(item);`;
-      html += `})()">
+      const id = _escHtml(item.leagueId);
+      html += `<div class="global-auc-row" onclick="(function(){var items=DraftTicker.getLastItems?.();var item=(items?.live||[]).find(function(x){return x.leagueId==='${id}'});if(item)_navigateToDraftItem(item);})()">
         <div style="flex:1">
           <div style="font-weight:600;font-size:.88rem">${icon} ${_escHtml(item.leagueName)}${context}</div>
           <div class="dim" style="font-size:.72rem;margin-top:2px">${detail}</div>
@@ -1175,16 +1138,14 @@ function _openGlobalDraftModal() {
     }
     html += `</div>`;
   }
-
   if (upcoming.length) {
     html += `<div class="global-auc-league-block"><div class="global-auc-league-name" style="cursor:default">📅 Upcoming Drafts</div>`;
     for (const item of upcoming) {
-      const d      = new Date(item.startTime);
+      const d       = new Date(item.startTime);
       const dateStr = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
       const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       const context = item.tournamentName ? ` · ${_escHtml(item.tournamentName)}` : "";
       const id      = _escHtml(item.leagueId);
-
       html += `<div class="global-auc-row" onclick="(function(){var items=DraftTicker.getLastItems?.();var item=(items?.upcoming||[]).find(function(x){return x.leagueId==='${id}'});if(item)_navigateToDraftItem(item);})()">
         <div style="flex:1">
           <div style="font-weight:600;font-size:.88rem">📅 ${_escHtml(item.leagueName)}${context}</div>
@@ -1195,9 +1156,30 @@ function _openGlobalDraftModal() {
     }
     html += `</div>`;
   }
-
   body.innerHTML = html;
+}
+
+function _openGlobalDraftModal() {
+  const modal = document.getElementById("global-draft-modal");
+  const body  = document.getElementById("global-draft-modal-body");
+  if (!modal || !body) return;
+
+  // Show cached data immediately
+  const items    = typeof DraftTicker !== "undefined" ? DraftTicker.getLastItems?.() : null;
+  const live     = items?.live     || [];
+  const upcoming = items?.upcoming || [];
+  _renderGlobalDraftBody(body, live, upcoming);
   modal.classList.remove("hidden");
+
+  // Then refresh live pick data from Sleeper and re-render in place
+  if (typeof DraftTicker !== "undefined" && live.length) {
+    DraftTicker.refreshForModal().then(freshItems => {
+      if (!modal.classList.contains("hidden")) {
+        _renderGlobalDraftBody(body, freshItems.live || [], freshItems.upcoming || []);
+      }
+    }).catch(() => {});
+  }
+
 }
 
 // Called from inline onclick in draft modal rows
@@ -1314,15 +1296,12 @@ function _openGlobalNotifModal() {
       if (_notifOpen && !e.target.closest("#nav-notif-wrap")) close();
     });
 
-    // Mobile drawer: draft row — open ticker panel (same as desktop pill click).
-    // preventDefault stops <a> href navigation; stopPropagation stops the event
-    // reaching the ticker's outside-click handler before openPanel runs.
-    // setTimeout(0) defers openPanel past any remaining bubbling.
+    // Mobile drawer: draft row — open draft modal with fresh data
     document.getElementById("drawer-draft-btn")?.addEventListener("click", e => {
       e.preventDefault();
       e.stopPropagation();
       DLRNav.close();
-      if (typeof DraftTicker !== "undefined") setTimeout(() => DraftTicker.openPanel(), 0);
+      _openGlobalDraftModal();
     });
 
     // Mobile drawer: notif row — open notification modal

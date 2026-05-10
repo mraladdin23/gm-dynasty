@@ -665,6 +665,15 @@ const DraftTicker = (() => {
     if (w) w.style.display = "none";
   }
 
-  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, getLastItems: () => _lastItems };
+  // ── Public: refreshForModal ──────────────────────────
+  // Called by _openGlobalDraftModal — runs the same Sleeper refresh
+  // as _refreshLiveDrafts but returns the updated items so the modal
+  // can re-render without depending on the ticker panel being open.
+  async function refreshForModal() {
+    await _refreshLiveDrafts();
+    return _lastItems;
+  }
+
+  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, refreshForModal, getLastItems: () => _lastItems };
 
 })();
