@@ -135,12 +135,13 @@ const DraftTicker = (() => {
       }
     } catch(e) { console.warn("[DraftTicker] Failed to load tournament leagues:", e.message); }
 
-    // Write lightweight watch list to Firebase for the Worker cron to read
-    if (watchList.size > 0) {
-      const fbEntry = {};
-      for (const [id, m] of watchList) fbEntry[id] = m;
-      GMD.child("draftWatchList").set(fbEntry).catch(() => {});
-    }
+    // Write per-user watch list so multiple users don't clobber each other.
+    // Worker reads all children of gmd/draftWatchList/ and unions them.
+    const fbEntry = {};
+    for (const [id, m] of watchList) fbEntry[id] = m;
+    GMD.child(`draftWatchList/${_username}`).set(
+      watchList.size > 0 ? fbEntry : null
+    ).catch(() => {});
 
     console.log(`[DraftTicker] Watching ${watchList.size} leagues`);
     return watchList;

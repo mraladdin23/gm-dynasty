@@ -1025,6 +1025,13 @@ const DLRTournament = (() => {
             placeholder="https://paypal.me/…" />
           <span class="field-hint">Shown as a button on the Info tab.</span>
         </div>
+        <div class="form-group" style="margin-top:var(--space-2)">
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;text-transform:none;letter-spacing:0;font-size:.88rem;font-weight:600">
+            <input type="checkbox" id="trn-private-toggle" ${meta.isPrivate ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;accent-color:var(--color-gold)" />
+            Keep tournament private (hide from public tournament list)
+          </label>
+          <span class="field-hint">When enabled, this tournament won't appear on the public Tournaments page.</span>
+        </div>
         <div class="trn-section-card-title" style="margin-top:var(--space-4)">Social Links</div>
         ${["twitter","discord","reddit","instagram","youtube","website"].map(key => `
           <div class="form-group" style="margin-bottom:var(--space-3)">
@@ -1065,17 +1072,25 @@ const DLRTournament = (() => {
         if (val) newSocial[inp.dataset.socialKey] = val;
       });
       try {
+        const isPrivate = document.getElementById("trn-private-toggle")?.checked || false;
         await _tMetaRef(tid).update({
           bio,
           donationLink: donation || null,
-          socialLinks:  newSocial
+          socialLinks:  newSocial,
+          isPrivate:    isPrivate || null
         });
         if (_tournaments[tid]?.meta) {
           _tournaments[tid].meta.bio          = bio;
           _tournaments[tid].meta.donationLink = donation || null;
           _tournaments[tid].meta.socialLinks  = newSocial;
+          _tournaments[tid].meta.isPrivate    = isPrivate || null;
         }
-        _writePublicSummary(tid, _tournaments[tid]);
+        if (isPrivate) {
+          // Remove from public listing
+          await GMD.child("publicTournaments/" + tid).remove();
+        } else {
+          _writePublicSummary(tid, _tournaments[tid]);
+        }
         showToast("Info saved ✓");
       } catch(e) { showToast("Failed to save info", "error"); }
     });
@@ -14826,6 +14841,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   async function _writePublicSummary(tid, t) {
     try {
       const meta  = t.meta || {};
+      // Respect private flag — remove from public listing rather than writing
+      if (meta.isPrivate) {
+        await GMD.child("publicTournaments/" + tid).remove();
+        return;
+      }
       const regs  = t.registrations || {};
       const leagues = t.leagues || {};
       const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;

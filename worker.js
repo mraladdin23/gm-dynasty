@@ -506,11 +506,15 @@ if (path === "/draft/test" && req.method === "GET") {
     const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
     const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-    // Step 1: read watchList
+    // Step 1: read watchList (per-user structure)
     const watchRes  = await fetch(`${FB}/draftWatchList.json?${auth}`);
-    const watchList = (await watchRes.json()) || {};
+    const watchRaw  = (await watchRes.json()) || {};
+    const watchList = {};
+    for (const [, ul] of Object.entries(watchRaw)) {
+      if (ul && typeof ul === "object") Object.assign(watchList, ul);
+    }
     const allIds    = Object.keys(watchList);
-    log.push({ step: "watchList", status: watchRes.status, count: allIds.length });
+    log.push({ step: "watchList", status: watchRes.status, count: allIds.length, users: Object.keys(watchRaw).length });
 
     // Step 2: read existing draftStatus
     const statusRes = await fetch(`${FB}/draftStatus.json?${auth}`);
@@ -566,7 +570,7 @@ if (path === "/draft/test" && req.method === "GET") {
 if (path === "/draft/forcecheck" && req.method === "GET") {
   const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
   const auth = `auth=${env.FIREBASE_DB_SECRET}`;
-  const id   = "1312644275434946560";
+  const id   = new URL(req.url).searchParams.get("leagueId") || "1312644275434946560";
   
   // Delete the seeded entry so cron treats it as unknown → urgent
   await fetch(`${FB}/draftStatus/${id}.json?${auth}`, { method: "DELETE" });
@@ -595,6 +599,8 @@ if (path === "/draft/forcecheck" && req.method === "GET") {
   const teams     = Object.keys(draft.draft_order || {}).length || 12;
   const rounds    = draft.settings?.rounds || 1;
   const next      = picksMade + 1;
+  const watchRes  = await fetch(`${FB}/draftWatchList/${id}.json?${auth}`);
+  const watchMeta = watchRes.ok ? await watchRes.json() : {};
 
   const status = {
     status:            draft.status,
@@ -608,7 +614,7 @@ if (path === "/draft/forcecheck" && req.method === "GET") {
     traded_picks:      tradedPicks             || null,  
     picks_hash,
     startTime:         draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000,
-    leagueName:        "Ballers 6",
+    leagueName:        watchMeta?.leagueName || id,
     updatedAt:         Date.now()
   };
 
@@ -1680,8 +1686,28 @@ async function runDraftWatcher(env) {
     fetch(`${FB}/draftWatchList.json?${auth}`),
     fetch(`${FB}/draftStatus.json?${auth}`)
   ]);
-  const watchList = (await watchRes.json()) || {};
+  const watchRaw  = (await watchRes.json()) || {};
   const existing  = (await statusRes.json()) || {};
+
+  // watchRaw is now { username: { leagueId: meta, ... }, ... } (per-user nodes).
+  // Union all users' league IDs into a flat watchList map.
+  const watchList = {};
+  for (const [, userLeagues] of Object.entries(watchRaw)) {
+    if (userLeagues && typeof userLeagues === "object") {
+      // Check if this is a per-user node (values are objects with leagueName)
+      // vs old flat format (keys are league IDs directly)
+      const firstVal = Object.values(userLeagues)[0];
+      if (firstVal && typeof firstVal === "object" && "leagueName" in firstVal) {
+        // New per-user format: { leagueId: { leagueName, ... }, ... }
+        Object.assign(watchList, userLeagues);
+      } else {
+        // Old flat format fallback (single user wrote flat keys)
+        // Key is a league ID string directly
+        watchList[Object.keys(watchRaw)[0]] = watchRaw[Object.keys(watchRaw)[0]];
+        break;
+      }
+    }
+  }
 
   const allIds = Object.keys(watchList);
   if (!allIds.length) return;
@@ -1798,6 +1824,9 @@ async function runDraftWatcher(env) {
         }
 
         const prev = existing[leagueId];
+        const staleLiveDraft = prev && (prev.status === "drafting" || prev.status === "paused") 
+                       && (now - (prev.updatedAt || 0)) > 5 * 60 * 1000;
+        if (prev && prev.picks_hash === picks_hash && prev.status === draft.status && prev.slot_to_roster_id && !staleLiveDraft) return;
         if (prev && prev.picks_hash === picks_hash && prev.status === draft.status && prev.slot_to_roster_id) return;
 
         const startMs = draft.start_time
@@ -1832,10 +1861,11 @@ async function runDraftWatcher(env) {
           body:    JSON.stringify(writes)
         })
       : Promise.resolve(),
-    ...deletes.map(id => Promise.all([
-      fetch(`${FB}/draftWatchList/${id}.json?${auth}`, { method: "DELETE" }),
-      fetch(`${FB}/draftStatus/${id}.json?${auth}`,    { method: "DELETE" })
-    ]))
+    // Only delete from draftStatus — watchList is per-user and clients
+    // will naturally drop completed leagues on their next init() call.
+    ...deletes.map(id =>
+      fetch(`${FB}/draftStatus/${id}.json?${auth}`, { method: "DELETE" })
+    )
   ]);
 
   console.log(`[DraftWatcher] done — ${Object.keys(writes).length} writes, ${deletes.length} removed`);
