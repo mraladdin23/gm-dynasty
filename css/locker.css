@@ -4721,8 +4721,9 @@ select option { background: var(--color-bg-2); }
 .nav-hamburger--open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
 /* ── Mobile activity button (pulsing red dot next to hamburger) ── */
+/* Hidden on desktop always; JS controls visibility on mobile only  */
 .nav-activity-btn {
-  display: none; /* shown via JS when there is activity */
+  display: none !important; /* desktop: always hidden */
   align-items: center;
   justify-content: center;
   width: 32px;
@@ -4816,6 +4817,7 @@ select option { background: var(--color-bg-2); }
   .nav-user  { display: none; }
   .nav-title { display: none; }
   .nav-hamburger { display: flex; }
+  .nav-activity-btn { display: none; } /* JS overrides to flex when active */
   .top-nav { justify-content: space-between; }
 
   /* Compact filter area — use a select dropdown on mobile */
