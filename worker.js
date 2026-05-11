@@ -1709,6 +1709,18 @@ async function runDraftWatcher(env) {
     }
   }
 
+  // Prune confirmed-dead leagues from the combined list before processing.
+  // Dead = pre_draft + picksHash:"checked" + no startTime + last checked >7 days ago.
+  // Prevents large multi-league accounts from bloating the cron's workload.
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  for (const id of Object.keys(watchList)) {
+    const s = existing[id];
+    if (s && s.status === "pre_draft" && s.picks_hash === "checked"
+        && !s.startTime && s.updatedAt && s.updatedAt < sevenDaysAgo) {
+      delete watchList[id];
+    }
+  }
+
   const allIds = Object.keys(watchList);
   if (!allIds.length) return;
 
