@@ -970,13 +970,19 @@ function _updateGlobalAucPill(liveByLeague) {
   _syncDrawerActivity();
 }
 
-// ── Show/hide the Activity drawer section ──────────────────
+// ── Show/hide the Activity drawer section + mobile nav button ──────────────────
 function _syncDrawerActivity() {
   const aucVisible   = document.getElementById("drawer-auc-section")?.style.display   !== "none";
   const draftVisible = document.getElementById("drawer-draft-section")?.style.display !== "none";
   const notifVisible = document.getElementById("drawer-notif-section")?.style.display !== "none";
-  const activity     = document.getElementById("drawer-activity-section");
-  if (activity) activity.style.display = (aucVisible || draftVisible || notifVisible) ? "" : "none";
+  const hasActivity  = aucVisible || draftVisible || notifVisible;
+
+  const activity = document.getElementById("drawer-activity-section");
+  if (activity) activity.style.display = hasActivity ? "" : "none";
+
+  // Mobile nav activity button — pulsing red dot next to hamburger
+  const btn = document.getElementById("nav-activity-btn");
+  if (btn) btn.style.display = hasActivity ? "flex" : "none";
 }
 
 // ── Notification tracker ────────────────────────────────────
@@ -1111,7 +1117,7 @@ function _escHtml(s) {
   return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// ── Global Draft Modal ─────────────────────────────────────
+// ── Shared draft body renderer (used by both draft modal and activity modal) ──
 function _renderGlobalDraftBody(body, live, upcoming) {
   if (!live.length && !upcoming.length) {
     body.innerHTML = `<div class="dim" style="padding:var(--space-4)">No active or upcoming drafts.</div>`;
@@ -1124,9 +1130,9 @@ function _renderGlobalDraftBody(body, live, upcoming) {
       const icon    = item.onTheClock ? "🔔" : (item.status === "paused" ? "⏸" : "📋");
       const context = item.tournamentName ? `<span style="font-size:.72rem;color:var(--color-text-dim)"> · ${_escHtml(item.tournamentName)}</span>` : "";
       let detail = "";
-      if (item.nextPick) detail += `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+      if (item.nextPick)   detail += `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
       if (item.myNextPick) detail += ` · My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`;
-      if (item.onTheClock) detail = `<strong style="color:#f87171">ON THE CLOCK!</strong>`;
+      if (item.onTheClock) detail  = `<strong style="color:#f87171">ON THE CLOCK!</strong>`;
       const id = _escHtml(item.leagueId);
       html += `<div class="global-auc-row" onclick="(function(){var items=DraftTicker.getLastItems?.();var item=(items?.live||[]).find(function(x){return x.leagueId==='${id}'});if(item)_navigateToDraftItem(item);})()">
         <div style="flex:1">
@@ -1157,6 +1163,78 @@ function _renderGlobalDraftBody(body, live, upcoming) {
     html += `</div>`;
   }
   body.innerHTML = html;
+}
+
+// ── Combined mobile activity modal ──────────────────────────
+// Opens when user taps the pulsing red nav button.
+// Shows active drafts, live auctions, and unread notifications.
+function _openGlobalActivityModal() {
+  const modal = document.getElementById("global-draft-modal");
+  const body  = document.getElementById("global-draft-modal-body");
+  if (!modal || !body) return;
+
+  const items    = typeof DraftTicker !== "undefined" ? DraftTicker.getLastItems?.() : null;
+  const live     = items?.live     || [];
+  const upcoming = items?.upcoming || [];
+
+  const aucVisible   = document.getElementById("drawer-auc-section")?.style.display   !== "none";
+  const notifVisible = document.getElementById("drawer-notif-section")?.style.display !== "none";
+
+  let html = "";
+
+  // ── Drafts section ──
+  if (live.length || upcoming.length) {
+    html += `<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);padding:var(--space-2) 0 var(--space-1)">🏈 Drafts</div>`;
+    const tmpDiv = document.createElement("div");
+    _renderGlobalDraftBody(tmpDiv, live, upcoming);
+    html += tmpDiv.innerHTML;
+  }
+
+  // ── Auctions section ──
+  if (aucVisible) {
+    const aucCount = document.getElementById("nav-auc-label")?.textContent || "Active";
+    html += `<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);padding:var(--space-3) 0 var(--space-1)">💰 Auctions</div>
+      <div class="global-auc-row" onclick="document.getElementById('global-draft-modal').classList.add('hidden');_openGlobalAucModal()">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">🏷 ${_escHtml(aucCount)}</div>
+          <div class="dim" style="font-size:.72rem">Tap to view live auctions</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>`;
+  }
+
+  // ── Notifications section ──
+  if (notifVisible) {
+    const notifCount = document.getElementById("drawer-notif-badge")?.textContent || "";
+    html += `<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-dim);padding:var(--space-3) 0 var(--space-1)">🔔 Notifications</div>
+      <div class="global-auc-row" onclick="document.getElementById('global-draft-modal').classList.add('hidden');_openGlobalNotifModal()">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">🔔 ${notifCount ? notifCount + " unread" : "New activity"}</div>
+          <div class="dim" style="font-size:.72rem">Tap to view notifications</div>
+        </div>
+        <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
+      </div>`;
+  }
+
+  if (!html) {
+    html = `<div class="dim" style="padding:var(--space-4)">No active drafts, auctions, or notifications.</div>`;
+  }
+
+  body.innerHTML = html;
+  modal.classList.remove("hidden");
+
+  // Refresh draft data in background and re-render if modal is still open
+  if (live.length && typeof DraftTicker !== "undefined") {
+    DraftTicker.refreshForModal().then(freshItems => {
+      if (!modal.classList.contains("hidden") && (freshItems.live?.length || freshItems.upcoming?.length)) {
+        const tmpDiv = document.createElement("div");
+        _renderGlobalDraftBody(tmpDiv, freshItems.live || [], freshItems.upcoming || []);
+        // Patch just the draft section rows if present
+        const firstBlock = body.querySelector(".global-auc-league-block");
+        if (firstBlock) firstBlock.outerHTML = tmpDiv.innerHTML;
+      }
+    }).catch(() => {});
+  }
 }
 
 function _openGlobalDraftModal() {
