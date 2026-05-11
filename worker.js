@@ -506,15 +506,24 @@ if (path === "/draft/test" && req.method === "GET") {
     const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
     const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-    // Step 1: read watchList (per-user structure)
-    const watchRes  = await fetch(`${FB}/draftWatchList.json?${auth}`);
-    const watchRaw  = (await watchRes.json()) || {};
+    // Step 1: build watch list from gmd/users (same as cron)
+    const usersRes  = await fetch(`${FB}/users.json?${auth}&shallow=false`);
+    const allUsers  = (await usersRes.json()) || {};
+    const curYear   = new Date().getFullYear();
+    const relevant  = new Set([curYear-1, curYear, curYear+1, String(curYear-1), String(curYear), String(curYear+1)]);
     const watchList = {};
-    for (const [, ul] of Object.entries(watchRaw)) {
-      if (ul && typeof ul === "object") Object.assign(watchList, ul);
+    for (const [, ud] of Object.entries(allUsers)) {
+      for (const [, l] of Object.entries(ud?.leagues || {})) {
+        if (!l.leagueId && !l.league_id) continue;
+        if (l.platform !== "sleeper") continue;
+        const season = l.season || l.year || 0;
+        if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+        const id = String(l.leagueId || l.league_id);
+        if (!watchList[id]) watchList[id] = { leagueName: l.leagueName || l.name || id };
+      }
     }
-    const allIds    = Object.keys(watchList);
-    log.push({ step: "watchList", status: watchRes.status, count: allIds.length, users: Object.keys(watchRaw).length });
+    const allIds = Object.keys(watchList);
+    log.push({ step: "watchList", userCount: Object.keys(allUsers).length, leagueCount: allIds.length });
 
     // Step 2: read existing draftStatus
     const statusRes = await fetch(`${FB}/draftStatus.json?${auth}`);
@@ -1674,50 +1683,38 @@ Write a 3-4 paragraph weekly recap in an engaging, sports-analyst style. Mention
 
 // ══════════════════════════════════════════════════════════
 //  DRAFT WATCHER — runs on cron (every minute via wrangler.toml)
-//  Reads gmd/draftWatchList, fetches Sleeper draft state,
-//  writes gmd/draftStatus/{leagueId} only when state changes.
-//  Clients subscribe to draftStatus — zero direct Sleeper calls.
+//  Scans gmd/users/*/leagues for all Sleeper leagues across all users,
+//  fetches Sleeper draft state, writes gmd/draftStatus/{leagueId} when state changes.
+//  No client write needed — cron builds the watch list itself.
 // ══════════════════════════════════════════════════════════
 async function runDraftWatcher(env) {
   const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
   const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-  const [watchRes, statusRes] = await Promise.all([
-    fetch(`${FB}/draftWatchList.json?${auth}`),
+  const [usersRes, statusRes] = await Promise.all([
+    fetch(`${FB}/users.json?${auth}&shallow=false`),
     fetch(`${FB}/draftStatus.json?${auth}`)
   ]);
-  const watchRaw  = (await watchRes.json()) || {};
-  const existing  = (await statusRes.json()) || {};
+  const allUsers = (await usersRes.json()) || {};
+  const existing = (await statusRes.json()) || {};
 
-  // watchRaw is now { username: { leagueId: meta, ... }, ... } (per-user nodes).
-  // Union all users' league IDs into a flat watchList map.
-  const watchList = {};
-  for (const [, userLeagues] of Object.entries(watchRaw)) {
-    if (userLeagues && typeof userLeagues === "object") {
-      // Check if this is a per-user node (values are objects with leagueName)
-      // vs old flat format (keys are league IDs directly)
-      const firstVal = Object.values(userLeagues)[0];
-      if (firstVal && typeof firstVal === "object" && "leagueName" in firstVal) {
-        // New per-user format: { leagueId: { leagueName, ... }, ... }
-        Object.assign(watchList, userLeagues);
-      } else {
-        // Old flat format fallback (single user wrote flat keys)
-        // Key is a league ID string directly
-        watchList[Object.keys(watchRaw)[0]] = watchRaw[Object.keys(watchRaw)[0]];
-        break;
+  // Build watch list by scanning all users' leagues for current-season Sleeper leagues.
+  const curYear = new Date().getFullYear();
+  const relevant = new Set([curYear - 1, curYear, curYear + 1,
+    String(curYear - 1), String(curYear), String(curYear + 1)]);
+  const watchList = {}; // leagueId → { leagueName }
+
+  for (const [, userData] of Object.entries(allUsers)) {
+    const leagues = userData?.leagues || {};
+    for (const [, l] of Object.entries(leagues)) {
+      if (!l.leagueId && !l.league_id) continue;
+      if (l.platform !== "sleeper") continue;
+      const season = l.season || l.year || 0;
+      if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+      const id = String(l.leagueId || l.league_id);
+      if (!watchList[id]) {
+        watchList[id] = { leagueName: l.leagueName || l.name || id };
       }
-    }
-  }
-
-  // Prune confirmed-dead leagues from the combined list before processing.
-  // Dead = pre_draft + picksHash:"checked" + no startTime + last checked >7 days ago.
-  // Prevents large multi-league accounts from bloating the cron's workload.
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  for (const id of Object.keys(watchList)) {
-    const s = existing[id];
-    if (s && s.status === "pre_draft" && s.picks_hash === "checked"
-        && !s.startTime && s.updatedAt && s.updatedAt < sevenDaysAgo) {
-      delete watchList[id];
     }
   }
 
@@ -1873,8 +1870,6 @@ async function runDraftWatcher(env) {
           body:    JSON.stringify(writes)
         })
       : Promise.resolve(),
-    // Only delete from draftStatus — watchList is per-user and clients
-    // will naturally drop completed leagues on their next init() call.
     ...deletes.map(id =>
       fetch(`${FB}/draftStatus/${id}.json?${auth}`, { method: "DELETE" })
     )

@@ -135,52 +135,9 @@ const DraftTicker = (() => {
       }
     } catch(e) { console.warn("[DraftTicker] Failed to load tournament leagues:", e.message); }
 
-    // Write per-user watch list so multiple users don't clobber each other.
-    // Worker reads all children of gmd/draftWatchList/ and unions them.
-    //
-    // Prune before writing: skip leagues the Worker already confirmed have no
-    // draft (pre_draft + picksHash:"checked" + no startTime + checked >7d ago).
-    // This prevents large accounts (100+ leagues) from hitting Firebase write limits.
-    let prunedList = watchList;
-    if (watchList.size > 50) {
-      try {
-        const statusSnap = await GMD.child(FB_STATUS_PATH).once("value");
-        const statusData = statusSnap.val() || {};
-        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        prunedList = new Map();
-        for (const [id, meta] of watchList) {
-          const s = statusData[id];
-          if (s && s.status === "pre_draft" && s.picks_hash === "checked"
-              && !s.startTime && s.updatedAt && s.updatedAt < sevenDaysAgo) {
-            continue; // confirmed dead — skip
-          }
-          prunedList.set(id, meta);
-        }
-        console.log(`[DraftTicker] Pruned ${watchList.size - prunedList.size} confirmed-inactive leagues`);
-      } catch(e) {
-        prunedList = watchList; // fall back to full list on error
-      }
-    }
-
-    // Hard cap at 150 as a safety net
-    if (prunedList.size > 150) {
-      const capped = new Map();
-      for (const [id, meta] of prunedList) {
-        if (capped.size >= 150) break;
-        capped.set(id, meta);
-      }
-      prunedList = capped;
-      console.warn(`[DraftTicker] Watch list capped at 150 leagues`);
-    }
-
-    const fbEntry = {};
-    for (const [id, m] of prunedList) fbEntry[id] = m;
-    GMD.child(`draftWatchList/${_username}`).set(
-      prunedList.size > 0 ? fbEntry : null
-    ).catch(() => {});
-
-    console.log(`[DraftTicker] Watching ${prunedList.size} leagues (${watchList.size} total before pruning)`);
-    // Return full unpruned list for local use — client still shows all leagues
+    // No Firebase write needed — Worker cron builds the watch list itself
+    // by scanning gmd/users directly. Client just reads draftStatus.
+    console.log(`[DraftTicker] Monitoring ${watchList.size} local leagues`);
     return watchList;
   }
 
