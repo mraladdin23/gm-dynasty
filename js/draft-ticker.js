@@ -20,6 +20,8 @@ const DraftTicker = (() => {
 
   // ── State ──────────────────────────────────────────────
   let _username        = null;
+  let _debugWatchList      = new Map();
+  let _debugSleeperResults = [];
   let _mySleeperUserId = null;
   let _lastItems       = { live: [], upcoming: [] };
   let _tickerOpen         = false;
@@ -140,16 +142,8 @@ const DraftTicker = (() => {
       }
     } catch(e) { console.warn("[DraftTicker] Failed to load tournament leagues:", e.message); }
 
-    // Write filtered watch list to Firebase so the Worker knows what to monitor.
-    // Per-user path so users don't clobber each other.
-    // Already filtered to current-season, current-dynasty-entry only — small payload.
-    const fbEntry = {};
-    for (const [id, m] of watchList) fbEntry[id] = m.leagueName || id;
-    GMD.child(`draftWatchIndex/${_username}`).set(
-      watchList.size > 0 ? fbEntry : null
-    ).catch(e => console.warn("[DraftTicker] watchIndex write failed:", e.message));
-
     console.log(`[DraftTicker] Monitoring ${watchList.size} current-season leagues`);
+    _debugWatchList = watchList;
     return watchList;
   }
 
@@ -438,22 +432,21 @@ const DraftTicker = (() => {
   // data that the Worker may have already fetched.
   async function _initialLoad() {
     // Fire all Sleeper checks in parallel — this is the authoritative source
+    _debugSleeperResults = [];
     await Promise.allSettled([..._leagueMeta.keys()].map(async leagueId => {
+      const meta = _leagueMeta.get(leagueId) || {};
       try {
         const status = await _checkSleeperDirect(leagueId);
         if (status) {
           _statusCache.set(leagueId, status);
-        }
-        // If no active draft found, mark as checked so _pollInterval
-        // doesn't schedule unnecessary retries
-        else if (!_statusCache.has(leagueId)) {
-          _statusCache.set(leagueId, {
-            status: "pre_draft", picks_hash: "client-checked",
-            startTime: null, updatedAt: Date.now()
-          });
+          _debugSleeperResults.push({ leagueId, name: meta.leagueName, result: status.status, startTime: status.startTime });
+        } else {
+          _statusCache.set(leagueId, { status: "pre_draft", picks_hash: "client-checked", startTime: null, updatedAt: Date.now() });
+          _debugSleeperResults.push({ leagueId, name: meta.leagueName, result: "no draft" });
         }
       } catch(e) {
         console.warn("[DraftTicker] Sleeper check failed for", leagueId, e.message);
+        _debugSleeperResults.push({ leagueId, name: meta.leagueName, result: `ERROR: ${e.message}` });
       }
     }));
 
@@ -750,6 +743,54 @@ const DraftTicker = (() => {
     }
 
     await _redraw();
+
+    // Debug overlay — add ?tickerDebug=1 to URL to see step-by-step results
+    if (new URLSearchParams(window.location.search).get("tickerDebug") === "1") {
+      const lines = [];
+      lines.push(`<b>User:</b> ${_username}`);
+      lines.push(`<b>Relevant seasons:</b> ${[..._relevantSeasons()].filter(v => typeof v === "number").join(", ")}`);
+      lines.push(`&nbsp;`);
+
+      lines.push(`<b>Step 1 — Leagues found: ${_debugWatchList.size}</b>`);
+      if (!_debugWatchList.size) {
+        lines.push(`&nbsp;&nbsp;⚠️ NONE — user has not synced Sleeper leagues in DLR`);
+      } else {
+        for (const [id, m] of _debugWatchList) {
+          lines.push(`&nbsp;&nbsp;✓ ${m.leagueName || id} (${id})`);
+        }
+      }
+
+      lines.push(`&nbsp;`);
+      lines.push(`<b>Step 2 — Sleeper API results: ${_debugSleeperResults.length} checked</b>`);
+      if (!_debugSleeperResults.length) {
+        lines.push(`&nbsp;&nbsp;⚠️ NO CHECKS RAN — _leagueMeta was empty`);
+      } else {
+        for (const r of _debugSleeperResults) {
+          const icon = r.result === "no draft" ? "—"
+            : r.result?.startsWith("ERROR") ? "❌"
+            : (r.result === "drafting" || r.result === "paused") ? "🔴"
+            : r.result === "pre_draft" ? "📅" : "?";
+          const extra = r.startTime ? ` → starts ${new Date(r.startTime).toLocaleString()}` : "";
+          lines.push(`&nbsp;&nbsp;${icon} ${r.name || r.leagueId}: <b>${r.result}</b>${extra}`);
+        }
+      }
+
+      lines.push(`&nbsp;`);
+      const { live, upcoming } = _lastItems;
+      lines.push(`<b>Step 3 — Ticker shows: ${live.length} live, ${upcoming.length} upcoming</b>`);
+      for (const i of live)     lines.push(`&nbsp;&nbsp;🔴 ${i.leagueName}`);
+      for (const i of upcoming) lines.push(`&nbsp;&nbsp;📅 ${i.leagueName} — ${new Date(i.startTime).toLocaleString()}`);
+      if (!live.length && !upcoming.length) lines.push(`&nbsp;&nbsp;(nothing to show)`);
+
+      // Render overlay
+      const existing = document.getElementById("ticker-debug-overlay");
+      if (existing) existing.remove();
+      const el = document.createElement("div");
+      el.id = "ticker-debug-overlay";
+      el.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#0a0e1a;color:#e2e8f0;font-family:monospace;font-size:11px;padding:12px;max-height:50vh;overflow-y:auto;border-top:2px solid #f0b429";
+      el.innerHTML = `<div style="font-weight:700;color:#f0b429;margin-bottom:8px">🔍 DraftTicker Debug <button onclick="document.getElementById('ticker-debug-overlay').remove()" style="background:#f0b429;border:none;color:#000;padding:2px 8px;cursor:pointer;border-radius:3px;margin-left:8px">Close</button></div>${lines.map(l => `<div style="padding:1px 0;border-bottom:1px solid #1a2236">${l}</div>`).join("")}`;
+      document.body.appendChild(el);
+    }
   }
 
   // ── Public: stop ─────────────────────────────────────

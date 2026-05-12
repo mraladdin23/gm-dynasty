@@ -500,6 +500,48 @@ export default {
         return new Response(JSON.stringify(data || {}), { headers: corsHeaders() });
       }
 
+      // /draft/rebuildWatchIndex — one-time admin backfill
+      // Scans all users' Firebase leagues and writes draftWatchIndex for each.
+      // Run once to cover all existing users. Safe to re-run.
+      if (path === "/draft/rebuildWatchIndex" && req.method === "GET") {
+        const FB    = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
+        const auth  = `auth=${env.FIREBASE_DB_SECRET}`;
+        const curYear  = new Date().getFullYear();
+        const relevant = new Set([curYear-1, curYear, curYear+1,
+          String(curYear-1), String(curYear), String(curYear+1)]);
+
+        const usersRes = await fetch(`${FB}/users.json?${auth}&shallow=true`);
+        const userKeys = Object.keys((await usersRes.json()) || {});
+        const results  = { processed: 0, skipped: 0, errors: [], written: {} };
+
+        await Promise.allSettled(userKeys.map(async username => {
+          try {
+            const lgRes   = await fetch(`${FB}/users/${username}/leagues.json?${auth}`);
+            if (!lgRes.ok) { results.skipped++; return; }
+            const leagues = (await lgRes.json()) || {};
+            const entry   = {};
+            for (const [, l] of Object.entries(leagues)) {
+              if (!l.leagueId && !l.league_id) continue;
+              if (l.platform !== "sleeper") continue;
+              const season = l.season || l.year || 0;
+              if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+              if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) continue;
+              const id = String(l.leagueId || l.league_id);
+              entry[id] = l.leagueName || l.name || id;
+            }
+            if (!Object.keys(entry).length) { results.skipped++; return; }
+            const wr = await fetch(`${FB}/draftWatchIndex/${username}.json?${auth}`,
+              { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+            if (wr.ok) { results.processed++; results.written[username] = Object.keys(entry).length; }
+            else results.errors.push(`${username}: write failed ${wr.status}`);
+          } catch(e) { results.errors.push(`${username}: ${e.message}`); }
+        }));
+
+        results.totalUsers = userKeys.length;
+        results.summary = `Wrote watchIndex for ${results.processed}/${userKeys.length} users.`;
+        return new Response(JSON.stringify(results, null, 2), { headers: corsHeaders() });
+      }
+
       // /draft/diagnose?username=X
       if (path === "/draft/diagnose" && req.method === "GET") {
         const FB       = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
@@ -1753,24 +1795,32 @@ async function runDraftWatcher(env) {
   const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
   const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-  // Read draftWatchIndex (written by each client on init) and draftStatus in parallel.
-  // draftWatchIndex is { username: { leagueId: leagueName, ... }, ... }
-  // This is a single Firebase read — no per-user fetching needed.
-  const [watchIndexRes, statusRes] = await Promise.all([
-    fetch(`${FB}/draftWatchIndex.json?${auth}`),
-    fetch(`${FB}/draftStatus.json?${auth}`)
+  // The cron's job: keep pick counts fresh for live/paused drafts so clients
+  // get real-time updates via Firebase listeners. Discovery is handled client-side.
+  //
+  // Two sources for the watchList:
+  // 1. draftStatus — any league already known to be live/upcoming (fast, self-maintaining)
+  // 2. draftWatchIndex — leagues clients have registered (catches new pre-draft leagues)
+  const [statusRes, watchIndexRes] = await Promise.all([
+    fetch(`${FB}/draftStatus.json?${auth}`),
+    fetch(`${FB}/draftWatchIndex.json?${auth}`)
   ]);
-  const watchIndex = (await watchIndexRes.json()) || {};
   const existing   = (await statusRes.json()) || {};
+  const watchIndex = (await watchIndexRes.json()) || {};
 
-  // Union all users' league IDs into a flat watchList
+  // Build watchList: start from draftWatchIndex (all registered leagues)
   const watchList = {};
   for (const [, userLeagues] of Object.entries(watchIndex)) {
     if (!userLeagues || typeof userLeagues !== "object") continue;
     for (const [leagueId, leagueName] of Object.entries(userLeagues)) {
-      if (!watchList[leagueId]) {
-        watchList[leagueId] = { leagueName: leagueName || leagueId };
-      }
+      if (!watchList[leagueId]) watchList[leagueId] = { leagueName: leagueName || leagueId };
+    }
+  }
+  // Also include any league already in draftStatus that's not complete
+  // (covers leagues the Worker discovered before watchIndex existed)
+  for (const [leagueId, s] of Object.entries(existing)) {
+    if (!watchList[leagueId] && s.status !== "complete") {
+      watchList[leagueId] = { leagueName: leagueId };
     }
   }
 
