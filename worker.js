@@ -1835,16 +1835,17 @@ async function runDraftWatcher(env) {
   for (const id of allIds) {
     const prev = existing[id];
 
-    if (!prev || prev.picks_hash === "seeded") {
-      pending.push(id); // never properly checked
-      continue;
-    }
     if (prev.status === "complete") {
       toSkip.push(id);
       continue;
     }
+    // Any live/paused draft — urgent regardless of source (Worker or client seed)
     if (prev.status === "drafting" || prev.status === "paused") {
       urgent.push(id);
+      continue;
+    }
+    if (!prev || prev.picks_hash === "seeded") {
+      pending.push(id); // never properly checked
       continue;
     }
     if (prev.status === "pre_draft") {
@@ -1868,14 +1869,23 @@ async function runDraftWatcher(env) {
     }
   }
 
-  // Process all urgent (live/paused) immediately.
-  // Shuffle pending so no league is permanently starved.
-  for (let i = pending.length - 1; i > 0; i--) {
+  // Process all urgent immediately.
+  // Split pending into never-checked (no draftStatus entry) and already-checked.
+  // Never-checked go first since they include newly registered leagues.
+  const neverChecked    = pending.filter(id => !existing[id]);
+  const alreadyChecked  = pending.filter(id =>  existing[id]);
+  for (let i = alreadyChecked.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [pending[i], pending[j]] = [pending[j], pending[i]];
+    [alreadyChecked[i], alreadyChecked[j]] = [alreadyChecked[j], alreadyChecked[i]];
   }
-  const PENDING_PER_RUN = 60;
-  const toCheck = [...urgent, ...pending.slice(0, PENDING_PER_RUN)];
+  // Never-checked get up to 80 slots; already-checked fill the rest up to 120 total
+  const NEVER_CHECKED_LIMIT  = 80;
+  const TOTAL_PENDING_LIMIT  = 120;
+  const pendingToProcess = [
+    ...neverChecked.slice(0, NEVER_CHECKED_LIMIT),
+    ...alreadyChecked.slice(0, TOTAL_PENDING_LIMIT - Math.min(neverChecked.length, NEVER_CHECKED_LIMIT))
+  ];
+  const toCheck = [...urgent, ...pendingToProcess];
 
   console.log(`[DraftWatcher] urgent=${urgent.length} pending=${pending.length} checking=${toCheck.length} skipping=${toSkip.length}`);
   if (!toCheck.length && !toSkip.length) return;

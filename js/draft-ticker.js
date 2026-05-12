@@ -440,6 +440,16 @@ const DraftTicker = (() => {
         if (status) {
           _statusCache.set(leagueId, status);
           _debugSleeperResults.push({ leagueId, name: meta.leagueName, result: status.status, startTime: status.startTime });
+          // Seed draftStatus in Firebase so the Worker picks this up immediately
+          // in its urgent queue rather than waiting for the pending shuffle.
+          // Fire-and-forget — client display doesn't depend on this write.
+          GMD.child(`${FB_STATUS_PATH}/${leagueId}`).update({
+            status:    status.status,
+            draftId:   status.draftId   || null,
+            startTime: status.startTime || null,
+            picks_hash: status.picks_hash,
+            updatedAt:  status.updatedAt
+          }).catch(() => {});
         } else {
           _statusCache.set(leagueId, { status: "pre_draft", picks_hash: "client-checked", startTime: null, updatedAt: Date.now() });
           _debugSleeperResults.push({ leagueId, name: meta.leagueName, result: "no draft" });
