@@ -499,6 +499,72 @@ export default {
         const data  = await res.json();
         return new Response(JSON.stringify(data || {}), { headers: corsHeaders() });
       }
+
+      // /draft/diagnose?username=X — full client-side simulation for a user
+      if (path === "/draft/diagnose" && req.method === "GET") {
+        const FB       = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
+        const auth     = `auth=${env.FIREBASE_DB_SECRET}`;
+        const username = new URL(req.url).searchParams.get("username") || "";
+        if (!username) return new Response(JSON.stringify({ error: "?username= required" }), { status: 400, headers: corsHeaders() });
+
+        const report = { username, steps: {} };
+        try {
+          // 1. What leagues does Firebase have for this user?
+          const lgRes  = await fetch(`${FB}/users/${username}/leagues.json?${auth}`);
+          const leagues = lgRes.ok ? (await lgRes.json() || {}) : {};
+          const curYear = new Date().getFullYear();
+          const relevant = new Set([curYear-1, curYear, curYear+1, String(curYear-1), String(curYear), String(curYear+1)]);
+
+          const allLeagues = Object.entries(leagues);
+          const filtered = [], watching = [];
+          for (const [key, l] of allLeagues) {
+            if (!l.leagueId && !l.league_id) { filtered.push({ key, reason: "no leagueId" }); continue; }
+            if (l.platform !== "sleeper")     { filtered.push({ key, reason: `platform=${l.platform}` }); continue; }
+            const season = l.season || l.year || 0;
+            if (season && !relevant.has(season) && !relevant.has(String(season))) {
+              filtered.push({ key, reason: `season=${season} out of range` }); continue;
+            }
+            if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) {
+              filtered.push({ key, reason: `stale dynasty season (${l.season}, mostRecent=${l.mostRecentSeason})` }); continue;
+            }
+            watching.push({ key, leagueId: String(l.leagueId || l.league_id), season: l.season, name: l.leagueName || l.name });
+          }
+          report.steps.leagues = { total: allLeagues.length, watching: watching.length, filtered: filtered.length, watchingList: watching, filteredList: filtered };
+
+          // 2. What does draftStatus show for each watched league?
+          const statusResults = {};
+          await Promise.all(watching.map(async w => {
+            const sr = await fetch(`${FB}/draftStatus/${w.leagueId}.json?${auth}`);
+            const sd = sr.ok ? await sr.json() : null;
+            statusResults[w.leagueId] = {
+              name: w.name,
+              season: w.season,
+              workerStatus: sd ? sd.status : "NOT IN draftStatus",
+              startTime: sd?.startTime ? new Date(sd.startTime).toISOString() : null,
+              picksHash: sd?.picks_hash || null,
+              updatedAt: sd?.updatedAt ? new Date(sd.updatedAt).toISOString() : null,
+            };
+          }));
+          report.steps.draftStatus = statusResults;
+
+          // 3. What would the client display?
+          const live = [], upcoming = [];
+          const now = Date.now();
+          for (const [id, s] of Object.entries(statusResults)) {
+            if (!s.workerStatus || s.workerStatus === "NOT IN draftStatus") continue;
+            if (s.workerStatus === "drafting" || s.workerStatus === "paused") live.push({ id, name: s.name });
+            else if (s.workerStatus === "pre_draft" && s.startTime && new Date(s.startTime) > now) upcoming.push({ id, name: s.name, startTime: s.startTime });
+          }
+          report.steps.clientWouldShow = { live, upcoming };
+
+          // 4. Summary
+          if (!watching.length) report.summary = "No current-season Sleeper leagues found — user may need to sync their leagues in DLR.";
+          else if (!live.length && !upcoming.length) report.summary = `${watching.length} leagues found but none have active/upcoming drafts in draftStatus. Worker may not have checked them yet, or no drafts are scheduled.`;
+          else report.summary = `${live.length} live, ${upcoming.length} upcoming — should be visible in the ticker.`;
+
+        } catch(e) { report.error = e.message; }
+        return new Response(JSON.stringify(report, null, 2), { headers: corsHeaders() });
+      }
 // ── TEMPORARY DEBUG ROUTE — remove after testing ─────────
 if (path === "/draft/test" && req.method === "GET") {
   const log = [];
