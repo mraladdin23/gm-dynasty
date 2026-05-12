@@ -46,6 +46,9 @@ const AppState = {
       DraftTicker.init(profile.username);
     }
 
+    // Show admin impersonation button if this user is an admin
+    AdminImpersonate.initAdminUI();
+
     // Init notification tracker
     _startNotifMonitor(profile);
 
@@ -1421,3 +1424,93 @@ function showToast(message, type = "success", duration = 3500) {
 
 // Show loading overlay while Firebase auth initializes
 setLoading(true, "Loading GM Dynasty...");
+
+// ── Admin Impersonation ─────────────────────────────────────────────────────
+// Lets site admins view the app as any user for debugging.
+// Firebase Auth session stays as mraladdin23 — only the rendered profile swaps.
+const AdminImpersonate = (() => {
+  const ADMINS       = ["mraladdin23"];
+  let   _realProfile = null;
+  let   _active      = false;
+
+  function isAdmin() {
+    const p = Auth.getCurrentProfile();
+    return p && ADMINS.includes(p.username);
+  }
+
+  function initAdminUI() {
+    const btn = document.getElementById("nav-viewas-btn");
+    if (!btn || !isAdmin()) return;
+    btn.style.display = "inline-flex";
+    btn.addEventListener("click", _promptViewAs);
+  }
+
+  async function _promptViewAs() {
+    const target = prompt("Enter DLR username to view as:");
+    if (!target?.trim()) return;
+    await viewAs(target.trim().toLowerCase());
+  }
+
+  async function viewAs(targetUsername) {
+    if (!isAdmin()) return;
+    if (!_active) _realProfile = Auth.getCurrentProfile();
+
+    try {
+      setLoading(true, `Loading ${targetUsername}'s locker...`);
+
+      const snap = await GMD.child(`users/${targetUsername}`).once("value");
+      const data = snap.val();
+      if (!data) {
+        setLoading(false);
+        alert(`User "${targetUsername}" not found.`);
+        return;
+      }
+
+      const fakeProfile = {
+        username:   targetUsername,
+        email:      data.email      || "",
+        bio:        data.bio        || "",
+        avatarUrl:  data.avatarUrl  || "",
+        leagues:    data.leagues    || {},
+        stats:      data.stats      || {},
+        platforms:  data.platforms  || {},
+        leagueMeta: data.leagueMeta || {}
+      };
+
+      if (typeof DraftTicker  !== "undefined") DraftTicker.stop();
+      if (typeof NotifTracker !== "undefined") NotifTracker.stop?.();
+
+      AppState.currentProfile = fakeProfile;
+      _active = true;
+
+      const banner = document.getElementById("impersonation-banner");
+      const label  = document.getElementById("impersonation-username");
+      if (banner) banner.style.display = "flex";
+      if (label)  label.textContent = targetUsername;
+
+      const navUser = document.getElementById("nav-username");
+      if (navUser) navUser.textContent = `@${targetUsername}`;
+
+      if (typeof Profile !== "undefined") Profile.renderLocker(fakeProfile);
+      if (typeof DraftTicker !== "undefined") DraftTicker.init(targetUsername);
+
+      setLoading(false);
+    } catch(e) {
+      setLoading(false);
+      alert(`Error: ${e.message}`);
+    }
+  }
+
+  function exit() {
+    if (!_active || !_realProfile) return;
+    if (typeof DraftTicker  !== "undefined") DraftTicker.stop();
+    if (typeof NotifTracker !== "undefined") NotifTracker.stop?.();
+    _active = false;
+    AppState.currentProfile = _realProfile;
+    const banner = document.getElementById("impersonation-banner");
+    if (banner) banner.style.display = "none";
+    AppState.showApp(_realProfile);
+  }
+
+  return { initAdminUI, viewAs, exit, isAdmin };
+})();
