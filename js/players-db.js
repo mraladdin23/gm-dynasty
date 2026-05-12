@@ -5,7 +5,9 @@
 // ─────────────────────────────────────────────────────────
 
 const DLRPlayers = (() => {
-  const SLEEPER_KEY = "dlr_players_v4";
+  const SLEEPER_KEY = "dlr_players_v5";       // bumped: forces one-time cache bust for stale team data
+  const SLEEPER_TS_KEY = "dlr_players_v5_ts"; // stores fetch timestamp for TTL enforcement
+  const SLEEPER_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — refreshes daily to pick up NFL team changes
   const MAPPINGS_KEY = "dlr_player_mappings";
   const MAPPINGS_VER_KEY = "dlr_mappings_ver";
   const MAPPINGS_VERSION = "2026-04b";  // bumped: filter rows without birthdate
@@ -120,19 +122,29 @@ function formatHeight(inches) {
   }
 
   async function _loadSleeper(force) {
-    // Your original Sleeper logic (kept intact)
     if (!force && _sleeperCache) return _sleeperCache;
 
+    // Check TTL — if cache exists but is older than 24h, treat as stale
     const cached = await DLRIDB.get(SLEEPER_KEY);
     if (cached && Object.keys(cached).length > 1000) {
-      _sleeperCache = cached;
-      return cached;
+      const ts = parseInt(localStorage.getItem(SLEEPER_TS_KEY) || "0");
+      const age = Date.now() - ts;
+      if (!force && age < SLEEPER_TTL_MS) {
+        // Cache is fresh — use it
+        _sleeperCache = cached;
+        return cached;
+      }
+      // Cache exists but is stale (or no timestamp) — fall through to re-fetch
+      console.log(`[DLRPlayers] Sleeper cache stale (${Math.round(age / 3600000)}h old) — refreshing for updated NFL team assignments`);
     }
 
     const r = await fetch("https://api.sleeper.app/v1/players/nfl");
     const data = await r.json();
     _sleeperCache = data;
-    try { await DLRIDB.set(SLEEPER_KEY, data); } catch(e) {}
+    try {
+      await DLRIDB.set(SLEEPER_KEY, data);
+      localStorage.setItem(SLEEPER_TS_KEY, String(Date.now()));
+    } catch(e) {}
     return data;
   }
 

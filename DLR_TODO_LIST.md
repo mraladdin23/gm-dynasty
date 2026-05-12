@@ -1,5 +1,5 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: May 9, 2026 — Global Draft Ticker complete + on-demand refresh on panel open + MFL/Yahoo display-only support.*
+*Updated: May 12, 2026 — Draft Ticker overhauled (Sleeper-first client), Hallway H2H, Admin Impersonation, tournament private flag.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
 
 ---
@@ -43,11 +43,6 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🟢 Tournament — New Features & Polish
 
-### T5 — Total Points Mode: Single-Round Multi-Week Championship Window
-**Status:** ✅ Complete — validated end-to-end. Admin can configure a single championship round spanning multiple weeks.
-
----
-
 ### A2 — Registration Confirmation Email
 **Idea:** When a user submits a tournament registration, send a confirmation email acknowledging receipt.
 **Files:** `tournament.js`, `worker.js`
@@ -57,10 +52,7 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ## 🟢 Auth & Account
 
-### A1 — Contact Email for Support
-**Idea:** Add a visible support contact email somewhere accessible to users — login screen, registration confirmation, or a footer on the public site.
-**Files:** `auth.css`, `index.html`, `tournaments/index.html`
-**Note:** Support email is `support@dynastylockerroom.com`. Simple text addition.
+*(none currently — A1 contact email already added)*
 
 ---
 
@@ -107,10 +99,10 @@ After completing an issue, move it to the ✅ Completed section at the bottom.
 
 ---
 
-### F8 — Hallway H2H Records in Common Leagues
-**Idea:** In the Hallway manager modal, show head-to-head record per common league (combined for dynasty/keeper chains, per-season for redraft).
-**Files:** `hallway.js`
-**Note:** Medium effort. Well-scoped. Good candidate for a focused session.
+### F9 — Tournament League Invite Emails
+**Idea:** From the tournament admin panel, send email invites to participants to join their specific league on the platform (Sleeper, MFL, Yahoo).
+**Files:** `tournament.js`, `worker.js`
+**Note:** Resend is already wired. Scoping needed — probably a button in the Participants tab per participant row.
 
 ---
 
@@ -133,6 +125,18 @@ console.log("Bundles cleared");
 ### Force-republish public summaries (if playoffMode/createdBy missing)
 Open DLR while logged in as admin — `_backfillPublicSummaries()` runs automatically on tournament page load and republishes any stale public nodes.
 
+### Rebuild draftWatchIndex for all users (admin Worker endpoint)
+```
+GET https://mfl-proxy.mraladdin23.workers.dev/draft/rebuildWatchIndex
+```
+Scans all users' Firebase leagues and writes `gmd/draftWatchIndex/{username}` for each. Safe to re-run. Returns JSON with per-user league counts.
+
+### Diagnose draft ticker for a specific user (admin Worker endpoint)
+```
+GET https://mfl-proxy.mraladdin23.workers.dev/draft/diagnose?username=USERNAME
+```
+Returns: watchIndex leagues, filter results, draftStatus vs Sleeper cross-check, mismatches, and summary.
+
 ---
 
 *⚠️ NEVER run bulk Firebase reset scripts. Fix stale data surgically, one league at a time.*
@@ -141,159 +145,116 @@ Open DLR while logged in as admin — `_backfillPublicSummaries()` runs automati
 
 ## ✅ Completed
 
-### May 9, 2026 — Global Draft Ticker (U1): Cloudflare Worker Cron + Firebase Architecture
+### May 12, 2026 — Draft Ticker Overhaul: Sleeper-First Client Architecture
 
-**Global Draft Ticker (`draft-ticker.js`, `worker.js`, `firebase-db.js`, `locker.css`)**
+**Problem:** Draft ticker was entirely dependent on the Worker cron writing to `gmd/draftStatus` before clients could see anything. Worker's pending queue (15/run) meant newly registered leagues could wait hours. Users like orkneybowl with 66 leagues had 4 live drafts the Worker never processed.
 
-Complete rewrite of the draft ticker from direct Sleeper polling to a Worker cron + Firebase pub/sub architecture:
+**Solution — Client is now self-sufficient (`draft-ticker.js`):**
+- `_initialLoad()` completely rewritten: checks Sleeper directly (`/league/{id}/drafts`) for ALL leagues in parallel on every page load. No Worker dependency for discovery.
+- `_checkSleeperDirect(leagueId)` — new helper that fetches draft status from Sleeper, builds a full status object, fetches picks for live/paused drafts. Returns null if no active draft.
+- `_pollLeague()` rewritten to call `_checkSleeperDirect` instead of Firebase — client stays fresh with no Worker lag.
+- `_initialLoad` supplements from Firebase draftStatus only to enrich live drafts with traded_picks.
+- `mostRecentSeason` filter added to `_buildWatchList` — dynasty chains now correctly include only the current-season entry. Drops from 135 → 20 leagues for typical user.
+- Tournament section in `_buildWatchList` refactored — no longer adds all 336 BOTS leagues; only annotates leagues already in the user's own league list with tournament name.
+- `diagnose()` added to public API — call `DraftTicker.diagnose()` from browser console for full report.
+- Verbose `console.log` added throughout `init()` for easy debugging.
+- `?tickerDebug=1` URL param shows a visible overlay with all three steps (watchList, Sleeper results, display).
 
-**Worker cron (`runDraftWatcher`):**
-- Runs every minute via Cloudflare Workers Paid plan (required for cron CPU time)
-- `wrangler.toml` added with `crons = ["* * * * *"]`
-- Reads `gmd/draftWatchList` (set by client on init), fetches Sleeper for each watched league
-- For live drafts: fetches `/draft/{id}` (full object with `slot_to_roster_id`), `/picks`, `/traded_picks` in parallel
-- Smart filtering: only checks `urgent` (live/paused/starting soon) + 15 `pending` per run — avoids timeout on 135-league watch list
-- Skip-if-unchanged: only writes to `gmd/draftStatus/{leagueId}` when `picks_hash` or status changes, OR when `slot_to_roster_id` is missing
-- Removes completed drafts from both `draftWatchList` and `draftStatus`
+**Worker cron simplified (`worker.js`):**
+- Now reads `gmd/draftWatchIndex` (single read) instead of scanning all users' Firebase leagues per run.
+- Also reads `gmd/draftStatus` and unions leagues from both sources.
+- Pending queue: never-checked leagues (no draftStatus entry) get priority over already-checked ones.
+- `PENDING_PER_RUN` raised to 60 (was 15), shuffled to prevent starvation.
+- `drafting`/`paused` status checked before null check — client-seeded live drafts go to `urgent` immediately.
+- New admin endpoints: `/draft/rebuildWatchIndex` (backfill all users), `/draft/diagnose?username=X` (cross-check Sleeper vs Worker for any user).
 
-**Client (`draft-ticker.js`):**
-- `_buildWatchList()` — reads leagues/tournaments from Firebase, writes `gmd/draftWatchList` with metadata
-- `_initialLoad()` — reads all `gmd/draftStatus/` in one Firebase call at startup
-- Firebase `.on("value")` listeners for live drafts; polling for upcoming (60s/5min/15min by proximity)
-- `_computeMyNextPick()` — trade-aware using correct Sleeper data model:
-  - `draft_order[userId]` → my draft slot
-  - `slot_to_roster_id[mySlot]` → my rosterId
-  - `traded_picks`: `roster_id` = original slot, `owner_id` = current owner
-  - Builds `tradeMap["round-originalRosterId"] → currentOwnerRosterId`
-  - Scans forward: `originalRosterId = slot_to_roster_id[slotAtPos]`, then checks tradeMap
-- Duplicate listener guard (`dataset.tickerBound`) prevents double-binding on `stop()`/`init()` calls
-- Shows pick details (Current/My Next) for both `drafting` and `paused` status
+**`gmd/draftWatchIndex` architecture:**
+- Client writes `gmd/draftWatchIndex/{username}` on `init()` — flat `{leagueId: leagueName}`, pre-filtered.
+- Worker reads this as a single node to know what leagues exist across all users.
+- Run `/draft/rebuildWatchIndex` once to backfill all existing users.
+- Firebase rules: `.read: auth != null, .write: auth != null`
 
-**`firebase-db.js`:**
-- `linkPlatform` changed from `.set()` to `.update()` — critical fix preventing `sleeperUserId`, `avatar`, `displayName` from being wiped on every Sleeper refresh
-
-**Key architectural notes:**
-- Cloudflare paid plan required ($5/month) — free plan 10ms CPU limit kills the cron
-- `/league/{id}/drafts` does NOT include `slot_to_roster_id` — must fetch `/draft/{id}` separately
-- `gmd/draftWatchList`: `.read: auth != null, .write: auth != null`
-- `gmd/draftStatus`: `.read: auth != null, .write: false` (Worker writes via DB secret, bypasses rules)
-- Debug routes in worker: `/draft/status` (read Firebase draftStatus), `/draft/test` (step-by-step diagnostics), `/draft/forcecheck` (force-write Ballers 6 status)
-- Seeded `draftStatus` with `picks_hash: "seeded"` for all 135 leagues to prevent first-run timeout
-
-**On-demand refresh on panel open (`draft-ticker.js`):**
-- `_refreshLiveDrafts()` fires every time the ticker panel is opened
-- Fetches `/picks` + `/traded_picks` directly from Sleeper for all live/paused drafts
-- Updates `_statusCache` with fresh pick count, nextPick, myNextPick — re-renders panel
-- Panel shows cached state instantly, then updates after fetch — eliminates stale state without cron dependency
-- Fixed duplicate `const cached` declaration bug (syntax error on line 610)
-
-**MFL / Yahoo display-only support (`draft-ticker.js`):**
-- `_nonSleeperLeagues` map collects current-season MFL/Yahoo leagues during `_buildWatchList`
-- Live tracking not feasible for MFL/Yahoo — requires per-user auth in cron (security tradeoff not worth it)
-- Panel renders "⚠️ MFL / Yahoo Drafts" section at reduced opacity with each league listed
-- Each row shows platform label + "Open league to refresh" CTA; clicking navigates to league draft tab
-- `_nonSleeperLeagues.clear()` called on `stop()` for clean re-init
-- CSS: `.draft-ticker-nonsleeper-note` added to `locker.css`
+**Cache busting:**
+- `draft-ticker.js` bumped to `?v=5` in `index.html`.
+- `no-cache` meta tags added to `index.html` so all browsers pick up new JS on next normal load.
 
 ---
+
+### May 12, 2026 — Admin Impersonation (`app.js`, `index.html`)
+
+**Feature:** Admins can view DLR as any user for debugging without touching their Firebase Auth session.
+- `AdminImpersonate` module added to `app.js`. `ADMINS = ["mraladdin23"]`.
+- 👁 button added to nav (hidden for non-admins). Click → prompt for username → loads their Firebase profile data and re-renders the full app as them.
+- Purple banner at top of screen: "Viewing as {username} — read only". Exit button restores your own profile.
+- DraftTicker re-inits as the target user so you see their exact ticker state.
+- Firebase Auth session unchanged — nothing writes under their account.
+- `DraftTicker.diagnose()` runnable from console while impersonating.
+
+---
+
+### May 12, 2026 — Hallway F8: H2H Records in Common Leagues (`hallway.js`, `locker.css`)
+
+**Feature:** In the Hallway manager modal, shows head-to-head record per common league and a combined overall H2H at the top.
+
+**Implementation:**
+- `chainLeagueMap` built when opening modal — maps each displayed league row to all its seasons (dynasty chains aggregated by leagueName).
+- `_computeH2HForChain(seasons)` — async, checks all seasons in parallel, aggregates W/L/PF/PA.
+- `_checkSleeperDirect` equivalent per platform:
+  - **Sleeper:** parallel `getMatchups` for all regular-season weeks, match on shared `matchup_id`.
+  - **MFL:** parallel `getLiveScoring` calls, match on franchise ID pairs.
+  - **Yahoo:** scans `allMatchups` from existing bundle — zero extra API calls.
+- Missing `myRosterId` on Sleeper: auto-resolved via `SleeperAPI.getRosters` + `owner_id` lookup.
+- Modal renders immediately with spinner placeholders; H2H cells patch in place as results arrive.
+- Combined "Overall H2H" shown in the common leagues header (e.g. `7–4` in green/red).
+- `↻ Sync needed` shown when roster IDs can't be resolved (user needs to re-sync).
+- `.hl-h2h` and `.spinner--sm` CSS added to `locker.css`.
+
+---
+
+### May 12, 2026 — Tournament Private Flag (`tournament.js`)
+
+**Feature:** Tournament admins can mark a tournament as private to hide it from the public tournament list.
+- Checkbox added to Info & Rules admin section: "Keep tournament private (hide from public tournament list)".
+- Saves `meta.isPrivate = true` to Firebase on save.
+- `_writePublicSummary` checks `meta.isPrivate` — removes the `gmd/publicTournaments/{tid}` node instead of writing.
+- Saving with box unchecked re-publishes normally.
+
+---
+
+### May 12, 2026 — Mobile Draft Ticker / Activity Pills
+
+**Changes:**
+- Mobile `nav-actions` (`display: none !important`) replaced with icon-only pill display — same pills as desktop, labels hidden on mobile, compact padding.
+- Separate mobile activity button (pulsing red dot) removed — unified with desktop pills.
+- `drawer-draft-btn` in hamburger: `e.preventDefault()` + `e.stopPropagation()` added; opens `_openGlobalDraftModal()` with live data refresh via `DraftTicker.refreshForModal()`.
+- `_openGlobalActivityModal()` added — combined modal showing live drafts + auctions + notifications, opened from mobile activity button.
+- `_renderGlobalDraftBody()` extracted as shared helper used by both draft modal and activity modal.
+- `setTimeout(0)` defers panel open past click-event bubbling to prevent immediate close.
+
+---
+
+### May 9, 2026 — Global Draft Ticker (U1): Cloudflare Worker Cron + Firebase Architecture
+*(see previous entries)*
 
 ### May 7, 2026 — Tournament Landing Page Overhaul, Participant Sync, Mobile Fixes
-
-**🏆 Tournament Landing Page — List Row Layout (`tournament.js`, `tournament.css`, `tournaments/index.html`)**
-- Replaced card grid with compact single-line list rows on desktop
-- Row structure: 4-line mobile layout — (1) name, (2) description, (3) type badge + stats, (4) status + buttons
-- Desktop: `trn-row-main` (flex:1) + `trn-row-right` (fixed 260px) with `trn-row-actions` (fixed 162px)
-- Fixed column alignment using `align-items: stretch` on `.trn-row` with `align-items: center` on right panel
-- `overflow: hidden` removed from `trn-row-main` (was clipping rows)
-- Mobile (`≤700px`): rows stack to 4 lines; `trn-row-right` goes full width with border-top separator
-- Desktop fixed widths moved to `@media (min-width: 701px)` block — mobile no longer fights overrides
-- Internal app mobile fix: `overflow-x: hidden !important` on `#view-tournament.active` at both 640px and 700px to counteract `locker.css .screen.active { overflow: hidden }` which was causing horizontal clipping
-
-**🔍 Tournament Filters (`tournament.js`, `tournament.css`)**
-- Three filter dropdowns (View/Type/Admin) now on one line using `flex: 1 1 0` with `flex-wrap: nowrap`
-- Type filter uses `_tMode(t)` helper which reads `playoffs[mostRecentYear].mode` correctly (was reading wrong key `t.playoff`)
-- Admin filter populated from `meta.createdBy` across all tournaments
-- Alphabetical sort on tournament name
-- Pagination: 10 per page with Prev/Next at top and bottom
-- "My Tournaments" — shows only `discoveredBy` (league match) or `dlrLinked` participant match; admin-only excluded
-- Public site: same Type + Admin filters; Type filter left, Admin filter right
-
-**📖 Tournament Type Guide (`tournament.js`, `tournament.css`)**
-- `📖 Tournament Type Guide` button as subtle text link below `+ New Tournament`
-- Also appears as `📖 Type Guide` link below `+ Season` in playoff config year bar
-- Tabbed modal — 5 type buttons across top, one panel at a time (Points Rounds / H2H Bracket / Custom Rounds / World Cup / Total Points)
-- Each panel: summary, "Best for" callout, numbered setup steps
-
-**🏷 Tournament Type Badges**
-- Color-coded inline badges: gold (Points Rounds), blue (H2H Bracket), purple (Custom Rounds), green (World Cup), gray (Total Points)
-- Appear on both internal list rows and public site
-
-**🌐 Public Site Parity (`tournaments/index.html`)**
-- Same list-row layout as internal app
-- `playoffMode` and `createdBy` written to `gmd/publicTournaments/{tid}` via `_writePublicSummary`
-- `_backfillPublicSummaries()` auto-runs on page load to republish any stale public nodes missing these fields
-- Public site filters match internal: Type (left) + Admin (right)
-
-**👥 Participant Auto-Sync (`tournament.js`)**
-- `⚡ Sync from Leagues` button in Participants toolbar
-- `_autoSyncParticipants(tid, t)`: iterates all league batches, fetches rosters from Sleeper/MFL/Yahoo APIs
-- Sleeper: uses `user_id` as `dedupKey` (always unique), `username || display_name` as `sleeperUsername`
-- MFL: `email` as `dedupKey` and `mflEmail`; team name as `displayName`
-- Yahoo: `managerNickname` as `dedupKey` and `yahooUsername`; nickname/team name as `displayName`
-- All platforms: if no registration data, platform identity value populates `displayName`
-- Fresh Firebase read before building dedup lookup (avoids stale snapshot duplicates)
-- Single `participantsRef.update(updates)` write (atomic, surfaces errors)
-- `_matchParticipantsToDLR` called automatically after sync on all participants
-- DLR match indexes: `platforms/sleeper/sleeperUsername`, `platforms/sleeper/username`, `platforms/sleeper/displayName` (all three checked); `platforms/mfl/mflEmail`; `platforms/yahoo/username`
-- Single authoritative reload + re-render after all writes complete
-- Existing participants: patch only fills missing fields (no overwrite of existing data)
-
-**📱 Mobile UI Polish (`tournament.css`)**
-- Section pages (roles, registrants, participants, registration form): stay single-row on mobile with tighter font sizes
-- Registrant/participant rows: `flex-wrap: nowrap`, name `.80rem` truncates, meta `.68rem` truncates, buttons `3px 7px`
-- Role rows: single line, avatar shrinks to 26×26, name `.80rem`, scope `.68rem`
-- Registration Type radio labels: `.82rem` to match section card body font (was `.88rem`)
-- Global baseline: `.trn-container` and `.trn-detail-container` set to `.86rem` on mobile
-
-**🔄 Draft Tab Fixes (`tournament.js`)**
-- Draft updates live on refresh: `_draftForceRefresh` flag bypasses both Firebase and in-memory cache
-- Set `true` by refresh button and by live poll when picks change; cleared after fetch
-- Draft league dropdown no longer snaps back on selection (`selected` attribute on current `_draftLeague`)
-
----
+*(see previous entries)*
 
 ### May 6, 2026 — Tournament Message Board, Matchups Tab, Form Builder, H2H Bracket, Registration Import
-
 *(see previous entries)*
-
----
 
 ### May 5, 2026 — B1, B2, X1, X2: Bug Fix Session
-
 *(see previous entries)*
-
----
 
 ### May 5, 2026 — World Cup Tournament Mode: Full Implementation
-
 *(see previous entries)*
-
----
 
 ### April 30, 2026 — T1–T4: Tournament Polish + Public Players Tab Parity
-
 *(see previous entries)*
-
----
 
 ### April 29, 2026 — F5-P4-ext / F5-P4: Custom Playoffs, Players Tab, finalRankings
-
 *(see previous entries)*
 
----
-
 ### Earlier completed items
-
 - Yahoo OAuth, standings, matchups, playoffs, roster, players, draft, transactions, analytics
 - MFL playoff detection, identity matching, bundle reliability
 - Auth, mobile scroll, DNS, Cloudflare Worker, Firebase token storage

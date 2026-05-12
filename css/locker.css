@@ -3171,6 +3171,31 @@ select option { background: var(--color-bg-2); }
   border-color: var(--color-gold-dim);
 }
 
+/* Player report — expand leagues button */
+.pr-leagues-expand-btn {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--color-accent-dim, rgba(99,102,241,0.12));
+  border: 1px solid var(--color-accent);
+  cursor: pointer;
+  margin-left: 2px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.pr-leagues-expand-btn:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+.pr-leagues-expand-btn--open {
+  color: var(--color-text-dim);
+  border-color: var(--color-text-dim);
+  background: transparent;
+}
+
 .pr-ownership-bar {
   display: flex;
   flex-direction: column;
