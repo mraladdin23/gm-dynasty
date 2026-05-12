@@ -271,20 +271,33 @@ const DLRPlayerReport = (() => {
     `;
   }
 
+  // Build league chips HTML for a given leagues array
+  function _leagueChips(leagues) {
+    return leagues.map(l =>
+      `<span class="pr-league-chip ${l.slot !== "roster" ? "pr-league-chip--special" : ""}">${_esc(l.leagueName)}${l.slot !== "roster" ? ` <em>(${l.slot})</em>` : ""}</span>`
+    ).join("");
+  }
+
   function _playerRow(p, totalLeagues, showLeagues) {
     const color  = POS_COLOR[p.pos] || "#9ca3af";
     const pct    = Math.round((p.count / totalLeagues) * 100);
     const barCol = pct === 100 ? "var(--color-gold)" : p.count > 1 ? "var(--color-green)" : "var(--color-text-dim)";
     const multiLabel = p.count > 1 ? `<span class="pr-multi-badge">${p.count} leagues</span>` : "";
 
-    const leagueNames = p.leagues
-      .slice(0, 3)
-      .map(l => `<span class="pr-league-chip ${l.slot !== "roster" ? "pr-league-chip--special" : ""}">${_esc(l.leagueName)}${l.slot !== "roster" ? ` (${l.slot})` : ""}</span>`)
-      .join("");
-    const more = p.leagues.length > 3 ? `<span class="pr-league-chip">+${p.leagues.length - 3}</span>` : "";
+    const COLLAPSED_MAX = 3;
+    const hasMore = p.leagues.length > COLLAPSED_MAX;
+
+    // First 3 chips for collapsed view
+    const collapsedChips = _leagueChips(p.leagues.slice(0, COLLAPSED_MAX));
+    const expandBtn = hasMore
+      ? `<button class="pr-leagues-expand-btn" onclick="event.stopPropagation();DLRPlayerReport.expandLeagues(this,'${p.pid}')" title="Show all leagues">+${p.leagues.length - COLLAPSED_MAX} more</button>`
+      : "";
+
+    // All chips (stored as data attr for expand toggle)
+    const allChipsHtml = hasMore ? _leagueChips(p.leagues) : "";
 
     return `
-      <div class="pr-player-row" data-pos="${p.pos}"
+      <div class="pr-player-row" data-pos="${p.pos}" data-pid="${p.pid}" data-expanded="0"
         onclick="DLRPlayerCard.show('${p.pid}', '${_escAttr(p.name)}')">
         <div class="pr-pos-dot" style="background:${color}22;color:${color};border-color:${color}55">${p.pos}</div>
         <div class="pr-player-info">
@@ -293,13 +306,34 @@ const DLRPlayerReport = (() => {
             <span class="pr-nfl-team">${p.team}</span>
             ${p.rank < 999 ? `<span class="pr-adp">#${p.rank} ADP</span>` : ""}
           </div>
-          <div class="pr-leagues-line">${leagueNames}${more}</div>
+          <div class="pr-leagues-line"
+            data-collapsed="${_escAttr(collapsedChips + expandBtn)}"
+            data-all="${_escAttr(allChipsHtml)}">
+            ${collapsedChips}${expandBtn}
+          </div>
         </div>
         <div class="pr-ownership-bar">
           <div class="pr-bar-fill" style="width:${pct}%;background:${barCol}"></div>
           <span class="pr-bar-label" style="color:${barCol}">${pct}%</span>
         </div>
       </div>`;
+  }
+
+  // Expand or collapse the league list for a player row
+  function expandLeagues(btn, pid) {
+    const row = btn.closest(".pr-player-row");
+    if (!row) return;
+    const line = row.querySelector(".pr-leagues-line");
+    if (!line) return;
+    const isExpanded = row.dataset.expanded === "1";
+    if (isExpanded) {
+      line.innerHTML = line.dataset.collapsed;
+      row.dataset.expanded = "0";
+    } else {
+      const collapseBtn = `<button class="pr-leagues-expand-btn pr-leagues-expand-btn--open" onclick="event.stopPropagation();DLRPlayerReport.expandLeagues(this,'${pid}')" title="Show less">− less</button>`;
+      line.innerHTML = line.dataset.all + collapseBtn;
+      row.dataset.expanded = "1";
+    }
   }
 
   function _gemRow(p, rank) {
@@ -396,6 +430,6 @@ const DLRPlayerReport = (() => {
   function _esc(s)     { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function _escAttr(s) { return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
 
-  return { open, close, toggle, switchTab, filterPos };
+  return { open, close, toggle, switchTab, filterPos, expandLeagues };
 
 })();

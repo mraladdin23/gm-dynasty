@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: May 9, 2026 — Global Draft Ticker complete + on-demand refresh + MFL/Yahoo display-only support.*
+*Updated: May 12, 2026 — Draft Ticker overhauled (Sleeper-first), Hallway H2H, Admin Impersonation, tournament private flag.*
 
 ---
 
@@ -38,22 +38,22 @@ GitHub Pages (dynastylockerroom.com)
 ## File Map — Every File and Its Purpose
 
 ### Root
-- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted: `locker.css v=22`, `auth.css v=6`, `tournament.css v=6`. Viewport meta includes `viewport-fit=cover` for PWA safe area support.
-- `worker.js` — Cloudflare Worker. MFL bundle fetches, Yahoo OAuth flow + bundle + playerStats + tournament draft + tournament rosters. Deploy by pasting into Cloudflare dashboard.
+- `index.html` — Full SPA shell. All screens defined here. Firebase SDK loaded at bottom of body. CSS cache-busted: `locker.css v=22`, `auth.css v=6`, `tournament.css v=6`. JS cache-busted: `draft-ticker.js?v=5`. Viewport meta includes `viewport-fit=cover` for PWA safe area support. Cache-control `no-cache` meta tags added to prevent stale JS on mobile.
+- `worker.js` — Cloudflare Worker. MFL bundle fetches, Yahoo OAuth flow + bundle + playerStats + tournament draft + tournament rosters. Draft watcher cron. Deploy by pasting into Cloudflare dashboard.
 
 ### `css/`
 - `base.css` — Global variables, reset, typography. `.screen` uses `min-height: 100dvh`. `.screen.active { overflow: hidden }` on mobile.
 - `auth.css` — Login/register screen styles
-- `locker.css` — All app UI styles. v=22. Mobile: `100dvh` for app-view height, `env(safe-area-inset-top)` for nav + detail panel.
-- `tournament.css` — Tournament module styles. **v=6.** Contains all playoff UI styles, Players tab list view, year pips, analytics tabs, World Cup bracket canvas, weekly matchup cards (`.trn-wmu-*`), message board (`.trn-board-*`), unified registration form field list (`.trn-form-field-*`), tournament landing page list rows (`.trn-row-*`, `.trn-list`), tournament guide modal (`.trn-guide-*`).
+- `locker.css` — All app UI styles. v=22. Mobile: `100dvh` for app-view height, `env(safe-area-inset-top)` for nav + detail panel. Nav pills show icon-only on mobile (labels hidden). `.hl-h2h`, `.spinner--sm` added for Hallway H2H.
+- `tournament.css` — Tournament module styles. **v=6.**
 
 ### `js/` — Core modules (all vanilla JS IIFEs)
 
 | File | Purpose |
 |------|---------|
-| `app.js` | Orchestrates screens, auth state, global monitors, button handlers. |
+| `app.js` | Orchestrates screens, auth state, global monitors, button handlers. Contains `AdminImpersonate` module (admin-only view-as-user feature). `_openGlobalActivityModal()`, `_renderGlobalDraftBody()`, `_openGlobalDraftModal()` for draft/activity modals. |
 | `auth.js` | Firebase Auth wrapper. `sendPasswordReset(username)` calls worker endpoint which emails reset link via Resend to real address. |
-| `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. |
+| `firebase-db.js` | All Firebase Realtime DB reads/writes. REST API with 8-second AbortController timeouts. `linkPlatform` uses `.update()` not `.set()`. |
 | `profile.js` | League card grid, franchise history, league detail panel, MFL/Yahoo/Sleeper import. |
 | `mfl.js` | MFL API helpers. Full set of normalizers for standings, matchups, brackets, drafts. |
 | `yahoo.js` | Yahoo OAuth token management, `getLeagueBundle`, `normalizeBundle`. |
@@ -64,16 +64,16 @@ GitHub Pages (dynastylockerroom.com)
 | `transactions.js` | Transactions tab — all platforms. |
 | `analytics.js` | Analytics tab — Sleeper + MFL + Yahoo. |
 | `rules-and-fa.js` | League Rules + Players/Free Agents tab. |
-| `tournament.js` | Tournament module — full admin + user UI. See Tournament section below. |
-| `draft-ticker.js` | Global draft ticker — Worker cron + Firebase pub/sub. Monitors live/upcoming drafts across all leagues, trade-aware "My Next Pick" via `slot_to_roster_id` + `traded_picks`. |
-| `hallway.js` | The Hallway social feature |
+| `tournament.js` | Tournament module — full admin + user UI. Private tournament flag (`meta.isPrivate`) hides from public listing. |
+| `draft-ticker.js` | Global draft ticker — Sleeper-first client architecture. Checks Sleeper directly on load for all leagues. Worker cron supplements with pick counts for live drafts. See Draft Ticker section below. |
+| `hallway.js` | The Hallway social feature. H2H records shown per common league in manager modal, aggregated across dynasty chains. All three platforms supported. |
 | `trophy-room.js` | Trophy room display |
 | `players-db.js` | Cross-platform player DB. DynastyProcess CSV. `MAPPINGS_VERSION = "2026-04b"`. |
 | `salary.js` | Salary cap management. Force-reads from Firebase after every save to bust SDK cache. |
 | Other modules | `auction.js`, `playercard.js`, `idb-cache.js`, `chat.js`, `leaguegroups.js`, `manager-search.js`, `playerreport.js`, `config.js` |
 
 ### `tournaments/`
-- `index.html` — Public tournament directory and detail page. Reads from `gmd/publicTournaments/` (no auth required). Has mobile tab `<select>` dropdown, year selector, playoff tab with full round/standings/bracket rendering. Players tab fully at parity with internal. World Cup mode: group dropdown in Standings, tight bracket canvas in Playoffs. Message board tab (💬 Board) — read-only for anonymous, shows sign-in prompt. Landing page uses same `.trn-row-*` list layout as internal app. Filters: Type (playoff mode) + Admin (createdBy).
+- `index.html` — Public tournament directory. Private tournaments (`meta.isPrivate = true`) excluded from listing.
 
 ---
 
@@ -85,36 +85,77 @@ GitHub Pages (dynastylockerroom.com)
 
 ---
 
-## Tournament Mode — Architecture
+## Global Draft Ticker — Architecture (as of May 12, 2026)
+
+### Core principle
+**Client is self-sufficient.** On every page load, `_initialLoad()` checks Sleeper directly for all of the user's current-season leagues in parallel. No waiting for the Worker cron. The Worker supplements with pick counts for live drafts.
+
+### Client flow (`draft-ticker.js`)
+1. `_buildWatchList()` — reads `gmd/users/{username}/leagues`, filters to current-season Sleeper leagues only. `mostRecentSeason` filter ensures only one entry per dynasty chain (not all historical seasons). Writes `gmd/draftWatchIndex/{username}` for Worker.
+2. `_initialLoad()` — calls `_checkSleeperDirect(leagueId)` for every league in parallel. Finds live/upcoming drafts immediately. Supplements from Firebase draftStatus for traded_picks enrichment only.
+3. Scheduling — live drafts get Firebase realtime listener; upcoming use `_pollLeague()` (calls Sleeper directly) on graduated intervals (15min → 5min → 1min → 30s based on proximity).
+4. `_refreshLiveDrafts()` — fires on panel open, fetches fresh picks from Sleeper.
+5. `diagnose()` — public method, call `DraftTicker.diagnose()` from console for full state report.
+
+### Worker cron (`worker.js` — `runDraftWatcher`)
+- Reads `gmd/draftWatchIndex` (single node, all users unioned) + `gmd/draftStatus`.
+- Classifies leagues: `urgent` (drafting/paused) → always check; `neverChecked` → priority pending (up to 80/run); `alreadyChecked` → shuffled pending (up to 120 total/run).
+- Writes to `gmd/draftStatus/{leagueId}` — pick counts, traded picks, status changes.
+- `gmd/draftStatus` rules: `.read: auth != null, .write: false` — only Worker can write (via DB secret).
 
 ### Firebase paths
 ```
-gmd/draftWatchList/
-  {leagueId}: { leagueName, tid?, source: "league"|"tournament", tournamentName? }
-  — Written by client on DraftTicker.init(). Read by Worker cron every minute.
+gmd/draftWatchIndex/
+  {username}: { leagueId: leagueName, ... }
+  — Written by client on init(). Read by Worker cron.
+  — Rules: .read: auth != null, .write: auth != null
 
 gmd/draftStatus/
-  {leagueId}: { status, draftId, draftType, picksMade, totalPicks, nextPick,
+  {leagueId}: { status, draftId, draftType, picksMade, totalPicks,
                 draft_order, slot_to_roster_id, traded_picks, picks_hash,
-                startTime, leagueName, tid, source, updatedAt }
-  — Written ONLY by Worker (clients: .read=auth, .write=false).
-  — slot_to_roster_id from /draft/{id} endpoint (NOT /league/{id}/drafts)
-  — traded_picks: [{ roster_id, owner_id, round }] — original→current owner mapping
+                startTime, updatedAt }
+  — Written ONLY by Worker (via DB secret, bypasses rules).
+  — Rules: .read: auth != null, .write: false
+```
 
+### Worker debug endpoints
+```
+GET /draft/status              — Read full gmd/draftStatus
+GET /draft/test                — Step-by-step diagnostic
+GET /draft/diagnose?username=X — Full per-user report: leagues, filter results,
+                                  draftStatus vs Sleeper cross-check, mismatches
+GET /draft/rebuildWatchIndex   — Backfill draftWatchIndex for ALL users (run once)
+GET /draft/forcecheck          — Force-check a specific league
+```
+
+---
+
+## Admin Impersonation (`app.js`)
+
+- `AdminImpersonate` module — `ADMINS = ["mraladdin23"]`
+- 👁 button in nav (only visible to admins). Prompts for username, loads their Firebase profile, re-renders entire app as them.
+- Purple banner: "Viewing as {username} — read only". Exit button restores your session.
+- DraftTicker re-inits as target user. Run `DraftTicker.diagnose()` to see their exact state.
+- Firebase Auth session unchanged — nothing writes under their account.
+
+---
+
+## Tournament Module
+
+### Firebase paths
+```
 gmd/tournaments/{tid}/
-  meta/             — name, tagline, status, regType, rankBy, playoffStartWeek, bio, createdAt, createdBy
-  leagues/          — batch structure: {batchId: {platform, year, leagues: {leagueId: {name, conference, division}}}}
+  meta/             — name, tagline, status, regType, rankBy, playoffStartWeek, bio,
+                      createdAt, createdBy, isPrivate (optional — hides from public listing)
+  leagues/          — batch structure: {batchId: {platform, year, leagues: {leagueId: {name, ...}}}}
   roles/            — {username: {role: "admin"|"sub_admin"}}
   registrationForm/ — {fields, optionalFields, customQuestions, fieldOrder}
-                      fieldOrder: [{type:"std"|"opt"|"custom", key?, question?, questionType?, required?, options?}]
-  registrations/    — {rid: {displayName, email, status, custom_0, custom_1, ..., importedAt, reviewedAt, reviewedBy}}
-  participants/     — {pid: {displayName, teamName, email,
-                             sleeperUserId, sleeperUsername, sleeperDisplayName,
-                             mflEmail, yahooUsername,
-                             twitterHandle, gender, years[], dlrLinked, dlrUsername, syncedAt}}
-  standingsCache/   — {year_leagueId: {leagueName, platform, year, conference, division, champion,
-                                        leagueStatus, teams:[{teamId, userId, sleeperUsername,
-                                        teamName, wins, losses, ties, pf, pa}], lastSynced}}
+  registrations/    — {rid: {displayName, email, status, custom_0..., importedAt, ...}}
+  participants/     — {pid: {displayName, teamName, email, sleeperUserId, sleeperUsername,
+                             mflEmail, yahooUsername, twitterHandle, gender, years[],
+                             dlrLinked, dlrUsername, syncedAt}}
+  standingsCache/   — {year_leagueId: {leagueName, platform, year, conference, division,
+                                        champion, leagueStatus, teams:[...]}}
   playoffs/         — {year: {mode, qualification, seeding, byes, pointsRounds, customRounds,
                                bracketSize, h2hRounds, h2hRoundWeeks, h2hReseed,
                                startWeek, endWeek, recognizeLeagueChampions,
@@ -131,151 +172,17 @@ gmd/tournamentChats/{tid}_{year}/
 
 gmd/publicTournaments/{tid}/
   — Meta fields + leagueCount, registrationCount, standingsCache, participantMap
-  — playoffMode (string) — written by _writePublicSummary via _tMode(t)
-  — createdBy (string) — written by _writePublicSummary from meta.createdBy
-  — playoffs/{year} — published snapshot with computedRounds, leagueChamps, standings,
-                       finalRankings (all with displayName), worldcup config fields,
-                       h2hRounds, h2hRoundWeeks, h2hReseed
-  — adpByYear/{year} — published ADP data for public site
+  — playoffMode, createdBy written by _writePublicSummary
+  — NOT written if meta.isPrivate === true (_writePublicSummary removes the node instead)
+  — playoffs/{year} — published snapshot
 ```
-
-### Key tournament helper functions
-
-**`_tMode(t)`** — Derives the active playoff mode from a tournament object. Reads `t.playoffs[mostRecentYear].mode` (year-keyed), falls back to `t.playoffs.mode` (legacy flat), then `"total_points"`. Always use this instead of reading `t.playoff?.mode` (wrong key).
-
-**`_backfillPublicSummaries()`** — Runs silently after `_loadTournaments()` on every page load. Re-publishes any public tournament node missing `playoffMode` or `createdBy`. No-op once all nodes are up to date.
-
-**`_autoSyncParticipants(tid, t)`** — Fetches rosters from all league batches (Sleeper/MFL/Yahoo), deduplicates by `dedupKey` (Sleeper: `user_id`, MFL: email, Yahoo: nickname), upserts participant records, then calls `_matchParticipantsToDLR` on all participants. Does a fresh Firebase read before dedup to avoid stale-snapshot duplicates. Single `participantsRef.update(updates)` write.
-
-**`_matchParticipantsToDLR(tid, participantsMap)`** — Reads `gmd/users/*/platforms` and builds lookup indexes for all three platforms:
-- Sleeper: `platforms/sleeper/sleeperUsername`, `platforms/sleeper/username`, `platforms/sleeper/displayName`
-- MFL: `platforms/mfl/mflEmail`
-- Yahoo: `platforms/yahoo/username`, `platforms/yahoo/yahooUsername`
-Returns `{ newMatches, alreadyLinked, total }` — caller handles toast and re-render.
-
-### Key behaviors
-
-**Standings display name:** Uses participant `displayName`. Lookup keyed by `sleeperUsername` (stable) first, then display name / team name.
-
-**Playoff config is year-scoped:** Each season stored at `playoffs/{year}/`. Admin selects year via year selector; `_activePoYear` passed through rerender chain.
-
-**Qualification engine:** `_runCompositeQual` with `_groupKey`. Falls back to `leagueName` when `division/conference` fields are empty.
-
-**Publish:** Fetches all playoff weeks, computes `computedRounds` and `finalRankings`. Writes to both `publicTournaments/{tid}/playoffs/{year}` AND `tournaments/{tid}/playoffs/{year}/finalRankings`. **Players tab stats (PO apps, rank, titles, pips) only activate after publish with a champion in `finalRankings`.**
-
-**Regular season gating (all modes):**
-- `_regSeasonComplete(t, po, year)` — returns true when `latestWeekPlayed >= po.startWeek - 1`
-- `_playoffsUnderway(t, po, year)` — returns true when `latestWeekPlayed >= po.startWeek`
-- `_computeQualCount(t, po)` — derives playoff qualifier count for cut-line positioning
-
-**finalRankings:** Rank 1 = overall champion. Mode-specific:
-- `total_points`: ranked by PF desc
-- `points_rounds`: backwards from round simulation (supports multi-week rounds via `weeksPerRound`)
-- `custom_rounds`: simulates PF-based group advancement; includes `customRounds.matchups` for H2H assignment
-- `h2h_bracket`: simulates bracket from `_weekScoreCache`; falls back to seed order
-- `worldcup`: reads actual `{a,b,scoreA,scoreB}` bracket objects; bracket champion first, then eliminated by deepest round, then group-stage eliminated, then non-qualifiers by group PF
-
----
-
-### Tournament Landing Page
-
-**Internal app list rows** use `.trn-row` → `.trn-row-main` + `.trn-row-right`:
-```
-.trn-row-main (flex:1)
-  .trn-row-line1  ← tournament name
-  .trn-row-line2  ← tagline/description
-  .trn-row-line3  ← type badge + league count + reg count + admin
-.trn-row-right (260px desktop, 100% mobile)
-  trn-status-badge
-  .trn-row-actions (162px desktop, auto mobile)
-    btn-primary (Manage)
-    btn-secondary (View)
-```
-
-Desktop fixed widths live in `@media (min-width: 701px)` — not the base rule — so mobile never has to fight overrides.
-
-Mobile (`≤700px`): rows stack to column, `trn-row-right` goes full width with `border-top` separator. `overflow-x: hidden !important` on `#view-tournament.active` prevents horizontal clipping from `locker.css .screen.active`.
-
-**Filter row:** Three selects (View/Type/Admin) using `flex: 1 1 0` + `flex-wrap: nowrap`. Type built from `_tMode(t)` across all tournaments. Admin from `meta.createdBy`.
-
-**"My Tournaments"** tab: `discoveredBy[currentUsername]` OR `dlrLinked + dlrUsername === currentUsername` as participant. Being admin-only does NOT qualify.
-
-**Public site:** Same row structure, same `tournament.css`. Type + Admin filters only (no status filter). `playoffMode` and `createdBy` must be present in the public node — auto-backfilled by `_backfillPublicSummaries()`.
-
----
-
-### Registration Form — fieldOrder
-
-The form builder saves `fieldOrder[]` — an ordered array of all fields including std, opt, and custom questions interleaved. This is the authoritative order for both the admin builder and user-facing form.
-
-```js
-fieldOrder: [
-  { type: "std", key: "displayName" },
-  { type: "std", key: "email" },
-  { type: "opt", key: "sleeperUsername" },
-  { type: "custom", question: "Your question?", questionType: "select", required: true,
-    options: ["Option A", "Option B"] },
-  { type: "opt", key: "gender" }
-]
-```
-
-Custom question answers are stored as `custom_0`, `custom_1` etc in Firebase — never the raw question text. The import template uses these same safe keys.
-
----
-
-### H2H Bracket Rounds
-
-```js
-po.h2hRounds: [
-  { weeksPerRound: 1, blend: null },     // Round 1
-  { weeksPerRound: 1, blend: null },     // Semifinals
-  { weeksPerRound: 2, blend: {...} }     // Championship
-]
-po.h2hRoundWeeks: [1, 1, 2]             // derived array for backward compat
-po.h2hReseed: true|null                 // reseed after each round
-```
-
----
-
-### Tab structure (internal admin + user)
-```
-Admin tabs: Overview | Leagues | Roles | Registration Form | Registrants |
-            Participants | Standings | Playoffs | Info/Rules |
-            Players | Most Rostered | ADP vs Finish | Match Analysis | Matchups | Board
-
-User tabs:  Info | Rules | Standings | Playoffs | Draft | Match Analysis | Matchups |
-            Rosters | Players | Most Rostered | ADP vs Finish | Board
-```
-
----
-
-### Message Board
-
-Firebase path: `gmd/tournamentChats/{tid}_{year}/`
-Message types: `text`, `gif`, `poll`
-Poll votes stored as: `{messageId}/votes/{username} = optionIndex`
-
----
-
-### Weekly Matchups Tab
-
-State variables: `_weeklyMuWeek`, `_weeklyMuFilter`, `_weeklyMuPage`, `_weeklyMuCache`
-All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
-
----
-
-### Draft Tab
-
-- **Live updates:** `_draftForceRefresh` flag bypasses Firebase + in-memory cache when set. Set by refresh button and by live poll when new picks detected. Cleared after fetch completes.
-- **League dropdown:** `selected` attribute applied to current `_draftLeague` so it doesn't snap back on re-render.
-- **Live poll:** `_startDraftPoll` / `_stopDraftPoll` — Sleeper every 15s for `draft_status === "drafting"`. MFL/Yahoo still require manual refresh.
 
 ---
 
 ## Worker Endpoints
 
 | Path | Method | Purpose |
-|------|--------|---------|\
+|------|--------|---------|
 | `/auth/yahoo/login` | GET | Start Yahoo OAuth flow |
 | `/auth/yahoo/callback` | GET | OAuth callback, redirect to app |
 | `/auth/yahoo/refresh` | POST | Refresh Yahoo token |
@@ -296,8 +203,10 @@ All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 | `/tournament/recap` | POST | AI-generated weekly recap via Claude Haiku |
 | `/auth/passwordReset` | POST | Look up real email, generate Firebase reset link, send via Resend |
 | `/draft/status` | GET | Read `gmd/draftStatus` from Firebase (debug) |
-| `/draft/test` | GET | Step-by-step diagnostic: watchList → Sleeper → Firebase write |
-| `/draft/forcecheck` | GET | Force-write Ballers 6 draft status with full draft object fetch |
+| `/draft/test` | GET | Step-by-step diagnostic: watchIndex → Sleeper → Firebase write |
+| `/draft/diagnose?username=X` | GET | Full per-user report: leagues, filter, draftStatus vs Sleeper, mismatches |
+| `/draft/rebuildWatchIndex` | GET | Backfill draftWatchIndex for all users (one-time admin) |
+| `/draft/forcecheck` | GET | Force-check a specific league's draft status |
 
 ---
 
@@ -307,60 +216,51 @@ All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 - Always use `.update()` for merges, never `.set()` on existing nodes with data you want to keep
 - Firebase Realtime DB keys cannot contain: `. # $ / [ ]` — sanitize user-supplied strings
 - `GMDB.saveLeagues` (plural) is correct — `saveLeague` (singular) does not exist
-- For large datasets (e.g. 300+ registrations), always fetch the specific child ref (`_tRegsRef`) directly rather than reading the full tournament snapshot
+- For large datasets (e.g. 300+ registrations), always fetch the specific child ref directly
 
 ### Mobile scroll
 - `base.css`: `.screen.active { overflow: hidden }` — clips everything at mobile
 - To make a view scrollable: add `#view-{name}.active { overflow-y: auto !important; overflow-x: hidden !important; height: calc(100dvh - 48px) !important; }` to the relevant CSS file
-- Setting `overflow-y` explicitly also sets `overflow-x: auto` — always set both explicitly
 
-### CSS versioning
-- `locker.css` is at **v=22**, `auth.css` at **v=6**, `tournament.css` at **v=6**
-- Bump `?v=N` in the `<link>` tag in `index.html` when deploying CSS changes
+### CSS/JS versioning
+- `locker.css` is at **v=22**, `auth.css` at **v=6**, `tournament.css` at **v=6**, `draft-ticker.js` at **v=5**
+- Bump `?v=N` in `index.html` when deploying changes to force cache bust
+- `index.html` itself has `no-cache` meta tags — browsers always fetch a fresh copy
+
+### Draft Ticker
+- **Client-first:** `_initialLoad()` checks Sleeper directly for all leagues on load. No Worker dependency for discovery.
+- **`mostRecentSeason` filter:** dynasty chains store one Firebase entry per season. Only include leagues where `l.season === l.mostRecentSeason` (or `mostRecentSeason` absent). Without this, a 6-year dynasty shows up 6× in the watchList.
+- **Tournament bloat:** `_buildWatchList` section 2 only *annotates* leagues already in watchList with tournament name — does NOT add new leagues just because user is tournament admin. Prevents BOTS 336-league explosion.
+- **`gmd/draftStatus` rules:** `.write: false` for clients — only Worker writes via DB secret. Client attempts to write will get `permission_denied` (harmless, fire-and-forget).
+- **`gmd/draftWatchIndex` rules:** `.read: auth != null, .write: auth != null` — clients write their own slot.
+- **Impersonation + diagnose:** Use `AdminImpersonate.viewAs("username")` then `DraftTicker.diagnose()` to debug any user's ticker state without touching their account.
+- **`/draft/rebuildWatchIndex`:** Run once after deployment to backfill all existing users' watchIndex entries.
 
 ### Tournament type detection
-- Always use `_tMode(t)` — never `t.playoff?.mode` (wrong key, no 's') or `t.playoffs?.mode` (misses year-keyed config)
+- Always use `_tMode(t)` — never `t.playoff?.mode` or `t.playoffs?.mode`
 - `_tMode` reads `t.playoffs[mostRecentYear].mode` first, then flat `t.playoffs.mode`, then defaults to `"total_points"`
 
-### Tournament year/string normalization
-- `lc.year` in standingsCache can be a **number** (e.g. `2025`); `Object.keys(poByYear)` returns **strings**
-- Always normalize with `String(yr)` when comparing or using as Set/Map keys
+### Tournament private flag
+- `meta.isPrivate = true` prevents `_writePublicSummary` from writing to `gmd/publicTournaments/{tid}`
+- If already published, saving with the flag checked removes the public node
 
 ### Participant sync
-- Sleeper `u.username` can be null for users who never set one — fall back to `u.display_name`
-- Use `u.user_id` as `dedupKey`, not username (user_id is always present and unique)
+- Sleeper `u.username` can be null — fall back to `u.display_name`
+- Use `u.user_id` as `dedupKey` (always unique)
 - DLR stores Sleeper identity at `platforms/sleeper/sleeperUsername` (primary), also check `platforms/sleeper/username` and `platforms/sleeper/displayName`
-- Always do a fresh `_tParticipantsRef(tid).once("value")` read before building dedup maps — never rely on the tournament snapshot's `participants` node which may be stale
 
 ### Worker deployment
 - Changes to `worker.js` require a **separate paste into Cloudflare dashboard** — git push alone does nothing
 - `YAHOO_REDIRECT_URI` must be `https://mfl-proxy.mraladdin23.workers.dev/auth/yahoo/callback`
 
-### Registration Import
-- Status values in CSV must be lowercase (`approved`, `pending`, `denied`) — importer normalizes automatically
-- Custom question columns must use `custom_0`, `custom_1` etc as headers (not question text)
-
-### Global Draft Ticker
-- **Cloudflare Workers Paid plan required** — free plan has 10ms CPU limit on cron triggers, paid gives 30s
-- `/league/{id}/drafts` does NOT include `slot_to_roster_id` — must fetch `/draft/{id}` separately
-- `gmd/draftWatchList` security rules: `.read: auth != null, .write: auth != null`
-- `gmd/draftStatus` security rules: `.read: auth != null, .write: false` (Worker writes via DB secret)
-- `linkPlatform` in `firebase-db.js` must use `.update()` not `.set()` — `.set()` wipes `sleeperUserId` on every Sleeper refresh
-- `slot_to_roster_id`: maps draft slot → rosterId. `traded_picks.roster_id` = original slot, `.owner_id` = current owner rosterId
-- Skip-if-unchanged check must also check `prev.slot_to_roster_id` — always rewrite if missing
-- Seeded all 135 leagues with `picks_hash: "seeded"` to prevent first-run timeout; cron processes 15 pending/run
-- On-demand refresh: `_refreshLiveDrafts()` fires on every panel open — fetches Sleeper directly, bypasses cron timing issues
-- MFL/Yahoo live tracking not supported — requires per-user auth in cron (security tradeoff); shown as display-only rows with "Open league to refresh" CTA
-- `_nonSleeperLeagues` map collects MFL/Yahoo leagues during `_buildWatchList`; cleared on `stop()`
+### Auth
+- Synthetic email format: `username@gmdynasty.app`
+- Password reset: worker mints service account JWT → calls Firebase Auth Admin API → sends link via Resend
+- Resend sender: `support@dynastylockerroom.com`
+- Worker secrets: `RESEND_API_KEY`, `FIREBASE_DB_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`
 
 ### Yahoo
 - Test on **mobile data** — home router blocks workers.dev and firebaseio.com WebSocket
-
-### Auth
-- Synthetic email format: `username@gmdynasty.app` — Firebase Auth only knows this email
-- Password reset: worker mints service account JWT → calls Firebase Auth Admin API with `returnOobLink: true` → sends link to real email via Resend
-- Resend sender: `support@dynastylockerroom.com`
-- Worker secrets: `RESEND_API_KEY`, `FIREBASE_DB_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`
 
 ---
 
@@ -377,7 +277,7 @@ All four cleared on tournament switch and year change. Cache TTL: 5 minutes.
 I'm building Dynasty Locker Room (DLR), a fantasy football SPA at dynastylockerroom.com.
 Repo: mraladdin23/gm-dynasty (GitHub Pages).
 Stack: Vanilla JS, Firebase Realtime DB, Cloudflare Worker (mfl-proxy.mraladdin23.workers.dev).
-Worker deployed by pasting into Cloudflare dashboard editor (no wrangler.toml).
+Worker deployed by pasting into Cloudflare dashboard editor.
 Platforms: Sleeper ✅, MFL ✅, Yahoo ✅.
 [Attach DLR_PROJECT_SUMMARY.md + DLR_TODO_LIST.md]
 Today I want to work on: [specific task]
