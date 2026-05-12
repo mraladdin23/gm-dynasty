@@ -5966,7 +5966,10 @@ select option { background: var(--color-bg-2); }
   }
 }
 
-/* Hide activity pills on mobile — live in drawer instead */
+/* Mobile: show activity pills icon-only — hide labels and contact button */
 @media (max-width: 640px) {
-  .nav-actions { display: none !important; }
+  .nav-pill-label  { display: none !important; }
+  .nav-pill        { padding: 5px 8px; min-width: 28px; justify-content: center; }
+  .nav-actions > a { display: none !important; } /* hide Contact link */
+  .nav-actions     { margin-right: var(--space-2); gap: var(--space-1); }
 }
