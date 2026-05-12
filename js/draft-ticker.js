@@ -825,6 +825,25 @@ const DraftTicker = (() => {
     return _lastItems;
   }
 
-  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, refreshForModal, getLastItems: () => _lastItems };
+  function diagnose() {
+    const report = {
+      username:      _username,
+      leagueCount:   _leagueMeta.size,
+      leagues:       [..._leagueMeta.entries()].map(([id, m]) => ({ id, name: m.leagueName })),
+      sleeperChecks: _debugSleeperResults,
+      statusCache:   Object.fromEntries([..._statusCache.entries()].map(([id, s]) => [id, {
+        status:    s.status,
+        startTime: s.startTime ? new Date(s.startTime).toISOString() : null,
+        draftId:   s.draftId || null
+      }])),
+      live:        _lastItems.live.map(i => i.leagueName),
+      upcoming:    _lastItems.upcoming.map(i => ({ name: i.leagueName, starts: new Date(i.startTime).toISOString() })),
+      pillVisible: document.getElementById("draft-ticker-wrap")?.style.display !== "none"
+    };
+    console.log("[DraftTicker.diagnose]", JSON.stringify(report, null, 2));
+    return report;
+  }
+
+  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, refreshForModal, getLastItems: () => _lastItems, diagnose };
 
 })();
