@@ -1743,9 +1743,9 @@ async function runDraftWatcher(env) {
     }
     if (prev.status === "pre_draft") {
       if (!prev.startTime) {
-        // Already checked, no draft found — skip for a while
-        // Re-check every 30 minutes using updatedAt
-        if (!prev.updatedAt || (now - prev.updatedAt) > 30 * 60 * 1000) {
+        // Already checked, no draft found — re-check every 10 minutes
+        // (drafts can be scheduled at any time so keep this fresh)
+        if (!prev.updatedAt || (now - prev.updatedAt) > 10 * 60 * 1000) {
           pending.push(id);
         }
         continue;
@@ -1763,8 +1763,8 @@ async function runDraftWatcher(env) {
   }
 
   // Process all urgent (live drafts) immediately — should be a small number
-  // Process only 15 pending per run — spreads initial scan across ~9 cron runs
-  const PENDING_PER_RUN = 15;
+  // Process 40 pending per run — balances thoroughness vs Cloudflare CPU limits
+  const PENDING_PER_RUN = 40;
   const toCheck = [...urgent, ...pending.slice(0, PENDING_PER_RUN)];
 
   console.log(`[DraftWatcher] urgent=${urgent.length} pending=${pending.length} checking=${toCheck.length} skipping=${toSkip.length}`);
