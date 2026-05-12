@@ -972,17 +972,13 @@ function _updateGlobalAucPill(liveByLeague) {
 
 // ── Show/hide the Activity drawer section + mobile nav button ──────────────────
 function _syncDrawerActivity() {
+  // Drawer activity section — kept for compatibility but activity now lives in nav pills
   const aucVisible   = document.getElementById("drawer-auc-section")?.style.display   !== "none";
   const draftVisible = document.getElementById("drawer-draft-section")?.style.display !== "none";
   const notifVisible = document.getElementById("drawer-notif-section")?.style.display !== "none";
   const hasActivity  = aucVisible || draftVisible || notifVisible;
-
   const activity = document.getElementById("drawer-activity-section");
   if (activity) activity.style.display = hasActivity ? "" : "none";
-
-  // Mobile nav activity button — pulsing red dot next to hamburger
-  const btn = document.getElementById("nav-activity-btn");
-  if (btn) btn.style.display = hasActivity ? "flex" : "none";
 }
 
 // ── Notification tracker ────────────────────────────────────

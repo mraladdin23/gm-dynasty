@@ -98,6 +98,10 @@ const DraftTicker = (() => {
         if (meta[key]?.isCommissioner && !meta[key]?.isOwner) continue;
         const season = l.season || l.year || 0;
         if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+        // For dynasty/keeper chains, only include the current-season entry.
+        // Each season of a chain has mostRecentSeason set to the franchise's
+        // active season — skip any entry where this league's season is stale.
+        if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) continue;
         const id = String(l.leagueId || l.league_id);
         watchList.set(id, { leagueName: l.leagueName || l.name || id, source: "league" });
       }
@@ -331,9 +335,15 @@ const DraftTicker = (() => {
       const snap   = await GMD.child(`${FB_STATUS_PATH}/${leagueId}`).once("value");
       const status = snap.val();
 
-      if (!status || status.status === "complete") {
+      if (status?.status === "complete") {
         _detachLeague(leagueId);
         await _redraw();
+        return;
+      }
+      // null status means Worker hasn't written yet — keep existing cache,
+      // retry in 5 minutes rather than removing the league from the display
+      if (!status) {
+        _schedulePoll(leagueId, 5 * 60 * 1000);
         return;
       }
 

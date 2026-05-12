@@ -507,23 +507,28 @@ if (path === "/draft/test" && req.method === "GET") {
     const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
     // Step 1: build watch list from gmd/users (same as cron)
-    const usersRes  = await fetch(`${FB}/users.json?${auth}&shallow=false`);
-    const allUsers  = (await usersRes.json()) || {};
     const curYear   = new Date().getFullYear();
     const relevant  = new Set([curYear-1, curYear, curYear+1, String(curYear-1), String(curYear), String(curYear+1)]);
-    const watchList = {};
-    for (const [, ud] of Object.entries(allUsers)) {
-      for (const [, l] of Object.entries(ud?.leagues || {})) {
-        if (!l.leagueId && !l.league_id) continue;
-        if (l.platform !== "sleeper") continue;
-        const season = l.season || l.year || 0;
-        if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
-        const id = String(l.leagueId || l.league_id);
-        if (!watchList[id]) watchList[id] = { leagueName: l.leagueName || l.name || id };
-      }
-    }
+    const usersShRes = await fetch(`${FB}/users.json?${auth}&shallow=true`);
+    const userKeys   = Object.keys((await usersShRes.json()) || {});
+    const watchList  = {};
+    await Promise.allSettled(userKeys.map(async uname => {
+      try {
+        const r = await fetch(`${FB}/users/${uname}/leagues.json?${auth}`);
+        if (!r.ok) return;
+        const lgs = await r.json() || {};
+        for (const [, l] of Object.entries(lgs)) {
+          if (!l.leagueId && !l.league_id || l.platform !== "sleeper") continue;
+          const season = l.season || l.year || 0;
+          if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+          if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) continue;
+          const id = String(l.leagueId || l.league_id);
+          if (!watchList[id]) watchList[id] = { leagueName: l.leagueName || l.name || id };
+        }
+      } catch(e) {}
+    }));
     const allIds = Object.keys(watchList);
-    log.push({ step: "watchList", userCount: Object.keys(allUsers).length, leagueCount: allIds.length });
+    log.push({ step: "watchList", userCount: userKeys.length, leagueCount: allIds.length });
 
     // Step 2: read existing draftStatus
     const statusRes = await fetch(`${FB}/draftStatus.json?${auth}`);
@@ -1691,32 +1696,38 @@ async function runDraftWatcher(env) {
   const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
   const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-  const [usersRes, statusRes] = await Promise.all([
-    fetch(`${FB}/users.json?${auth}&shallow=false`),
+  // Fetch user list (shallow — just usernames) and draftStatus in parallel.
+  // Then fetch each user's leagues node individually to avoid a massive full read.
+  const [usersShallowRes, statusRes] = await Promise.all([
+    fetch(`${FB}/users.json?${auth}&shallow=true`),
     fetch(`${FB}/draftStatus.json?${auth}`)
   ]);
-  const allUsers = (await usersRes.json()) || {};
+  const userKeys = Object.keys((await usersShallowRes.json()) || {});
   const existing = (await statusRes.json()) || {};
 
-  // Build watch list by scanning all users' leagues for current-season Sleeper leagues.
+  // Fetch all users' leagues in parallel (leagues node only, not full user data)
   const curYear = new Date().getFullYear();
   const relevant = new Set([curYear - 1, curYear, curYear + 1,
     String(curYear - 1), String(curYear), String(curYear + 1)]);
-  const watchList = {}; // leagueId → { leagueName }
+  const watchList = {};
 
-  for (const [, userData] of Object.entries(allUsers)) {
-    const leagues = userData?.leagues || {};
-    for (const [, l] of Object.entries(leagues)) {
-      if (!l.leagueId && !l.league_id) continue;
-      if (l.platform !== "sleeper") continue;
-      const season = l.season || l.year || 0;
-      if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
-      const id = String(l.leagueId || l.league_id);
-      if (!watchList[id]) {
-        watchList[id] = { leagueName: l.leagueName || l.name || id };
+  await Promise.allSettled(userKeys.map(async username => {
+    try {
+      const r = await fetch(`${FB}/users/${username}/leagues.json?${auth}`);
+      if (!r.ok) return;
+      const leagues = await r.json() || {};
+      for (const [, l] of Object.entries(leagues)) {
+        if (!l.leagueId && !l.league_id) continue;
+        if (l.platform !== "sleeper") continue;
+        const season = l.season || l.year || 0;
+        if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
+        // Only include current-season entry for dynasty chains
+        if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) continue;
+        const id = String(l.leagueId || l.league_id);
+        if (!watchList[id]) watchList[id] = { leagueName: l.leagueName || l.name || id };
       }
-    }
-  }
+    } catch(e) {}
+  }));
 
   const allIds = Object.keys(watchList);
   if (!allIds.length) return;
@@ -1743,9 +1754,9 @@ async function runDraftWatcher(env) {
     }
     if (prev.status === "pre_draft") {
       if (!prev.startTime) {
-        // Already checked, no draft found — re-check every 10 minutes
-        // (drafts can be scheduled at any time so keep this fresh)
-        if (!prev.updatedAt || (now - prev.updatedAt) > 10 * 60 * 1000) {
+        // Already checked, no draft found — skip for a while
+        // Re-check every 30 minutes using updatedAt
+        if (!prev.updatedAt || (now - prev.updatedAt) > 30 * 60 * 1000) {
           pending.push(id);
         }
         continue;
@@ -1763,8 +1774,8 @@ async function runDraftWatcher(env) {
   }
 
   // Process all urgent (live drafts) immediately — should be a small number
-  // Process 40 pending per run — balances thoroughness vs Cloudflare CPU limits
-  const PENDING_PER_RUN = 40;
+  // Process only 15 pending per run — spreads initial scan across ~9 cron runs
+  const PENDING_PER_RUN = 15;
   const toCheck = [...urgent, ...pending.slice(0, PENDING_PER_RUN)];
 
   console.log(`[DraftWatcher] urgent=${urgent.length} pending=${pending.length} checking=${toCheck.length} skipping=${toSkip.length}`);
