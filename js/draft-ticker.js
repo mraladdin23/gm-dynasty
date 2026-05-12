@@ -336,34 +336,39 @@ const DraftTicker = (() => {
     _timers.set(leagueId, entry);
   }
 
-  // ── Poll one league status from Firebase ───────────────
+  // ── Poll one league directly against Sleeper ──────────
+  // Client is self-sufficient — no Firebase dependency for discovery.
   async function _pollLeague(leagueId) {
     try {
-      const snap   = await GMD.child(`${FB_STATUS_PATH}/${leagueId}`).once("value");
-      const status = snap.val();
+      const status = await _checkSleeperDirect(leagueId);
 
-      if (status?.status === "complete") {
-        _detachLeague(leagueId);
+      if (!status) {
+        // No active/upcoming draft — retry in 15 min
+        _statusCache.set(leagueId, {
+          status: "pre_draft", picks_hash: "client-checked",
+          startTime: null, updatedAt: Date.now()
+        });
+        _schedulePoll(leagueId, 15 * 60 * 1000);
         await _redraw();
         return;
       }
-      // null status means Worker hasn't written yet — keep existing cache,
-      // retry in 5 minutes rather than removing the league from the display
-      if (!status) {
-        _schedulePoll(leagueId, 5 * 60 * 1000);
+
+      if (status.status === "complete") {
+        _detachLeague(leagueId);
+        await _redraw();
         return;
       }
 
       _statusCache.set(leagueId, status);
       const interval = _pollInterval(status);
       if (interval === null) {
-        _attachListener(leagueId);
+        _attachListener(leagueId); // live — use Firebase realtime listener
       } else {
         _schedulePoll(leagueId, interval);
       }
       await _redraw();
     } catch(e) {
-      _schedulePoll(leagueId, 5 * 60 * 1000); // retry in 5min on error
+      _schedulePoll(leagueId, 5 * 60 * 1000);
     }
   }
 
@@ -376,91 +381,98 @@ const DraftTicker = (() => {
     if (_tickerOpen) _renderPanel(items);
   }
 
-  // ── Load all current statuses in one Firebase read ─────
+  // ── Check one league directly against Sleeper ──────────
+  // Returns a status object or null if no active/upcoming draft.
+  async function _checkSleeperDirect(leagueId) {
+    const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+    if (!r.ok) return null;
+    const drafts = await r.json();
+    if (!Array.isArray(drafts) || !drafts.length) return null;
+
+    const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
+    const draft = drafts
+      .filter(d => d.status !== "complete")
+      .sort((a, b) =>
+        (priority[a.status] ?? 9) - (priority[b.status] ?? 9) ||
+        (b.start_time || 0) - (a.start_time || 0)
+      )[0];
+
+    if (!draft) return null;
+
+    const now     = Date.now();
+    const startMs = draft.start_time
+      ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
+      : null;
+
+    const status = {
+      status:            draft.status,
+      draftId:           draft.draft_id,
+      draftType:         draft.type,
+      totalPicks:        (draft.settings?.teams || 12) * (draft.settings?.rounds || 15) || null,
+      draft_order:       draft.draft_order       || {},
+      slot_to_roster_id: draft.slot_to_roster_id || {},
+      traded_picks:      [],
+      picksMade:         0,
+      picks_hash:        "client-checked",
+      startTime:         startMs,
+      updatedAt:         now
+    };
+
+    if (draft.status === "drafting" || draft.status === "paused") {
+      try {
+        const pr = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
+        if (pr.ok) {
+          const picks = await pr.json();
+          status.picksMade  = Array.isArray(picks) ? picks.length : 0;
+          status.picks_hash = `${status.picksMade}:${picks[picks.length-1]?.player_id || ""}`;
+        }
+      } catch(e) {}
+    }
+
+    return status;
+  }
+
+  // ── Load all statuses on init — Sleeper-first, Firebase as supplement ──
+  // Check every league directly against Sleeper on load. No Worker dependency.
+  // Firebase draftStatus is used only to enrich live drafts with traded_picks
+  // data that the Worker may have already fetched.
   async function _initialLoad() {
+    // Fire all Sleeper checks in parallel — this is the authoritative source
+    await Promise.allSettled([..._leagueMeta.keys()].map(async leagueId => {
+      try {
+        const status = await _checkSleeperDirect(leagueId);
+        if (status) {
+          _statusCache.set(leagueId, status);
+        }
+        // If no active draft found, mark as checked so _pollInterval
+        // doesn't schedule unnecessary retries
+        else if (!_statusCache.has(leagueId)) {
+          _statusCache.set(leagueId, {
+            status: "pre_draft", picks_hash: "client-checked",
+            startTime: null, updatedAt: Date.now()
+          });
+        }
+      } catch(e) {
+        console.warn("[DraftTicker] Sleeper check failed for", leagueId, e.message);
+      }
+    }));
+
+    // Supplement with Firebase data for any live drafts — Worker may have
+    // richer pick/traded_picks data from its last run
     try {
       const snap = await GMD.child(FB_STATUS_PATH).once("value");
       const all  = snap.val() || {};
-      for (const [leagueId, status] of Object.entries(all)) {
-        if (_leagueMeta.has(leagueId)) {
-          _statusCache.set(leagueId, status);
+      for (const [leagueId, fbStatus] of Object.entries(all)) {
+        if (!_leagueMeta.has(leagueId)) continue;
+        const cached = _statusCache.get(leagueId);
+        // Only use Firebase data if it's richer (has traded picks or more picks)
+        if (cached && (cached.status === "drafting" || cached.status === "paused")) {
+          if (fbStatus.traded_picks?.length > 0 && !cached.traded_picks?.length) {
+            _statusCache.set(leagueId, { ...cached, traded_picks: fbStatus.traded_picks });
+          }
         }
       }
-    } catch(e) { console.warn("[DraftTicker] Initial status load failed:", e.message); }
-
-    // For leagues with no status (never checked by Worker) or stale status
-    // (Worker may not have cycled through yet), check Sleeper directly.
-    // This makes the client self-sufficient for draft discovery — no Worker lag.
-    const now          = Date.now();
-    const thirtyMinAgo = now - 30 * 60 * 1000;
-    const toCheck      = [];
-    for (const [leagueId] of _leagueMeta) {
-      const s = _statusCache.get(leagueId);
-      if (!s) { toCheck.push(leagueId); continue; }
-      if (s.status === "drafting" || s.status === "paused") continue; // already live
-      if (s.status === "complete") continue;
-      // pre_draft with no startTime and stale — re-check directly
-      if (s.status === "pre_draft" && !s.startTime
-          && s.updatedAt && s.updatedAt < thirtyMinAgo) {
-        toCheck.push(leagueId);
-      }
-    }
-
-    if (!toCheck.length) return;
-    console.log(`[DraftTicker] Checking ${toCheck.length} leagues directly from Sleeper`);
-
-    await Promise.allSettled(toCheck.map(async leagueId => {
-      try {
-        const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
-        if (!r.ok) return;
-        const drafts = await r.json();
-        if (!Array.isArray(drafts) || !drafts.length) return;
-
-        // Find the most relevant draft (drafting > paused > pre_draft, then newest)
-        const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
-        const draft = drafts.sort((a, b) =>
-          (priority[a.status] ?? 9) - (priority[b.status] ?? 9) ||
-          (b.start_time || 0) - (a.start_time || 0)
-        )[0];
-
-        if (!draft || draft.status === "complete") return;
-
-        const startMs = draft.start_time
-          ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
-          : null;
-
-        // Build a status object compatible with what the Worker would write
-        const status = {
-          status:            draft.status,
-          draftId:           draft.draft_id,
-          draftType:         draft.type,
-          totalPicks:        draft.settings?.teams * draft.settings?.rounds || null,
-          draft_order:       draft.draft_order || {},
-          slot_to_roster_id: draft.slot_to_roster_id || {},
-          traded_picks:      [],
-          picksMade:         0,
-          picks_hash:        "client-checked",
-          startTime:         startMs,
-          updatedAt:         now
-        };
-
-        // For live/paused drafts, also fetch current picks
-        if (draft.status === "drafting" || draft.status === "paused") {
-          try {
-            const pr = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
-            if (pr.ok) {
-              const picks = await pr.json();
-              status.picksMade  = Array.isArray(picks) ? picks.length : 0;
-              status.picks_hash = `${status.picksMade}:${picks[picks.length-1]?.player_id || ""}`;
-            }
-          } catch(e) {}
-        }
-
-        _statusCache.set(leagueId, status);
-      } catch(e) {
-        console.warn("[DraftTicker] Direct Sleeper check failed for", leagueId, e.message);
-      }
-    }));
+    } catch(e) { /* Firebase supplement is best-effort */ }
   }
 
   // ── Time formatting ────────────────────────────────────
@@ -724,15 +736,16 @@ const DraftTicker = (() => {
     // Load all current draft statuses in one read from gmd/draftStatus/
     await _initialLoad();
 
-    // Schedule per-league polling or attach realtime listeners
+    // Schedule per-league polling or attach realtime listeners.
+    // _initialLoad already checked Sleeper for every league so cache is fresh —
+    // use the proper intervals directly, no aggressive 60s override.
     for (const [leagueId] of _leagueMeta) {
       const status   = _statusCache.get(leagueId);
       const interval = _pollInterval(status);
       if (interval === null) {
-        _attachListener(leagueId);
+        _attachListener(leagueId); // live draft — Firebase realtime listener for picks
       } else {
-        // First check within 60s regardless of full interval
-        _schedulePoll(leagueId, Math.min(interval, 60 * 1000));
+        _schedulePoll(leagueId, interval);
       }
     }
 
