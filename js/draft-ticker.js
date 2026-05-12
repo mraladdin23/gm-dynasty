@@ -103,17 +103,18 @@ const DraftTicker = (() => {
       }
     } catch(e) { console.warn("[DraftTicker] Failed to load user leagues:", e.message); }
 
-    // 2. Tournament leagues (participant/discovered only, not admin-only)
+    // 2. Tournament leagues — only leagues where THIS user has a roster.
+    // We already have those in section 1 (user's own leagues node) so this
+    // section only needs to add leagues that aren't already in the user's
+    // own leagues list, tagged with the tournament name for display.
+    // Crucially: do NOT scan all 336 leagues in a tournament just because
+    // the user is an admin/discoverer — only add leagues already in watchList
+    // that need a tournamentName annotation, plus any participant-specific ones.
     try {
       const snap = await GMD.child("tournaments").once("value");
       const all  = snap.val() || {};
       for (const [tid, t] of Object.entries(all)) {
         if (!t?.meta || !t?.leagues) continue;
-        const isDiscovered  = t.meta?.discoveredBy?.[_username];
-        const isParticipant = Object.values(t.participants || {})
-          .some(p => p.dlrLinked && p.dlrUsername === _username);
-        if (!isDiscovered && !isParticipant) continue;
-
         const tournamentName = t.meta?.name || "";
         const isBatch = v => v && typeof v === "object" && v.leagues !== undefined;
         for (const [, batch] of Object.entries(t.leagues)) {
@@ -122,13 +123,13 @@ const DraftTicker = (() => {
           const season = batch.year || 0;
           if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
           for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
-            if (!watchList.has(leagueId)) {
-              watchList.set(leagueId, {
-                leagueName: l.name || leagueId,
-                tournamentName,
-                source: "tournament",
-                tid
-              });
+            // Only annotate leagues already in the watchList (from user's own leagues)
+            // — don't add new ones just because user is tournament admin
+            if (watchList.has(leagueId)) {
+              const existing = watchList.get(leagueId);
+              if (!existing.tournamentName) {
+                watchList.set(leagueId, { ...existing, tournamentName, tid });
+              }
             }
           }
         }
@@ -369,6 +370,80 @@ const DraftTicker = (() => {
         }
       }
     } catch(e) { console.warn("[DraftTicker] Initial status load failed:", e.message); }
+
+    // For leagues with no status (never checked by Worker) or stale status
+    // (Worker may not have cycled through yet), check Sleeper directly.
+    // This makes the client self-sufficient for draft discovery — no Worker lag.
+    const now          = Date.now();
+    const thirtyMinAgo = now - 30 * 60 * 1000;
+    const toCheck      = [];
+    for (const [leagueId] of _leagueMeta) {
+      const s = _statusCache.get(leagueId);
+      if (!s) { toCheck.push(leagueId); continue; }
+      if (s.status === "drafting" || s.status === "paused") continue; // already live
+      if (s.status === "complete") continue;
+      // pre_draft with no startTime and stale — re-check directly
+      if (s.status === "pre_draft" && !s.startTime
+          && s.updatedAt && s.updatedAt < thirtyMinAgo) {
+        toCheck.push(leagueId);
+      }
+    }
+
+    if (!toCheck.length) return;
+    console.log(`[DraftTicker] Checking ${toCheck.length} leagues directly from Sleeper`);
+
+    await Promise.allSettled(toCheck.map(async leagueId => {
+      try {
+        const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`);
+        if (!r.ok) return;
+        const drafts = await r.json();
+        if (!Array.isArray(drafts) || !drafts.length) return;
+
+        // Find the most relevant draft (drafting > paused > pre_draft, then newest)
+        const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
+        const draft = drafts.sort((a, b) =>
+          (priority[a.status] ?? 9) - (priority[b.status] ?? 9) ||
+          (b.start_time || 0) - (a.start_time || 0)
+        )[0];
+
+        if (!draft || draft.status === "complete") return;
+
+        const startMs = draft.start_time
+          ? (draft.start_time > 1e12 ? draft.start_time : draft.start_time * 1000)
+          : null;
+
+        // Build a status object compatible with what the Worker would write
+        const status = {
+          status:            draft.status,
+          draftId:           draft.draft_id,
+          draftType:         draft.type,
+          totalPicks:        draft.settings?.teams * draft.settings?.rounds || null,
+          draft_order:       draft.draft_order || {},
+          slot_to_roster_id: draft.slot_to_roster_id || {},
+          traded_picks:      [],
+          picksMade:         0,
+          picks_hash:        "client-checked",
+          startTime:         startMs,
+          updatedAt:         now
+        };
+
+        // For live/paused drafts, also fetch current picks
+        if (draft.status === "drafting" || draft.status === "paused") {
+          try {
+            const pr = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
+            if (pr.ok) {
+              const picks = await pr.json();
+              status.picksMade  = Array.isArray(picks) ? picks.length : 0;
+              status.picks_hash = `${status.picksMade}:${picks[picks.length-1]?.player_id || ""}`;
+            }
+          } catch(e) {}
+        }
+
+        _statusCache.set(leagueId, status);
+      } catch(e) {
+        console.warn("[DraftTicker] Direct Sleeper check failed for", leagueId, e.message);
+      }
+    }));
   }
 
   // ── Time formatting ────────────────────────────────────
