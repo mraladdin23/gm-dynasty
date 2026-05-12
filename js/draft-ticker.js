@@ -140,9 +140,16 @@ const DraftTicker = (() => {
       }
     } catch(e) { console.warn("[DraftTicker] Failed to load tournament leagues:", e.message); }
 
-    // No Firebase write needed — Worker cron builds the watch list itself
-    // by scanning gmd/users directly. Client just reads draftStatus.
-    console.log(`[DraftTicker] Monitoring ${watchList.size} local leagues`);
+    // Write filtered watch list to Firebase so the Worker knows what to monitor.
+    // Per-user path so users don't clobber each other.
+    // Already filtered to current-season, current-dynasty-entry only — small payload.
+    const fbEntry = {};
+    for (const [id, m] of watchList) fbEntry[id] = m.leagueName || id;
+    GMD.child(`draftWatchIndex/${_username}`).set(
+      watchList.size > 0 ? fbEntry : null
+    ).catch(e => console.warn("[DraftTicker] watchIndex write failed:", e.message));
+
+    console.log(`[DraftTicker] Monitoring ${watchList.size} current-season leagues`);
     return watchList;
   }
 
@@ -321,27 +328,6 @@ const DraftTicker = (() => {
     _statusCache.delete(leagueId);
   }
 
-  // ── Merge two status objects, preferring the more informative one ────────
-  // "More informative" = has a startTime when the other doesn't,
-  // or has a more urgent draft status (drafting > paused > pre_draft).
-  // This prevents a stale Worker-written status from overwriting a
-  // fresher client-discovered status.
-  function _mergeStatus(cached, fresh) {
-    if (!cached) return fresh;
-    if (!fresh)  return cached;
-    const priority = { drafting: 0, paused: 1, pre_draft: 2, complete: 3 };
-    const cp = priority[cached.status] ?? 9;
-    const fp = priority[fresh.status]  ?? 9;
-    // Fresh is more urgent — always use it
-    if (fp < cp) return fresh;
-    // Same urgency: if fresh has a startTime and cached doesn't, use fresh
-    if (fp === cp && fresh.startTime && !cached.startTime) return fresh;
-    // Same urgency: if cached has a startTime and fresh doesn't, keep cached
-    if (fp === cp && cached.startTime && !fresh.startTime) return cached;
-    // Otherwise use fresh (Worker is authoritative once it has real data)
-    return fresh;
-  }
-
   // ── Schedule next poll for a league ───────────────────
   function _schedulePoll(leagueId, delay) {
     const entry = _timers.get(leagueId) || {};
@@ -368,13 +354,8 @@ const DraftTicker = (() => {
         return;
       }
 
-      // Merge: keep the better status. If we already found a draft (startTime set)
-      // via direct Sleeper check but Firebase doesn't have it yet (Worker lag),
-      // don't overwrite the good cached status with the stale Firebase one.
-      const cached = _statusCache.get(leagueId);
-      const useStatus = _mergeStatus(cached, status);
-      _statusCache.set(leagueId, useStatus);
-      const interval = _pollInterval(useStatus);
+      _statusCache.set(leagueId, status);
+      const interval = _pollInterval(status);
       if (interval === null) {
         _attachListener(leagueId);
       } else {
@@ -750,15 +731,8 @@ const DraftTicker = (() => {
       if (interval === null) {
         _attachListener(leagueId);
       } else {
-        // If _initialLoad already found real draft info (startTime set, or live status),
-        // don't do the aggressive 60s first poll — it would overwrite the fresh status
-        // with potentially stale Firebase data. Use the normal interval instead.
-        const alreadyFresh = status && (
-          status.status === "drafting" || status.status === "paused" ||
-          (status.status === "pre_draft" && status.startTime)
-        );
-        const firstInterval = alreadyFresh ? interval : Math.min(interval, 60 * 1000);
-        _schedulePoll(leagueId, firstInterval);
+        // First check within 60s regardless of full interval
+        _schedulePoll(leagueId, Math.min(interval, 60 * 1000));
       }
     }
 

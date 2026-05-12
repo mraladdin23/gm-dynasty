@@ -500,7 +500,7 @@ export default {
         return new Response(JSON.stringify(data || {}), { headers: corsHeaders() });
       }
 
-      // /draft/diagnose?username=X — simulate exactly what a user's client sees
+      // /draft/diagnose?username=X
       if (path === "/draft/diagnose" && req.method === "GET") {
         const FB       = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
         const auth     = `auth=${env.FIREBASE_DB_SECRET}`;
@@ -509,34 +509,28 @@ export default {
 
         const report = { username, steps: {} };
         try {
+          // 1. What is in draftWatchIndex for this user?
+          const wiRes  = await fetch(`${FB}/draftWatchIndex/${username}.json?${auth}`);
+          const wiData = wiRes.ok ? (await wiRes.json() || {}) : {};
+          report.steps.watchIndex = { leagueCount: Object.keys(wiData).length, leagues: wiData };
+
+          // 2. Simulate what client would write (from stored leagues)
           const lgRes   = await fetch(`${FB}/users/${username}/leagues.json?${auth}`);
           const leagues = lgRes.ok ? (await lgRes.json() || {}) : {};
           const curYear = new Date().getFullYear();
-          const relevant = new Set([curYear-1, curYear, curYear+1,
-            String(curYear-1), String(curYear), String(curYear+1)]);
-
+          const relevant = new Set([curYear-1, curYear, curYear+1, String(curYear-1), String(curYear), String(curYear+1)]);
           const filtered = [], watching = [];
           for (const [key, l] of Object.entries(leagues)) {
             if (!l.leagueId && !l.league_id) { filtered.push({ key, reason: "no leagueId" }); continue; }
             if (l.platform !== "sleeper")     { filtered.push({ key, reason: `platform=${l.platform}` }); continue; }
             const season = l.season || l.year || 0;
-            if (season && !relevant.has(season) && !relevant.has(String(season))) {
-              filtered.push({ key, reason: `season=${season} out of range` }); continue;
-            }
-            if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) {
-              filtered.push({ key, reason: `stale dynasty season (${l.season}, mostRecent=${l.mostRecentSeason})` }); continue;
-            }
+            if (season && !relevant.has(season) && !relevant.has(String(season))) { filtered.push({ key, reason: `season=${season} out of range` }); continue; }
+            if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) { filtered.push({ key, reason: `stale dynasty (${l.season} vs mostRecent ${l.mostRecentSeason})` }); continue; }
             watching.push({ key, leagueId: String(l.leagueId || l.league_id), season: l.season, name: l.leagueName || l.name });
           }
-          report.steps.leagues = {
-            total: Object.keys(leagues).length,
-            watching: watching.length,
-            filtered: filtered.length,
-            watchingList: watching,
-            filteredList: filtered
-          };
+          report.steps.leagueFilter = { total: Object.keys(leagues).length, watching: watching.length, filtered: filtered.length, watchingList: watching };
 
-          // Check draftStatus and Sleeper directly for each watched league
+          // 3. Cross-check draftStatus + Sleeper for each watched league
           const now = Date.now();
           const statusResults = {};
           await Promise.all(watching.map(async w => {
@@ -546,44 +540,28 @@ export default {
             ]);
             const sd = sr.ok ? await sr.json() : null;
             const sleeperDrafts = sleeperRes.ok ? await sleeperRes.json() : [];
-            const activeDraft = Array.isArray(sleeperDrafts)
+            const active = Array.isArray(sleeperDrafts)
               ? sleeperDrafts.find(d => d.status === "drafting" || d.status === "paused")
                 ?? sleeperDrafts.find(d => d.status === "pre_draft" && d.start_time)
               : null;
-
             statusResults[w.leagueId] = {
-              name: w.name,
-              season: w.season,
-              workerStatus: sd ? sd.status : "NOT IN draftStatus",
+              name: w.name, season: w.season,
+              workerStatus: sd?.status || "NOT IN draftStatus",
               workerStartTime: sd?.startTime ? new Date(sd.startTime).toISOString() : null,
               workerUpdatedAt: sd?.updatedAt ? new Date(sd.updatedAt).toISOString() : null,
-              sleeperLiveDraft: activeDraft
-                ? { status: activeDraft.status, draftId: activeDraft.draft_id, startTime: activeDraft.start_time }
-                : "no active/upcoming draft on Sleeper",
-              mismatch: activeDraft && sd?.status !== activeDraft.status
-                ? `⚠️ Worker says "${sd?.status}" but Sleeper says "${activeDraft.status}"`
-                : null
+              sleeperDraft: active ? { status: active.status, draftId: active.draft_id, startTime: active.start_time } : null,
+              inWatchIndex: !!wiData[w.leagueId],
+              mismatch: active && sd?.status !== active.status ? `⚠️ Worker="${sd?.status || "none"}" Sleeper="${active.status}"` : null
             };
           }));
           report.steps.draftStatus = statusResults;
 
-          // What would show in the ticker?
-          const live = [], upcoming = [];
-          for (const [id, s] of Object.entries(statusResults)) {
-            if (s.workerStatus === "drafting" || s.workerStatus === "paused") live.push({ id, name: s.name });
-            else if (s.workerStatus === "pre_draft" && s.workerStartTime && new Date(s.workerStartTime) > now) upcoming.push({ id, name: s.name, startTime: s.workerStartTime });
-            // Also flag: Sleeper says live but Worker doesn't know yet
-            if (s.sleeperLiveDraft?.status === "drafting" && s.workerStatus !== "drafting") {
-              live.push({ id, name: s.name, note: "⚠️ Sleeper live but Worker not updated yet — client direct-check should catch this" });
-            }
-          }
-          report.steps.tickerWouldShow = { live, upcoming };
-
           const mismatches = Object.values(statusResults).filter(s => s.mismatch);
-          if (!watching.length) report.summary = "No current-season Sleeper leagues — user needs to sync leagues in DLR.";
-          else if (mismatches.length) report.summary = `⚠️ ${mismatches.length} leagues where Worker status doesn't match Sleeper — Worker cron may be behind.`;
-          else if (!live.length && !upcoming.length) report.summary = `${watching.length} leagues found, none with active/upcoming drafts.`;
-          else report.summary = `${live.length} live, ${upcoming.length} upcoming — should show in ticker.`;
+          const notInIndex = watching.filter(w => !wiData[w.leagueId]);
+          if (!watching.length) report.summary = "No current-season Sleeper leagues — sync leagues in DLR first.";
+          else if (notInIndex.length) report.summary = `⚠️ ${notInIndex.length} leagues not in draftWatchIndex — user needs to reload DLR to write their watchIndex.`;
+          else if (mismatches.length) report.summary = `⚠️ ${mismatches.length} Worker/Sleeper mismatches — Worker cron hasn't processed these yet (check pending queue size).`;
+          else report.summary = "All looks good.";
 
         } catch(e) { report.error = e.message; }
         return new Response(JSON.stringify(report, null, 2), { headers: corsHeaders() });
@@ -595,29 +573,19 @@ if (path === "/draft/test" && req.method === "GET") {
     const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
     const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-    // Step 1: build watch list from gmd/users (same as cron)
-    const curYear   = new Date().getFullYear();
-    const relevant  = new Set([curYear-1, curYear, curYear+1, String(curYear-1), String(curYear), String(curYear+1)]);
-    const usersShRes = await fetch(`${FB}/users.json?${auth}&shallow=true`);
-    const userKeys   = Object.keys((await usersShRes.json()) || {});
-    const watchList  = {};
-    await Promise.allSettled(userKeys.map(async uname => {
-      try {
-        const r = await fetch(`${FB}/users/${uname}/leagues.json?${auth}`);
-        if (!r.ok) return;
-        const lgs = await r.json() || {};
-        for (const [, l] of Object.entries(lgs)) {
-          if (!l.leagueId && !l.league_id || l.platform !== "sleeper") continue;
-          const season = l.season || l.year || 0;
-          if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
-          if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) continue;
-          const id = String(l.leagueId || l.league_id);
-          if (!watchList[id]) watchList[id] = { leagueName: l.leagueName || l.name || id };
+    // Step 1: read draftWatchIndex (same as cron)
+    const wiRes  = await fetch(`${FB}/draftWatchIndex.json?${auth}`);
+    const wiData = (await wiRes.json()) || {};
+    const watchList = {};
+    for (const [, ul] of Object.entries(wiData)) {
+      if (ul && typeof ul === "object") {
+        for (const [id, name] of Object.entries(ul)) {
+          if (!watchList[id]) watchList[id] = { leagueName: name || id };
         }
-      } catch(e) {}
-    }));
+      }
+    }
     const allIds = Object.keys(watchList);
-    log.push({ step: "watchList", userCount: userKeys.length, leagueCount: allIds.length });
+    log.push({ step: "watchIndex", userCount: Object.keys(wiData).length, leagueCount: allIds.length });
 
     // Step 2: read existing draftStatus
     const statusRes = await fetch(`${FB}/draftStatus.json?${auth}`);
@@ -1785,38 +1753,26 @@ async function runDraftWatcher(env) {
   const FB   = "https://sleeperbid-default-rtdb.firebaseio.com/gmd";
   const auth = `auth=${env.FIREBASE_DB_SECRET}`;
 
-  // Fetch user list (shallow — just usernames) and draftStatus in parallel.
-  // Then fetch each user's leagues node individually to avoid a massive full read.
-  const [usersShallowRes, statusRes] = await Promise.all([
-    fetch(`${FB}/users.json?${auth}&shallow=true`),
+  // Read draftWatchIndex (written by each client on init) and draftStatus in parallel.
+  // draftWatchIndex is { username: { leagueId: leagueName, ... }, ... }
+  // This is a single Firebase read — no per-user fetching needed.
+  const [watchIndexRes, statusRes] = await Promise.all([
+    fetch(`${FB}/draftWatchIndex.json?${auth}`),
     fetch(`${FB}/draftStatus.json?${auth}`)
   ]);
-  const userKeys = Object.keys((await usersShallowRes.json()) || {});
-  const existing = (await statusRes.json()) || {};
+  const watchIndex = (await watchIndexRes.json()) || {};
+  const existing   = (await statusRes.json()) || {};
 
-  // Fetch all users' leagues in parallel (leagues node only, not full user data)
-  const curYear = new Date().getFullYear();
-  const relevant = new Set([curYear - 1, curYear, curYear + 1,
-    String(curYear - 1), String(curYear), String(curYear + 1)]);
+  // Union all users' league IDs into a flat watchList
   const watchList = {};
-
-  await Promise.allSettled(userKeys.map(async username => {
-    try {
-      const r = await fetch(`${FB}/users/${username}/leagues.json?${auth}`);
-      if (!r.ok) return;
-      const leagues = await r.json() || {};
-      for (const [, l] of Object.entries(leagues)) {
-        if (!l.leagueId && !l.league_id) continue;
-        if (l.platform !== "sleeper") continue;
-        const season = l.season || l.year || 0;
-        if (season && !relevant.has(season) && !relevant.has(String(season))) continue;
-        // Only include current-season entry for dynasty chains
-        if (l.mostRecentSeason && String(l.season) !== String(l.mostRecentSeason)) continue;
-        const id = String(l.leagueId || l.league_id);
-        if (!watchList[id]) watchList[id] = { leagueName: l.leagueName || l.name || id };
+  for (const [, userLeagues] of Object.entries(watchIndex)) {
+    if (!userLeagues || typeof userLeagues !== "object") continue;
+    for (const [leagueId, leagueName] of Object.entries(userLeagues)) {
+      if (!watchList[leagueId]) {
+        watchList[leagueId] = { leagueName: leagueName || leagueId };
       }
-    } catch(e) {}
-  }));
+    }
+  }
 
   const allIds = Object.keys(watchList);
   if (!allIds.length) return;
@@ -1862,10 +1818,8 @@ async function runDraftWatcher(env) {
     }
   }
 
-  // Process all urgent (live/paused/starting-soon) immediately.
-  // Shuffle pending so no league is permanently starved when the list is long.
-  // Process up to 60 pending per run — covers ~1 full scan per minute across
-  // a large user base without hitting Cloudflare CPU limits.
+  // Process all urgent (live/paused) immediately.
+  // Shuffle pending so no league is permanently starved.
   for (let i = pending.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pending[i], pending[j]] = [pending[j], pending[i]];
