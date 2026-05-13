@@ -2,200 +2,929 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Tournaments — Dynasty Locker Room</title>
+  <title>Dynasty Locker Room — Your Fantasy Legacy</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
-  <link rel="stylesheet" href="../css/base.css?v=19" />
-  <link rel="stylesheet" href="../css/locker.css?v=21" />
-  <link rel="stylesheet" href="../css/tournament.css?v=5" />
-  <style>
-    /* ── Public tournament page overrides ── */
-    body { background: var(--color-bg); }
+  <link rel="stylesheet" href="css/base.css?v=19" />
+  <link rel="stylesheet" href="css/auth.css?v=7" />
+  <link rel="stylesheet" href="css/locker.css?v=26" />
+  <link rel="stylesheet" href="css/tournament.css?v=3" />
 
-    .pub-nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--space-3) var(--space-5);
-      border-bottom: 1px solid var(--color-border);
-      background: var(--color-surface);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    .pub-nav-brand {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-weight: 800;
-      font-size: 1rem;
-      text-decoration: none;
-      color: var(--color-text);
-    }
-
-    .pub-nav-actions { display: flex; gap: var(--space-2); }
-
-    .pub-main {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: var(--space-6) var(--space-4) 120px;
-    }
-
-    /* ── Loading ── */
-    #pub-loading {
-      text-align: center;
-      padding: var(--space-10) var(--space-4);
-      color: var(--color-text-dim);
-    }
-
-    /* ── Sign-up banner ── */
-    .pub-signup-banner {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: linear-gradient(135deg, var(--color-primary, #6366f1), #8b5cf6);
-      color: #fff;
-      padding: var(--space-4) var(--space-5);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--space-4);
-      flex-wrap: wrap;
-      z-index: 200;
-      box-shadow: 0 -4px 24px rgba(0,0,0,.3);
-    }
-
-    .pub-signup-banner-text {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .pub-signup-banner-title {
-      font-weight: 700;
-      font-size: .95rem;
-      margin-bottom: 2px;
-    }
-
-    .pub-signup-banner-sub {
-      font-size: .8rem;
-      opacity: .85;
-    }
-
-    .pub-signup-banner-btn {
-      background: #fff;
-      color: var(--color-primary, #6366f1);
-      border: none;
-      border-radius: var(--radius-lg, 8px);
-      padding: var(--space-2) var(--space-4);
-      font-weight: 700;
-      font-size: .88rem;
-      cursor: pointer;
-      white-space: nowrap;
-      flex-shrink: 0;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-    }
-
-    .pub-signup-banner-dismiss {
-      background: transparent;
-      border: none;
-      color: rgba(255,255,255,.7);
-      font-size: 1.2rem;
-      cursor: pointer;
-      padding: 0 var(--space-1);
-      flex-shrink: 0;
-    }
-
-    @media (max-width: 700px) {
-      /* ── Tournament list rows: 4 stacked lines ──────────── */
-      .trn-row {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0;
-        padding: 10px var(--space-3);
+  <!-- Firebase v9 compat — loaded async to avoid blocking page render on mobile -->
+  <script>
+    // If Firebase SDK fails to load (blocked CDN, offline, etc),
+    // show login screen immediately rather than hanging on blank page
+    window._fbLoadTimeout = setTimeout(() => {
+      if (typeof firebase === "undefined") {
+        console.error("[DLR] Firebase SDK failed to load");
+        document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+        const auth = document.getElementById("auth-screen");
+        if (auth) {
+          auth.classList.add("active");
+          const msg = auth.querySelector(".auth-error") || document.createElement("div");
+          msg.className = "auth-error";
+          msg.style.cssText = "text-align:center;padding:16px;color:#f87171;font-size:.85rem";
+          msg.textContent = "Could not connect. Check your internet connection and reload.";
+          const container = auth.querySelector(".auth-container");
+          if (container && !auth.querySelector(".auth-error")) container.prepend(msg);
+        }
       }
-      .trn-row-main  { width: 100%; }
-      .trn-row-line1 { margin-bottom: 3px; }
-      .trn-row-name  { font-size: .88rem; }
-      .trn-row-line2 {
-        white-space: normal;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        margin-bottom: 4px;
-      }
-      .trn-row-line3 { flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-      .trn-row-right {
-        width: 100%;
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
-        border-top: 1px solid var(--color-border);
-        padding-top: 6px;
-      }
-      .trn-row-actions { width: auto; flex-shrink: 0; }
-      .trn-filter-row  { flex-wrap: wrap; gap: 4px; }
-      .trn-filter-select { flex: 1 1 130px; font-size: .76rem; }
-    }
+    }, 6000);
+  </script>
 
-    @media (max-width: 500px) {
-      .pub-nav  { padding: var(--space-3); }
-      .pub-main { padding: var(--space-4) var(--space-3) 120px; }
-      .pub-signup-banner { padding: var(--space-3); }
-      /* Tighten tournament detail on very small screens */
-      .trn-detail-container { padding: var(--space-2) var(--space-3); font-size: .86rem; }
-      .trn-section-card     { padding: var(--space-2) var(--space-3); }
-      .trn-info-name        { font-size: 1.1rem; }
-      .trn-info-tagline     { font-size: .82rem; }
-      .trn-tab-select       { font-size: .82rem; }
-    }
-  </style>
 </head>
 <body>
 
-  <!-- ── Nav ── -->
-  <nav class="pub-nav">
-    <a href="../" class="pub-nav-brand">
-      <span>🏆</span>
-      <span>Dynasty Locker Room</span>
-    </a>
-    <div class="pub-nav-actions">
-      <a href="mailto:dynastylockerroom.support@gmail.com" class="btn-secondary btn-sm" style="text-decoration:none">✉️ Contact</a>
-      <a href="../" class="btn-secondary btn-sm" style="text-decoration:none">Sign In</a>
-      <a href="../?register=1" class="btn-primary btn-sm" id="pub-nav-signup" style="text-decoration:none">Sign Up Free</a>
-    </div>
-  </nav>
+  <!-- ═══════════════════════════════════════
+       AUTH SCREEN
+  ═══════════════════════════════════════ -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-container">
+      <div class="auth-brand">
+        <div class="brand-logo">🏆</div>
+        <h1 class="brand-name">Dynasty<br>Locker Room</h1>
+        <p class="brand-tagline">Your Fantasy Legacy Starts Here</p>
+      </div>
 
-  <!-- ── Main content ── -->
-  <main class="pub-main">
-    <div id="pub-loading">
-      <div class="spinner" style="margin:0 auto var(--space-3)"></div>
-      Loading tournaments…
-    </div>
-    <div id="pub-content" style="display:none"></div>
-  </main>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login">Sign In</button>
+        <button class="auth-tab" data-tab="register">Create Account</button>
+      </div>
 
-  <!-- ── Sign-up banner ── -->
-  <div class="pub-signup-banner" id="pub-signup-banner">
-    <div class="pub-signup-banner-text">
-      <div class="pub-signup-banner-title">🏈 Want to track your fantasy leagues?</div>
-      <div class="pub-signup-banner-sub">Sign up for Dynasty Locker Room — free forever. Link your Sleeper, MFL, and Yahoo leagues.</div>
+      <!-- Login Form -->
+      <div id="login-form" class="auth-form active">
+        <div class="form-group">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" placeholder="your_dlr_handle" autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <div id="login-error" class="auth-error hidden"></div>
+        <button id="login-btn" class="btn-primary">Enter the Locker Room</button>
+        <div class="auth-forgot">
+          <a href="#" id="forgot-password-link">Forgot your password?</a>
+        </div>
+      </div>
+
+      <!-- Forgot Password Form -->
+      <div id="forgot-form" class="auth-form">
+        <p class="auth-reset-hint">Enter your DLR username and we'll send a reset link to your email.</p>
+        <div class="form-group">
+          <label for="reset-username">Username</label>
+          <input type="text" id="reset-username" placeholder="your_dlr_handle" autocomplete="username" />
+        </div>
+        <div id="reset-error" class="auth-error hidden"></div>
+        <div id="reset-success" class="auth-success hidden"></div>
+        <button id="reset-btn" class="btn-primary">Send Reset Link</button>
+        <div class="auth-forgot">
+          <a href="#" id="back-to-login-link">← Back to Sign In</a>
+        </div>
+      </div>
+
+      <!-- Register Form -->
+      <div id="register-form" class="auth-form">
+        <div class="form-group">
+          <label for="reg-username">Choose a Username</label>
+          <input type="text" id="reg-username" placeholder="your_dlr_handle" maxlength="20" autocomplete="username" />
+          <span class="field-hint">Letters, numbers, underscores. This is your GM identity.</span>
+        </div>
+        <div class="form-group">
+          <label for="reg-email">Email</label>
+          <input type="email" id="reg-email" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="reg-password">Password</label>
+          <input type="password" id="reg-password" placeholder="Min 8 characters" autocomplete="new-password" />
+        </div>
+        <div class="form-group">
+          <label for="reg-password2">Confirm Password</label>
+          <input type="password" id="reg-password2" placeholder="Repeat password" autocomplete="new-password" />
+        </div>
+        <div id="register-error" class="auth-error hidden"></div>
+        <button id="register-btn" class="btn-primary">Claim My Locker</button>
+      </div>
+
+      <!-- Contact Support -->
+      <div class="auth-contact">
+        <a href="mailto:dynastylockerroom.support@gmail.com">✉️ Contact Support</a>
+      </div>
     </div>
-    <a href="../?register=1" class="pub-signup-banner-btn">Sign Up Free →</a>
-    <button class="pub-signup-banner-dismiss" id="pub-banner-dismiss" title="Dismiss">✕</button>
   </div>
 
-  <!-- ── Firebase SDK ── -->
+  <!-- ═══════════════════════════════════════
+       WELCOME SCREEN (post-registration)
+  ═══════════════════════════════════════ -->
+  <div id="welcome-screen" class="screen">
+    <div class="welcome-container">
+      <div class="welcome-trophy">🏆</div>
+      <h1 class="welcome-title">Your Locker<br>is Ready</h1>
+      <p class="welcome-username" id="welcome-username"></p>
+      <p class="welcome-sub">You're officially in the Dynasty Locker Room. Next up — connect your fantasy leagues to start building your legacy.</p>
+      <button id="welcome-continue-btn" class="btn-primary">Connect My Leagues →</button>
+      <button id="welcome-skip-btn" class="btn-ghost">Skip — take me to my locker</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       ONBOARDING — LINK PLATFORMS
+  ═══════════════════════════════════════ -->
+  <div id="onboarding-screen" class="screen">
+    <div class="onboarding-container">
+      <div class="onboarding-header">
+        <div class="onboarding-back">
+          <button id="onboarding-back-btn" class="btn-ghost">← Back</button>
+        </div>
+        <h2>Connect Your Leagues</h2>
+        <p>Link your fantasy platforms to import your win/loss history, championships, and league affiliations.</p>
+      </div>
+
+      <!-- Sleeper -->
+      <div class="platform-card" id="sleeper-card">
+        <div class="platform-header">
+          <div class="platform-icon platform-icon-text" style="color:#5a9eff">SLP</div>
+          <div class="platform-info">
+            <h3>Sleeper</h3>
+            <span class="platform-status" id="sleeper-status">Not connected</span>
+          </div>
+        </div>
+        <div class="platform-body">
+          <input type="text" id="sleeper-username-input" placeholder="Your Sleeper username" />
+          <button class="btn-link-platform" id="sleeper-link-btn">🔁 Full Sync (all seasons)</button>
+          <!-- Refresh button — shown via JS only when already synced -->
+          <button class="btn-link-platform hidden" id="sleeper-refresh-btn" style="background:var(--color-surface)">🔄 Refresh Current Season</button>
+          <span class="field-hint">
+            <strong>Refresh</strong> — updates current season records and adds new leagues. Fast (~10s).<br>
+            <strong>Full Sync</strong> — re-imports all seasons since 2017. Use when first connecting or after a long break (30–90s).
+          </span>
+        </div>
+        <div id="sleeper-leagues-preview" class="leagues-preview hidden"></div>
+      </div>
+
+<!-- MFL Platform Card -->
+<div class="platform-card" id="mfl-card">
+  <!-- Header -->
+  <div class="platform-header">
+    <div class="platform-icon platform-icon-text">MFL</div>
+    <div class="platform-info">
+      <h3>MyFantasyLeague</h3>
+      <span class="platform-status" id="mfl-connection-status">Not connected</span>
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="platform-body">
+    <input type="email" id="mfl-email-input" placeholder="MFL Email Address" required autocomplete="email" />
+    <input type="password" id="mfl-password-input" placeholder="MFL Password" required autocomplete="current-password" />
+
+    <!-- Field hint -->
+    <span class="field-hint">
+      Enter your MFL email and password to connect. All leagues and seasons you belong to will be imported automatically (except survivor pools). Your password is only used to import your leagues and is <strong>never saved</strong>.
+    </span>
+
+    <!-- Connect / Import Button -->
+    <button class="btn-link-platform" id="connect-mfl">Connect MFL</button>
+
+    <!-- Messages / Feedback -->
+    <div id="mfl-message" class="input-message hidden"></div>
+  </div>
+
+  <!-- Leagues Preview -->
+  <div id="league-container" class="leagues-preview hidden"></div>
+</div>
+
+<!-- JS to handle Connect button -->
+  <script>
+    document.getElementById("connect-mfl").addEventListener("click", async () => {
+      const email      = document.getElementById("mfl-email-input").value.trim();
+      const password   = document.getElementById("mfl-password-input").value.trim();
+      const messageEl  = document.getElementById("mfl-message");
+      const statusEl   = document.getElementById("mfl-connection-status");
+      const leagueContainer = document.getElementById("league-container");
+
+      messageEl.classList.add("hidden");
+      leagueContainer.classList.add("hidden");
+      leagueContainer.innerHTML = "";
+
+      if (!email) {
+        messageEl.textContent = "MFL email address is required.";
+        messageEl.classList.remove("hidden");
+        return;
+      }
+      if (!password) {
+        messageEl.textContent = "MFL password is required.";
+        messageEl.classList.remove("hidden");
+        return;
+      }
+
+      statusEl.textContent = "Connecting...";
+
+      try {
+        const profile = typeof Auth !== "undefined" ? Auth.getCurrentProfile() : null;
+        if (!profile) {
+          messageEl.textContent = "Not logged in.";
+          messageEl.classList.remove("hidden");
+          return;
+        }
+
+        const result = await Profile.linkMFL(profile.username, email, password);
+        const count  = Object.keys(result.leagues).length;
+        statusEl.textContent = `✓ Connected — ${count} league(s) saved`;
+
+        if (count > 0) {
+          leagueContainer.classList.remove("hidden");
+          leagueContainer.innerHTML = Object.values(result.leagues)
+            .map(l => `<div>${l.leagueName} (${l.season})</div>`)
+            .join("");
+        }
+      } catch (err) {
+        statusEl.textContent = "Not connected";
+        messageEl.textContent = err.message;
+        messageEl.classList.remove("hidden");
+      }
+    });
+  </script>
+
+      <!-- Yahoo -->
+      <div class="platform-card" id="yahoo-card">
+        <div class="platform-header">
+          <div class="platform-icon platform-icon-text" style="color:#7B40F2">YHO</div>
+          <div class="platform-info">
+            <h3>Yahoo Fantasy</h3>
+            <span class="platform-status" id="yahoo-status">Not connected</span>
+          </div>
+        </div>
+        <div class="platform-body" id="yahoo-body">
+          <span class="field-hint">Connect via Yahoo OAuth — you'll be redirected to Yahoo to authorize, then returned here automatically.</span>
+          <button class="btn-link-platform" id="yahoo-link-btn">Connect Yahoo Account</button>
+        </div>
+        <div id="yahoo-leagues-preview" class="leagues-preview hidden"></div>
+      </div>
+
+      <div class="onboarding-actions">
+        <button id="onboarding-skip-btn" class="btn-secondary">Skip for Now</button>
+        <button id="onboarding-save-btn" class="btn-primary" disabled>Save & Enter My Locker</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       MAIN APP SHELL
+  ═══════════════════════════════════════ -->
+  <div id="app-screen" class="screen">
+
+    <!-- Admin impersonation banner -->
+    <div id="impersonation-banner" style="display:none;background:#7c3aed;color:#fff;text-align:center;padding:6px 16px;font-size:.82rem;font-weight:600;position:sticky;top:0;z-index:200;gap:12px;align-items:center;justify-content:center">
+      <span>👁 Viewing as <strong id="impersonation-username"></strong> — read only</span>
+      <button onclick="AdminImpersonate.exit()" style="margin-left:12px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:.78rem">Exit</button>
+    </div>
+    <nav class="top-nav">
+      <div class="nav-brand">
+        <span class="nav-logo">🏆</span>
+        <span class="nav-title">DLR</span>
+      </div>
+      <!-- Mobile identity strip (hidden on desktop) -->
+      <div class="nav-identity" id="nav-identity">
+        <div class="nav-avatar" id="nav-avatar"></div>
+        <div class="nav-id-info">
+          <div class="nav-id-row">
+            <span class="nav-id-name" id="nav-id-name"></span>
+            <div class="nav-id-meta" id="nav-id-meta"></div>
+            <div class="nav-id-dscore" id="nav-id-dscore"></div>
+          </div>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="#" class="nav-link active" data-view="locker">My Locker</a>
+        <a href="#" class="nav-link" data-view="hallway">Hallway</a>
+        <a href="#" class="nav-link" data-view="trophies">Trophies</a>
+        <a href="#" class="nav-link" data-view="tournament">Tournaments</a>
+      </div>
+      <!-- Activity pills: Auctions | Drafts | Notifications | Contact (desktop only — mobile in drawer) -->
+      <div class="nav-actions" id="nav-actions">
+        <!-- Auction pill -->
+        <div class="nav-pill-wrap" id="nav-auc-wrap" style="display:none;position:relative">
+          <button class="nav-pill nav-pill--gold" id="nav-auc-btn" onclick="_openGlobalAucModal()">
+            <span class="nav-pill-dot" id="nav-auc-dot"></span>
+            <span class="nav-pill-icon">🏷</span>
+            <span class="nav-pill-label" id="nav-auc-label">Auctions</span>
+          </button>
+        </div>
+        <!-- Draft ticker -->
+        <div class="nav-pill-wrap" id="draft-ticker-wrap" style="display:none;position:relative">
+          <button class="nav-pill" id="draft-ticker-btn">
+            <span class="nav-pill-dot" id="draft-ticker-dot"></span>
+            <span class="nav-pill-icon">📋</span>
+            <span class="nav-pill-label" id="draft-ticker-label">Drafts</span>
+          </button>
+          <div class="draft-ticker-panel" id="draft-ticker-panel" style="display:none">
+            <div class="draft-ticker-panel-header">
+              <span>📋 Draft Status</span>
+              <button class="draft-ticker-panel-close" id="draft-ticker-close">✕</button>
+            </div>
+            <div class="draft-ticker-panel-body" id="draft-ticker-body">
+              <div class="draft-ticker-empty">Loading…</div>
+            </div>
+          </div>
+        </div>
+        <!-- Notification pill -->
+        <div class="nav-pill-wrap" id="nav-notif-wrap" style="display:none;position:relative">
+          <button class="nav-pill" id="nav-notif-btn">
+            <span class="nav-pill-icon">🔔</span>
+            <span class="nav-pill-label" id="nav-notif-label">Activity</span>
+          </button>
+          <div class="draft-ticker-panel" id="nav-notif-panel" style="display:none;right:0">
+            <div class="draft-ticker-panel-header">
+              <span>🔔 Activity</span>
+              <button class="draft-ticker-panel-close" id="nav-notif-close">✕</button>
+            </div>
+            <div class="draft-ticker-panel-body" id="nav-notif-body">
+              <div class="draft-ticker-empty">No new activity.</div>
+            </div>
+          </div>
+        </div>
+        <!-- Contact -->
+        <a href="mailto:dynastylockerroom.support@gmail.com" class="btn-secondary btn-sm" style="text-decoration:none;flex-shrink:0">✉️ Contact</a>
+      </div>
+      <div class="nav-user">
+        <span id="nav-username" class="nav-username"></span>
+        <button id="nav-viewas-btn" class="btn-icon" title="View as user" style="display:none;font-size:.75rem;color:var(--color-gold)">👁</button>
+        <button id="nav-logout-btn" class="btn-icon" title="Sign Out">⬡</button>
+      </div>
+      <!-- Mobile hamburger -->
+      <button class="nav-hamburger" id="nav-hamburger" onclick="DLRNav.toggle()" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </nav>
+    <!-- Mobile drawer -->
+    <div class="nav-drawer" id="nav-drawer">
+      <!-- Activity items moved to mobile nav activity button — keep hidden anchors so JS refs don't break -->
+      <div id="drawer-activity-section" style="display:none"></div>
+      <div id="drawer-auc-section"      style="display:none"></div>
+      <div id="drawer-draft-section"    style="display:none"></div>
+      <div id="drawer-notif-section"    style="display:none"></div>
+      <span id="drawer-auc-badge"   style="display:none"></span>
+      <span id="drawer-draft-badge" style="display:none"></span>
+      <span id="drawer-notif-badge" style="display:none"></span>
+      <div class="nav-drawer-section">
+        <div class="nav-drawer-label">Views</div>
+        <a href="#" class="nav-drawer-item" data-view="locker" onclick="DLRNav.go('locker')">🏠 My Locker</a>
+        <a href="#" class="nav-drawer-item" data-view="hallway" onclick="DLRNav.go('hallway')">🚪 Hallway</a>
+        <a href="#" class="nav-drawer-item" data-view="trophies" onclick="DLRNav.go('trophies')">🏆 Trophy Room</a>
+        <a href="#" class="nav-drawer-item" data-view="tournament" onclick="DLRNav.go('tournament')">🏟 Tournaments</a>
+      </div>
+      <div class="nav-drawer-section">
+        <div class="nav-drawer-label">Quick Actions</div>
+        <a href="#" class="nav-drawer-item" id="drawer-career-btn">📊 Career Stats</a>
+        <a href="#" class="nav-drawer-item" id="drawer-players-btn">📋 My Players</a>
+        <a href="#" class="nav-drawer-item" id="drawer-edit-btn">✏ Edit Profile</a>
+        <a href="#" class="nav-drawer-item" id="drawer-leagues-btn">⚙ Manage Leagues</a>
+      </div>
+      <div class="nav-drawer-section">
+        <a href="mailto:dynastylockerroom.support@gmail.com" class="nav-drawer-item">✉️ Contact Support</a>
+        <a href="#" class="nav-drawer-item nav-drawer-item--danger" id="drawer-logout-btn">⬡ Sign Out</a>
+      </div>
+    </div>
+
+    <div class="nav-drawer-backdrop hidden" id="nav-drawer-backdrop" onclick="DLRNav.close()"></div>
+
+    <div id="view-locker" class="app-view active">
+      <div class="locker-container">
+
+        <!-- Profile header -->
+        <div class="locker-header">
+          <div class="locker-header-top">
+            <div class="locker-avatar" id="locker-avatar">
+              <span id="locker-avatar-initials"></span>
+            </div>
+            <div class="locker-identity">
+              <h2 id="locker-display-name"></h2>
+              <p id="locker-tagline" class="locker-tagline">Dynasty GM</p>
+              <div class="locker-stats-row" id="locker-stats-row"></div>
+            </div>
+          </div>
+          <div class="locker-header-actions">
+            <button class="btn-secondary btn-sm" id="career-summary-btn" title="Career Summary">📊 Career Stats</button>
+            <button class="btn-secondary btn-sm" id="player-report-btn" title="Cross-League Player Report">📋 My Players</button>
+            <button class="btn-secondary btn-sm" id="edit-profile-btn">✏ Edit Profile</button>
+            <button class="btn-secondary btn-sm" id="manage-leagues-btn">⚙ Manage Leagues</button>
+          </div>
+        </div>
+
+        <!-- Platform badges -->
+        <div class="platforms-summary" id="platforms-summary">
+          <div class="platforms-list" id="platforms-list"></div>
+        </div>
+
+        <!-- MFL resync nudge — shown when username stored but no email -->
+        <div id="mfl-resync-banner" class="mfl-resync-banner hidden">
+          <span>⚠️ <strong>Action needed:</strong> Please reconnect MFL with your email and password to refresh your leagues.</span>
+          <button class="btn-secondary btn-sm" id="mfl-resync-banner-btn">Reconnect MFL</button>
+        </div>
+
+        <!-- League filter bar -->
+        <div class="leagues-section" id="leagues-section">
+          <div class="leagues-header">
+            <h3 class="section-title">League Affiliations</h3>
+            <div style="display:flex;gap:var(--space-2);">
+              <button class="btn-add-league" id="league-groups-btn">🗂 Groups</button>
+              <button class="btn-add-league" id="add-league-btn">+ Add League</button>
+            </div>
+          </div>
+
+          <!-- League filter bar — compact button approach -->
+          <div class="league-filters-row" id="league-filters-row">
+            <button class="filter-btn" id="filter-main-btn" onclick="Profile.toggleFilterPanel('main')">
+              🔍 Filter <span id="filter-main-count" class="filter-btn-count" style="display:none"></span>
+            </button>
+            <button class="filter-btn" id="filter-archived-btn" onclick="Profile.toggleFilter('archived')">
+              📦 Archived
+            </button>
+            <button class="filter-btn" id="filter-mygroups-btn" onclick="Profile.toggleFilterPanel('mygroups')" style="display:none">
+              🗂 My Groups <span id="filter-mygroups-count" class="filter-btn-count" style="display:none"></span>
+            </button>
+          </div>
+          <!-- Filter panels (hidden by default) -->
+          <div class="filter-panel hidden" id="filter-panel-main">
+            <div class="filter-panel-cols">
+              <div class="filter-panel-col">
+                <div class="filter-panel-label">View</div>
+                <label class="filter-check"><input type="checkbox" data-filter="all" checked> All</label>
+                <label class="filter-check"><input type="checkbox" data-filter="active"> Active</label>
+                <label class="filter-check"><input type="checkbox" data-filter="pinned"> 📌 Pinned</label>
+                <label class="filter-check"><input type="checkbox" data-filter="owner"> 🏈 Owner</label>
+                <label class="filter-check"><input type="checkbox" data-filter="commissioner"> 👑 Commish</label>
+              </div>
+              <div class="filter-panel-col">
+                <div class="filter-panel-label">Platform</div>
+                <label class="filter-check"><input type="checkbox" data-filter="platform:sleeper"> 🟣 Sleeper</label>
+                <label class="filter-check"><input type="checkbox" data-filter="platform:mfl"> 🟢 MFL</label>
+                <label class="filter-check"><input type="checkbox" data-filter="platform:yahoo"> 🔵 Yahoo</label>
+              </div>
+              <div class="filter-panel-col">
+                <div class="filter-panel-label">Type</div>
+                <label class="filter-check"><input type="checkbox" data-filter="dynasty"> Dynasty</label>
+                <label class="filter-check"><input type="checkbox" data-filter="salary"> Salary Cap</label>
+                <label class="filter-check"><input type="checkbox" data-filter="redraft"> Redraft</label>
+                <label class="filter-check"><input type="checkbox" data-filter="keeper"> Keeper</label>
+              </div>
+            </div>
+            <button class="filter-panel-clear btn-secondary btn-sm" onclick="Profile.clearFilters()">Clear All</button>
+          </div>
+          <!-- Unified My Groups panel: My Labels + Commissioner Groups -->
+          <div class="filter-panel hidden" id="filter-panel-mygroups">
+            <div id="filter-mygroups-labels-section" class="filter-group-section" style="display:none">
+              <div class="filter-group-section-title">🏷 My Labels</div>
+              <div id="filter-mygroups-labels-list" class="filter-chip-list"></div>
+            </div>
+            <div id="filter-mygroups-commish-section" class="filter-group-section" style="display:none">
+              <div class="filter-group-section-title">⚡ Commissioner Groups</div>
+              <div id="filter-mygroups-commish-list" class="filter-chip-list"></div>
+            </div>
+          </div>
+          <!-- Legacy hidden filter bar (still used by JS internally) -->
+          <div class="league-filters" id="league-filters" style="display:none">
+            <button class="filter-tab active" data-filter="all">All</button>
+          </div>
+
+          <!-- League search + group pills row -->
+          <div class="league-tools-row">
+            <div class="league-search-bar" id="league-search-bar" style="display:none;">
+              <select class="league-jump-select" id="league-jump-select" onchange="Profile.jumpToLeague(this.value)">
+                <option value="">Jump to league…</option>
+              </select>
+            </div>
+            <div class="league-group-pills" id="league-group-pills"></div>
+          </div>
+
+          <!-- Active leagues grid -->
+          <div class="leagues-grid" id="leagues-grid">
+            <p class="empty-state">No leagues loaded yet.</p>
+          </div>
+
+          <!-- Pagination -->
+          <div class="leagues-pagination" id="leagues-pagination" style="display:none;">
+            <button class="page-btn" id="page-prev" onclick="Profile.changePage(-1)">← Prev</button>
+            <span class="page-info" id="page-info"></span>
+            <button class="page-btn" id="page-next" onclick="Profile.changePage(1)">Next →</button>
+          </div>
+
+          <!-- Archived leagues (collapsed by default) -->
+          <div class="archived-section hidden" id="archived-section">
+            <button class="archived-toggle" id="archived-toggle">
+              <span>📦 Archived Leagues</span>
+              <span id="archived-count" class="archived-count"></span>
+              <span class="archived-chevron">▼</span>
+            </button>
+            <div class="leagues-grid archived-grid hidden" id="archived-grid"></div>
+            <div class="leagues-pagination" id="archived-pagination" style="display:none;">
+              <button class="page-btn" id="arch-prev" onclick="Profile.changePage(-1, true)">← Prev</button>
+              <span class="page-info" id="arch-page-info"></span>
+              <button class="page-btn" id="arch-next" onclick="Profile.changePage(1, true)">Next →</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Career Summary Modal -->
+    <div id="career-summary-modal" class="modal-overlay hidden">
+      <div class="modal-box modal-box--wide">
+        <div class="modal-header">
+          <h3>Career Summary</h3>
+          <button class="modal-close" onclick="document.getElementById('career-summary-modal').classList.add('hidden')">✕</button>
+        </div>
+        <div class="modal-body" style="padding:var(--space-5);">
+          <div class="career-summary-tabs" id="career-summary-tabs" style="margin-bottom:var(--space-4);">
+            <button class="cs-tab active" data-cstab="overall">Overall</button>
+            <button class="cs-tab" data-cstab="annual">By Year</button>
+            <button class="cs-tab" data-cstab="type">By Type</button>
+            <button class="cs-tab" data-cstab="matrix">Year × Type</button>
+            <button class="cs-tab" data-cstab="platform">By Platform</button>
+            <button class="cs-tab" data-cstab="platform-year">Platform × Year</button>
+          </div>
+          <div id="cs-overall" class="cs-panel active"></div>
+          <div id="cs-annual"  class="cs-panel"></div>
+          <div id="cs-type"    class="cs-panel"></div>
+          <div id="cs-matrix"  class="cs-panel"></div>
+          <div id="cs-platform"      class="cs-panel"></div>
+          <div id="cs-platform-year" class="cs-panel"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="view-hallway" class="app-view">
+      <div class="hallway-container">
+        <div class="hallway-header">
+          <div>
+            <h2 class="hallway-title">The Hallway</h2>
+            <p class="hallway-subtitle">Browse other managers' lockers</p>
+          </div>
+        </div>
+
+        <!-- Search bar -->
+        <div class="hallway-search-wrap">
+          <input type="text" id="hallway-search-input"
+            class="hallway-search-input"
+            placeholder="🔍 Search by username…"
+            oninput="DLRHallway.search(this.value)"
+            autocomplete="off" />
+        </div>
+
+        <!-- Results / pinned lockers grid -->
+        <div id="hallway-results" class="hallway-grid"></div>
+      </div>
+    </div>
+
+    <div id="view-trophies" class="app-view">
+      <div id="trophy-room-container" class="trophy-room-container">
+        <div class="trophy-room-loading">
+          <div class="spinner"></div> Loading trophy room…
+        </div>
+      </div>
+    </div>
+
+    <div id="view-tournament" class="app-view">
+      <!-- Populated by DLRTournament.init() -->
+    </div>
+
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <p id="loading-message">Loading...</p>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ═══════════════════════════════════════
+       EDIT PROFILE MODAL
+  ═══════════════════════════════════════ -->
+  <div id="edit-profile-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Edit Profile</h3>
+        <button class="modal-close" id="edit-profile-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Bio</label>
+          <input type="text" id="edit-bio" placeholder="Your dynasty tagline..." maxlength="80" />
+        </div>
+        <div class="form-group">
+          <label>Favorite NFL Team</label>
+          <select id="edit-nfl-team">
+            <option value="">— Select Team —</option>
+            <option value="ARI">Arizona Cardinals</option>
+            <option value="ATL">Atlanta Falcons</option>
+            <option value="BAL">Baltimore Ravens</option>
+            <option value="BUF">Buffalo Bills</option>
+            <option value="CAR">Carolina Panthers</option>
+            <option value="CHI">Chicago Bears</option>
+            <option value="CIN">Cincinnati Bengals</option>
+            <option value="CLE">Cleveland Browns</option>
+            <option value="DAL">Dallas Cowboys</option>
+            <option value="DEN">Denver Broncos</option>
+            <option value="DET">Detroit Lions</option>
+            <option value="GB">Green Bay Packers</option>
+            <option value="HOU">Houston Texans</option>
+            <option value="IND">Indianapolis Colts</option>
+            <option value="JAX">Jacksonville Jaguars</option>
+            <option value="KC">Kansas City Chiefs</option>
+            <option value="LV">Las Vegas Raiders</option>
+            <option value="LAC">LA Chargers</option>
+            <option value="LAR">LA Rams</option>
+            <option value="MIA">Miami Dolphins</option>
+            <option value="MIN">Minnesota Vikings</option>
+            <option value="NE">New England Patriots</option>
+            <option value="NO">New Orleans Saints</option>
+            <option value="NYG">NY Giants</option>
+            <option value="NYJ">NY Jets</option>
+            <option value="PHI">Philadelphia Eagles</option>
+            <option value="PIT">Pittsburgh Steelers</option>
+            <option value="SF">San Francisco 49ers</option>
+            <option value="SEA">Seattle Seahawks</option>
+            <option value="TB">Tampa Bay Buccaneers</option>
+            <option value="TEN">Tennessee Titans</option>
+            <option value="WAS">Washington Commanders</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Profile Visibility</label>
+          <select id="edit-visibility">
+            <option value="public">Public — anyone can view</option>
+            <option value="private">Private — only you</option>
+          </select>
+        </div>
+        <div class="modal-section-title">Connected Platforms</div>
+        <div class="platform-relink-row">
+          <div class="platform-relink-info">
+            <span class="platform-badge-name">Sleeper</span>
+            <span id="sleeper-linked-user" class="platform-relink-user"></span>
+          </div>
+          <button class="btn-secondary btn-sm" id="relink-sleeper-btn" title="Update current season records and add new leagues from this year">🔄 Refresh</button>
+          <button class="btn-secondary btn-sm" id="fullsync-sleeper-btn" title="Re-import all seasons from 2017 to present (slow)">🔁 Full Sync</button>
+          <button class="btn-danger btn-sm" id="delete-sleeper-leagues-btn" title="Remove all Sleeper leagues from your profile">🗑 Remove All</button>
+        </div>
+        <div class="platform-relink-row">
+          <div class="platform-relink-info">
+            <span class="platform-badge-name">MFL</span>
+            <span id="mfl-linked-user" class="platform-relink-user"></span>
+          </div>
+          <button class="btn-secondary btn-sm" id="relink-mfl-btn">Reconnect</button>
+          <button class="btn-danger btn-sm" id="delete-mfl-leagues-btn" title="Remove all MFL leagues from your profile">🗑 Remove All</button>
+        </div>
+        <div class="platform-relink-row">
+          <div class="platform-relink-info">
+            <span class="platform-badge-name">Yahoo</span>
+            <span id="yahoo-linked-user" class="platform-relink-user"></span>
+          </div>
+          <button class="btn-secondary btn-sm" id="relink-yahoo-btn">Reconnect</button>
+          <button class="btn-danger btn-sm" id="delete-yahoo-leagues-btn" title="Remove all Yahoo leagues from your profile">🗑 Remove All</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="edit-profile-cancel">Cancel</button>
+        <button class="btn-primary" id="edit-profile-save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       LEAGUE LABEL MODAL
+  ═══════════════════════════════════════ -->
+  <div id="league-label-modal" class="modal-overlay hidden">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3 id="label-modal-title">League Options</h3>
+        <button class="modal-close" id="label-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="label-league-name" id="label-league-name"></div>
+
+        <!-- Read-only: groups/labels this league belongs to -->
+        <div id="label-groups-display" class="label-groups-display hidden">
+          <div class="label-groups-title">Groups &amp; Labels</div>
+          <div id="label-groups-chips" class="label-groups-chips"></div>
+        </div>
+
+        <!-- Available to all users -->
+        <div class="form-group">
+          <label>My Label</label>
+          <input type="text" id="label-custom-input" placeholder="e.g. Main League, Work League..." maxlength="30" />
+          <span class="field-hint">Private label visible only to you.</span>
+        </div>
+        <div class="label-options">
+          <label class="label-checkbox">
+            <input type="checkbox" id="label-pin-check" />
+            <span>📌 Pin this league to top</span>
+          </label>
+          <label class="label-checkbox">
+            <input type="checkbox" id="label-archive-check" />
+            <span>📦 Move to archive</span>
+          </label>
+        </div>
+
+        <!-- Commissioner-only options -->
+        <div id="label-commish-section" class="label-commish-section hidden">
+          <div class="label-commish-divider">
+            <span>👑 Commissioner Options</span>
+          </div>
+          <div class="form-group">
+            <label>League Type Override</label>
+            <select id="label-type-override">
+              <option value="">Auto-detect</option>
+              <option value="dynasty">Dynasty</option>
+              <option value="keeper">Keeper</option>
+              <option value="redraft">Redraft</option>
+              <option value="salary">Salary Cap</option>
+            </select>
+            <span class="field-hint">Override if the type was detected incorrectly (e.g. MFL dynasty showing as keeper).</span>
+          </div>
+          <div class="form-group">
+            <label>Commissioner Group / Tournament</label>
+            <input type="text" id="label-commish-input" placeholder="e.g. The Inner Circle, Degens..." maxlength="30" />
+            <span class="field-hint">Organize leagues into a group for cross-league tournaments. Members will see the group tag.</span>
+          </div>
+          <div class="label-options">
+            <label class="label-checkbox">
+              <input type="checkbox" id="label-auction-check" />
+              <span>🏷 Enable Auction tab</span>
+            </label>
+            <label class="label-checkbox">
+              <input type="checkbox" id="label-picks-check" />
+              <span>📋 Include draft picks in auction</span>
+            </label>
+          </div>
+
+          <!-- Cross-platform merge (shown when same-name league detected on another platform) -->
+          <div id="label-merge-section" class="label-merge-section" style="display:none">
+            <div class="label-commish-divider"><span>🔗 Dynasty Chain</span></div>
+          </div>
+
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="label-modal-cancel">Cancel</button>
+        <button class="btn-danger" id="label-modal-delete" style="margin-right:auto;" title="Remove this league from your profile">🗑 Remove</button>
+        <button class="btn-primary" id="label-modal-save" onclick="Profile.saveLeagueLabelModal()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       LEAGUE DETAIL PANEL
+  ═══════════════════════════════════════ -->
+  <div id="league-detail-panel" class="league-detail-panel hidden">
+    <div class="league-detail-header">
+      <div class="league-detail-header-info">
+        <div class="league-detail-name" id="detail-league-name"></div>
+        <div class="league-detail-meta" id="detail-league-meta"></div>
+        <div class="detail-season-selector" id="detail-season-selector" style="display:none;"></div>
+        <button class="btn-secondary btn-sm" id="detail-yahoo-sync-btn" style="display:none;margin-top:4px;" title="Re-fetch this league from Yahoo to fix missing data or playoff results">🔄 Sync League</button>
+      </div>
+      <button class="modal-close" id="league-detail-close">✕</button>
+    </div>
+    <div class="league-detail-tabs">
+      <select class="detail-tab-select" id="detail-tab-select" onchange="Profile.onDetailTabChange(this.value)">
+        <option value="overview">Overview</option>
+        <option value="standings">Standings</option>
+        <option value="matchups">Matchups</option>
+        <option value="playoffs">Playoffs</option>
+        <option value="roster">Rosters</option>
+        <option value="freeagents">Players</option>
+        <option value="draft">Draft</option>
+        <option value="analytics">Analytics</option>
+        <option value="rules">Rules</option>
+        <option value="chat">Chat</option>
+      </select>
+    </div>
+    <div class="league-detail-body detail-body-scroll">
+      <div id="dtab-overview"    class="detail-tab-content active"></div>
+      <div id="dtab-standings"   class="detail-tab-content"></div>
+      <div id="dtab-matchups"    class="detail-tab-content"></div>
+      <div id="dtab-playoffs"    class="detail-tab-content"></div>
+      <div id="dtab-roster"      class="detail-tab-content"></div>
+      <div id="dtab-salary"     class="detail-tab-content"></div>
+      <div id="dtab-auction"    class="detail-tab-content"></div>
+      <div id="dtab-freeagents" class="detail-tab-content"></div>
+      <div id="dtab-draft"       class="detail-tab-content"></div>
+      <div id="dtab-analytics"     class="detail-tab-content"></div>
+      <div id="dtab-transactions"  class="detail-tab-content"></div>
+      <div id="dtab-rules"         class="detail-tab-content"></div>
+      <div id="dtab-chat"        class="detail-tab-content">
+        <div id="chat-panel-body" class="chat-panel-body"></div>
+      </div>
+    </div>
+  </div>
+  <div id="league-detail-backdrop" class="chat-panel-backdrop hidden"></div>
+
+  <!-- ═══════════════════════════════════════
+       CHAT PANEL (slide-in) - kept for group broadcast
+  ═══════════════════════════════════════ -->
+  <div id="chat-panel" class="chat-panel hidden" style="display:none!important"></div>
+
+  <!-- Player Report slide panel -->
+  <!-- Manager Search Panel -->
+  <!-- Global Active Auctions Modal -->
+  <div id="global-auc-modal" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3>🏷 Active Auctions</h3>
+        <button class="modal-close" onclick="document.getElementById('global-auc-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div class="modal-body" id="global-auc-modal-body" style="padding:var(--space-4)"></div>
+    </div>
+  </div>
+
+  <!-- Global Draft Modal -->
+  <div id="global-draft-modal" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3>📋 Drafts</h3>
+        <button class="modal-close" onclick="document.getElementById('global-draft-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div class="modal-body" id="global-draft-modal-body" style="padding:var(--space-4)"></div>
+    </div>
+  </div>
+
+  <!-- Global Notifications Modal -->
+  <div id="global-notif-modal" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3>🔔 Notifications</h3>
+        <button class="modal-close" onclick="document.getElementById('global-notif-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div class="modal-body" id="global-notif-modal-body" style="padding:var(--space-4)"></div>
+    </div>
+  </div>
+
+  <div id="manager-search-panel" class="ms-panel ms-panel--hidden">
+    <div class="ms-header">
+      <div class="ms-title">🔍 Find a Manager</div>
+      <button class="ms-close" onclick="DLRManagerSearch.close()">✕</button>
+    </div>
+    <div class="ms-body">
+      <div class="ms-search-row">
+        <input type="text" id="ms-input" placeholder="Enter DLR or Sleeper username…"
+          oninput="DLRManagerSearch.search(this.value)" autocomplete="off"/>
+      </div>
+      <div id="ms-results" class="ms-results"></div>
+    </div>
+  </div>
+  <div id="ms-backdrop" class="ms-backdrop hidden" onclick="DLRManagerSearch.close()"></div>
+
+  <div id="player-report-panel" class="pr-panel pr-panel--hidden">
+    <div class="pr-panel-header">
+      <div class="pr-panel-title">📋 My Players</div>
+      <button class="modal-close" onclick="DLRPlayerReport.close()">✕</button>
+    </div>
+    <div id="pr-body" class="pr-panel-body"></div>
+  </div>
+  <div id="player-report-backdrop" class="chat-panel-backdrop hidden" onclick="DLRPlayerReport.close()"></div>
+
+  <!-- ═══════════════════════════════════════
+       DELETE LEAGUE MODAL
+  ═══════════════════════════════════════ -->
+  <div id="delete-league-modal" class="modal-overlay hidden">
+    <div class="modal-box modal-box--sm">
+      <div class="modal-header">
+        <h3>Remove League</h3>
+        <button class="modal-close" id="delete-league-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="delete-league-message" style="margin-bottom:var(--space-4);color:var(--color-text);">
+          Remove this league from your profile?
+        </p>
+        <p class="field-hint" style="margin-bottom:var(--space-4);">
+          This only removes the league from your DLR profile. Your actual fantasy league is unaffected.
+        </p>
+        <div class="modal-footer" style="padding:0;border:none;">
+          <button class="btn-secondary" id="delete-league-cancel">Cancel</button>
+          <button class="btn-danger" id="delete-league-confirm">Remove</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK — loaded here so HTML renders before SDK downloads -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <<<<<<< HEAD
+<<<<<<< HEAD
   <script src="../firebase/config.js"></script>
 =======
+=======
+>>>>>>> parent of 378b22e (Update index.html)
   <script>clearTimeout(window._fbLoadTimeout);</script>
 
   <script src="firebase/config.js"></script>
@@ -208,7 +937,11 @@
   <script src="js/yahoo.js"></script>
   <script src="js/leaguegroups.js"></script>
   <script src="js/chat.js"></script>
+<<<<<<< HEAD
   <script src="js/draft-ticker.js?v=5"></script>
+=======
+  <script src="js/draft-ticker.js?v=6"></script>
+>>>>>>> parent of 378b22e (Update index.html)
   <script src="js/standings.js"></script>
   <script src="js/roster.js"></script>
   <script src="js/draft.js"></script>
@@ -225,2414 +958,96 @@
   <script src="js/tournament.js?v=2"></script>
   <script src="js/profile.js?v=20"></script>
   <script src="js/app.js?v=20"></script>
+<<<<<<< HEAD
 >>>>>>> parent of ca2bff4 (Update index.html)
+=======
+>>>>>>> parent of 378b22e (Update index.html)
 
   <script>
-    // ── Public tournaments page ─────────────────────────────
-    // Reads from gmd/publicTournaments/{tid} — no auth required.
-    // Firebase rules: "publicTournaments": { ".read": true }
-
-    const STATUS_LABELS = {
-      draft:             "Draft",
-      registration_open: "Registration Open",
-      active:            "In Season",
-      playoffs:          "Playoffs",
-      completed:         "Completed"
-    };
-    const STATUS_ICONS = {
-      draft:             "📝",
-      registration_open: "📬",
-      active:            "🏈",
-      playoffs:          "🏆",
-      completed:         "✅"
-    };
-    const TYPE_BADGE_PUB = {
-      points_rounds: { icon: "📈", label: "Points Rounds", cls: "trn-type-points"  },
-      h2h_bracket:   { icon: "🥊", label: "H2H Bracket",   cls: "trn-type-h2h"     },
-      custom_rounds: { icon: "⚙️", label: "Custom Rounds", cls: "trn-type-custom"  },
-      worldcup:      { icon: "🌍", label: "World Cup",     cls: "trn-type-wc"      },
-      total_points:  { icon: "🎯", label: "Total Points",  cls: "trn-type-total"   },
-    };
-
-    // ── Check if a specific tournament was requested ────────
-    const urlParams = new URLSearchParams(window.location.search);
-    const requestedTid = urlParams.get("t");
-
-    // ── Dismiss banner ──────────────────────────────────────
-    const bannerDismissed = localStorage.getItem("dlr_pub_banner_dismissed");
-    const banner = document.getElementById("pub-signup-banner");
-    if (bannerDismissed) banner.style.display = "none";
-    document.getElementById("pub-banner-dismiss")?.addEventListener("click", () => {
-      banner.style.display = "none";
-      localStorage.setItem("dlr_pub_banner_dismissed", "1");
-    });
-
-    // ── Load and render ─────────────────────────────────────
-    const _pubDb   = firebase.database();
-    const pubRef  = () => _pubDb.ref("gmd/publicTournaments");
-    const tRef    = (tid) => _pubDb.ref("gmd/publicTournaments/" + tid);
-
-    function esc(s) {
-      return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-    }
-
-    async function init() {
-      try {
-        if (requestedTid) {
-          await loadTournament(requestedTid);
-        } else {
-          await loadDirectory();
-        }
-      } catch(err) {
-        showError("Failed to load tournaments: " + err.message);
-      }
-    }
-
-    // ── Directory ───────────────────────────────────────────
-    async function loadDirectory() {
-      const snap = await pubRef().once("value");
-      const all  = snap.val() || {};
-      const entries = Object.entries(all)
-        .filter(([, t]) => {
-          if (!t) return false;
-          // Always show non-draft tournaments
-          if (t.status !== "draft") return true;
-          // Show draft tournaments only if they have prior standings data
-          return t.standingsCache && Object.keys(t.standingsCache).length > 0;
-        })
-        .sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
-
-      const loading = document.getElementById("pub-loading");
-      const content = document.getElementById("pub-content");
-      loading.style.display = "none";
-      content.style.display = "";
-
-      if (!entries.length) {
-        content.innerHTML = `
-          <div style="text-align:center;padding:80px 16px;color:var(--color-text-dim)">
-            <div style="font-size:2.5rem;margin-bottom:16px">🏆</div>
-            <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px">No public tournaments yet</div>
-            <div style="font-size:.88rem">Check back soon.</div>
-          </div>`;
-        return;
-      }
-
-      // Build unique type and admin values for filter dropdowns
-      const pubTypes   = [...new Set(entries.map(([,t]) => t.playoffMode || "total_points"))];
-      const pubAdmins  = [...new Set(entries.map(([,t]) => t.createdBy).filter(Boolean))].sort();
-
-      const TYPE_LABELS_PUB = {
-        all:           "All Types",
-        points_rounds: "📈 Points Rounds",
-        h2h_bracket:   "🥊 H2H Bracket",
-        custom_rounds: "⚙️ Custom Rounds",
-        worldcup:      "🌍 World Cup",
-        total_points:  "🎯 Total Points",
-      };
-
-      content.innerHTML = `
-        <div style="margin-bottom:var(--space-4)">
-          <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 var(--space-3)">🏆 Tournaments</h1>
-          <div class="trn-filter-row">
-            <select class="trn-filter-select" id="pub-type-filter">
-              <option value="all">All Types</option>
-              ${pubTypes.map(t => `<option value="${t}">${TYPE_LABELS_PUB[t] || t}</option>`).join("")}
-            </select>
-            <select class="trn-filter-select" id="pub-admin-filter">
-              <option value="all">All Admins</option>
-              ${pubAdmins.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join("")}
-            </select>
-          </div>
-        </div>
-        <div class="trn-list" id="pub-cards">
-          ${entries.map(([tid, t]) => renderCard(tid, t)).join("")}
-        </div>`;
-
-      // Filter wiring
-      function applyPubFilters() {
-        const tf = document.getElementById("pub-type-filter")?.value  || "all";
-        const af = document.getElementById("pub-admin-filter")?.value || "all";
-        let filtered = entries;
-        if (tf !== "all") filtered = filtered.filter(([,t]) => (t.playoffMode || "total_points") === tf);
-        if (af !== "all") filtered = filtered.filter(([,t]) => t.createdBy === af);
-        document.getElementById("pub-cards").innerHTML =
-          filtered.length ? filtered.map(([tid, t]) => renderCard(tid, t)).join("") :
-          `<div style="padding:40px;text-align:center;color:var(--color-text-dim)">No tournaments match the current filters.</div>`;
-        document.querySelectorAll("[data-pub-open]").forEach(btn => {
-          btn.addEventListener("click", () => {
-            window.history.pushState({}, "", "?t=" + btn.dataset.pubOpen);
-            loadTournament(btn.dataset.pubOpen);
-          });
-        });
-      }
-      document.getElementById("pub-type-filter")?.addEventListener("change", applyPubFilters);
-      document.getElementById("pub-admin-filter")?.addEventListener("change", applyPubFilters);
-
-      // Wire initial view buttons
-      document.querySelectorAll("[data-pub-open]").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const tid = btn.dataset.pubOpen;
-          window.history.pushState({}, "", "?t=" + tid);
-          loadTournament(tid);
-        });
-      });
-    }
-
-    function renderCard(tid, t) {
-      const status     = t.status || "draft";
-      const isDraft    = status === "draft";
-      const hasHistory = t.standingsCache && Object.keys(t.standingsCache).length > 0;
-      const years      = isDraft && hasHistory
-        ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a)
-        : [];
-      const yearStr   = years.length ? years.join(", ") : null;
-      const mode      = t.playoffMode || "total_points";
-      const tb        = TYPE_BADGE_PUB[mode] || { icon: "🏆", label: mode, cls: "trn-type-total" };
-      const statusBadge = isDraft && hasHistory
-        ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
-        : `<span class="trn-status-badge trn-status-${status}">${STATUS_ICONS[status] || ""} ${STATUS_LABELS[status] || status}</span>`;
-
-      return `
-        <div class="trn-row">
-          <div class="trn-row-main">
-            <div class="trn-row-line1">
-              <span class="trn-row-name">${esc(t.name || "Untitled Tournament")}</span>
-            </div>
-            ${t.tagline ? `<div class="trn-row-line2">${esc(t.tagline)}</div>` : ""}
-            <div class="trn-row-line3">
-              <span class="trn-type-badge ${tb.cls}">${tb.icon} ${tb.label}</span>
-              <span class="trn-row-stat">🏟 ${t.leagueCount || 0}</span>
-              ${!isDraft ? `<span class="trn-row-stat">👥 ${t.registrationCount || 0}</span>` : ""}
-              ${yearStr ? `<span class="trn-row-stat">📅 ${esc(yearStr)}</span>` : ""}
-            </div>
-          </div>
-          <div class="trn-row-right">
-            ${statusBadge}
-            <div class="trn-row-actions">
-              <button class="btn-secondary btn-sm" data-pub-open="${esc(tid)}">
-                ${isDraft && hasHistory ? "History" : "View"}
-              </button>
-            </div>
-          </div>
-        </div>`;
-    }
-
-    // ── Single tournament view ───────────────────────────────
-    let _currentTid      = null;
-    let _currentT        = null;
-    let _activeTab       = "info";
-    let _selectedYear    = null;   // null = all years / most recent
-    let _adpRefreshTimer = null;   // setInterval handle for ADP auto-refresh
-    let _pubBoardUnsub   = null;
-    let _pubBoardMsgs    = [];
-
-    async function loadTournament(tid) {
-      const loading = document.getElementById("pub-loading");
-      const content = document.getElementById("pub-content");
-      loading.style.display = "block";
-      content.style.display = "none";
-
-      const snap = await tRef(tid).once("value");
-      const t    = snap.val();
-      if (!t) { showError("Tournament not found."); return; }
-
-      _currentTid   = tid;
-      _currentT     = t;
-      loading.style.display = "none";
-      content.style.display = "";
-
-      const isDraft      = (t.status || "draft") === "draft";
-      const hasStandings = t.standingsCache && Object.keys(t.standingsCache).length > 0;
-      // playoffs is now year-keyed: {2025: {...}, 2024: {...}}
-      // Fall back to flat .mode for legacy snapshots
-      const hasPlayoffs = !!(t.playoffs && (
-        t.playoffs.mode ||
-        Object.keys(t.playoffs).some(k => /^\d{4}$/.test(k) && t.playoffs[k]?.mode)
-      ));
-      const regOpen      = ["registration_open", "active"].includes(t.status);
-
-      // Build sorted year list from standingsCache
-      const years = hasStandings
-        ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a)
-        : [];
-      // Default to most recent year
-      if (years.length && (_selectedYear === null || !years.includes(_selectedYear))) {
-        _selectedYear = years[0];
-      }
-
-      // For draft tournaments showing history, default to Standings tab
-      if (isDraft && hasStandings && _activeTab === "info") _activeTab = "standings";
-
-      content.innerHTML = `
-        <div style="margin-bottom:var(--space-4)">
-          <button id="pub-back-btn" class="btn-ghost btn-sm">← All Tournaments</button>
-        </div>
-
-        <div class="trn-detail-title-row" style="margin-bottom:var(--space-4)">
-          <div>
-            <h1 class="trn-detail-name">${esc(t.name || "Tournament")}</h1>
-            ${t.tagline ? `<p class="trn-detail-tagline">${esc(t.tagline)}</p>` : ""}
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
-            ${regOpen ? `<button class="btn-primary btn-sm trn-reg-pill" id="pub-register-pill">📬 Register</button>` : ""}
-            ${isDraft && hasStandings
-              ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
-              : `<span class="trn-status-badge trn-status-${t.status || "draft"}">${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}</span>`
-            }
-          </div>
-        </div>
-
-        <div class="trn-nav-row">
-          ${years.length > 1 ? `
-            <div class="trn-year-selector">
-              <select id="pub-year-sel" class="trn-filter-select">
-                ${years.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
-              </select>
-            </div>` : years.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${years[0]}</span></div>` : ""}
-          <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
-            ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
-            ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
-            ${hasPlayoffs  ? `<option value="playoffs"  ${_activeTab === "playoffs"  ? "selected" : ""}>🥇 Playoffs</option>`  : ""}
-            ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
-            ${Object.keys(t.rulesByYear || {}).length ? `<option value="rules" ${_activeTab === "rules" ? "selected" : ""}>📋 Rules</option>` : ""}
-            ${hasStandings ? `<option value="players" ${_activeTab === "players" ? "selected" : ""}>👥 Players</option>` : ""}
-            <option value="board" ${_activeTab === "board" ? "selected" : ""}>💬 Board</option>
-          </select>
-        </div>
-
-        <div id="pub-tab-body" class="trn-tab-body"></div>
-      `;
-
-      document.getElementById("pub-back-btn")?.addEventListener("click", () => {
-        _clearAdpRefresh();
-        window.history.pushState({}, "", window.location.pathname);
-        _selectedYear = null;
-        _activeTab    = "info";
-        loadDirectory();
-      });
-
-      // Register pill — opens inline register form overlay
-      document.getElementById("pub-register-pill")?.addEventListener("click", () => {
-        const content = document.getElementById("pub-content");
-        const existing = document.getElementById("pub-register-overlay");
-        if (existing) { existing.remove(); return; }
-        const overlay = document.createElement("div");
-        overlay.id = "pub-register-overlay";
-        overlay.className = "trn-register-overlay";
-        overlay.innerHTML = `
-          <div class="trn-register-page">
-            <div class="trn-register-page-header">
-              <button class="btn-ghost btn-sm" id="pub-reg-back">← Back to ${esc(t.name || "Tournament")}</button>
-              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")} ${t.registrationYear || new Date().getFullYear()}</h2>
-            </div>
-            <div id="pub-register-page-body"></div>
-          </div>`;
-        content.appendChild(overlay);
-        document.getElementById("pub-reg-back")?.addEventListener("click", () => overlay.remove());
-        const body = document.getElementById("pub-register-page-body");
-        if (body) renderRegisterTab(body);
-      });
-
-      // Year selector (global — controls all tabs)
-      document.getElementById("pub-year-sel")?.addEventListener("change", async function() {
-        _selectedYear = parseInt(this.value);
-        // Fetch year-specific ADP from Firebase if not already loaded
-        if (!_currentT.adpByYear?.[_selectedYear]) {
-          try {
-            const snap = await tRef(_currentTid).child(`adpByYear/${_selectedYear}`).once("value");
-            const data = snap.val();
-            if (Array.isArray(data) && data.length) {
-              if (!_currentT.adpByYear) _currentT.adpByYear = {};
-              _currentT.adpByYear[_selectedYear] = data;
-              _ensureAdpTabOption();
-            }
-          } catch(e) { /* non-fatal */ }
-        }
-        renderTab(_activeTab);
-      });
-
-      // Tab select
-      document.getElementById("pub-tab-select")?.addEventListener("change", function() {
-        _activeTab = this.value;
-        if (_activeTab !== "adp") _clearAdpRefresh();
-        renderTab(_activeTab);
-      });
-
-      // If ADP data already exists on this tournament, inject the tab option immediately
-      if (t.adp?.length || Object.keys(t.adpByYear || {}).length) _ensureAdpTabOption();
-
-      renderTab(_activeTab);
-    }
-
-    async function renderTab(tab) {
-      const body = document.getElementById("pub-tab-body");
-      if (!body) return;
-      if (tab !== "board" && _pubBoardUnsub) { _pubBoardUnsub(); _pubBoardUnsub = null; }
-      if (tab === "info")           renderInfoTab(body);
-      else if (tab === "standings") renderStandingsTab(body);
-      else if (tab === "playoffs")  await renderPlayoffsTab(body);
-      else if (tab === "register")  renderRegisterTab(body);
-      else if (tab === "adp")       renderAdpTab(body);
-      else if (tab === "rules")     renderRulesTab(body);
-      else if (tab === "players")   renderPlayersTab(body);
-      else if (tab === "board")     renderBoardTab(body);
-    }
-
-    // ── Info tab ────────────────────────────────────────────
-    function renderInfoTab(body) {
-      const t      = _currentT;
-      const social = t.socialLinks || {};
-      const rawBio = t.bio || "";
-      const linkedBio = rawBio
-        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-        .replace(/\n/g, "<br>")
-        .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
-      const socialIcons = { twitter:"𝕏", discord:"💬", reddit:"🤖", website:"🌐", instagram:"📸", youtube:"▶" };
-      const socialHtml = Object.entries(social)
-        .filter(([,url]) => url)
-        .map(([key,url]) => {
-          const icon = socialIcons[key] || "🔗";
-          const label = key.charAt(0).toUpperCase() + key.slice(1);
-          return `<a href="${esc(url)}" target="_blank" rel="noopener" class="trn-social-link">${icon} ${label}</a>`;
-        }).join("");
-      // Rules preview (first 3 lines) — read from rulesByYear (latest year)
-      const _rbyPub = t.rulesByYear || {};
-      const _rbyPubLatest = Object.keys(_rbyPub).map(Number).sort((a,b)=>b-a)[0] || null;
-      const rules = _rbyPubLatest ? (_rbyPub[_rbyPubLatest] || null) : null;
-      const rulesPreview = rules?.content
-        ? rules.content.split("\n").slice(0,3).map(l => esc(l)).join("<br>") + (rules.content.split("\n").length > 3 ? "<br><em>…</em>" : "")
-        : null;
-      const _rulesYear = _rbyPubLatest;
-
-      const _infoYears = [...new Set(Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean))].length || null;
-      body.innerHTML = `
-        <div class="trn-info-stats" style="justify-content:flex-start">
-          <div class="trn-stat-card"><div class="trn-stat-value">${_infoYears || t.leagueCount || 0}</div><div class="trn-stat-label">${_infoYears ? "Years" : "Leagues"}</div></div>
-          <div class="trn-stat-card"><div class="trn-stat-value">${t.registrationCount || 0}</div><div class="trn-stat-label">Registered</div></div>
-          <div class="trn-stat-card"><div class="trn-stat-value">${t.regType === "invite" ? "Invite" : "Open"}</div><div class="trn-stat-label">Registration</div></div>
-        </div>
-        ${rawBio ? `
-          <div class="trn-section-card">
-            <div class="trn-section-card-title">About This Tournament</div>
-            <div class="trn-info-bio">${linkedBio}</div>
-          </div>` : ""}
-        ${t.donationLink ? `
-          <div class="trn-section-card trn-info-donation">
-            <div class="trn-section-card-title">Support the Tournament</div>
-            <a href="${esc(t.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">💰 Donate / Entry Fee</a>
-          </div>` : ""}
-        ${socialHtml ? `
-          <div class="trn-section-card">
-            <div class="trn-section-card-title">Follow Us</div>
-            <div class="trn-social-links">${socialHtml}</div>
-          </div>` : ""}
-        ${rulesPreview ? `
-          <div class="trn-section-card">
-            <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
-              <span>Rules</span>
-              <div style="display:flex;gap:var(--space-2);align-items:center">
-                ${_rulesYear ? `<span style="font-size:.75rem;color:var(--color-text-dim)">${_rulesYear}</span>` : ""}
-                ${rules?.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">v${esc(String(rules.version))}</span>` : ""}
-              </div>
-            </div>
-            <div class="trn-info-bio trn-rules-preview">${rulesPreview}</div>
-            <button class="btn-secondary btn-sm" id="pub-view-rules-btn" style="margin-top:var(--space-3)">View Full Rules</button>
-          </div>` : ""}`;
-
-      document.getElementById("pub-view-rules-btn")?.addEventListener("click", () => {
-        _activeTab = "rules";
-        const sel = document.getElementById("pub-tab-select");
-        if (sel) sel.value = "rules";
-        renderTab("rules");
-      });
-    }
-
-    // ── ADP tab (public site) ────────────────────────────────────────────────
-    // Reads from _currentT.adp (flat) or _currentT.adpByYear[_selectedYear].
-    // Uses the same POS_COLOR and page variables declared above.
-    function renderAdpTab(body) {
-      const t   = _currentT;
-      const adp = (t.adpByYear && _selectedYear && t.adpByYear[_selectedYear])
-        ? t.adpByYear[_selectedYear]
-        : (t.adp || []);
-
-      if (!adp.length) {
-        body.innerHTML = `
-          <div class="trn-empty">
-            <div class="trn-empty-icon">📊</div>
-            <div class="trn-empty-title">No ADP data for ${_selectedYear || "this year"}</div>
-            <div class="trn-empty-sub">ADP is published by the tournament admin after the draft.</div>
-          </div>`;
-        return;
-      }
-
-      const isMobile  = window.innerWidth <= 640;
-      const PAGE_SIZE = ADP_PAGE_SIZE;
-
-      const positions = ["all", ...new Set(adp.map(p => p.position).filter(Boolean))];
-      const posOpts   = positions.map(p =>
-        `<option value="${esc(p)}" ${_adpPos === p ? "selected" : ""}>${p === "all" ? "All Positions" : esc(p)}</option>`
-      ).join("");
-
-      const filtered = _adpPos === "all" ? adp : adp.filter(p => p.position === _adpPos);
-      const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-      const page       = Math.max(1, Math.min(_adpPage, totalPages));
-      const pageSlice  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-      const COL = isMobile ? "28px 1fr 44px 34px 34px" : "32px 1fr 36px 52px 40px 40px 76px";
-      const headerCols = isMobile
-        ? `<span>#</span><span>Player</span><span style="text-align:right">ADP</span><span style="text-align:right">Min</span><span style="text-align:right">Max</span>`
-        : `<span>#</span><span>Player</span><span style="text-align:center">Dft</span><span style="text-align:center">ADP</span><span style="text-align:center">Min</span><span style="text-align:center">Max</span><span style="text-align:center">25–75%</span>`;
-
-      const rows = pageSlice.map((p, i) => {
-        const col      = POS_COLOR[p.position] || "#9ca3af";
-        const mn       = p.min  != null ? p.min  : "—";
-        const mx       = p.max  != null ? p.max  : "—";
-        const rangeStr = (p.p25 != null && p.p75 != null) ? `${Math.round(p.p25)}–${Math.round(p.p75)}` : "—";
-        const statCols = isMobile
-          ? `<span style="text-align:right;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
-             <span style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums;color:var(--color-text-dim)">${mn}</span>
-             <span style="text-align:right;font-size:.76rem;font-variant-numeric:tabular-nums;color:var(--color-text-dim)">${mx}</span>`
-          : `<span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.count || "—"}</span>
-             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${p.adp.toFixed(1)}</span>
-             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mn}</span>
-             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${mx}</span>
-             <span style="text-align:center;font-size:.8rem;font-variant-numeric:tabular-nums">${rangeStr}</span>`;
-        return `
-          <div class="draft-auction-row" style="grid-template-columns:${COL}">
-            <span style="font-size:.75rem;color:var(--color-text-dim)">${(page - 1) * PAGE_SIZE + i + 1}</span>
-            <div style="display:flex;align-items:center;gap:4px;min-width:0">
-              <span class="draft-pos-badge" style="background:${col}22;color:${col};border-color:${col}55;flex-shrink:0;font-size:.65rem;padding:1px 5px;border-radius:4px;border:1px solid">${esc(p.position || "?")}</span>
-              <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name || "Unknown")}</span>
-            </div>
-            ${statCols}
-          </div>`;
-      }).join("");
-
-      const pagination = totalPages > 1 ? `
-        <div class="draft-pagination" style="display:flex;align-items:center;justify-content:center;gap:var(--space-3);padding:var(--space-3)">
-          <button class="draft-toggle-btn" id="pub-adp-prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button>
-          <span style="font-size:.85rem;color:var(--color-text-dim)">Page ${page} of ${totalPages}</span>
-          <button class="draft-toggle-btn" id="pub-adp-next" ${page >= totalPages ? "disabled" : ""}>Next ›</button>
-        </div>` : "";
-
-      body.innerHTML = `
-        <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
-          <select id="pub-adp-pos" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">${posOpts}</select>
-          <span style="font-size:.78rem;color:var(--color-text-dim)">${adp.length} players · ${filtered.length} shown${_selectedYear ? " · " + _selectedYear : ""}</span>
-        </div>
-        <div class="draft-auction-list trn-adp-table">
-          <div class="draft-auction-header" style="grid-template-columns:${COL};font-size:.7rem">${headerCols}</div>
-          ${rows}
-        </div>
-        ${pagination}`;
-
-      document.getElementById("pub-adp-pos")?.addEventListener("change", function() {
-        _adpPos  = this.value;
-        _adpPage = 1;
-        renderAdpTab(body);
-      });
-      document.getElementById("pub-adp-prev")?.addEventListener("click", () => { _adpPage--; renderAdpTab(body); });
-      document.getElementById("pub-adp-next")?.addEventListener("click", () => { _adpPage++; renderAdpTab(body); });
-    }
-
-    // ── Players tab — career history (public site) ──────────────────────────
-    // List view, 25/page, searchable. Sorted: tournament champions first,
-    // then years desc, then win% desc. Click row → career modal.
-    // Year-agnostic: shows all years regardless of _selectedYear.
-    let _pubPhSearch = "";
-    let _pubPhPage   = 1;
-
-    function renderPlayersTab(body) {
-      const t    = _currentT;
-      const cache = t.standingsCache || {};
-      const pMap  = t.participantMap || {};
-      const _sk   = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
-
-      // ── Build career data from standingsCache ───────────────
-      const careers = {};
-
-      for (const lc of Object.values(cache)) {
-        const year     = String(lc.year || "Unknown");
-        const lgName   = lc.leagueName || "Unknown League";
-        const champion = lc.champion || null;
-        const champKey = champion
-          ? (_sk(champion.sleeperUsername || "") || _sk(champion.teamName || ""))
-          : null;
-
-        for (const tm of (lc.teams || [])) {
-          let part = null;
-          if (tm.sleeperUsername) part = pMap[_sk(tm.sleeperUsername)];
-          if (!part && tm.teamName) part = pMap[_sk(tm.teamName)];
-
-          const displayName = part?.displayName || tm.teamName || "Unknown";
-          const careerKey   = _sk(displayName);
-
-          if (!careers[careerKey]) {
-            careers[careerKey] = { displayName, gender: part?.gender || "", twitter: part?.twitterHandle || "", seasons: {} };
-          }
-          if (!careers[careerKey].seasons[year]) careers[careerKey].seasons[year] = [];
-
-          const isChamp = !!(champKey && (
-            (tm.sleeperUsername && _sk(tm.sleeperUsername) === champKey) ||
-            (tm.teamName        && _sk(tm.teamName)        === champKey)
-          ));
-
-          careers[careerKey].seasons[year].push({
-            leagueName: lgName, teamName: tm.teamName || displayName,
-            wins: tm.wins || 0, losses: tm.losses || 0, ties: tm.ties || 0,
-            pf: tm.pf || 0, isChamp, platform: lc.platform || "sleeper"
-          });
-        }
-      }
-
-      // ── Join playoff qualification data from published snapshots ───────────
-      // PRIMARY: read finalRankings (authoritative ordered list written at publish time).
-      // FALLBACK: read po.standings (pre-finalRankings format — no rank data).
-      const poByYear = {};
-      const poData = t.playoffs || {};
-      for (const [yr, po] of Object.entries(poData)) {
-        if (!/^\d{4}$/.test(String(yr))) continue; // skip flat/legacy
-        poByYear[String(yr)] = {};
-
-        // Primary: finalRankings
-        if (Array.isArray(po.finalRankings) && po.finalRankings.length) {
-          po.finalRankings.forEach(entry => {
-            [entry.displayName, entry.teamName].filter(Boolean).map(_sk).forEach(k => {
-              if (!poByYear[String(yr)][k]) {
-                poByYear[String(yr)][k] = {
-                  qualified:        !!(entry.qualified),
-                  bye:              !!(entry.bye),
-                  rank:             entry.finalRank || null,
-                  isTournamentChamp: !!(entry.isTChamp),
-                  isGroupWinner:    !!(entry.isGroupWinner),
-                  groupWins:        entry.groupWins   ?? null,
-                  groupLosses:      entry.groupLosses ?? null,
-                  groupPF:          entry.groupPF     ?? null,
-                };
-              }
-            });
-          });
-          continue;
-        }
-
-        // Fallback: standings array (no rank available)
-        if (!po?.standings) continue;
-        po.standings.forEach((tm, idx) => {
-          const keys = [tm.displayName, tm.teamName].filter(Boolean).map(_sk);
-          const isTournamentChamp = (po.mode === "total_points" && idx === 0) || !!(tm.isChamp);
-          keys.forEach(k => {
-            poByYear[String(yr)][k] = {
-              qualified: !!(tm.qualified),
-              bye:       !!(tm.bye),
-              rank:      null,
-              isTournamentChamp,
-              roundsData: po.computedRounds || []
-            };
-          });
-        });
-      }
-
-      // ── Aggregate career stats ───────────────────────────────
-      const playerList = Object.values(careers).map(c => {
-        const yearKeys = Object.keys(c.seasons).sort((a, b) => b - a);
-        let totalLeagues = 0, totalWins = 0, totalLosses = 0, totalPF = 0, totalChamps = 0;
-        let playoffApps = 0, tournamentChamps = 0, bestRank = null;
-        const yearData = {};
-
-        yearKeys.forEach(yr => {
-          // Playoff qualification entry — try displayName first, then teamName variants
-          const cKey    = _sk(c.displayName);
-          const poYr    = poByYear[yr] || {};
-          const teamNames = (c.seasons[yr] || []).map(s => _sk(s.teamName)).filter(Boolean);
-          const poEntry = poYr[cKey]
-            || teamNames.reduce((found, k) => found || poYr[k], null)
-            || null;
-
-          // For worldcup years: override W/L/PF with group-stage records BEFORE accumulating
-          if (poEntry?.groupWins !== null && poEntry?.groupWins !== undefined) {
-            (c.seasons[yr] || []).forEach(season => {
-              season.wins   = poEntry.groupWins;
-              season.losses = poEntry.groupLosses ?? season.losses;
-              season.pf     = poEntry.groupPF     ?? season.pf;
-            });
-          }
-
-          const bracketComplete = Array.isArray(((t.playoffs||{})[yr]||{}).finalRankings)
-            && ((t.playoffs||{})[yr]||{}).finalRankings.some(e => e.isTChamp);
-
-          c.seasons[yr].forEach(s => {
-            totalLeagues++;
-            totalWins   += s.wins;
-            totalLosses += s.losses;
-            totalPF     += s.pf;
-            if (bracketComplete) {
-              if (poEntry?.isGroupWinner) totalChamps++;
-              else if (!poEntry?.isGroupWinner && poEntry?.groupWins == null && s.isChamp) totalChamps++;
-            }
-          });
-
-          yearData[yr]  = poEntry || { qualified: false, bye: false, rank: null, isTournamentChamp: false, isGroupWinner: false };
-
-          if (bracketComplete) {
-            if (poEntry?.qualified)          playoffApps++;
-            if (poEntry?.isTournamentChamp)  tournamentChamps++;
-            if (poEntry?.rank && (!bestRank || poEntry.rank < bestRank)) bestRank = poEntry.rank;
-          }
-        });
-
-        // Streak: consecutive most-recent seasons qualified
-        let streak = 0;
-        for (const yr of yearKeys) {
-          if (yearData[yr]?.qualified) streak++;
-          else break;
-        }
-
-        const winPct = (totalWins + totalLosses) > 0
-          ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
-
-        return { ...c, yearKeys, yearData, totalYears: yearKeys.length, totalLeagues,
-          totalWins, totalLosses, totalPF, totalChamps, playoffApps, tournamentChamps,
-          bestRank, winPct, streak };
-      });
-
-      // ── Sort: tournament champs first, then years desc, then bestRank asc, then win% desc ──────
-      playerList.sort((a, b) => {
-        if (b.tournamentChamps !== a.tournamentChamps) return b.tournamentChamps - a.tournamentChamps;
-        if (b.totalYears !== a.totalYears) return b.totalYears - a.totalYears;
-        if (a.bestRank !== b.bestRank) {
-          if (a.bestRank === null) return 1;
-          if (b.bestRank === null) return -1;
-          return a.bestRank - b.bestRank;
-        }
-        const wa = parseFloat(a.winPct) || 0, wb = parseFloat(b.winPct) || 0;
-        return wb - wa;
-      });
-
-      if (!playerList.length) {
-        body.innerHTML = `
-          <div class="trn-empty">
-            <div class="trn-empty-icon">👥</div>
-            <div class="trn-empty-title">No player history yet</div>
-            <div class="trn-empty-sub">Standings have not been synced for this tournament.</div>
-          </div>`;
-        return;
-      }
-
-      const PH_PAGE_SIZE = 25;
-
-      // All years across standings + playoff data, newest first
-      const allYearsSet = [...new Set([
-        ...Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean).map(String),
-        ...Object.keys(poByYear)
-      ])].sort((a, b) => String(b).localeCompare(String(a)));
-      const hasPoData = Object.keys(poByYear).length > 0;
-
-      // ── Build list rows ──────────────────────────────────────
-      const _renderList = (q, pg) => {
-        const filtered = q
-          ? playerList.filter(p => p.displayName.toLowerCase().includes(q.toLowerCase()))
-          : playerList;
-        if (!filtered.length) return { html: `<div class="trn-players-empty">No players match "${esc(q)}"</div>`, total: 0, pages: 0 };
-
-        const totalPgs = Math.ceil(filtered.length / PH_PAGE_SIZE);
-        const curPg    = Math.max(1, Math.min(pg, totalPgs));
-        const slice    = filtered.slice((curPg - 1) * PH_PAGE_SIZE, curPg * PH_PAGE_SIZE);
-        const startRank = (curPg - 1) * PH_PAGE_SIZE + 1;
-
-        const pipHeaders = allYearsSet.map(y =>
-          `<span style="font-size:.62rem;font-weight:600;display:inline-block;width:14px;text-align:center">${String(y).slice(2)}</span>`
-        ).join("");
-
-        const rows = slice.map((p, i) => {
-          const rank = startRank + i;
-          const genderBadge = p.gender === "Male"
-            ? `<span class="trn-gender-m" style="font-size:.65rem">M</span>`
-            : p.gender === "Female" ? `<span class="trn-gender-f" style="font-size:.65rem">F</span>` : "";
-          // Highlight row: gold for tournament champions, subtle for league champs only
-          const isTChamp = p.tournamentChamps > 0;
-          const isLChamp = p.totalChamps > 0 && !isTChamp;
-          const rowCls   = isTChamp ? "trn-ph-row trn-ph-row--tchamp" : isLChamp ? "trn-ph-row trn-ph-row--lchamp" : "trn-ph-row";
-          const champCell = isTChamp
-            ? `<span class="trn-ph-champ-badge">🏆 ×${p.tournamentChamps}</span>`
-            : p.totalChamps > 0 ? `<span class="trn-ph-champ-badge" style="background:rgba(99,102,241,.15);color:#a78bfa;border-color:rgba(99,102,241,.3)">🥇 ×${p.totalChamps}</span>`
-            : `<span style="color:var(--color-text-dim)">—</span>`;
-          const poCell = hasPoData
-            ? (p.playoffApps > 0
-                ? `<span style="color:#4ade80;font-weight:600">${p.playoffApps}</span><span style="color:var(--color-text-dim)">/${p.totalYears}</span>`
-                : `<span style="color:var(--color-text-dim)">0/${p.totalYears}</span>`)
-            : `<span style="color:var(--color-text-dim)">—</span>`;
-          const bestCell = p.bestRank
-            ? (p.bestRank === 1
-                ? `<span style="color:var(--color-gold,#d4af37);font-weight:700">1 🏆</span>`
-                : `<span style="font-weight:600">${p.bestRank}</span>`)
-            : `<span style="color:var(--color-text-dim)">—</span>`;
-          const yearPips = allYearsSet.map(yr => {
-            const e      = p.yearData[String(yr)];
-            const inS    = !!(p.seasons[String(yr)]);
-            if (!e && !inS) return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: did not play"></span>`;
-            const poYrD  = (t.playoffs || {})[yr] || {};
-            const bDone  = Array.isArray(poYrD.finalRankings) && poYrD.finalRankings.some(e2 => e2.isTChamp);
-            if (!e || !bDone) {
-              return `<span class="trn-az-yr-pip trn-az-yr-pip--absent" title="${yr}: ${inS ? "in progress" : "played, no PO data"}"></span>`;
-            }
-            const isWCYear = e.groupWins !== null && e.groupWins !== undefined;
-            let cls, tip;
-            if (e.isTournamentChamp) {
-              cls = "trn-az-yr-pip--champ"; tip = `${yr}: 🏆 Tournament Champion`;
-            } else if (isWCYear) {
-              if (e.isGroupWinner) {
-                cls = "trn-az-yr-pip--qual"; tip = `${yr}: ✓ Won Group${e.rank ? " · Finish " + e.rank : ""}`;
-              } else {
-                cls = "trn-az-yr-pip--elim"; tip = `${yr}: Did not win group${e.rank ? " · Finish " + e.rank : ""}`;
-              }
-            } else {
-              cls = e.qualified ? "trn-az-yr-pip--qual" : "trn-az-yr-pip--elim";
-              tip = e.qualified
-                ? `${yr}: ✓ Qualified${e.bye ? " (BYE)" : ""}${e.rank ? " · Rank " + e.rank : ""}`
-                : `${yr}: Eliminated`;
-            }
-            return `<span class="trn-az-yr-pip ${cls}" title="${tip}"></span>`;
-          }).join("");
-          return `
-            <tr class="${rowCls}" data-ph-key="${esc(_sk(p.displayName))}" role="button" tabindex="0" style="cursor:pointer">
-              <td class="trn-ph-col-rank">${rank}</td>
-              <td class="trn-ph-col-name">
-                <span style="font-weight:600">${esc(p.displayName)}</span>
-                ${genderBadge}
-                ${p.streak >= 2 ? `<span class="trn-az-streak-badge">🔥 ${p.streak}</span>` : ""}
-                ${p.twitter ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="font-size:.68rem" onclick="event.stopPropagation()">@${esc(p.twitter.replace(/^@/,""))}</a>` : ""}
-              </td>
-              <td class="trn-ph-col-num" style="text-align:center">${p.totalYears}</td>
-              <td class="trn-ph-col-num" style="text-align:center">${p.totalWins}–${p.totalLosses}</td>
-              <td class="trn-ph-col-num" style="text-align:center">${p.winPct !== null ? p.winPct + "%" : "—"}</td>
-              <td class="trn-ph-col-num" style="text-align:center">${poCell}</td>
-              <td class="trn-ph-col-num" style="text-align:center">${bestCell}</td>
-              <td class="trn-ph-col-champ" style="text-align:center">${champCell}</td>
-              ${hasPoData ? `<td class="trn-az-pips-cell">${yearPips}</td>` : ""}
-            </tr>`;
-        }).join("");
-
-        const colCount = hasPoData ? 9 : 8;
-        const pagination = totalPgs > 1 ? `
-          <tr class="trn-ph-pagination-row">
-            <td colspan="${colCount}">
-              <div class="trn-ph-pagination">
-                <button class="draft-toggle-btn" id="pub-ph-prev" ${curPg <= 1 ? "disabled" : ""}>‹ Prev</button>
-                <span style="font-size:.82rem;color:var(--color-text-dim)">Page ${curPg} of ${totalPgs} · ${filtered.length} players</span>
-                <button class="draft-toggle-btn" id="pub-ph-next" ${curPg >= totalPgs ? "disabled" : ""}>Next ›</button>
-              </div>
-            </td>
-          </tr>` : "";
-
-        return {
-          html: `
-            <div class="trn-ph-list-wrap">
-              ${hasPoData ? `<div class="trn-az-legend" style="margin-bottom:var(--space-2)">
-                <span class="trn-az-yr-pip trn-az-yr-pip--champ"></span> Champion &nbsp;
-                <span class="trn-az-yr-pip trn-az-yr-pip--qual"></span> Qualified &nbsp;
-                <span class="trn-az-yr-pip trn-az-yr-pip--elim"></span> Eliminated &nbsp;
-                <span class="trn-az-yr-pip trn-az-yr-pip--absent"></span> No play &nbsp;
-                🔥 = active streak
-              </div>` : ""}
-              <table class="trn-ph-list-table">
-                <thead><tr>
-                  <th class="trn-ph-col-rank">#</th>
-                  <th class="trn-ph-col-name">Player</th>
-                  <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Seasons played">Yrs</th>
-                  <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Career wins–losses">W–L</th>
-                  <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Win percentage">Win%</th>
-                  <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Playoff appearances / seasons played">PO</th>
-                  <th class="trn-ph-col-num trn-ph-th-tip" style="text-align:center" title="Best tournament finish rank">Best</th>
-                  <th class="trn-ph-col-champ trn-ph-th-tip" style="text-align:center" title="🏆 Tournament Champion · 🥇 League Champion">Titles</th>
-                  ${hasPoData ? `<th class="trn-az-pips-cell trn-ph-th-tip" title="Year-by-year playoff history (hover for detail)">${pipHeaders}</th>` : ""}
-                </tr></thead>
-                <tbody>${rows}</tbody>
-                ${pagination}
-              </table>
-            </div>`,
-          total: filtered.length,
-          pages: totalPgs,
-          cur:   curPg
-        };
-      };
-
-      // ── Initial render ───────────────────────────────────────
-      const _refresh = () => {
-        const result = _renderList(_pubPhSearch, _pubPhPage);
-        const wrap   = document.getElementById("pub-ph-list-wrap");
-        if (wrap) wrap.innerHTML = result.html;
-        _wirePubPhRows(playerList);
-      };
-
-      const initial = _renderList(_pubPhSearch, _pubPhPage);
-      body.innerHTML = `
-        <div class="trn-players-toolbar">
-          <input type="text" id="pub-ph-search" class="trn-st-search"
-            placeholder="Search by name…" value="${esc(_pubPhSearch)}" />
-          <span style="font-size:.8rem;color:var(--color-text-dim);white-space:nowrap">${playerList.length} player${playerList.length !== 1 ? "s" : ""} · all years</span>
-        </div>
-        <div id="pub-ph-list-wrap">${initial.html}</div>`;
-
-      // ── Events ────────────────────────────────────────────────
-      document.getElementById("pub-ph-search")?.addEventListener("input", function() {
-        _pubPhSearch = this.value;
-        _pubPhPage   = 1;
-        _refresh();
-      });
-
-      const _wirePubPhRows = (list) => {
-        document.querySelectorAll(".trn-ph-row").forEach(row => {
-          const key = row.dataset.phKey;
-          const p   = list.find(pl => _sk(pl.displayName) === key);
-          if (!p) return;
-          const open = () => _openPhModal(p);
-          row.addEventListener("click", open);
-          row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(); });
-        });
-        document.getElementById("pub-ph-prev")?.addEventListener("click", () => { _pubPhPage--; _refresh(); });
-        document.getElementById("pub-ph-next")?.addEventListener("click", () => { _pubPhPage++; _refresh(); });
-      };
-
-      // ── Career modal ─────────────────────────────────────────
-      const _openPhModal = (p) => {
-        document.getElementById("pub-ph-modal-root")?.remove();
-
-        const cKey = _sk(p.displayName);
-        const twitterLink = p.twitter
-          ? `<a href="https://x.com/${esc(p.twitter.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter" style="margin-left:6px">@${esc(p.twitter.replace(/^@/,""))}</a>` : "";
-        const genderBadge = p.gender === "Male"
-          ? ` <span class="trn-gender-m">M</span>`
-          : p.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : "";
-
-        // Per-year detail sections
-        const yearSections = p.yearKeys.map(yr => {
-          const poEntry  = p.yearData[String(yr)] || {};
-
-          // ── Regular season league rows ──
-          const leagueRows = p.seasons[yr].map(s => {
-            const tiesStr  = s.ties > 0 ? `–${s.ties}` : "";
-            const platIcon = { sleeper:"🟢", mfl:"🔵", yahoo:"🟣" }[s.platform] || "⚪";
-            const lchampCell = s.isChamp
-              ? `<span class="trn-ph-champ-badge" style="font-size:.68rem">🥇 Champ</span>`
-              : `<span style="color:var(--color-text-dim);font-size:.78rem">—</span>`;
-            return `<tr>
-              <td class="trn-ph-tbl-league">${platIcon} ${esc(s.leagueName)}</td>
-              <td class="trn-ph-tbl-num">${s.wins}–${s.losses}${tiesStr}</td>
-              <td class="trn-ph-tbl-num">${(s.pf || 0).toFixed(1)}</td>
-              <td style="padding:5px 6px;text-align:center">${lchampCell}</td>
-            </tr>`;
-          }).join("");
-
-          // ── Tournament finish row — appended at bottom of tbody ──
-          let finishRow = "";
-          if (poEntry.isTournamentChamp) {
-            finishRow = `<tr style="background:rgba(212,175,55,.1)"><td colspan="4" style="padding:5px 8px;font-size:.78rem;font-weight:700;color:var(--color-gold,#d4af37)">🏆 Tournament Champion${poEntry.rank ? " · Overall Rank " + poEntry.rank : ""}</td></tr>`;
-          } else if (poEntry.qualified) {
-            const label   = poEntry.bye ? "🌟 Qualified (BYE)" : "✓ Qualified";
-            const rankStr = poEntry.rank ? " · Rank " + poEntry.rank : "";
-            finishRow = `<tr style="background:rgba(34,197,94,.06)"><td colspan="4" style="padding:5px 8px;font-size:.78rem;color:#4ade80">${label}${rankStr}</td></tr>`;
-          } else if (hasPoData) {
-            finishRow = `<tr><td colspan="4" style="padding:5px 8px;font-size:.78rem;color:var(--color-text-dim)">Did not qualify</td></tr>`;
-          }
-
-          return `
-            <div class="trn-ph-year-section">
-              <div class="trn-ph-year-label">
-                <strong>${esc(yr)}</strong>
-                <span style="font-size:.75rem;color:var(--color-text-dim);margin-left:8px">${p.seasons[yr].length} league${p.seasons[yr].length !== 1 ? "s" : ""}</span>
-              </div>
-              <table class="trn-ph-career-table">
-                <thead><tr>
-                  <th>League</th>
-                  <th style="text-align:right;width:52px">W–L</th>
-                  <th style="text-align:right;width:52px">PF</th>
-                  <th style="text-align:center;width:72px">Lg Champ</th>
-                </tr></thead>
-                <tbody>${leagueRows}${finishRow}</tbody>
-              </table>
-            </div>`;
-        }).join("");
-
-        const modalRoot = document.createElement("div");
-        modalRoot.id        = "pub-ph-modal-root";
-        modalRoot.className = "trn-ph-modal-backdrop";
-        modalRoot.style.display = "flex";
-        modalRoot.innerHTML = `
-          <div class="trn-ph-modal">
-            <div class="trn-ph-modal-header">
-              <span class="trn-ph-modal-title">${esc(p.displayName)}${genderBadge}${twitterLink}</span>
-              <button class="modal-close" id="pub-ph-close">✕</button>
-            </div>
-            <div class="trn-ph-modal-body">
-              <div class="trn-ph-modal-totals">
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalYears}</div><div class="trn-ph-stat-lbl">Season${p.totalYears !== 1 ? "s" : ""}</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalWins}–${p.totalLosses}</div><div class="trn-ph-stat-lbl">Career W–L</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.winPct !== null ? p.winPct + "%" : "—"}</div><div class="trn-ph-stat-lbl">Win%</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.playoffApps}/${p.totalYears}</div><div class="trn-ph-stat-lbl">PO Apps</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.bestRank ?? "—"}</div><div class="trn-ph-stat-lbl">Best Rank</div></div>
-                <div class="trn-ph-stat"><div class="trn-ph-stat-val">${p.totalPF ? p.totalPF.toFixed(0) : "—"}</div><div class="trn-ph-stat-lbl">Career PF</div></div>
-                ${p.tournamentChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🏆×${p.tournamentChamps}</div><div class="trn-ph-stat-lbl">Tourn.</div></div>` : ""}
-                ${p.totalChamps > 0 ? `<div class="trn-ph-stat"><div class="trn-ph-stat-val">🥇×${p.totalChamps}</div><div class="trn-ph-stat-lbl">League</div></div>` : ""}
-              </div>
-              ${yearSections}
-            </div>
-          </div>`;
-
-        document.body.appendChild(modalRoot);
-        document.body.style.overflow = "hidden";
-        const _close = () => { modalRoot.remove(); document.body.style.overflow = ""; };
-        document.getElementById("pub-ph-close")?.addEventListener("click", _close);
-        modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
-      };
-
-      _wirePubPhRows(playerList);
-    }
-
-    // ── Rules tab (public) ──────────────────────────────────
-    function renderRulesTab(body) {
-      const t   = _currentT;
-      const rby = t.rulesByYear || {};
-      const years = Object.keys(rby).map(Number).sort((a, b) => b - a);
-
-      // Default to the globally selected year if available, else latest
-      let selYear = (_selectedYear && rby[_selectedYear])
-        ? String(_selectedYear)
-        : (years.length ? String(years[0]) : null);
-
-      function renderRulesContent(year) {
-        const inner = document.getElementById("pub-rules-content");
-        if (!inner) return;
-        const rules = rby[year] || null;
-        if (!rules?.content) {
-          inner.innerHTML = `
-            <div class="trn-empty" style="padding:var(--space-4) 0">
-              <div class="trn-empty-icon">📋</div>
-              <div class="trn-empty-title">No rules for ${year}</div>
-              <div class="trn-empty-sub">The commissioner hasn't published rules for this year.</div>
-            </div>`;
-          return;
-        }
-        const htmlContent = rules.content
-          .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-          .replace(/\n/g, "<br>")
-          .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
-        inner.innerHTML = `
-          <div style="display:flex;gap:var(--space-3);align-items:center;margin-bottom:var(--space-3);font-size:.78rem;color:var(--color-text-dim)">
-            ${rules.version ? `<span>Version ${esc(String(rules.version))}</span>` : ""}
-            ${rules.updatedAt ? `<span>${new Date(rules.updatedAt).toLocaleDateString()}</span>` : ""}
-          </div>
-          <div class="trn-info-bio trn-rules-full">${htmlContent}</div>`;
-      }
-
-      if (!selYear) {
-        body.innerHTML = `
-          <div class="trn-empty">
-            <div class="trn-empty-icon">📋</div>
-            <div class="trn-empty-title">No rules posted yet</div>
-            <div class="trn-empty-sub">The commissioner hasn't published rules for this tournament.</div>
-          </div>`;
-        return;
-      }
-
-      const yearOptions = years.map(y =>
-        `<option value="${y}" ${String(y) === selYear ? "selected" : ""}>${y}</option>`
-      ).join("");
-
-      body.innerHTML = `
-        <div class="trn-section-card">
-          <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2)">
-            <span>Tournament Rules</span>
-            ${years.length > 1 ? `
-              <div style="display:flex;align-items:center;gap:var(--space-2)">
-                <label style="font-size:.8rem;color:var(--color-text-dim)">Year:</label>
-                <select id="pub-rules-year" style="font-size:.8rem;padding:2px 6px">${yearOptions}</select>
-              </div>` : `<span style="font-size:.78rem;color:var(--color-text-dim)">${selYear}</span>`}
-          </div>
-          <div id="pub-rules-content"></div>
-        </div>`;
-
-      renderRulesContent(selYear);
-
-      document.getElementById("pub-rules-year")?.addEventListener("change", function() {
-        selYear = this.value;
-        renderRulesContent(selYear);
-      });
-    }
-
-    // ── Standings tab (read-only, reuses cached data) ───────
-    let _stSort = { col: "overallRank", dir: "asc" };
-    let _stConf = "";  // persists conference filter across sort re-renders
-
-    function renderStandingsTab(body) {
-      const t       = _currentT;
-      const cache   = t.standingsCache || {};
-
-      // ── World Cup: group dropdown selector ──────────────────────────────────
-      const allPoYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
-      // Respect the global year selector
-      const poYear = allPoYears.find(y => String(y) === String(_selectedYear)) || allPoYears[0] || null;
-      const po     = poYear ? (t.playoffs[poYear] || {}) : {};
-      if (po.mode === "worldcup") {
-        const wcGroups  = po.worldcupGroups  || [];
-        const wcSched   = po.worldcupSchedule || {};
-        const wcRegWks  = po.worldcupRegWeeks || 6;
-        const startWk   = po.startWeek || null;
-        const wcAdv     = po.worldcupAdvanceCount ?? 2;
-        const _sk       = (s) => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-        const wcSC      = po.wcStandingsCache || {};
-
-        if (!wcGroups.length) {
-          body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No groups configured yet.</div></div>`;
-          return;
-        }
-
-        // Build teamName → {teamId, leagueId} — prefer wcStandingsCache, fallback to _currentT.standingsCache
-        const teamInfoMap = {};
-        const _buildTIM = (src) => Object.values(src||{}).forEach(lc => {
-          const lid = String(lc.leagueId || lc.league_id || "");
-          (lc.teams||[]).forEach(tm => { if (tm.teamName && lid) teamInfoMap[_sk(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid }; });
-        });
-        _buildTIM(wcSC);
-        if (!Object.keys(teamInfoMap).length) _buildTIM(_currentT.standingsCache);
-
-        const groupOpts = wcGroups.map((g, gi) =>
-          `<option value="${gi}">${esc(g.name || ("Group "+(gi+1)))}</option>`
-        ).join("");
-
-        body.innerHTML = `
-          <div class="trn-po-container" style="padding-top:var(--space-2)">
-            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3)">
-              <label style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">View Group</label>
-              <select id="pub-wc-group-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${groupOpts}</select>
-            </div>
-            <div id="pub-wc-group-body"></div>
-          </div>`;
-
-        const _loadPubGroup = (gi) => {
-          const g       = wcGroups[gi];
-          const adv     = g.advanceCount ?? wcAdv;
-          const members = g.members || [];
-          const sched   = wcSched[String(gi)] || {};
-          const _nflWk  = wi => startWk ? (startWk - wcRegWks + wi) : (wi + 1);
-
-          const tableId = `pub-wc-tbl-${gi}`, muId = `pub-wc-mu-${gi}`;
-          const weekOpts = Array.from({length: wcRegWks}, (_,wi) => `<option value="${wi}">Week ${wi+1}</option>`).join("");
-
-          const el = document.getElementById("pub-wc-group-body");
-          if (!el) return;
-          el.innerHTML = `
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
-              <div>
-                <div id="pub-wc-loader-${gi}" style="font-size:.8rem;color:var(--color-text-dim);padding:4px 0">⏳ Loading…</div>
-                <div class="trn-po-table-wrap">
-                  <table class="trn-po-table" id="${tableId}" style="display:none">
-                    <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
-              </div>
-              <div>
-                <div style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
-                <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2)">
-                  <select id="pub-wc-wk-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">${weekOpts}</select>
-                  <button class="btn-secondary btn-xs" id="pub-wc-ref-${gi}">↺ Refresh</button>
-                </div>
-                <div id="${muId}"></div>
-              </div>
-            </div>`;
-
-          const scoreMap = {};
-          const _fetchScores = async (lid, nflWk) => {
-            const key = `${lid}|${nflWk}`;
-            if (scoreMap[key]) return;
-            try {
-              const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
-              if (!r.ok) return;
-              const data = await r.json();
-              (data||[]).forEach(m => { scoreMap[`${lid}|${nflWk}|${m.roster_id}`] = parseFloat(m.points)||0; });
-            } catch(e) {}
-          };
-          const _score = (name, nflWk) => {
-            const info = teamInfoMap[_sk(name)];
-            if (!info) return null;
-            const v = scoreMap[`${info.leagueId}|${nflWk}|${info.teamId}`];
-            return v !== undefined ? v : null;
-          };
-
-          // Compute full standings from all weeks
-          const rec = {};
-          members.forEach(n => { rec[n] = { wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{} }; });
-
-          const _computeAndRender = async () => {
-            const lids = [...new Set(members.map(n => teamInfoMap[_sk(n)]?.leagueId).filter(Boolean))];
-            // Fetch all weeks
-            for (let wi = 0; wi < wcRegWks; wi++) {
-              if ((sched[String(wi)]||[]).length) {
-                await Promise.allSettled(lids.map(lid => _fetchScores(lid, _nflWk(wi))));
-              }
-            }
-            // Compute records
-            for (let wi = 0; wi < wcRegWks; wi++) {
-              const nflWk = _nflWk(wi);
-              (sched[String(wi)]||[]).forEach(({home,away}) => {
-                if (!home||!away||home===away||!rec[home]||!rec[away]) return;
-                const hs=_score(home,nflWk), as_=_score(away,nflWk);
-                if (hs!==null&&as_!==null) {
-                  rec[home].pf+=hs;rec[home].pa+=as_;rec[away].pf+=as_;rec[away].pa+=hs;
-                  rec[home].h2hPF[away]=(rec[home].h2hPF[away]||0)+(hs-as_);
-                  rec[away].h2hPF[home]=(rec[away].h2hPF[home]||0)+(as_-hs);
-                  if(hs>as_){rec[home].wins++;rec[away].losses++;rec[home].h2h[away]=(rec[home].h2h[away]||0)+1;rec[away].h2h[home]=(rec[away].h2h[home]||0)-1;}
-                  else if(as_>hs){rec[away].wins++;rec[home].losses++;rec[away].h2h[home]=(rec[away].h2h[home]||0)+1;rec[home].h2h[away]=(rec[home].h2h[away]||0)-1;}
-                }
-              });
-            }
-            // Sort with tiebreakers
-            const tbChain = Array.isArray(po.worldcupTiebreakers)&&po.worldcupTiebreakers.length ? po.worldcupTiebreakers : ["h2h_record_tied","h2h_pt_diff","overall_pt_diff","overall_pf"];
-            const winGrps={};
-            members.forEach(n=>{const w=rec[n]?.wins||0;(winGrps[w]=winGrps[w]||[]).push(n);});
-            const sorted=[...members].sort((a,b)=>{
-              const d=(rec[b]?.wins||0)-(rec[a]?.wins||0);if(d!==0)return d;
-              const tc=(winGrps[rec[a]?.wins||0]||[]).length;
-              if(tc>=3){const dd=((rec[b]?.pf||0)-(rec[b]?.pa||0))-((rec[a]?.pf||0)-(rec[a]?.pa||0));if(dd!==0)return dd;return(rec[b]?.pf||0)-(rec[a]?.pf||0);}
-              for(const tb of tbChain){let df=0;
-                if(tb==="h2h_record_tied")df=(rec[a]?.h2h[b]||0)-(rec[b]?.h2h[a]||0);
-                else if(tb==="h2h_pt_diff")df=(rec[a]?.h2hPF[b]||0)-(rec[b]?.h2hPF[a]||0);
-                else if(tb==="overall_pt_diff")df=((rec[a]?.pf||0)-(rec[a]?.pa||0))-((rec[b]?.pf||0)-(rec[b]?.pa||0));
-                else if(tb==="overall_pf")df=(rec[a]?.pf||0)-(rec[b]?.pf||0);
-                if(df!==0)return -df;}
-              return 0;
-            });
-            // Determine if all regular season weeks have scores (gates advance/eliminate badges)
-            const regComplete = (() => {
-              for (let wi = 0; wi < wcRegWks; wi++) {
-                const matchups = sched[String(wi)] || [];
-                if (!matchups.length) continue;
-                const nflWk = _nflWk(wi);
-                const hasScore = members.some(n => {
-                  const info = teamInfoMap[_sk(n)];
-                  return info?.leagueId && scoreMap[`${info.leagueId}|${nflWk}|${info.teamId}`] !== undefined;
-                });
-                if (!hasScore) return false;
-              }
-              return true;
-            })();
-
-            const trs=sorted.map((name,i)=>{
-              const r=rec[name],isAdv=i<adv;
-              const rowCls = regComplete ? (isAdv?"trn-po-row--advance":"trn-po-row--cut") : "trn-po-row--neutral";
-              const div=(i===adv&&sorted.length>adv)
-                ?`<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line (top ${adv}${regComplete?" advance":""}) —</div></td></tr>`
-                :"";
-              const badge=regComplete
-                ?(isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
-                :"";
-              return `${div}<tr class="${rowCls}">
-                <td class="trn-po-rank">${i+1}</td><td class="trn-po-team-name"><div>${esc(name)}</div></td>
-                <td class="trn-po-num">${r.wins}–${r.losses}</td><td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
-                <td>${badge}</td></tr>`;
-            }).join("");
-            const tEl=document.getElementById(tableId),lEl=document.getElementById(`pub-wc-loader-${gi}`);
-            if(tEl){tEl.querySelector("tbody").innerHTML=trs;tEl.style.display="";}
-            if(lEl)lEl.style.display="none";
-          };
-
-          const _loadMatchups = async (wi) => {
-            const muEl=document.getElementById(muId);if(!muEl)return;
-            const nflWk=_nflWk(wi);
-            const lids=[...new Set(members.map(n=>teamInfoMap[_sk(n)]?.leagueId).filter(Boolean))];
-            await Promise.allSettled(lids.map(lid=>_fetchScores(lid,nflWk)));
-            const matchups=sched[String(wi)]||[];
-            if(!matchups.length){muEl.innerHTML=`<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`;return;}
-            const cards=matchups.map(m=>{
-              const sa=_score(m.home,nflWk),sb=_score(m.away,nflWk);
-              const has=sa!==null&&sb!==null,wH=has&&sa>sb,wA=has&&sb>sa;
-              const fmt=v=>v!==null?v.toFixed(2):"–";
-              return `<div class="trn-wc-mu-card">
-                <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${esc(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(sa)}</span></div>
-                <div class="trn-wc-mu-vs">vs</div>
-                <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${esc(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(sb)}</span></div>
-              </div>`;
-            }).join("");
-            muEl.innerHTML=`<div class="trn-wc-mu-cards">${cards}</div>`;
-          };
-
-          _computeAndRender().then(()=>_loadMatchups(0));
-          document.getElementById(`pub-wc-wk-${gi}`)?.addEventListener("change",function(){_loadMatchups(parseInt(this.value)||0);});
-          document.getElementById(`pub-wc-ref-${gi}`)?.addEventListener("click",()=>_loadMatchups(parseInt(document.getElementById(`pub-wc-wk-${gi}`)?.value||"0")));
-        };
-
-        document.getElementById("pub-wc-group-sel")?.addEventListener("change", function() { _loadPubGroup(parseInt(this.value)); });
-        setTimeout(() => _loadPubGroup(0), 0);
-        return;
-      }
-
-      const rankBy  = t.rankBy || "record";
-
-      // All available years
-      const allYears = [...new Set(Object.values(cache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a);
-      if (allYears.length && (_selectedYear === null || !allYears.includes(_selectedYear))) {
-        _selectedYear = allYears[0];
-      }
-
-      // Filter by selected year
-      const entries = Object.entries(cache).filter(([, lc]) =>
-        !_selectedYear || lc.year === _selectedYear
-      );
-
-      if (!entries.length) {
-        body.innerHTML = `<div class="trn-empty"><div class="trn-empty-title">No standings data${_selectedYear ? " for " + _selectedYear : ""}</div></div>`;
-        return;
-      }
-
-      // Build participant lookup from publicTournaments data
-      const pMap = t.participantMap || {};
-      // Sanitize keys the same way as _writePublicSummary in tournament.js
-      const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
-
-      // Build rows
-      let allRows = [];
-      let lastSynced = 0;
-      for (const [leagueId, lc] of entries) {
-        const teams = [...(lc.teams || [])].sort((a, b) => {
-          if (rankBy === "pf") return b.pf - a.pf;
-          if (b.wins !== a.wins) return b.wins - a.wins;
-          return b.pf - a.pf;
-        });
-        teams.forEach(team => {
-          const key = _sk(team.teamName || "");
-          const p   = pMap[key] || {};
-          allRows.push({
-            overallRank: 0,
-            teamName:    p.displayName || team.teamName || "Unknown",
-            rawTeamName: team.teamName || "Unknown",
-            leagueName:  lc.leagueName || leagueId,
-            conference:  lc.conference || "",
-            division:    lc.division   || "",
-            wins:        team.wins     || 0,
-            losses:      team.losses   || 0,
-            pf:          team.pf       || 0,
-            pa:          team.pa       || 0,
-            gender:      p.gender      || "",
-            twitterHandle: pMap[_sk(team.teamName || "")]?.twitterHandle || ""
-          });
-        });
-        if ((lc.lastSynced || 0) > lastSynced) lastSynced = lc.lastSynced;
-      }
-
-      // Overall rank
-      allRows.sort((a, b) => rankBy === "pf"
-        ? b.pf - a.pf
-        : b.wins !== a.wins ? b.wins - a.wins : b.pf - a.pf
-      );
-      allRows.forEach((r, i) => r.overallRank = i + 1);
-
-      const conferences = [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort();
-      const hasConf     = conferences.length > 0;
-      const lastStr     = lastSynced ? new Date(lastSynced).toLocaleString() : "Unknown";
-
-      sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears);
-    }
-
-    function sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears) {
-      allYears = allYears || [];
-      const mult = _stSort.dir === "asc" ? 1 : -1;
-      const sorted = [...allRows].sort((a, b) => {
-        const col = _stSort.col;
-        if (col === "teamName" || col === "leagueName" || col === "conference")
-          return mult * String(a[col]||"").localeCompare(String(b[col]||""));
-        return mult * ((Number(a[col])||0) - (Number(b[col])||0));
-      });
-
-      const si = (col) => {
-        if (_stSort.col !== col) return '<span style="margin-left:3px;font-size:.65rem;opacity:.4">⇅</span>';
-        return '<span style="margin-left:3px;font-size:.65rem">' + (_stSort.dir === "asc" ? "↑" : "↓") + "</span>";
-      };
-
-      const thStyle = "cursor:pointer;user-select:none";
-
-      // Build unique conferences for filter (needs allRows, available in closure)
-      const _confOpts = hasConf
-        ? [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort()
-        : [];
-
-      body.innerHTML = `
-        <div class="trn-standings-toolbar">
-          <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
-          ${hasConf ? `<select id="pub-st-conf" class="trn-filter-select" style="min-width:130px">
-            <option value="">All Conferences</option>
-            ${_confOpts.map(c => `<option value="${c.toLowerCase()}" ${_stConf === c.toLowerCase() ? "selected" : ""}>${esc(c)}</option>`).join("")}
-          </select>` : ""}
-        </div>
-        <div class="trn-standings-meta">
-          Last synced: ${esc(lastStr)} &middot; ${allRows.length} teams
-        </div>
-        <div class="standings-table-wrap">
-          <table class="standings-table" id="pub-st-table">
-            <thead><tr>
-              <th class="standings-rank" data-col="overallRank" style="${thStyle}">#${si("overallRank")}</th>
-              <th data-col="teamName" style="${thStyle}">Team${si("teamName")}</th>
-
-              <th class="standings-win"  data-col="wins"   style="${thStyle}">W${si("wins")}</th>
-              <th class="standings-loss" data-col="losses" style="${thStyle}">L${si("losses")}</th>
-              <th class="standings-num"  data-col="pf"     style="${thStyle}">PF${si("pf")}</th>
-            </tr></thead>
-            <tbody id="pub-st-tbody">
-              ${sorted.map(r => `
-                <tr data-name="${esc(r.teamName.toLowerCase())}" data-raw="${esc((r.rawTeamName||r.teamName).toLowerCase())}" data-league="${esc(r.leagueName.toLowerCase())}" data-conf="${esc((r.conference||"").toLowerCase())}">
-                  <td class="standings-rank">${r.overallRank}</td>
-                  <td>
-                    <span class="standings-team-cell">
-                      <span class="st-av">${esc((r.teamName||"?").slice(0,2).toUpperCase())}</span>
-                      <span class="trn-st-name-wrap">
-                        <span class="trn-st-name">${esc(r.teamName)}${r.gender === "Male" ? ` <span class="trn-gender-m">M</span>` : r.gender === "Female" ? ` <span class="trn-gender-f">F</span>` : ""}${r.twitterHandle ? `<a href="https://x.com/${esc(r.twitterHandle.replace(/^@/,""))}" target="_blank" rel="noopener" class="trn-st-twitter">@${esc(r.twitterHandle.replace(/^@/,""))}</a>` : ""}</span>
-                        ${hasConf && r.conference ? `<span class="trn-st-sub">${esc(r.conference)}</span>` : ""}
-                        <span class="trn-st-sub trn-st-sub--league">${esc(r.leagueName)}</span>
-                      </span>
-                    </span>
-                  </td>
-                  <td class="standings-win">${r.wins}</td>
-                  <td class="standings-loss">${r.losses}</td>
-                  <td class="standings-num">${r.pf.toFixed(2)}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
-        </div>`;
-
-      // Combined filter — search + conference dropdown work together
-      function _applyStFilter() {
-        const q    = (document.getElementById("pub-st-search")?.value || "").toLowerCase();
-        const conf = (document.getElementById("pub-st-conf")?.value   || "").toLowerCase();
-        document.querySelectorAll("#pub-st-tbody tr").forEach(row => {
-          const matchQ    = !q    || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q) || row.dataset.conf?.includes(q);
-          const matchConf = !conf || row.dataset.conf === conf;
-          row.style.display = (matchQ && matchConf) ? "" : "none";
-        });
-      }
-      document.getElementById("pub-st-search")?.addEventListener("input", _applyStFilter);
-      document.getElementById("pub-st-conf")?.addEventListener("change", function() { _stConf = this.value; _applyStFilter(); });
-
-      // Sort headers
-      document.querySelectorAll("[data-col]").forEach(th => {
-        th.addEventListener("click", () => {
-          const col = th.dataset.col;
-          if (_stSort.col === col) _stSort.dir = _stSort.dir === "asc" ? "desc" : "asc";
-          else { _stSort.col = col; _stSort.dir = "asc"; }
-          sortAndRenderStandings(body, allRows, hasConf, lastStr, allYears);
-        });
-      });
-    }
-
-    // ── ADP tab ─────────────────────────────────────────────
-    const POS_COLOR = { QB:"#b89ffe", RB:"#18e07a", WR:"#00d4ff", TE:"#ffc94d", K:"#9ca3af", DEF:"#9ca3af" };
-    let _adpPage    = 1;
-    let _adpPos     = "all";
-    const ADP_PAGE_SIZE = 25;
-
-    function _ensureAdpTabOption() {
-      const sel = document.getElementById("pub-tab-select");
-      if (!sel) return;
-      if (sel.querySelector('option[value="adp"]')) return; // already there
-      const opt = document.createElement("option");
-      opt.value = "adp";
-      opt.textContent = "📊 ADP";
-      // Insert before Rules if it exists, otherwise append
-      const rulesOpt = sel.querySelector('option[value="rules"]');
-      if (rulesOpt) sel.insertBefore(opt, rulesOpt);
-      else sel.appendChild(opt);
-    }
-
-    function _clearAdpRefresh() {
-      if (_adpRefreshTimer) { clearInterval(_adpRefreshTimer); _adpRefreshTimer = null; }
-    }
-
-    // ── Public Playoffs Tab ──────────────────────────────
-    // Reads from publicTournaments/{tid}/playoffs — written by admin "Publish Playoffs" button.
-    async function renderPlayoffsTab(body) {
-      // Always re-fetch playoffs from Firebase so the public page reflects
-      // the latest publish without requiring a full page reload.
-      body.innerHTML = `<div class="trn-po-container" style="padding:var(--space-4) 0;color:var(--color-text-dim);font-size:.85rem">Loading playoffs…</div>`;
-      try {
-        // Fetch the year-keyed playoffs node for the selected year
-        const year = _selectedYear || new Date().getFullYear();
-        const snap = await tRef(_currentTid).child(`playoffs/${year}`).once("value");
-        if (snap.exists()) {
-          if (!_currentT.playoffs) _currentT.playoffs = {};
-          _currentT.playoffs[year] = snap.val();
-        } else {
-          // Legacy fallback: try flat node
-          const flatSnap = await tRef(_currentTid).child("playoffs").once("value");
-          if (flatSnap.exists()) _currentT.playoffs = flatSnap.val();
-        }
-      } catch(e) { /* use cached value on error */ }
-
-      const t   = _currentT;
-      const year = _selectedYear || new Date().getFullYear();
-      // Get year-keyed playoff data, falling back to flat legacy format
-      const playoffs_ = t.playoffs || {};
-      const po = (playoffs_[year] && playoffs_[year].mode)
-        ? playoffs_[year]
-        : (playoffs_.mode ? playoffs_ : {});
-
-      if (!po.mode) {
-        body.innerHTML = `<div class="trn-po-container"><div class="trn-po-empty">Playoff information has not been published yet for ${year}. Click 📢 Publish from the admin Playoffs tab.</div></div>`;
-        return;
-      }
-
-      // For worldcup: if the published snapshot is missing WC fields (published before
-      // the worldcup fix), merge them from _currentT.playoffs[year] or standingsCache.
-      if (po.mode === "worldcup") {
-        const live = (_currentT.playoffs || {})[year] || {};
-        if (!po.worldcupGroups?.length   && live.worldcupGroups?.length)   po.worldcupGroups   = live.worldcupGroups;
-        if (!po.worldcupBracket?.length  && live.worldcupBracket?.length)  po.worldcupBracket  = live.worldcupBracket;
-        if (!po.worldcupSchedule         && live.worldcupSchedule)         po.worldcupSchedule = live.worldcupSchedule;
-        if (!po.wcStandingsCache         && live.wcStandingsCache)         po.wcStandingsCache = live.wcStandingsCache;
-        // Last resort: build wcStandingsCache from the public standingsCache
-        if (!po.wcStandingsCache && _currentT.standingsCache) {
-          const wsc = {};
-          Object.entries(_currentT.standingsCache||{}).forEach(([ck, lc]) => {
-            if (String(lc.year) !== String(year)) return;
-            wsc[ck] = {
-              leagueId:   lc.leagueId || lc.league_id || "",
-              leagueName: lc.leagueName || "",
-              year:       lc.year,
-              teams: (lc.teams||[]).map(tm => ({
-                teamId:   String(tm.teamId||""),
-                teamName: tm.teamName || "",
-                wins:     tm.wins    || 0,
-                losses:   tm.losses  || 0,
-                pf:       tm.pf      || 0,
-                pa:       tm.pa      || 0
-              }))
-            };
-          });
-          if (Object.keys(wsc).length) po.wcStandingsCache = wsc;
-        }
-      }
-
-      const mode       = po.mode || "total_points";
-      const standings  = po.standings  || [];
-      const rounds     = po.rounds     || [];
-      const qualCount  = po.qualCount  || standings.filter(tm => tm.qualified).length;
-      const byeCount   = po.byeCount   || 0;
-      const leagueChamps = po.leagueChamps || [];
-      const showChamps = po.recognizeLeagueChampions && leagueChamps.length > 0;
-
-      const modeLabel = {total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode;
-      const modeIcon  = {total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍"}[mode]||"🏆";
-      const sw = po.startWeek, ew = po.endWeek;
-
-      // Helper: prefer displayName over teamName everywhere
-      const _name = (tm) => esc(tm.displayName || tm.teamName || "—");
-
-      // ── Tabs ──────────────────────────────────────────────
-      // Worldcup: playoffs tab shows bracket only — standings live on the Standings tab
-      const tabs = mode === "worldcup" ? [] : [{ id:"standings", label:"📊 Standings" }];
-      if (mode==="total_points")    tabs.push({id:"leaderboard", label:"🏆 Leaderboard"});
-      else if (mode==="points_rounds") rounds.forEach((_,i) => {
-        tabs.push({id:`round_${i}`, label: i===rounds.length-1 ? "🏆 Championship" : `Round ${i+1}`});
-      });
-      else if (mode==="h2h_bracket") tabs.push({id:"bracket", label:"🥊 Bracket"});
-      else if (mode==="custom_rounds") rounds.forEach((_,i) => {
-        tabs.push({id:`cround_${i}`, label: i===rounds.length-1 ? "🏆 Championship" : `Round ${i+1}`});
-      });
-      else if (mode==="worldcup") {
-        // In worldcup mode the Playoffs tab only shows the bracket.
-        // All group standings + matchups are in the Standings tab.
-        tabs.push({id:"wc_bracket", label:"🥊 Bracket"});
-      }
-      if (showChamps) tabs.push({id:"league_champs", label:"🏅 League Champs"});
-
-      let _tab = tabs[0].id;
-
-      const _tabBar = (active) => `
-        <div class="trn-po-subtab-bar">
-          ${tabs.map(tb=>`<button class="trn-po-subtab-btn ${tb.id===active?"trn-po-subtab-btn--active":""}" data-subtab="${tb.id}">${tb.label}</button>`).join("")}
-        </div>
-        <select class="trn-po-tab-select" id="pub-po-tab-select">
-          ${tabs.map(tb=>`<option value="${tb.id}" ${tb.id===active?"selected":""}>${tb.label}</option>`).join("")}
-        </select>`;
-
-      // ── Standings view ────────────────────────────────────
-      const _standingsView = () => {
-        const elimCount = standings.length - standings.filter(tm=>tm.qualified).length;
-        const note = mode==="total_points"
-          ? `Champion = highest PF${ew?` through Week ${ew}`:""}.`
-          : `${standings.filter(tm=>tm.qualified).length} qualified · ${elimCount} eliminated${byeCount?` · ${byeCount} bye${byeCount!==1?"s":""}`:""}.${sw?` Playoffs Wk ${sw}`:""}`;
-
-        let lastQualIdx = -1;
-        standings.forEach((tm,i) => { if (tm.qualified) lastQualIdx = i; });
-
-        const rows = standings.map((tm, i) => {
-          const isChamp = mode==="total_points" && i===0;
-          const isBye   = tm.bye;
-          const isQ     = tm.qualified;
-          const rowCls  = isChamp ? "trn-po-row--champion"
-            : isBye ? "trn-po-row--bye-seed"
-            : isQ   ? "trn-po-row--qualified"
-            : "trn-po-row--eliminated";
-          const badge = isChamp
-            ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
-            : isBye ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-            : isQ   ? `<span class="trn-po-badge trn-po-badge--qualified">✓ Qualified</span>`
-            : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-          const champBanner = isChamp ? `<tr class="trn-po-row--champion-banner"><td colspan="5">
-            <div class="trn-po-champion-banner">
-              <span class="trn-po-champion-trophy">🏆</span>
-              <div class="trn-po-champion-info">
-                <div class="trn-po-champion-name">${_name(tm)}</div>
-                <div class="trn-po-champion-sub">${esc(tm.leagueName||"")} · ${(tm.pf||0).toFixed(2)} pts · ${tm.wins??0}–${tm.losses??0}</div>
-              </div>
-              <span class="trn-po-champion-label">🏆 Tournament Champion</span>
-            </div>
-          </td></tr>` : "";
-          const cutRow = (i === lastQualIdx + 1 && lastQualIdx >= 0)
-            ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Qualification Cut Line — ${standings.filter(tm=>tm.qualified).length} qualified · ${elimCount} eliminated —</div></td></tr>`
-            : "";
-          return `${champBanner}${cutRow}<tr class="${rowCls}">
-            <td class="trn-po-rank">${isChamp?"🏆":i+1}</td>
-            <td class="trn-po-team-name">
-              <div>${_name(tm)}</div>
-              <div class="trn-st-sub trn-st-sub--league">${esc(tm.leagueName||"—")}</div>
-            </td>
-            <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
-            <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
-            <td>${badge}</td>
-          </tr>`;
-        }).join("");
-        return `<div class="trn-po-tp-note">${note}</div>
-          <div class="trn-po-table-wrap"><table class="trn-po-table">
-            <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table></div>`;
-      };
-
-      // ── Leaderboard (total_points) ─────────────────────────
-      const _leaderboard = () => `
-        <div class="trn-po-table-wrap"><table class="trn-po-table">
-          <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th></tr></thead>
-          <tbody>${standings.slice(0,20).map((tm,i)=>`<tr class="${i===0?"trn-po-row--champion":""}">
-            <td class="trn-po-rank">${i===0?"🏆":i+1}</td>
-            <td class="trn-po-team-name">
-              <div>${_name(tm)}</div>
-              <div class="trn-st-sub trn-st-sub--league">${esc(tm.leagueName||"")}</div>
-            </td>
-            <td class="trn-po-num">${tm.wins??0}–${tm.losses??0}</td>
-            <td class="trn-po-num trn-po-pf">${(tm.pf||0).toFixed(2)}</td>
-          </tr>`).join("")}</tbody>
-        </table></div>
-        ${standings.length>20?`<div class="trn-po-more">+ ${standings.length-20} more teams</div>`:""}`;
-
-      // ── Round view (points_rounds / custom_rounds) ─────────
-      // computedRounds: pre-computed at publish time with actual scores and blend values
-      const computedRounds = po.computedRounds || [];
-
-      // Fallback: derive from weeklyScores if computedRounds not present (legacy snapshots)
-      const weeklyScores = po.weeklyScores || {};
-      const _weekPts = (tm, week) => {
-        if (!week || !tm.leagueId || !tm.teamId) return null;
-        return weeklyScores[tm.leagueId]?.[String(week)]?.[String(tm.teamId)] ?? null;
-      };
-      const regSeasonWeeks = sw ? sw - 1 : null;
-
-      const _roundView = (roundIdx, isCustom) => {
-        const round = rounds[roundIdx];
-        if (!round) return `<div class="trn-po-empty">Round data not available.</div>`;
-        const isFinal  = roundIdx === rounds.length-1;
-        const weekNum  = sw ? sw+roundIdx : null;
-
-        // ── Fast path: use pre-computed results from publish snapshot ────
-        const computed = computedRounds[roundIdx];
-        if (computed && computed.results?.length) {
-          const { blendEnabled, blendWeight, blendMode, poolByes, advCount, results } = computed;
-          const histLabel = roundIdx===0 ? "reg avg" : `avg (reg + ${roundIdx} playoff wk${roundIdx!==1?"s":""})`;
-          const blendNote = !blendEnabled ? "Score = this week's points"
-            : blendMode==="weighted"
-              ? `Score = week × ${100-blendWeight}% + ${histLabel} × ${blendWeight}%`
-              : `Score = week pts + ${histLabel} × ${blendWeight}%`;
-          const competitors = results.length - poolByes;
-          const summary = poolByes > 0
-            ? `${results.length} total · ${poolByes} byes · ${competitors} competing · ${advCount} advance · ${competitors-advCount} eliminated`
-            : `${results.length} competing · ${advCount} advance · ${results.length-advCount} eliminated`;
-          const tableId_  = `pub-round-table-${roundIdx}`;
-          const byeBarId_ = `pub-round-bye-bar-${roundIdx}`;
-          const headerCols_ = blendEnabled
-            ? `<th class="trn-po-th-num trn-po-col-wk">Wk Score</th><th class="trn-po-th-num trn-po-col-avg">Avg/Wk</th><th class="trn-po-th-num trn-po-col-blend">Blend</th>`
-            : `<th class="trn-po-th-num">Wk Score</th>`;
-          const colSpan_ = blendEnabled ? 6 : 4;
-          const tableClass_ = blendEnabled ? "trn-po-table trn-po-table--blend" : "trn-po-table";
-          const rows_ = results.map((tm, i) => {
-            const isByeTeam = tm.isBye;
-            const compIdx   = i - poolByes;
-            const rowCls    = tm.isChamp ? "trn-po-row--champion"
-              : isByeTeam ? "trn-po-row--bye-seed"
-              : tm.advances && !isByeTeam ? "trn-po-row--advance" : "trn-po-row--cut";
-            const badge = tm.isChamp
-              ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
-              : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-              : tm.advances ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-            const cutAfter = !isFinal && !isByeTeam && compIdx === advCount-1;
-            const scoreCell = isByeTeam
-              ? (blendEnabled ? `<td class="trn-po-num dim trn-po-col-wk">—</td><td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : `<td class="trn-po-num dim">—</td>`)
-              : blendEnabled
-                ? `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
-                   <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
-                   <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
-                : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
-            return `<tr class="${rowCls}${isByeTeam?" pub-bye-row":""}" ${isByeTeam?'style="display:none"':""}>
-              <td class="trn-po-rank">${i+1}</td>
-              <td class="trn-po-team-name">
-                <div>${esc(tm.displayName||tm.teamName||"—")}</div>
-                <div class="trn-st-sub trn-st-sub--league">${esc(tm.leagueName||"")}</div>
-              </td>
-              ${scoreCell}
-              <td>${badge}</td>
-            </tr>${cutAfter?`<tr class="trn-po-cut-row"><td colspan="${colSpan_}"><div class="trn-po-cut-divider">— Cut Line — ${advCount} advance · ${competitors-advCount} eliminated</div></td></tr>`:""}`;
-          }).join("");
-          setTimeout(() => {
-            const byeBar_ = document.getElementById(byeBarId_);
-            const table_  = document.getElementById(tableId_);
-            if (!byeBar_ || !table_ || poolByes === 0) return;
-            let vis = false;
-            const upd = () => {
-              byeBar_.innerHTML = `<button class="trn-po-bye-toggle">${vis?"▼ Hide":"▶ Show"} ${poolByes} bye${poolByes!==1?"s":""} (auto-advance)</button>`;
-              table_.querySelectorAll(".pub-bye-row").forEach(tr => { tr.style.display = vis ? "" : "none"; });
-              byeBar_.querySelector("button").onclick = () => { vis = !vis; upd(); };
-            };
-            upd();
-          }, 0);
-          return `
-            <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
-              <div class="trn-po-round-header">
-                <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
-                ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
-                <span class="trn-po-round-meta">${summary}</span>
-              </div>
-              <div class="trn-po-round-blend-note">${blendNote}</div>
-            </div>
-            <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
-              <div id="${byeBarId_}"></div>
-              <table class="${tableClass_}" id="${tableId_}">
-                <thead><tr><th>#</th><th>Team</th>${headerCols_}<th>Status</th></tr></thead>
-                <tbody>${rows_}</tbody>
-              </table>
-            </div>`;
-        }
-        // ── Fallback: derive from weeklyScores / PF (legacy snapshots) ──
-
-        const blend        = round.blend;
-        const blendEnabled = !!(blend?.enabled);
-        const blendWeight  = blend?.weight ?? 30;
-        const blendMode    = blend?.mode || "weighted";
-        const histLabel = roundIdx===0 ? "reg avg" : `avg (reg + ${roundIdx} playoff wk${roundIdx!==1?"s":""})`;
-        const blendNote = !blendEnabled ? "Score = this week's points"
-          : blendMode==="weighted"
-            ? `Score = week × ${100-blendWeight}% + ${histLabel} × ${blendWeight}%`
-            : `Score = week pts + ${histLabel} × ${blendWeight}%`;
-
-        // Build pool: bye teams first, then rest, simulate advancement using stored weekly scores
-        const byeTeams_  = standings.filter(tm => tm.bye);
-        const compTeams_ = standings.filter(tm => tm.qualified && !tm.bye);
-        let pool = [...byeTeams_, ...compTeams_];
-
-        for (let ri = 0; ri < roundIdx; ri++) {
-          const r = rounds[ri];
-          const rWeekNum  = sw ? sw + ri : null;
-          const isByeRi   = ri === 0 && byeCount > 0;
-          const rPoolByes = isByeRi ? byeCount : 0;
-          const compSection = pool.slice(rPoolByes);
-          const competitors = compSection.length;
-          const adv = isCustom ? (r.groups||0)*(r.advPerGroup||0)
-            : r.advanceMethod==="pct" ? Math.round(competitors*(r.advancePct||50)/100)
-            : (r.advanceCount||0);
-          // Sort comp section by week score if available, else by PF
-          const sorted = [...compSection].sort((a, b) => {
-            const sa = _weekPts(a, rWeekNum) ?? -1;
-            const sb = _weekPts(b, rWeekNum) ?? -1;
-            if (sb !== sa) return sb - sa;
-            return (b.pf||0) - (a.pf||0);
-          });
-          pool = [...pool.slice(0, rPoolByes), ...sorted.slice(0, adv)];
-        }
-
-        const isByeRound  = roundIdx === 0 && byeCount > 0;
-        const poolByes    = isByeRound ? byeCount : 0;
-        const competitors = pool.length - poolByes;
-        const advCount = isFinal ? 1
-          : isCustom ? (round.groups||0)*(round.advPerGroup||0)
-          : round.advanceMethod==="pct" ? Math.round(competitors*(round.advancePct||50)/100)
-          : (round.advanceCount||0);
-
-        // Annotate with this week's score and sort competing section
-        const regWeeks = regSeasonWeeks || 1;
-        const poolScored = pool.map(tm => {
-          const wkScore  = _weekPts(tm, weekNum);
-          const regAvgPW = (tm.pf||0) / regWeeks;
-          const bScore   = !blendEnabled || wkScore == null ? null
-            : blendMode==="weighted"
-              ? wkScore * (1 - blendWeight/100) + regAvgPW * (blendWeight/100)
-              : wkScore + regAvgPW * (blendWeight/100);
-          return { ...tm, wkScore, regAvgPW, bScore };
-        });
-        const byeSect = poolScored.slice(0, poolByes);
-        const compSect = poolScored.slice(poolByes).sort((a, b) => {
-          const sa = blendEnabled ? (b.bScore ?? b.wkScore ?? b.pf) : (b.wkScore ?? b.pf);
-          const sb = blendEnabled ? (a.bScore ?? a.wkScore ?? a.pf) : (a.wkScore ?? a.pf);
-          return sa - sb;
-        });
-        const sortedPool = [...byeSect, ...compSect];
-
-        const summary = isByeRound
-          ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advCount} advance · ${competitors-advCount} eliminated`
-          : `${pool.length} competing · ${advCount} advance · ${pool.length-(poolByes+advCount)} eliminated`;
-
-        const tableId  = `pub-round-table-${roundIdx}`;
-        const byeBarId = `pub-round-bye-bar-${roundIdx}`;
-        const headerCols = blendEnabled
-          ? `<th class="trn-po-th-num trn-po-col-wk">Wk Score</th><th class="trn-po-th-num trn-po-col-avg">Avg/Wk</th><th class="trn-po-th-num trn-po-col-blend">Blend</th>`
-          : `<th class="trn-po-th-num">Wk Score</th>`;
-        const colSpan = blendEnabled ? 6 : 4;
-        const tableClass = blendEnabled ? "trn-po-table trn-po-table--blend" : "trn-po-table";
-
-        const rows = sortedPool.map((tm, i) => {
-          const isByeTeam = isByeRound && i < poolByes;
-          const compIdx   = i - poolByes;
-          const isCompAdv = !isByeTeam && compIdx < advCount;
-          const isChamp   = isFinal && i === poolByes;
-          const rowCls    = isChamp ? "trn-po-row--champion"
-            : isByeTeam ? "trn-po-row--bye-seed"
-            : isCompAdv ? "trn-po-row--advance" : "trn-po-row--cut";
-          const badge = isChamp
-            ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
-            : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-            : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-            : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-          const cutAfter = !isFinal && !isByeTeam && compIdx === advCount-1;
-          const scoreCell = isByeTeam
-            ? (blendEnabled ? `<td class="trn-po-num dim trn-po-col-wk">—</td><td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : `<td class="trn-po-num dim">—</td>`)
-            : blendEnabled
-              ? `<td class="trn-po-num trn-po-pf trn-po-col-wk">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>
-                 <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
-                 <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
-              : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
-          const byeClass = isByeTeam ? " pub-bye-row" : "";
-          return `<tr class="${rowCls}${byeClass}" ${isByeTeam ? 'style="display:none"' : ""}>
-            <td class="trn-po-rank">${i+1}</td>
-            <td class="trn-po-team-name">
-              <div>${_name(tm)}</div>
-              <div class="trn-st-sub trn-st-sub--league">${esc(tm.leagueName||"")}</div>
-            </td>
-            ${scoreCell}
-            <td>${badge}</td>
-          </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${advCount} advance · ${competitors-advCount} eliminated</div></td></tr>` : ""}`;
-        }).join("");
-
-        // After DOM insertion, wire bye toggle via setTimeout
-        setTimeout(() => {
-          const byeBar = document.getElementById(byeBarId);
-          const table  = document.getElementById(tableId);
-          if (!byeBar || !table || poolByes === 0) return;
-          let byesVisible = false;
-          const update = () => {
-            byeBar.innerHTML = `<button class="trn-po-bye-toggle">${byesVisible?"▼ Hide":"▶ Show"} ${poolByes} bye${poolByes!==1?"s":""} (auto-advance)</button>`;
-            table.querySelectorAll(".pub-bye-row").forEach(tr => { tr.style.display = byesVisible ? "" : "none"; });
-            byeBar.querySelector("button").onclick = () => { byesVisible = !byesVisible; update(); };
-          };
-          update();
-        }, 0);
-
-        return `
-          <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
-            <div class="trn-po-round-header">
-              <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
-              ${weekNum?`<span class="trn-po-week-tag">Week ${weekNum}</span>`:""}
-              <span class="trn-po-round-meta">${summary}</span>
-            </div>
-            <div class="trn-po-round-blend-note">${blendNote}</div>
-          </div>
-          <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
-            <div id="${byeBarId}"></div>
-            <table class="${tableClass}" id="${tableId}">
-              <thead><tr><th>#</th><th>Team</th>${headerCols}<th>Status</th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>`;
-      };
-
-      // ── Bracket view ──────────────────────────────────────
-      const _bracketView = () => {
-        const bracketSize = po.bracketSize||8;
-        const seeds = standings.slice(0,bracketSize);
-        const numRounds = Math.log2(bracketSize);
-        const r1Byes = seeds.slice(0,byeCount);
-        const r1Players = seeds.slice(byeCount);
-        const r1Matchups=[];
-        for(let i=0;i<Math.floor(r1Players.length/2);i++)
-          r1Matchups.push({a:r1Players[i],b:r1Players[r1Players.length-1-i]});
-        const rName=(ri,tot)=>ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
-        return `<div class="trn-po-bracket-wrap"><div class="trn-po-bracket">
-          <div class="trn-po-bracket-round">
-            <div class="trn-po-bracket-round-title">${rName(0,numRounds)}</div>
-            ${r1Byes.map(tm=>`<div class="trn-po-matchup trn-po-matchup--bye"><div class="trn-po-matchup-row">
-              <span class="trn-po-matchup-seed">#${seeds.indexOf(tm)+1}</span>
-              <span class="trn-po-matchup-team trn-po-matchup-team--bye">${_name(tm)}</span>
-              <span class="trn-po-badge trn-po-badge--bye" style="margin-left:auto">BYE</span>
-            </div></div>`).join("")}
-            ${r1Matchups.map(m=>`<div class="trn-po-matchup">
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.a)+1}</span><span class="trn-po-matchup-team">${_name(m.a)}</span><span class="trn-po-matchup-pf">${(m.a?.pf||0).toFixed(1)}</span></div>
-              <div class="trn-po-matchup-vs">vs</div>
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-seed">#${seeds.indexOf(m.b)+1}</span><span class="trn-po-matchup-team">${_name(m.b)}</span><span class="trn-po-matchup-pf">${(m.b?.pf||0).toFixed(1)}</span></div>
-            </div>`).join("")}
-          </div>
-          ${Array.from({length:numRounds-1},(_,ri)=>`<div class="trn-po-bracket-round">
-            <div class="trn-po-bracket-round-title">${rName(ri+1,numRounds)}</div>
-            ${Array.from({length:Math.pow(2,numRounds-ri-2)},()=>`<div class="trn-po-matchup trn-po-matchup--tbd">
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
-              <div class="trn-po-matchup-vs">vs</div>
-              <div class="trn-po-matchup-row"><span class="trn-po-matchup-team trn-po-tbd">TBD</span></div>
-            </div>`).join("")}
-          </div>`).join("")}
-        </div></div>
-        <div class="trn-po-seed-list"><div class="trn-po-section-title">Seedings</div>
-          ${seeds.map((tm,i)=>`<div class="trn-po-seed-row ${i<byeCount?"trn-po-seed-row--bye":""}">
-            <span class="trn-po-seed-num">#${i+1}</span>
-            <span class="trn-po-seed-name">${_name(tm)}</span>
-            <span class="trn-po-seed-league">${esc(tm.leagueName||"")}</span>
-            <span class="trn-po-seed-record">${tm.wins??0}–${tm.losses??0}</span>
-            <span class="trn-po-seed-pf">${(tm.pf||0).toFixed(1)} pts</span>
-            ${i<byeCount?`<span class="trn-po-badge trn-po-badge--bye">BYE</span>`:""}
-          </div>`).join("")}
-        </div>`;
-      };
-
-      // ── League Champs view ────────────────────────────────
-      const _leagueChampsView = () => {
-        if (!leagueChamps.length)
-          return `<div class="trn-po-empty">No league champion data published yet.</div>`;
-        const playoffChamps = leagueChamps.filter(e=>e.isPlayoff);
-        const regLeaders    = leagueChamps.filter(e=>!e.isPlayoff);
-        const _card = (e) => `
-          <div class="trn-po-champ-card">
-            <div class="trn-po-champ-info">
-              <div class="trn-po-champ-name">${esc(e.displayName||e.teamName||"Unknown")}</div>
-              <div class="trn-po-champ-league">${esc(e.leagueName||"")}</div>
-            </div>
-            <div class="trn-po-champ-record">${e.wins??0}–${e.losses??0} · ${(e.pf||0).toFixed(1)} pts</div>
-          </div>`;
-        const _section = (title, icon, items) => items.length===0 ? "" : `
-          <div class="trn-po-champ-section">
-            <div class="trn-po-champ-section-title">${icon} ${title}</div>
-            <div class="trn-po-champ-grid">${items.map(_card).join("")}</div>
-          </div>`;
-        return _section("League Champions (Playoff Winners)", "🏆", playoffChamps)
-             + _section("Regular Season Leaders", "📊", regLeaders);
-      };
-
-      // ── Render content by tab ─────────────────────────────
-      // ── World Cup: group standings (public) ───────────────
-      const _wcGroupView = (gi) => {
-        const g   = (po.worldcupGroups||[])[gi];
-        if (!g) return `<div class="trn-po-empty">Group not found.</div>`;
-        const adv = g.advanceCount ?? (po.worldcupAdvanceCount ?? 2);
-        const members = g.members || [];
-        if (!members.length) return `<div class="trn-po-empty">No teams in this group yet.</div>`;
-
-        const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-        const _rec = (name) => {
-          const wsc = po.wcStandingsCache || {};
-          for (const lc of Object.values(wsc)) {
-            const tm = (lc.teams||[]).find(t2 => _sk(t2.teamName)===_sk(name));
-            if (tm) return { wins:tm.wins||0, losses:tm.losses||0, pf:tm.pf||0 };
-          }
-          const tm = (po.standings||[]).find(s => _sk(s.teamName||s.displayName||"")===_sk(name));
-          return { wins:tm?.wins||0, losses:tm?.losses||0, pf:tm?.pf||0 };
-        };
-
-        const rows = members.map(name=>({name,..._rec(name)})).sort((a,b)=>(b.wins-a.wins)||(b.pf-a.pf));
-        // This view uses wcStandingsCache (Sleeper league data) — not schedule-computed.
-        // It can't determine if reg season is complete, so we show cut line only (no badges).
-        const trs = rows.map((r,i) => {
-          const isAdv = i < adv;
-          const div = i===adv && rows.length>adv
-            ? `<tr class="trn-po-cut-row"><td colspan="5"><div class="trn-po-cut-divider">— Cut Line (top ${adv}) —</div></td></tr>` : "";
-          return `${div}<tr class="trn-po-row--neutral">
-            <td class="trn-po-rank">${i+1}</td>
-            <td class="trn-po-team-name"><div>${esc(r.name)}</div></td>
-            <td class="trn-po-num">${r.wins}–${r.losses}</td>
-            <td class="trn-po-num trn-po-pf">${(r.pf||0).toFixed(2)}</td>
-            <td></td>
-          </tr>`;
-        }).join("");
-
-        // Matchup section — load live from Sleeper
-        const wcSched  = po.worldcupSchedule || {};
-        const wcRegWks = po.worldcupRegWeeks || 6;
-        const startWk  = po.startWeek ? (po.startWeek - wcRegWks) : null;
-        const muContId = `pub-wc-mu-${gi}`;
-        const weekOpts = Array.from({length:wcRegWks},(_,wi)=>({wi,label:`Week ${wi+1}`}));
-
-        const teamInfoMap2 = {};
-        const _buildTIM = (src) => Object.values(src||{}).forEach(lc => {
-          const lid = String(lc.leagueId||lc.league_id||"");
-          (lc.teams||[]).forEach(tm => { if (tm.teamName && lid) teamInfoMap2[tm.teamName]={teamId:String(tm.teamId||""),leagueId:lid}; });
-        });
-        _buildTIM(po.wcStandingsCache);
-        if (!Object.keys(teamInfoMap2).length) _buildTIM(_currentT.standingsCache);
-
-        const _loadWCMatchups = async (wi) => {
-          const el = document.getElementById(muContId);
-          if (!el) return;
-          el.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">Loading…</div>`;
-          const nflWk = startWk ? startWk + wi : wi + 1;
-          const lids = [...new Set(Object.values(teamInfoMap2).map(x=>x.leagueId).filter(Boolean))];
-          const scoreMap = {};
-          await Promise.allSettled(lids.map(async lid => {
-            try {
-              const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${nflWk}`);
-              if (!r.ok) return;
-              const data = await r.json();
-              (data||[]).forEach(m => { scoreMap[`${lid}|${m.roster_id}`] = parseFloat(m.points)||0; });
-            } catch(e) {}
-          }));
-          const _score2 = (name) => {
-            const info = teamInfoMap2[name];
-            if (!info) return null;
-            const v = scoreMap[`${info.leagueId}|${info.teamId}`];
-            return v !== undefined ? v : null;
-          };
-          const matchups = (wcSched[String(gi)]||{})[String(wi)] || [];
-          if (!matchups.length) { el.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`; return; }
-          const cards = matchups.map(m => {
-            const sa=_score2(m.home), sb=_score2(m.away);
-            const has=sa!==null&&sb!==null, wH=has&&sa>sb, wA=has&&sb>sa;
-            const fmt=v=>v!==null?v.toFixed(2):"–";
-            return `<div class="trn-wc-mu-card">
-              <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}">
-                <span class="trn-wc-mu-name">${esc(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(sa)}</span>
-              </div>
-              <div class="trn-wc-mu-vs">vs</div>
-              <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}">
-                <span class="trn-wc-mu-name">${esc(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(sb)}</span>
-              </div>
-            </div>`;
-          }).join("");
-          el.innerHTML = `<div class="trn-wc-mu-cards">${cards}</div>`;
-        };
-
-        setTimeout(() => {
-          const wkSel = document.getElementById(`pub-wc-wk-${gi}`);
-          const refBtn = document.getElementById(`pub-wc-ref-${gi}`);
-          wkSel?.addEventListener("change", () => _loadWCMatchups(parseInt(wkSel.value)||0));
-          refBtn?.addEventListener("click", () => _loadWCMatchups(parseInt(wkSel?.value||"0")));
-          _loadWCMatchups(0);
-        }, 0);
-
-        return `
-          <div class="trn-po-round-card" style="margin-bottom:var(--space-2)">
-            <div class="trn-po-round-header">
-              <span>🌍 ${esc(g.name||("Group "+(gi+1)))}</span>
-              <span class="trn-po-round-meta">${members.length} teams · top ${adv} advance</span>
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
-            <div>
-              <div class="trn-po-table-wrap">
-                <table class="trn-po-table">
-                  <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W–L</th><th class="trn-po-th-num">PF</th><th>Status</th></tr></thead>
-                  <tbody>${trs}</tbody>
-                </table>
-              </div>
-            </div>
-            <div>
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:var(--space-2)">📅 Weekly Matchups</div>
-              <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
-                <select id="pub-wc-wk-${gi}" style="font-size:.78rem;padding:2px 7px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-                  ${weekOpts.map(w=>`<option value="${w.wi}">${esc(w.label)}</option>`).join("")}
-                </select>
-                <button class="btn-secondary btn-xs" id="pub-wc-ref-${gi}">↺ Refresh</button>
-              </div>
-              <div id="${muContId}"></div>
-            </div>
-          </div>`;
-      };
-
-      // ── World Cup: bracket (public read-only) ─────────────
-      // ── World Cup: bracket (public read-only) ─────────────
-      const _wcBracketView = () => {
-        const bracket = po.worldcupBracket || [];
-        if (!bracket.length) return `<div class="trn-po-empty">Bracket not yet set. Check back after group stage.</div>`;
-        const nr    = bracket.length;
-        const cardH = 44;  // px — matchup card height
-        const pairG = 8;   // px — tight intra-pair gap at Round 0
-
-        const getRN  = (ri,tot) => ri===tot-1?"🏆 Championship":ri===tot-2?"Semifinals":ri===tot-3?"Quarterfinals":`Round ${ri+1}`;
-        const wcWPR2 = po.worldcupWeeksPerRound || 2;
-
-        // Same absolute-positioning math as private _renderWCBracketCanvas
-        const centreR0 = (mi) => Math.floor(mi/2) * (2*cardH + 3*pairG) + (mi%2)*(cardH+pairG) + cardH/2;
-        const centreOf = (ri, mi) => ri === 0 ? centreR0(mi) : (centreOf(ri-1, 2*mi) + centreOf(ri-1, 2*mi+1)) / 2;
-        const topOf    = (ri, mi) => Math.round(centreOf(ri, mi) - cardH/2);
-        const colH     = (ri, n)  => n === 0 ? cardH : topOf(ri, n-1) + cardH;
-        const connGap  = (ri, mi) => Math.abs(centreOf(ri, mi) - centreOf(ri, mi % 2 === 0 ? mi+1 : mi-1));
-
-        const cols = bracket.map((rnd, ri) => {
-          const n      = (rnd||[]).length;
-          const totalH = colH(ri, n);
-          const wStart = po.startWeek ? po.startWeek + ri * wcWPR2 : null;
-          const wTag   = wStart ? `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR2>1?`Wks ${wStart}–${wStart+wcWPR2-1}`:`Wk ${wStart}`}</span>` : "";
-
-          const cards = (rnd||[]).map((m, mi) => {
-            const hasScore = m.scoreA !== null && m.scoreA !== undefined &&
-                             m.scoreB !== null && m.scoreB !== undefined;
-            const winA = hasScore && m.scoreA > m.scoreB;
-            const winB = hasScore && m.scoreB > m.scoreA;
-            const tRow = (name, score, isWin, isLoss) =>
-              `<div class="trn-wc-bteam ${!name?"trn-wc-bt--tbd":isWin?"trn-wc-bt--win":isLoss?"trn-wc-bt--loss":""}">
-                <span class="trn-wc-bteam-name">${esc(name||"TBD")}</span>
-                ${hasScore?`<span class="trn-wc-bteam-score">${(score||0).toFixed(1)}</span>`:""}
-              </div>`;
-
-            const top  = topOf(ri, mi);
-            const gap  = connGap(ri, mi);
-            const isTopOfPair = mi % 2 === 0;
-            const hasSib      = (isTopOfPair && mi+1 < n) || (!isTopOfPair);
-            const connCls     = ri < nr-1 && hasSib ? (isTopOfPair ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
-
-            return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
-              ${tRow(m.a, m.scoreA, winA, winB)}
-              <div class="trn-wc-card-divider"></div>
-              ${tRow(m.b, m.scoreB, winB, winA)}
-            </div>`;
-          }).join("");
-
-          return `<div class="trn-wc-col" data-ri="${ri}">
-            <div class="trn-wc-col-header">${getRN(ri,nr)} ${wTag}</div>
-            <div class="trn-wc-col-cards" style="position:relative;height:${totalH}px">${cards}</div>
-          </div>`;
-        }).join("");
-
-        const fm    = (bracket[nr-1]||[])[0] || {};
-        const champ = fm.scoreA > fm.scoreB ? fm.a : fm.scoreB > fm.scoreA ? fm.b : "";
-        const champCol = `<div class="trn-wc-col trn-wc-col--champ">
-          <div class="trn-wc-col-header">🏆 Champion</div>
-          <div class="trn-wc-col-cards" style="display:flex;align-items:center;height:100%">
-            <div class="trn-wc-card trn-wc-card--champion">
-              <div class="trn-wc-bteam trn-wc-bt--champ">
-                <span class="trn-wc-bteam-name">${esc(champ||"TBD")}</span>
-              </div>
-            </div>
-          </div>
-        </div>`;
-
-        return `<div class="trn-wc-bracket-wrap"><div class="trn-wc-bracket">${cols}${champCol}</div></div>`;
-      };
-
-      const _renderContent = (tabId) => {
-        if (tabId==="standings")    return _standingsView();
-        if (tabId==="leaderboard")  return _leaderboard();
-        if (tabId==="bracket")      return _bracketView();
-        if (tabId==="league_champs") return _leagueChampsView();
-        if (tabId==="wc_bracket")   return _wcBracketView();
-        if (tabId.startsWith("round_"))  return _roundView(parseInt(tabId.split("_")[1]), false);
-        if (tabId.startsWith("cround_")) return _roundView(parseInt(tabId.split("_")[1]), true);
-        return `<div class="trn-po-empty">Tab not found.</div>`;
-      };
-
-      const publishedDate = po.publishedAt
-        ? `<span style="font-size:.72rem;color:var(--color-text-dim)">Updated ${new Date(po.publishedAt).toLocaleDateString()}</span>` : "";
-
-      body.innerHTML = `<div class="trn-po-container">
-        <div class="trn-po-header">
-          <div class="trn-po-title">${modeIcon} Playoffs <span class="trn-po-year-badge">${po.year||""}</span></div>
-          <div class="trn-po-mode-chip">${modeLabel}</div>
-          ${publishedDate}
-        </div>
-        ${_tabBar(_tab)}
-        <div id="pub-po-content">${_renderContent(_tab)}</div>
-      </div>`;
-
-      body.querySelectorAll(".trn-po-subtab-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          _tab = btn.dataset.subtab;
-          body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
-            b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_tab));
-          const sel = document.getElementById("pub-po-tab-select");
-          if (sel) sel.value = _tab;
-          document.getElementById("pub-po-content").innerHTML = _renderContent(_tab);
-        });
-      });
-      document.getElementById("pub-po-tab-select")?.addEventListener("change", function() {
-        _tab = this.value;
-        body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
-          b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_tab));
-        document.getElementById("pub-po-content").innerHTML = _renderContent(_tab);
-      });
-    }
-
-
-    function renderRegisterTab(body) {
-      const t    = _currentT;
-      const form = t.registrationForm || {};
-      const opts = form.optionalFields || [];
-      const custom = form.customQuestions || [];
-
-      const STD_LABELS = { displayName: "Display Name", email: "Email Address" };
-      const OPT_LABELS = {
-        sleeperUsername: "Sleeper Username",
-        mflEmail:        "MFL Email Address",
-        yahooUsername:   "Yahoo Username",
-        teamName:        "Team Name",
-        twitterHandle:   "Twitter/X Handle",
-        gender:          "Gender (Male / Female)"
-      };
-      const label = (f) => STD_LABELS[f] || OPT_LABELS[f] || f;
-      const allFlds = ["displayName", "email", ...opts];
-
-      body.innerHTML = `
-        <div class="trn-section-card">
-          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")} ${t.registrationYear || new Date().getFullYear()}</div>
-          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
-            Fill in the form below. Your registration will be reviewed by the tournament admin.
-          </p>
-          ${allFlds.map(f => `
-            <div class="form-group">
-              <label>${esc(label(f))}${["displayName","email"].includes(f) ? ' <span class="required">*</span>' : ""}</label>
-              <input type="text" id="pub-reg-${f}" placeholder="${esc(label(f))}" />
-            </div>`).join("")}
-          ${custom.map((q, i) => `
-            <div class="form-group">
-              <label>${esc(q.question)}${q.required ? ' <span class="required">*</span>' : ""}</label>
-              ${q.type === "textarea"
-                ? `<textarea id="pub-reg-custom-${i}" rows="3" placeholder="Your answer"></textarea>`
-                : `<input type="text" id="pub-reg-custom-${i}" placeholder="Your answer" />`}
-            </div>`).join("")}
-          <div class="form-group" style="margin-top:var(--space-4);padding:var(--space-3);background:var(--color-bg);border-radius:var(--radius-md);border:1px solid var(--color-border)">
-            <div style="font-size:.82rem;color:var(--color-text-dim);line-height:1.6">
-              Already have a Dynasty Locker Room account?
-              <a href="../?register=1" style="color:var(--color-primary)">Sign in to register with your DLR account →</a>
-            </div>
-          </div>
-          <div id="pub-reg-error" class="auth-error hidden"></div>
-          <div class="trn-form-actions">
-            <button class="btn-primary" id="pub-reg-submit">Submit Registration</button>
-          </div>
-        </div>`;
-
-      document.getElementById("pub-reg-submit")?.addEventListener("click", () =>
-        submitPublicRegistration(allFlds, custom, form)
-      );
-    }
-
-    async function submitPublicRegistration(fields, custom, form) {
-      const errEl = document.getElementById("pub-reg-error");
-      const btn   = document.getElementById("pub-reg-submit");
-
-      // Helper: find the right success container — overlay path or tab path
-      const _successContainer = () =>
-        document.getElementById("pub-register-page-body") ||
-        document.getElementById("pub-tab-body");
-
-      const _showError = (msg) => {
-        if (errEl) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
-        if (btn)   { btn.disabled = false; btn.textContent = "Submit Registration"; }
-      };
-
-      const entry = {
-        status:      "pending",
-        submittedAt: Date.now(),
-        source:      "public_form",
-        dlrUsername: null,
-        dlrLinked:   false
-      };
-
-      // ── Collect and validate fields ────────────────────
-      for (const f of fields) {
-        const val = document.getElementById("pub-reg-" + f)?.value.trim();
-        if (!val && ["displayName", "email"].includes(f)) {
-          return _showError((f === "displayName" ? "Display Name" : "Email Address") + " is required.");
-        }
-        entry[f] = val || null;
-      }
-      for (let i = 0; i < custom.length; i++) {
-        const q   = custom[i];
-        const val = document.getElementById("pub-reg-custom-" + i)?.value.trim();
-        if (q.required && !val) return _showError('"' + q.question + '" is required.');
-        if (val) entry["custom_" + i] = val;
-      }
-
-      // ── Pre-flight: check if already approved ─────────
-      // participantMap is in publicTournaments and already loaded in _currentT
-      const _norm = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
-      const pMap  = _currentT.participantMap || {};
-      const emailKey = _norm(entry.email       || "");
-      const nameKey  = _norm(entry.displayName || "");
-      if ((emailKey && pMap[emailKey]) || (nameKey && pMap[nameKey])) {
-        return _showError("✅ You're already an approved participant in this tournament! Check your email for your league invite.");
-      }
-
-      // ── Pre-flight: check localStorage guard (client-side duplicate prevention) ──
-      // This catches the case where the Firebase write succeeded but the success screen
-      // didn't show (e.g. network hiccup on the count update).
-      const _storageKey = "reg_submitted_" + _currentTid + "_" + _norm(entry.email || entry.displayName || "");
-      try {
-        if (localStorage.getItem(_storageKey)) {
-          return _showError("📬 It looks like you already submitted a registration for this tournament. If you haven't heard back, please contact the tournament admin.");
-        }
-      } catch(e) { /* localStorage may be blocked — non-fatal */ }
-
-      // ── Disable button and clear any previous error ────
-      if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
-      if (errEl) errEl.classList.add("hidden");
-
-      try {
-        const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-        await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
-
-        // Mark submitted in localStorage so repeat clicks show a friendly message
-        try { localStorage.setItem(_storageKey, "1"); } catch(e) {}
-
-        // Update public registrationCount (non-fatal if this fails)
+    // Global safety net: if loading overlay is still visible after 10 seconds,
+    // something silently failed (Firebase SDK blocked, auth never fired, etc).
+    // Force-show the auth/login screen so the user isn't stuck on a spinner.
+    setTimeout(() => {
+      const overlay = document.getElementById("loading-overlay");
+      if (overlay && !overlay.classList.contains("hidden")) {
+        console.warn("[DLR] Loading timeout — forcing auth screen");
+        overlay.classList.add("hidden");
+        // Try to show auth screen; fall back to just hiding the overlay
         try {
-          const newCount = (_currentT.registrationCount || 0) + 1;
-          await _pubDb.ref("gmd/publicTournaments/" + _currentTid + "/registrationCount").set(newCount);
-          _currentT.registrationCount = newCount;
-        } catch(e) { /* count update failure should not block success screen */ }
-
-        // Show success in whichever container is active (overlay or tab)
-        const container = _successContainer();
-        if (container) {
-          container.innerHTML = `
-            <div class="trn-success">
-              <div class="trn-success-icon">✅</div>
-              <h3>Registration Submitted!</h3>
-              <p>Your registration for <strong>${esc(_currentT.name || "this tournament")}</strong>
-              is pending review. You'll receive a league invite link once approved.</p>
-              <p style="font-size:.85rem;color:var(--color-text-dim);margin-top:var(--space-3)">
-                Want to track all your leagues in one place?
-                <a href="../?register=1" style="color:var(--color-primary)">Sign up for Dynasty Locker Room →</a>
-              </p>
-            </div>`;
-        }
-      } catch(err) {
-        // Friendly messages for known Firebase error codes
-        const code = (err.code || err.message || "").toLowerCase();
-        let friendlyMsg;
-        if (code.includes("permission_denied") || code.includes("permission denied")) {
-          // Check localStorage — if we stored a key, the first write succeeded and this
-          // is a duplicate attempt caught by Firebase rules
-          let alreadySubmitted = false;
-          try { alreadySubmitted = !!localStorage.getItem(_storageKey); } catch(e) {}
-          if (alreadySubmitted) {
-            friendlyMsg = "📬 Your registration was already submitted! The admin will review it shortly.";
-          } else {
-            // Check participantMap again — might have been approved since page load
-            friendlyMsg = "⚠️ Registration could not be submitted. You may already be registered or approved for this tournament. Please contact the tournament admin if you think this is an error.";
-          }
-        } else if (code.includes("network") || code.includes("unavailable") || code.includes("timeout")) {
-          friendlyMsg = "⚠️ Network error — please check your connection and try again.";
-        } else {
-          friendlyMsg = "Submission failed. Please try again or contact the tournament admin.";
-        }
-        _showError(friendlyMsg);
+          document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+          const authScreen = document.getElementById("auth-screen");
+          if (authScreen) authScreen.classList.add("active");
+        } catch(e) {}
       }
-    }
+    }, 10000);
+  </script>
 
-    // ── Message Board (public) ──────────────────────────────
-    // Firebase path: gmd/tournamentChats/{tid}_{year}/
-    // Read-only for anonymous visitors. Sign-in required to post (handled in app).
-
-    function renderBoardTab(body) {
-      const tid  = _currentTid;
-      const year = _selectedYear || new Date().getFullYear();
-      _pubBoardMsgs = [];
-
-      body.innerHTML = `
-        <div class="trn-board-wrap">
-          <div class="trn-board-header">
-            <span class="trn-board-title">💬 Message Board</span>
-            <span class="trn-board-year">${esc(String(year))}</span>
-          </div>
-          <div id="pub-board-messages" class="trn-board-messages">
-            <div style="text-align:center;padding:var(--space-6);color:var(--color-text-dim)">
-              <div class="spinner" style="margin:0 auto var(--space-2)"></div>Loading…
-            </div>
-          </div>
-          <div class="trn-board-compose" style="opacity:.6;pointer-events:none">
-            <textarea class="trn-board-input" placeholder="Sign in to post a message…" rows="2" disabled></textarea>
-            <button class="btn-primary btn-sm" disabled>Send</button>
-          </div>
-          <div class="trn-board-char">
-            <a href="../" style="color:var(--color-accent)">Sign in to Dynasty Locker Room</a> to post messages.
-          </div>
-        </div>`;
-
-      const chatKey = `${tid}_${year}`;
-      const ref = _pubDb.ref(`gmd/tournamentChats/${chatKey}`).limitToLast(100);
-
-      const onAdded = ref.on("child_added", snap => {
-        _pubBoardMsgs.push({ id: snap.key, ...snap.val() });
-        _pubBoardRender();
-      });
-      const onRemoved = ref.on("child_removed", snap => {
-        const idx = _pubBoardMsgs.findIndex(m => m.id === snap.key);
-        if (idx !== -1) _pubBoardMsgs.splice(idx, 1);
-        _pubBoardRender();
+  <!-- ── Forgot Password wiring ─────────────────────────── -->
+  <script>
+    (function() {
+      // Also restore tabs opacity when the top-level Sign In / Create Account tabs are clicked
+      document.querySelectorAll(".auth-tab").forEach(function(tab) {
+        tab.addEventListener("click", function() {
+          document.querySelector(".auth-tabs")?.style.setProperty("opacity", "");
+        });
       });
 
-      _pubBoardUnsub = () => {
-        ref.off("child_added",  onAdded);
-        ref.off("child_removed", onRemoved);
-        _pubBoardUnsub = null;
-        _pubBoardMsgs  = [];
-      };
-    }
+      // Show forgot-password form; hide login tabs so back-link works cleanly
+      document.getElementById("forgot-password-link")?.addEventListener("click", function(e) {
+        e.preventDefault();
+        document.querySelectorAll(".auth-form").forEach(f => f.classList.remove("active"));
+        document.getElementById("forgot-form")?.classList.add("active");
+        // Dim the tabs to make it clear we're in a sub-flow
+        document.querySelector(".auth-tabs")?.style.setProperty("opacity", "0.3");
+      });
 
-    function _pubBoardRender() {
-      const el = document.getElementById("pub-board-messages");
-      if (!el) return;
-      const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      // Back to login
+      document.getElementById("back-to-login-link")?.addEventListener("click", function(e) {
+        e.preventDefault();
+        document.querySelectorAll(".auth-form").forEach(f => f.classList.remove("active"));
+        document.getElementById("login-form")?.classList.add("active");
+        document.querySelector(".auth-tabs")?.style.setProperty("opacity", "");
+        // Clear reset form state
+        const err = document.getElementById("reset-error");
+        const ok  = document.getElementById("reset-success");
+        const inp = document.getElementById("reset-username");
+        if (err) { err.textContent = ""; err.classList.add("hidden"); }
+        if (ok)  { ok.textContent  = ""; ok.classList.add("hidden");  }
+        if (inp) inp.value = "";
+      });
 
-      if (!_pubBoardMsgs.length) {
-        el.innerHTML = `<div class="trn-board-empty">No messages yet. Be the first! 🏈</div>`;
-        return;
-      }
+      // Submit reset
+      document.getElementById("reset-btn")?.addEventListener("click", async function() {
+        const btn      = this;
+        const username = document.getElementById("reset-username")?.value.trim() || "";
+        const errEl    = document.getElementById("reset-error");
+        const okEl     = document.getElementById("reset-success");
 
-      el.innerHTML = _pubBoardMsgs.map(m => {
-        const ts = m.ts ? new Date(m.ts).toLocaleString("en-US", {
-          month:"short", day:"numeric", hour:"numeric", minute:"2-digit"
-        }) : "";
-        return `
-          <div class="trn-board-msg">
-            <div class="trn-board-msg-meta">
-              <span class="trn-board-msg-user">${esc(m.user || "Anonymous")}</span>
-              <span class="trn-board-msg-ts">${esc(ts)}</span>
-            </div>
-            <div class="trn-board-msg-text">${esc(m.text || "").replace(/\n/g, "<br>")}</div>
-          </div>`;
-      }).join("");
+        errEl.classList.add("hidden");
+        okEl.classList.add("hidden");
 
-      if (wasAtBottom) el.scrollTop = el.scrollHeight;
-    }
+        if (!username) {
+          errEl.textContent = "Enter your username.";
+          errEl.classList.remove("hidden");
+          return;
+        }
 
-    function showError(msg) {
-      const loading = document.getElementById("pub-loading");
-      const content = document.getElementById("pub-content");
-      loading.style.display = "none";
-      content.style.display = "";
-      content.innerHTML = `<div style="text-align:center;padding:60px 16px;color:var(--color-text-dim)">${esc(msg)}</div>`;
-    }
+        btn.disabled    = true;
+        btn.textContent = "Sending…";
 
-    // ── Handle browser back/forward ─────────────────────────
-    window.addEventListener("popstate", () => {
-      const p = new URLSearchParams(window.location.search);
-      const tid = p.get("t");
-      if (tid) loadTournament(tid);
-      else loadDirectory();
-    });
-
-    // ── Boot ────────────────────────────────────────────────
-    init();
+        try {
+          await Auth.sendPasswordReset(username);
+          okEl.textContent = "✓ Reset link sent! Check your email inbox (including spam).";
+          okEl.classList.remove("hidden");
+          btn.textContent = "Sent";
+        } catch(err) {
+          errEl.textContent = err.message;
+          errEl.classList.remove("hidden");
+          btn.disabled    = false;
+          btn.textContent = "Send Reset Link";
+        }
+      });
+    })();
   </script>
 
 </body>
