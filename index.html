@@ -762,6 +762,10 @@
               <input type="checkbox" id="label-picks-check" />
               <span>📋 Include draft picks in auction</span>
             </label>
+            <label class="label-checkbox">
+              <input type="checkbox" id="label-custom-playoffs-check" />
+              <span>🏆 Enable Custom Playoffs tab</span>
+            </label>
           </div>
 
           <!-- Cross-platform merge (shown when same-name league detected on another platform) -->
@@ -811,7 +815,8 @@
       <div id="dtab-overview"    class="detail-tab-content active"></div>
       <div id="dtab-standings"   class="detail-tab-content"></div>
       <div id="dtab-matchups"    class="detail-tab-content"></div>
-      <div id="dtab-playoffs"    class="detail-tab-content"></div>
+      <div id="dtab-playoffs"       class="detail-tab-content"></div>
+      <div id="dtab-customplayoffs" class="detail-tab-content"></div>
       <div id="dtab-roster"      class="detail-tab-content"></div>
       <div id="dtab-salary"     class="detail-tab-content"></div>
       <div id="dtab-auction"    class="detail-tab-content"></div>
@@ -915,6 +920,66 @@
     </div>
   </div>
 
+  <!-- ── Custom Playoffs Config Modal ── -->
+  <div id="cp-config-modal" class="modal-overlay hidden" onclick="if(event.target===this)DLRCustomPlayoffs.closeConfig()">
+    <div class="modal-box modal-box--md">
+      <div class="modal-header">
+        <h3>⚙ Custom Playoff Setup</h3>
+        <button class="modal-close" onclick="DLRCustomPlayoffs.closeConfig()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+
+        <!-- Bracket settings -->
+        <div class="form-group">
+          <label>Bracket Size</label>
+          <select id="cp-bracket-size">
+            <option value="4">4 teams</option>
+            <option value="8" selected>8 teams</option>
+            <option value="16">16 teams</option>
+          </select>
+        </div>
+        <div class="cp-form-row">
+          <div class="form-group">
+            <label>First-Round Byes</label>
+            <select id="cp-bye-count">
+              <option value="0">None</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Seeding Method</label>
+            <select id="cp-seed-method">
+              <option value="record">By Record</option>
+              <option value="pf">By Points For</option>
+              <option value="manual">Manual (set below)</option>
+            </select>
+          </div>
+        </div>
+        <div class="label-options" style="margin-bottom:var(--space-3)">
+          <label class="label-checkbox">
+            <input type="checkbox" id="cp-reseed" />
+            <span>Reseed after each round</span>
+          </label>
+        </div>
+
+        <!-- Round week config -->
+        <div class="label-commish-divider" style="margin-bottom:var(--space-2)"><span>Round Schedule</span></div>
+        <div id="cp-rounds-body" class="cp-rounds-body"></div>
+
+        <!-- Seed assignments -->
+        <div class="label-commish-divider" style="margin:var(--space-3) 0 var(--space-2)"><span>Seedings</span></div>
+        <div id="cp-seeds-body" class="cp-seeds-body"></div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="DLRCustomPlayoffs.closeConfig()">Cancel</button>
+        <button class="btn-primary" id="cp-save-btn" onclick="DLRCustomPlayoffs.saveConfig()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Firebase SDK — loaded here so HTML renders before SDK downloads -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -933,6 +998,7 @@
   <script src="js/chat.js"></script>
   <script src="js/draft-ticker.js?v=6"></script>
   <script src="js/standings.js"></script>
+  <script src="js/customplayoffs.js"></script>
   <script src="js/roster.js"></script>
   <script src="js/draft.js"></script>
   <script src="js/transactions.js"></script>

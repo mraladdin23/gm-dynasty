@@ -6371,3 +6371,91 @@ details.ov-accordion[open] .ov-accordion-summary::after {
   .ov-career-lbl { font-size: .6rem; }
   .ov-col-team   { display: none; }
 }
+
+/* ─────────────────────────────────────────────────────────
+   Custom Playoffs Module (customplayoffs.js)
+   ───────────────────────────────────────────────────────── */
+
+/* Empty / loading states */
+.cp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
+  gap: var(--space-3);
+}
+.cp-empty-icon  { font-size: 2.5rem; }
+.cp-empty-title { font-size: 1rem; font-weight: 700; }
+.cp-empty-sub   { font-size: .85rem; color: var(--color-text-dim); max-width: 300px; }
+.cp-error       { padding: var(--space-4); color: var(--color-red); font-size: .85rem; }
+
+/* Commish action bar */
+.cp-commish-bar {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Config modal layout */
+.cp-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+@media (max-width: 480px) {
+  .cp-form-row { grid-template-columns: 1fr; }
+}
+
+/* Round schedule rows */
+.cp-rounds-body { display: flex; flex-direction: column; gap: var(--space-2); }
+.cp-round-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-2, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.cp-round-lbl {
+  font-size: .78rem;
+  font-weight: 700;
+  min-width: 100px;
+}
+.cp-round-row input {
+  padding: 3px 6px;
+  font-size: .8rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+
+/* Seed assignment rows */
+.cp-seeds-body { display: flex; flex-direction: column; gap: var(--space-1); }
+.cp-seed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 0;
+}
+.cp-seed-num {
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  min-width: 52px;
+  white-space: nowrap;
+}
+.cp-seed-select {
+  flex: 1;
+  font-size: .8rem;
+  padding: 4px 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
