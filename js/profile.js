@@ -3591,12 +3591,6 @@ const Profile = (() => {
         <span>${league.isCommissioner ? "👑 Yes" : "No"}</span>
       </div>
 
-      ${hasHistory && isDynastyStyle ? `<div id="ov-cs-${leagueKey.replace(/[^a-z0-9]/gi,'_')}" class="ov-career-stats-wrap">
-        <div class="ov-career-stats-loading">
-          <div class="spinner spinner--sm"></div><span>Loading league history…</span>
-        </div>
-      </div>` : ""}
-
       ${hasHistory ? `
       <!-- ── Franchise History accordion ── -->
       <details class="ov-accordion" open>
@@ -3642,6 +3636,12 @@ const Profile = (() => {
           </table>
         </div>
       </details>` : ""}
+
+      ${hasHistory && isDynastyStyle ? `<div id="ov-cs-${leagueKey.replace(/[^a-z0-9]/gi,'_')}" class="ov-career-stats-wrap">
+        <div class="ov-career-stats-loading">
+          <div class="spinner spinner--sm"></div><span>Loading league history…</span>
+        </div>
+      </div>` : ""}
     `;
   }
 
