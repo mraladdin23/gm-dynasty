@@ -845,8 +845,8 @@ const DLRStandings = (() => {
     const rosterMap = {};
     (_leagueData.teams || []).forEach(t => { rosterMap[t.roster_id] = t; });
 
-    // Get players from IndexedDB-backed cache
-    const players = DLRPlayers.all();
+    // Ensure player DB is loaded — load() is a no-op if already warm
+    const players = await DLRPlayers.load();
 
     const pName = id => { const p = players[id]; return p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : id; };
     const rosterSlots = _leagueData.league?.roster_positions || [];
