@@ -1230,6 +1230,7 @@
 
     // ── Standings tab (read-only, reuses cached data) ───────
     let _stSort = { col: "overallRank", dir: "asc" };
+    let _stConf = "";  // persists conference filter across sort re-renders
 
     function renderStandingsTab(body) {
       const t       = _currentT;
@@ -1518,9 +1519,18 @@
 
       const thStyle = "cursor:pointer;user-select:none";
 
+      // Build unique conferences for filter (needs allRows, available in closure)
+      const _confOpts = hasConf
+        ? [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort()
+        : [];
+
       body.innerHTML = `
         <div class="trn-standings-toolbar">
           <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
+          ${hasConf ? `<select id="pub-st-conf" class="trn-filter-select" style="min-width:130px">
+            <option value="">All Conferences</option>
+            ${_confOpts.map(c => `<option value="${c.toLowerCase()}" ${_stConf === c.toLowerCase() ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          </select>` : ""}
         </div>
         <div class="trn-standings-meta">
           Last synced: ${esc(lastStr)} &middot; ${allRows.length} teams
@@ -1557,14 +1567,18 @@
           </table>
         </div>`;
 
-      // Search
-      document.getElementById("pub-st-search")?.addEventListener("input", function() {
-        const q = this.value.toLowerCase();
+      // Combined filter — search + conference dropdown work together
+      function _applyStFilter() {
+        const q    = (document.getElementById("pub-st-search")?.value || "").toLowerCase();
+        const conf = (document.getElementById("pub-st-conf")?.value   || "").toLowerCase();
         document.querySelectorAll("#pub-st-tbody tr").forEach(row => {
-          const match = !q || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q) || row.dataset.conf?.includes(q);
-          row.style.display = match ? "" : "none";
+          const matchQ    = !q    || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q) || row.dataset.conf?.includes(q);
+          const matchConf = !conf || row.dataset.conf === conf;
+          row.style.display = (matchQ && matchConf) ? "" : "none";
         });
-      });
+      }
+      document.getElementById("pub-st-search")?.addEventListener("input", _applyStFilter);
+      document.getElementById("pub-st-conf")?.addEventListener("change", function() { _stConf = this.value; _applyStFilter(); });
 
       // Sort headers
       document.querySelectorAll("[data-col]").forEach(th => {
