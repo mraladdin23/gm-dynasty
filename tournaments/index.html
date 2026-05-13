@@ -1526,11 +1526,13 @@
 
       body.innerHTML = `
         <div class="trn-standings-toolbar">
+          ${hasConf ? `<div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
+            <select id="pub-st-conf" class="trn-filter-select" style="min-width:0">
+              <option value="">All Conferences</option>
+              ${_confOpts.map(c => `<option value="${c.toLowerCase()}" ${_stConf === c.toLowerCase() ? "selected" : ""}>${esc(c)}</option>`).join("")}
+            </select>
+          </div>` : ""}
           <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
-          ${hasConf ? `<select id="pub-st-conf" class="trn-filter-select" style="min-width:130px">
-            <option value="">All Conferences</option>
-            ${_confOpts.map(c => `<option value="${c.toLowerCase()}" ${_stConf === c.toLowerCase() ? "selected" : ""}>${esc(c)}</option>`).join("")}
-          </select>` : ""}
         </div>
         <div class="trn-standings-meta">
           Last synced: ${esc(lastStr)} &middot; ${allRows.length} teams
