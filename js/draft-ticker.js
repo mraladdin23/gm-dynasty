@@ -709,7 +709,7 @@ const DraftTicker = (() => {
 
   // ── Public: init ──────────────────────────────────────
   async function init(username) {
-    _username = username;
+    _username = (username || "").toLowerCase().trim();
 
     // Guard against duplicate listeners if init() is called more than once
     const btn   = document.getElementById("draft-ticker-btn");
