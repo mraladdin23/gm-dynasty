@@ -3269,7 +3269,7 @@ const Profile = (() => {
           if (m.points > 0) allScores.push({ season, week: m.week, pts: m.points, name: rosterToName[String(m.roster_id)] || "?" });
         });
       });
-      const top10Scores = [...allScores].sort((a, b) => b.pts - a.pts).slice(0, 10);
+      const top20Scores = [...allScores].sort((a, b) => b.pts - a.pts).slice(0, 20);
 
       // ── Top 10 blowouts (biggest margin in a single matchup) ──
       const allMatchups = [];
@@ -3295,7 +3295,7 @@ const Profile = (() => {
           });
         });
       });
-      const top10Blowouts = [...allMatchups].sort((a, b) => b.margin - a.margin).slice(0, 10);
+      const top20Blowouts = [...allMatchups].sort((a, b) => b.margin - a.margin).slice(0, 20);
 
       // ── Best individual seasons (by PF among completed weeks) ──
       const bestSeasons = [];
@@ -3322,14 +3322,14 @@ const Profile = (() => {
           bestSeasons.push({ season, name, W: w, L: l, PF: pf });
         });
       });
-      const top5BestPF = [...bestSeasons].sort((a, b) => b.PF - a.PF).slice(0, 5);
+      const top20BestPF = [...bestSeasons].sort((a, b) => b.PF - a.PF).slice(0, 20);
 
       // ── Render ──────────────────────────────────────────────
       const _e = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
       const html = `
-        <!-- Career Standings accordion (open by default) -->
-        <details class="ov-accordion" open>
+        <!-- Career Standings accordion (closed by default — franchise history above is open) -->
+        <details class="ov-accordion">
           <summary class="ov-accordion-summary">
             <span>League Career Standings</span>
             <span class="ov-accordion-meta">${validSeasons.length} seasons</span>
@@ -3366,7 +3366,7 @@ const Profile = (() => {
         <details class="ov-accordion">
           <summary class="ov-accordion-summary">
             <span>🔥 Best Seasons by PF</span>
-            <span class="ov-accordion-meta">Top 5</span>
+            <span class="ov-accordion-meta">Top 20</span>
           </summary>
           <div class="ov-history-table-wrap">
             <table class="ov-history-table ov-history-table--compact">
@@ -3377,7 +3377,7 @@ const Profile = (() => {
                 <th style="text-align:right">PF</th>
               </tr></thead>
               <tbody>
-                ${top5BestPF.map((r, i) => `<tr class="ov-history-row">
+                ${top20BestPF.map((r, i) => `<tr class="ov-history-row">
                   <td class="ov-col-num ov-col-dim">${i+1}</td>
                   <td class="ov-col-manager">${_e(r.name)}</td>
                   <td class="ov-col-num ov-col-dim">${r.season}</td>
@@ -3393,7 +3393,7 @@ const Profile = (() => {
         <details class="ov-accordion">
           <summary class="ov-accordion-summary">
             <span>⚡ Highest Scoring Games</span>
-            <span class="ov-accordion-meta">Top 10</span>
+            <span class="ov-accordion-meta">Top 20</span>
           </summary>
           <div class="ov-history-table-wrap">
             <table class="ov-history-table ov-history-table--compact">
@@ -3403,7 +3403,7 @@ const Profile = (() => {
                 <th style="text-align:right">Yr W</th>
               </tr></thead>
               <tbody>
-                ${top10Scores.map((r, i) => `<tr class="ov-history-row">
+                ${top20Scores.map((r, i) => `<tr class="ov-history-row">
                   <td class="ov-col-num ov-col-dim">${i+1}</td>
                   <td class="ov-col-manager">${_e(r.name)}</td>
                   <td class="ov-col-num" style="color:var(--color-gold);font-weight:700">${r.pts.toFixed(2)}</td>
@@ -3418,7 +3418,7 @@ const Profile = (() => {
         <details class="ov-accordion" style="margin-bottom:var(--space-3)">
           <summary class="ov-accordion-summary">
             <span>💥 Biggest Blowouts</span>
-            <span class="ov-accordion-meta">Top 10</span>
+            <span class="ov-accordion-meta">Top 20</span>
           </summary>
           <div class="ov-history-table-wrap">
             <table class="ov-history-table ov-history-table--compact">
@@ -3428,7 +3428,7 @@ const Profile = (() => {
                 <th style="text-align:right">Yr W</th>
               </tr></thead>
               <tbody>
-                ${top10Blowouts.map((r, i) => `<tr class="ov-history-row">
+                ${top20Blowouts.map((r, i) => `<tr class="ov-history-row">
                   <td class="ov-col-num ov-col-dim">${i+1}</td>
                   <td>
                     <div class="ov-blowout-winner">${_e(r.winnerName)} <span style="color:var(--color-green);font-weight:700">${r.winnerPts.toFixed(1)}</span></div>
