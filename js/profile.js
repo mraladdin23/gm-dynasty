@@ -3189,12 +3189,8 @@ const Profile = (() => {
   function _renderOverviewHTML(el, leagueKey, league) {
     const finish      = league.playoffFinish;
     const isComplete  = _isSeasonComplete(league);
-    // isGuillotine/isEliminator are persisted after first sync. Also treat any
-    // league where playoffFinish > 4 as "no-bracket" (eliminator/guillotine rank).
     const isElimStyle = !!(league.isGuillotine || league.isEliminator);
     const missedLabel = isElimStyle ? "No Playoffs Scheduled" : "Missed Playoffs";
-    // For eliminator/guillotine: show rank-based finish (1=Champion, 2=Runner-Up, 3=3rd)
-    // but don't show "Made Playoffs" (finish=7) or misleading bracket labels.
     const finishLabel = finish === 1 ? "🏆 Champion"
       : finish === 2 ? "🥈 Runner-Up"
       : finish === 3 ? "🥉 3rd Place"
@@ -3208,15 +3204,84 @@ const Profile = (() => {
     const allSeasons  = _getAllSeasonsForFranchise(franchiseId)
       .sort((a, b) => (b[1].season || "0").localeCompare(a[1].season || "0"));
 
-    const totalWins   = allSeasons.reduce((s, [,l]) => s + (l.wins   || 0), 0);
-    const totalLosses = allSeasons.reduce((s, [,l]) => s + (l.losses || 0), 0);
-    const titles      = allSeasons.filter(([,l]) => l.playoffFinish === 1 || l.isChampion).length;
-    const runnerUps   = allSeasons.filter(([,l]) => l.playoffFinish === 2).length;
-    const hasHistory  = allSeasons.length > 1;
+    const totalWins      = allSeasons.reduce((s, [,l]) => s + (l.wins    || 0), 0);
+    const totalLosses    = allSeasons.reduce((s, [,l]) => s + (l.losses  || 0), 0);
+    const totalPF        = allSeasons.reduce((s, [,l]) => s + (parseFloat(l.pointsFor)     || 0), 0);
+    const totalPA        = allSeasons.reduce((s, [,l]) => s + (parseFloat(l.pointsAgainst) || 0), 0);
+    const titles         = allSeasons.filter(([,l]) => l.playoffFinish === 1 || l.isChampion).length;
+    const runnerUps      = allSeasons.filter(([,l]) => l.playoffFinish === 2).length;
+    const playoffApps    = allSeasons.filter(([,l]) => l.playoffFinish != null && _isSeasonComplete(l)).length;
+    const totalGames     = totalWins + totalLosses;
+    const winPct         = totalGames > 0 ? ((totalWins / totalGames) * 100).toFixed(1) : "—";
+    const hasHistory     = allSeasons.length > 1;
+    const isDynastyStyle = ["dynasty", "keeper", "salary"].includes(league.leagueType);
+
+    // ── History table sort state (stored on element to survive re-renders) ──
+    const prevSort = el._ovSort || { col: "season", dir: "desc" };
+    el._ovSort = prevSort;
+
+    const _sortHistory = (col) => {
+      if (el._ovSort.col === col) el._ovSort.dir = el._ovSort.dir === "asc" ? "desc" : "asc";
+      else { el._ovSort.col = col; el._ovSort.dir = col === "season" ? "desc" : "desc"; }
+      _renderOverviewHTML(el, leagueKey, league);
+    };
+    // Expose for inline onclick
+    el._sortHistory = _sortHistory;
+    const _elId = "ov-" + leagueKey.replace(/[^a-z0-9]/gi, "_");
+    window[`_ovSort_${_elId}`] = _sortHistory;
+
+    // Sort the history rows
+    const sortedSeasons = [...allSeasons].sort((a, b) => {
+      const [ka, sa] = a, [kb, sb] = b;
+      const dir = el._ovSort.dir === "asc" ? 1 : -1;
+      switch (el._ovSort.col) {
+        case "season":  return dir * (sa.season || "").localeCompare(sb.season || "");
+        case "record":  return dir * ((sa.wins || 0) - (sb.wins || 0) || (sa.losses || 0) - (sb.losses || 0));
+        case "pf":      return dir * ((parseFloat(sa.pointsFor)  || 0) - (parseFloat(sb.pointsFor)  || 0));
+        case "pa":      return dir * ((parseFloat(sa.pointsAgainst) || 0) - (parseFloat(sb.pointsAgainst) || 0));
+        case "standing":return dir * ((sa.standing || 99) - (sb.standing || 99));
+        case "finish":  return dir * ((sa.playoffFinish || 99) - (sb.playoffFinish || 99));
+        default:        return 0;
+      }
+    });
+
+    const _si = (col) => {
+      if (el._ovSort.col !== col) return `<span style="opacity:.35;margin-left:2px;font-size:.6rem">⇅</span>`;
+      return `<span style="margin-left:2px;font-size:.6rem">${el._ovSort.dir === "asc" ? "↑" : "↓"}</span>`;
+    };
+    const _th = (col, label) =>
+      `<th style="cursor:pointer;user-select:none;white-space:nowrap" onclick="window['_ovSort_${_elId}']('${col}')">${label}${_si(col)}</th>`;
 
     el.innerHTML = `
-      <!-- This season -->
-      <div class="overview-section-title">This Season (${league.season})</div>
+      ${hasHistory && isDynastyStyle ? `
+      <!-- ── Career Stats Bar ── -->
+      <div class="ov-career-bar">
+        <div class="ov-career-stat">
+          <div class="ov-career-val">${allSeasons.length}</div>
+          <div class="ov-career-lbl">Seasons</div>
+        </div>
+        <div class="ov-career-stat">
+          <div class="ov-career-val">${totalWins}–${totalLosses}</div>
+          <div class="ov-career-lbl">All-Time</div>
+        </div>
+        <div class="ov-career-stat">
+          <div class="ov-career-val">${winPct}%</div>
+          <div class="ov-career-lbl">Win %</div>
+        </div>
+        <div class="ov-career-stat">
+          <div class="ov-career-val" style="color:var(--color-gold)">${titles || "—"}</div>
+          <div class="ov-career-lbl">🏆 Titles</div>
+        </div>
+        <div class="ov-career-stat">
+          <div class="ov-career-val">${playoffApps}</div>
+          <div class="ov-career-lbl">Playoff Apps</div>
+        </div>
+      </div>` : ""}
+
+      <!-- ── This Season ── -->
+      <div class="overview-section-title" style="${hasHistory && isDynastyStyle ? "margin-top:var(--space-4)" : ""}">
+        This Season (${league.season})
+      </div>
       <div class="detail-stats-grid">
         <div class="detail-stat">
           <div class="detail-stat-val">${league.wins || 0}–${league.losses || 0}${league.ties ? `–${league.ties}` : ""}</div>
@@ -3251,28 +3316,54 @@ const Profile = (() => {
       </div>
 
       ${hasHistory ? `
-      <!-- Franchise history -->
-      <div class="overview-section-title" style="margin-top:var(--space-5);">
-        Franchise History
-        <span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim);">
+      <!-- ── Franchise History Table ── -->
+      <div class="overview-section-title" style="margin-top:var(--space-5);display:flex;align-items:center;justify-content:space-between;">
+        <span>Franchise History</span>
+        ${isDynastyStyle && totalPF > 0 ? `<span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim);">
+          Avg PF: ${(totalPF / allSeasons.length).toFixed(1)}
+          ${runnerUps > 0 ? ` · 🥈×${runnerUps}` : ""}
+        </span>` : `<span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim);">
           ${totalWins}W–${totalLosses}L all-time
           ${titles > 0 ? ` · 🏆×${titles}` : ""}
           ${runnerUps > 0 ? ` · 🥈×${runnerUps}` : ""}
-        </span>
+        </span>`}
       </div>
-      <div class="detail-history-list">
-        ${allSeasons.map(([key, s]) => {
-          const f    = s.playoffFinish;
-          const icon = { 1:"🏆", 2:"🥈", 3:"🥉" }[f] || (f && f <= 7 ? "🏅" : "");
-          return `
-            <div class="detail-history-row ${key === leagueKey ? "detail-history-row--current" : ""}"
-              onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;">
-              <span class="detail-history-season">${s.season}</span>
-              <span class="detail-history-team">${_escHtml(s.teamName && s.teamName !== "My Team" ? s.teamName : (s.leagueName || ""))}</span>
-              <span class="detail-history-record">${s.wins}–${s.losses}</span>
-              <span class="detail-history-finish">${icon} ${s.playoffResult || (_isSeasonComplete(s) ? "—" : "active")}</span>
-            </div>`;
-        }).join("")}
+      <div class="ov-history-table-wrap">
+        <table class="ov-history-table">
+          <thead><tr>
+            ${_th("season",  "Year")}
+            <th>Team</th>
+            ${_th("record",  "W–L")}
+            ${_th("pf",      "PF")}
+            ${_th("pa",      "PA")}
+            ${_th("standing","Rank")}
+            ${_th("finish",  "Finish")}
+          </tr></thead>
+          <tbody>
+            ${sortedSeasons.map(([key, s]) => {
+              const f    = s.playoffFinish;
+              const icon = f === 1 ? "🏆" : f === 2 ? "🥈" : f === 3 ? "🥉" : (f && f <= 7 ? "🏅" : "");
+              const finishTxt = s.playoffResult
+                || (f === 1 ? "Champion" : f === 2 ? "Runner-Up" : f === 3 ? "3rd Place"
+                    : f != null ? "Playoffs" : (_isSeasonComplete(s) ? "—" : "Active"));
+              const isCurrent = key === leagueKey;
+              const pfStr = s.pointsFor     ? parseFloat(s.pointsFor).toFixed(1)     : "—";
+              const paStr = s.pointsAgainst ? parseFloat(s.pointsAgainst).toFixed(1) : "—";
+              const teamDisplay = s.teamName && s.teamName !== "My Team" ? s.teamName : (s.leagueName || "");
+              return `
+                <tr class="ov-history-row ${isCurrent ? "ov-history-row--current" : ""}"
+                  onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;" title="View ${s.season} season">
+                  <td class="ov-col-season">${s.season}</td>
+                  <td class="ov-col-team">${_escHtml(teamDisplay)}</td>
+                  <td class="ov-col-num">${s.wins || 0}–${s.losses || 0}</td>
+                  <td class="ov-col-num">${pfStr}</td>
+                  <td class="ov-col-num ov-col-dim">${paStr}</td>
+                  <td class="ov-col-num">${s.standing ? "#" + s.standing : "—"}</td>
+                  <td class="ov-col-finish">${icon ? icon + " " : ""}${_escHtml(finishTxt)}</td>
+                </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
       </div>` : ""}
     `;
   }

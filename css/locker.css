@@ -5998,3 +5998,150 @@ select option { background: var(--color-bg-2); }
   .nav-actions > a { display: none !important; } /* hide Contact link */
   .nav-actions     { margin-right: var(--space-2); gap: var(--space-1); }
 }
+/* ─────────────────────────────────────────────────────────
+   F1 — Overview Tab: Career Stats Bar + History Table
+   Add to locker.css (bump ?v=23 in index.html)
+   ───────────────────────────────────────────────────────── */
+
+/* ── Career Stats Bar ─────────────────────────────────── */
+.ov-career-bar {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  background: var(--color-surface-2, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  padding: var(--space-3) var(--space-4);
+}
+
+.ov-career-stat {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.ov-career-stat + .ov-career-stat {
+  border-left: 1px solid var(--color-border);
+}
+
+.ov-career-val {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-career-lbl {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ── Franchise History Table ──────────────────────────── */
+.ov-history-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  margin-top: var(--space-2);
+}
+
+.ov-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+
+.ov-history-table thead tr {
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ov-history-table th {
+  padding: var(--space-2) var(--space-3);
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ov-history-table th:hover {
+  color: var(--color-text);
+}
+
+.ov-history-row {
+  border-bottom: 1px solid var(--color-border);
+  transition: background .12s;
+}
+
+.ov-history-row:last-child {
+  border-bottom: none;
+}
+
+.ov-history-row:hover {
+  background: var(--color-surface-hover, rgba(255,255,255,.04));
+}
+
+.ov-history-row--current {
+  background: var(--color-accent-dim, rgba(99,102,241,.1));
+}
+
+.ov-history-row--current td {
+  font-weight: 600;
+}
+
+.ov-history-table td {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+
+.ov-col-season {
+  font-weight: 700;
+  color: var(--color-accent) !important;
+  white-space: nowrap;
+}
+
+.ov-col-team {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dim);
+  font-size: .78rem;
+}
+
+.ov-col-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-col-dim {
+  color: var(--color-text-dim);
+}
+
+.ov-col-finish {
+  white-space: nowrap;
+  font-size: .78rem;
+}
+
+/* ── Mobile: tighten career bar on narrow screens ─────── */
+@media (max-width: 480px) {
+  .ov-career-bar {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-1);
+  }
+  .ov-career-val {
+    font-size: .95rem;
+  }
+  .ov-career-lbl {
+    font-size: .62rem;
+  }
+  .ov-col-team {
+    display: none; /* hide team name col on very small screens */
+  }
+}
