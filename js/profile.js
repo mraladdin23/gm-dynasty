@@ -3174,9 +3174,313 @@ const Profile = (() => {
     }
 
     _renderOverviewHTML(el, leagueKey, league);
+
+    // Kick off career stats async — fills placeholder after overview renders
+    const franchiseIdCs  = _resolveEffectiveFid(leagueKey);
+    const allSeasonsCs   = _getAllSeasonsForFranchise(franchiseIdCs);
+    const isDynastyCs    = ["dynasty","keeper","salary"].includes(league.leagueType);
+    if (isDynastyCs && allSeasonsCs.length > 1 && league.platform === "sleeper") {
+      _loadCareerStats(leagueKey, allSeasonsCs).catch(() => {});
+    } else if (isDynastyCs && allSeasonsCs.length > 1) {
+      // Non-Sleeper: show note in placeholder
+      const csEl = document.getElementById("ov-cs-" + leagueKey.replace(/[^a-z0-9]/gi,"_"));
+      if (csEl) csEl.innerHTML = `<div class="ov-cs-note">📊 Career league stats available for Sleeper leagues.</div>`;
+    }
   }
 
-  // Returns true when a season is definitively over, regardless of platform.
+  // ── Career Stats loader ─────────────────────────────────
+  // Fetches all matchup weeks for every season in the franchise chain,
+  // computes cross-season standings + top scoring games, renders into placeholder.
+  // Results cached on element._csCache to avoid refetch on tab switch.
+  async function _loadCareerStats(leagueKey, allSeasons) {
+    const elId = "ov-cs-" + leagueKey.replace(/[^a-z0-9]/gi, "_");
+    const csEl = document.getElementById(elId);
+    if (!csEl) return;
+
+    // Use cached result if available
+    if (csEl._csCache) { csEl.innerHTML = csEl._csCache; return; }
+
+    try {
+      // Fetch rosters+users+matchups for every season in parallel
+      const seasonData = await Promise.all(
+        allSeasons.map(async ([key, s]) => {
+          if (!s.leagueId) return null;
+          try {
+            const [rosters, users, ...weekMatchups] = await Promise.all([
+              fetch(`https://api.sleeper.app/v1/league/${s.leagueId}/rosters`).then(r => r.json()).catch(() => []),
+              fetch(`https://api.sleeper.app/v1/league/${s.leagueId}/users`).then(r => r.json()).catch(() => []),
+              ...Array.from({ length: 17 }, (_, i) =>
+                fetch(`https://api.sleeper.app/v1/league/${s.leagueId}/matchups/${i + 1}`)
+                  .then(r => r.ok ? r.json() : []).then(d => (d||[]).map(m => ({ ...m, week: i + 1 }))).catch(() => [])
+              )
+            ]);
+
+            // Build rosterId → displayName for this season
+            const userMap = {};
+            (users||[]).forEach(u => { userMap[u.user_id] = u.metadata?.team_name || u.display_name || u.username || ""; });
+            const rosterToName = {};
+            (rosters||[]).forEach(r => { rosterToName[String(r.roster_id)] = userMap[r.owner_id] || `Team ${r.roster_id}`; });
+
+            const matchups = weekMatchups.flat().filter(m => m.points > 0);
+            return { season: s.season, leagueId: s.leagueId, rosterToName, matchups };
+          } catch(e) { return null; }
+        })
+      );
+
+      const validSeasons = seasonData.filter(Boolean);
+      if (!validSeasons.length || !validSeasons.some(s => s.matchups.length)) {
+        csEl.innerHTML = `<div class="ov-cs-note">No matchup data found.</div>`;
+        return;
+      }
+
+      // ── Build career standings ──────────────────────────────
+      // Key by display name (normalised) — maps same manager across seasons
+      const careerMap = {}; // normName → { name, W, L, PF, PA, seasons, bestPF }
+      const _norm = n => String(n||"").trim().toLowerCase();
+
+      validSeasons.forEach(({ season, rosterToName, matchups }) => {
+        // Group matchups by week → matchup_id to find opponents
+        const byWeekMu = {};
+        matchups.forEach(m => {
+          const key = `${m.week}|${m.matchup_id}`;
+          if (!byWeekMu[key]) byWeekMu[key] = [];
+          byWeekMu[key].push(m);
+        });
+
+        // Per-roster season totals
+        const rosterPF = {}, rosterW = {}, rosterL = {};
+        Object.values(byWeekMu).forEach(pair => {
+          if (pair.length !== 2) return;
+          const [a, b] = pair;
+          const ra = String(a.roster_id), rb = String(b.roster_id);
+          rosterPF[ra] = (rosterPF[ra]||0) + (a.points||0);
+          rosterPF[rb] = (rosterPF[rb]||0) + (b.points||0);
+          if (a.points > b.points) { rosterW[ra]=(rosterW[ra]||0)+1; rosterL[rb]=(rosterL[rb]||0)+1; }
+          else if (b.points > a.points) { rosterW[rb]=(rosterW[rb]||0)+1; rosterL[ra]=(rosterL[ra]||0)+1; }
+        });
+
+        Object.entries(rosterToName).forEach(([rid, name]) => {
+          const nk = _norm(name);
+          if (!nk) return;
+          if (!careerMap[nk]) careerMap[nk] = { name, W:0, L:0, PF:0, seasons:0, bestPF:0 };
+          const pf = rosterPF[rid] || 0;
+          const w  = rosterW[rid]  || 0;
+          const l  = rosterL[rid]  || 0;
+          if (w + l === 0) return; // skip rosters with no games
+          careerMap[nk].W       += w;
+          careerMap[nk].L       += l;
+          careerMap[nk].PF      += pf;
+          careerMap[nk].seasons += 1;
+          if (pf > careerMap[nk].bestPF) careerMap[nk].bestPF = pf;
+        });
+      });
+
+      const careerRows = Object.values(careerMap)
+        .filter(r => r.W + r.L > 0)
+        .sort((a, b) => (b.W/(b.W+b.L||1)) - (a.W/(a.W+a.L||1)) || b.PF - a.PF);
+
+      // ── Top 10 highest single-week scores ──────────────────
+      const allScores = [];
+      validSeasons.forEach(({ season, rosterToName, matchups }) => {
+        matchups.forEach(m => {
+          if (m.points > 0) allScores.push({ season, week: m.week, pts: m.points, name: rosterToName[String(m.roster_id)] || "?" });
+        });
+      });
+      const top10Scores = [...allScores].sort((a, b) => b.pts - a.pts).slice(0, 10);
+
+      // ── Top 10 blowouts (biggest margin in a single matchup) ──
+      const allMatchups = [];
+      validSeasons.forEach(({ season, rosterToName, matchups }) => {
+        const byWeekMu = {};
+        matchups.forEach(m => {
+          const key = `${m.week}|${m.matchup_id}`;
+          if (!byWeekMu[key]) byWeekMu[key] = [];
+          byWeekMu[key].push(m);
+        });
+        Object.values(byWeekMu).forEach(pair => {
+          if (pair.length !== 2) return;
+          const [a, b] = pair;
+          const margin = Math.abs((a.points||0) - (b.points||0));
+          if (margin < 1) return;
+          const winner = a.points > b.points ? a : b;
+          const loser  = a.points > b.points ? b : a;
+          allMatchups.push({
+            season, week: a.week, margin,
+            winnerName: rosterToName[String(winner.roster_id)] || "?",
+            loserName:  rosterToName[String(loser.roster_id)]  || "?",
+            winnerPts: winner.points, loserPts: loser.points
+          });
+        });
+      });
+      const top10Blowouts = [...allMatchups].sort((a, b) => b.margin - a.margin).slice(0, 10);
+
+      // ── Best individual seasons (by PF among completed weeks) ──
+      const bestSeasons = [];
+      validSeasons.forEach(({ season, rosterToName, matchups }) => {
+        const rosterPF = {}, rosterW = {}, rosterL = {};
+        const byWeekMu = {};
+        matchups.forEach(m => {
+          const key = `${m.week}|${m.matchup_id}`;
+          if (!byWeekMu[key]) byWeekMu[key] = [];
+          byWeekMu[key].push(m);
+        });
+        Object.values(byWeekMu).forEach(pair => {
+          if (pair.length !== 2) return;
+          const [a, b] = pair;
+          const ra = String(a.roster_id), rb = String(b.roster_id);
+          rosterPF[ra] = (rosterPF[ra]||0) + (a.points||0);
+          rosterPF[rb] = (rosterPF[rb]||0) + (b.points||0);
+          if (a.points > b.points) { rosterW[ra]=(rosterW[ra]||0)+1; rosterL[rb]=(rosterL[rb]||0)+1; }
+          else if (b.points > a.points) { rosterW[rb]=(rosterW[rb]||0)+1; rosterL[ra]=(rosterL[ra]||0)+1; }
+        });
+        Object.entries(rosterToName).forEach(([rid, name]) => {
+          const w = rosterW[rid]||0, l = rosterL[rid]||0, pf = rosterPF[rid]||0;
+          if (w + l < 5) return;
+          bestSeasons.push({ season, name, W: w, L: l, PF: pf });
+        });
+      });
+      const top5BestPF   = [...bestSeasons].sort((a, b) => b.PF - a.PF).slice(0, 5);
+      const top5BestWins = [...bestSeasons].sort((a, b) => b.W - a.W || b.PF - a.PF).slice(0, 5);
+
+      // ── Render ──────────────────────────────────────────────
+      const _e = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+      const html = `
+        <!-- Career Standings -->
+        <div class="overview-section-title" style="margin-top:var(--space-5)">
+          League Career Standings
+          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim)">All-time across ${validSeasons.length} seasons</span>
+        </div>
+        <div class="ov-history-table-wrap">
+          <table class="ov-history-table">
+            <thead><tr>
+              <th>#</th><th>Manager</th>
+              <th style="text-align:right">W–L</th>
+              <th style="text-align:right">Win%</th>
+              <th style="text-align:right">PF</th>
+              <th style="text-align:right">Avg PF/Wk</th>
+              <th style="text-align:right">Seasons</th>
+            </tr></thead>
+            <tbody>
+              ${careerRows.map((r, i) => {
+                const games  = r.W + r.L;
+                const winPct = games ? ((r.W/games)*100).toFixed(1) : "0.0";
+                const avgPF  = games ? (r.PF / games).toFixed(1) : "—";
+                const pctCol = r.W/games >= 0.6 ? "var(--color-green)" : r.W/games < 0.4 ? "var(--color-red)" : "var(--color-text)";
+                return `<tr class="ov-history-row">
+                  <td class="ov-col-num" style="color:var(--color-text-dim)">${i+1}</td>
+                  <td style="font-weight:600">${_e(r.name)}</td>
+                  <td class="ov-col-num">${r.W}–${r.L}</td>
+                  <td class="ov-col-num" style="color:${pctCol}">${winPct}%</td>
+                  <td class="ov-col-num">${r.PF.toFixed(1)}</td>
+                  <td class="ov-col-num ov-col-dim">${avgPF}</td>
+                  <td class="ov-col-num ov-col-dim">${r.seasons}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Best Individual Seasons -->
+        <div class="ov-cs-two-col">
+          <div>
+            <div class="overview-section-title" style="margin-top:var(--space-5)">
+              🔥 Best Seasons by PF
+            </div>
+            <div class="ov-history-table-wrap">
+              <table class="ov-history-table">
+                <thead><tr><th>Manager</th><th style="text-align:right">Season</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th></tr></thead>
+                <tbody>
+                  ${top5BestPF.map(r => `<tr class="ov-history-row">
+                    <td style="font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(r.name)}</td>
+                    <td class="ov-col-num ov-col-dim">${r.season}</td>
+                    <td class="ov-col-num">${r.W}–${r.L}</td>
+                    <td class="ov-col-num" style="color:var(--color-green)">${r.PF.toFixed(1)}</td>
+                  </tr>`).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="overview-section-title" style="margin-top:var(--space-5)">
+              🏆 Best Seasons by Wins
+            </div>
+            <div class="ov-history-table-wrap">
+              <table class="ov-history-table">
+                <thead><tr><th>Manager</th><th style="text-align:right">Season</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th></tr></thead>
+                <tbody>
+                  ${top5BestWins.map(r => `<tr class="ov-history-row">
+                    <td style="font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(r.name)}</td>
+                    <td class="ov-col-num ov-col-dim">${r.season}</td>
+                    <td class="ov-col-num" style="color:var(--color-gold)">${r.W}–${r.L}</td>
+                    <td class="ov-col-num">${r.PF.toFixed(1)}</td>
+                  </tr>`).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top Scoring Games -->
+        <div class="overview-section-title" style="margin-top:var(--space-5)">
+          ⚡ Top 10 Highest Scoring Games
+        </div>
+        <div class="ov-history-table-wrap">
+          <table class="ov-history-table">
+            <thead><tr>
+              <th>#</th><th>Manager</th>
+              <th style="text-align:right">Points</th>
+              <th style="text-align:right">Season</th>
+              <th style="text-align:right">Week</th>
+            </tr></thead>
+            <tbody>
+              ${top10Scores.map((r, i) => `<tr class="ov-history-row">
+                <td class="ov-col-num ov-col-dim">${i+1}</td>
+                <td style="font-weight:600">${_e(r.name)}</td>
+                <td class="ov-col-num" style="color:var(--color-gold);font-weight:700">${r.pts.toFixed(2)}</td>
+                <td class="ov-col-num ov-col-dim">${r.season}</td>
+                <td class="ov-col-num ov-col-dim">Wk ${r.week}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Top Blowouts -->
+        <div class="overview-section-title" style="margin-top:var(--space-5)">
+          💥 Top 10 Biggest Blowouts
+        </div>
+        <div class="ov-history-table-wrap" style="margin-bottom:var(--space-4)">
+          <table class="ov-history-table">
+            <thead><tr>
+              <th>#</th><th>Winner</th><th>Loser</th>
+              <th style="text-align:right">Score</th>
+              <th style="text-align:right">Margin</th>
+              <th style="text-align:right">Wk</th>
+            </tr></thead>
+            <tbody>
+              ${top10Blowouts.map((r, i) => `<tr class="ov-history-row">
+                <td class="ov-col-num ov-col-dim">${i+1}</td>
+                <td style="font-weight:600;color:var(--color-green)">${_e(r.winnerName)}</td>
+                <td style="color:var(--color-text-dim)">${_e(r.loserName)}</td>
+                <td class="ov-col-num" style="font-size:.78rem">${r.winnerPts.toFixed(1)}–${r.loserPts.toFixed(1)}</td>
+                <td class="ov-col-num" style="color:var(--color-red);font-weight:700">+${r.margin.toFixed(1)}</td>
+                <td class="ov-col-num ov-col-dim">${r.season} W${r.week}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      csEl._csCache = html;
+      csEl.innerHTML = html;
+
+    } catch(e) {
+      const csEl2 = document.getElementById("ov-cs-" + leagueKey.replace(/[^a-z0-9]/gi,"_"));
+      if (csEl2) csEl2.innerHTML = `<div class="ov-cs-note" style="color:var(--color-text-dim)">Could not load career stats: ${e.message}</div>`;
+    }
+  }
+
+  // Returns true when a season is definitively over, regardless of platform., regardless of platform.
   // Sleeper sets status="complete". Yahoo/MFL use resolved=true or season < currentYear.
   function _isSeasonComplete(l) {
     if (!l) return false;
@@ -3314,6 +3618,12 @@ const Profile = (() => {
         <span class="detail-info-label">Commissioner</span>
         <span>${league.isCommissioner ? "👑 Yes" : "No"}</span>
       </div>
+
+      ${hasHistory && isDynastyStyle ? `<div id="ov-cs-${leagueKey.replace(/[^a-z0-9]/gi,'_')}" class="ov-career-stats-wrap">
+        <div class="ov-career-stats-loading">
+          <div class="spinner spinner--sm"></div><span>Loading league history…</span>
+        </div>
+      </div>` : ""}
 
       ${hasHistory ? `
       <!-- ── Franchise History Table ── -->
