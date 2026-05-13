@@ -6182,3 +6182,192 @@ select option { background: var(--color-bg-2); }
     gap: 0;
   }
 }
+
+/* ─────────────────────────────────────────────────────────
+   F1 — Overview Tab: Career Stats Bar + History Accordions
+   ───────────────────────────────────────────────────────── */
+
+/* ── Career Stats Bar ─────────────────────────────────── */
+.ov-career-bar {
+  display: flex;
+  gap: var(--space-2);
+  background: var(--color-surface-2, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  padding: var(--space-3) var(--space-4);
+}
+.ov-career-stat {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+.ov-career-stat + .ov-career-stat {
+  border-left: 1px solid var(--color-border);
+}
+.ov-career-val {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-career-lbl {
+  font-size: .65rem;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ── Accordion sections ───────────────────────────────── */
+.ov-accordion {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  margin-top: var(--space-3);
+  overflow: hidden;
+}
+.ov-accordion-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  background: var(--color-surface-2, var(--color-surface));
+  user-select: none;
+}
+.ov-accordion-summary::-webkit-details-marker { display: none; }
+.ov-accordion-summary::after {
+  content: "›";
+  font-size: 1rem;
+  color: var(--color-text-dim);
+  transform: rotate(90deg);
+  display: inline-block;
+  transition: transform .15s;
+  margin-left: var(--space-2);
+}
+details.ov-accordion[open] .ov-accordion-summary::after {
+  transform: rotate(270deg);
+}
+.ov-accordion-meta {
+  font-size: .72rem;
+  font-weight: 400;
+  color: var(--color-text-dim);
+  margin-right: var(--space-1);
+}
+
+/* ── History/career tables ────────────────────────────── */
+.ov-history-table-wrap {
+  overflow-x: auto;
+}
+.ov-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8rem;
+}
+.ov-history-table--compact {
+  font-size: .74rem;
+}
+.ov-history-table thead tr {
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+}
+.ov-history-table th {
+  padding: 5px var(--space-2);
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.ov-history-table th:hover { color: var(--color-text); }
+.ov-history-row {
+  border-bottom: 1px solid var(--color-border);
+  transition: background .1s;
+}
+.ov-history-row:last-child { border-bottom: none; }
+.ov-history-row:hover { background: var(--color-surface-hover, rgba(255,255,255,.04)); }
+.ov-history-row--current { background: var(--color-accent-dim, rgba(99,102,241,.1)); }
+.ov-history-row--current td { font-weight: 600; }
+.ov-history-table td {
+  padding: 5px var(--space-2);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+.ov-col-season {
+  font-weight: 700;
+  color: var(--color-accent) !important;
+  white-space: nowrap;
+}
+.ov-col-team {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dim);
+  font-size: .72rem;
+}
+.ov-col-manager {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.ov-col-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ov-col-dim { color: var(--color-text-dim); }
+.ov-col-finish {
+  white-space: nowrap;
+  font-size: .74rem;
+}
+
+/* ── Blowout stacked matchup cell ─────────────────────── */
+.ov-blowout-winner {
+  font-weight: 600;
+  font-size: .76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.ov-blowout-loser {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+  margin-top: 1px;
+}
+
+/* ── Career stats loading/note ────────────────────────── */
+.ov-career-stats-wrap { margin-top: var(--space-3); }
+.ov-career-stats-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  color: var(--color-text-dim);
+  font-size: .82rem;
+}
+.ov-cs-note {
+  padding: var(--space-2) 0;
+  font-size: .8rem;
+  color: var(--color-text-dim);
+}
+
+/* ── Mobile ───────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .ov-career-bar { padding: var(--space-2); gap: var(--space-1); }
+  .ov-career-val { font-size: .9rem; }
+  .ov-career-lbl { font-size: .6rem; }
+  .ov-col-team   { display: none; }
+}

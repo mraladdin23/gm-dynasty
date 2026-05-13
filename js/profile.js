@@ -3222,7 +3222,7 @@ const Profile = (() => {
             (rosters||[]).forEach(r => { rosterToName[String(r.roster_id)] = userMap[r.owner_id] || `Team ${r.roster_id}`; });
 
             const matchups = weekMatchups.flat().filter(m => m.points > 0);
-            return { season: s.season, leagueId: s.leagueId, rosterToName, matchups };
+            return { season: s.season, leagueId: s.leagueId, rosterToName, matchups, rosters };
           } catch(e) { return null; }
         })
       );
@@ -3233,45 +3233,28 @@ const Profile = (() => {
         return;
       }
 
-      // ── Build career standings ──────────────────────────────
-      // Key by display name (normalised) — maps same manager across seasons
-      const careerMap = {}; // normName → { name, W, L, PF, PA, seasons, bestPF }
+      // ── Build career standings from final roster standings (authoritative W/L) ──
+      // Uses rosters[].settings.wins / .losses / .fpts — final season record, not
+      // weekly matchup recomputation. This correctly reflects median wins, etc.
+      const careerMap = {}; // normName → { name, W, L, PF, seasons }
       const _norm = n => String(n||"").trim().toLowerCase();
 
-      validSeasons.forEach(({ season, rosterToName, matchups }) => {
-        // Group matchups by week → matchup_id to find opponents
-        const byWeekMu = {};
-        matchups.forEach(m => {
-          const key = `${m.week}|${m.matchup_id}`;
-          if (!byWeekMu[key]) byWeekMu[key] = [];
-          byWeekMu[key].push(m);
-        });
-
-        // Per-roster season totals
-        const rosterPF = {}, rosterW = {}, rosterL = {};
-        Object.values(byWeekMu).forEach(pair => {
-          if (pair.length !== 2) return;
-          const [a, b] = pair;
-          const ra = String(a.roster_id), rb = String(b.roster_id);
-          rosterPF[ra] = (rosterPF[ra]||0) + (a.points||0);
-          rosterPF[rb] = (rosterPF[rb]||0) + (b.points||0);
-          if (a.points > b.points) { rosterW[ra]=(rosterW[ra]||0)+1; rosterL[rb]=(rosterL[rb]||0)+1; }
-          else if (b.points > a.points) { rosterW[rb]=(rosterW[rb]||0)+1; rosterL[ra]=(rosterL[ra]||0)+1; }
-        });
-
-        Object.entries(rosterToName).forEach(([rid, name]) => {
+      validSeasons.forEach(({ season, leagueId, rosters, rosterToName }) => {
+        (rosters||[]).forEach(r => {
+          const rid  = String(r.roster_id);
+          const name = rosterToName[rid];
+          if (!name) return;
           const nk = _norm(name);
           if (!nk) return;
-          if (!careerMap[nk]) careerMap[nk] = { name, W:0, L:0, PF:0, seasons:0, bestPF:0 };
-          const pf = rosterPF[rid] || 0;
-          const w  = rosterW[rid]  || 0;
-          const l  = rosterL[rid]  || 0;
-          if (w + l === 0) return; // skip rosters with no games
+          const w  = Number(r.settings?.wins   || 0);
+          const l  = Number(r.settings?.losses || 0);
+          const pf = Number(r.settings?.fpts   || 0) + Number(r.settings?.fpts_decimal || 0) / 100;
+          if (w + l === 0) return;
+          if (!careerMap[nk]) careerMap[nk] = { name, W:0, L:0, PF:0, seasons:0 };
           careerMap[nk].W       += w;
           careerMap[nk].L       += l;
           careerMap[nk].PF      += pf;
           careerMap[nk].seasons += 1;
-          if (pf > careerMap[nk].bestPF) careerMap[nk].bestPF = pf;
         });
       });
 
@@ -3339,136 +3322,125 @@ const Profile = (() => {
           bestSeasons.push({ season, name, W: w, L: l, PF: pf });
         });
       });
-      const top5BestPF   = [...bestSeasons].sort((a, b) => b.PF - a.PF).slice(0, 5);
-      const top5BestWins = [...bestSeasons].sort((a, b) => b.W - a.W || b.PF - a.PF).slice(0, 5);
+      const top5BestPF = [...bestSeasons].sort((a, b) => b.PF - a.PF).slice(0, 5);
 
       // ── Render ──────────────────────────────────────────────
       const _e = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
       const html = `
-        <!-- Career Standings -->
-        <div class="overview-section-title" style="margin-top:var(--space-5)">
-          League Career Standings
-          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim)">All-time across ${validSeasons.length} seasons</span>
-        </div>
-        <div class="ov-history-table-wrap">
-          <table class="ov-history-table">
-            <thead><tr>
-              <th>#</th><th>Manager</th>
-              <th style="text-align:right">W–L</th>
-              <th style="text-align:right">Win%</th>
-              <th style="text-align:right">PF</th>
-              <th style="text-align:right">Avg PF/Wk</th>
-              <th style="text-align:right">Seasons</th>
-            </tr></thead>
-            <tbody>
-              ${careerRows.map((r, i) => {
-                const games  = r.W + r.L;
-                const winPct = games ? ((r.W/games)*100).toFixed(1) : "0.0";
-                const avgPF  = games ? (r.PF / games).toFixed(1) : "—";
-                const pctCol = r.W/games >= 0.6 ? "var(--color-green)" : r.W/games < 0.4 ? "var(--color-red)" : "var(--color-text)";
-                return `<tr class="ov-history-row">
-                  <td class="ov-col-num" style="color:var(--color-text-dim)">${i+1}</td>
-                  <td style="font-weight:600">${_e(r.name)}</td>
-                  <td class="ov-col-num">${r.W}–${r.L}</td>
-                  <td class="ov-col-num" style="color:${pctCol}">${winPct}%</td>
-                  <td class="ov-col-num">${r.PF.toFixed(1)}</td>
-                  <td class="ov-col-num ov-col-dim">${avgPF}</td>
-                  <td class="ov-col-num ov-col-dim">${r.seasons}</td>
-                </tr>`;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Best Individual Seasons -->
-        <div class="ov-cs-two-col">
-          <div>
-            <div class="overview-section-title" style="margin-top:var(--space-5)">
-              🔥 Best Seasons by PF
-            </div>
-            <div class="ov-history-table-wrap">
-              <table class="ov-history-table">
-                <thead><tr><th>Manager</th><th style="text-align:right">Season</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th></tr></thead>
-                <tbody>
-                  ${top5BestPF.map(r => `<tr class="ov-history-row">
-                    <td style="font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(r.name)}</td>
-                    <td class="ov-col-num ov-col-dim">${r.season}</td>
+        <!-- Career Standings accordion (open by default) -->
+        <details class="ov-accordion" open>
+          <summary class="ov-accordion-summary">
+            <span>League Career Standings</span>
+            <span class="ov-accordion-meta">${validSeasons.length} seasons</span>
+          </summary>
+          <div class="ov-history-table-wrap">
+            <table class="ov-history-table ov-history-table--compact">
+              <thead><tr>
+                <th>#</th><th>Manager</th>
+                <th style="text-align:right">W–L</th>
+                <th style="text-align:right">Win%</th>
+                <th style="text-align:right">PF</th>
+                <th style="text-align:right">Szns</th>
+              </tr></thead>
+              <tbody>
+                ${careerRows.map((r, i) => {
+                  const games  = r.W + r.L;
+                  const winPct = games ? ((r.W/games)*100).toFixed(1) : "0.0";
+                  const pctCol = r.W/games >= 0.6 ? "var(--color-green)" : r.W/games < 0.4 ? "var(--color-red)" : "var(--color-text)";
+                  return `<tr class="ov-history-row">
+                    <td class="ov-col-num ov-col-dim">${i+1}</td>
+                    <td class="ov-col-manager">${_e(r.name)}</td>
                     <td class="ov-col-num">${r.W}–${r.L}</td>
-                    <td class="ov-col-num" style="color:var(--color-green)">${r.PF.toFixed(1)}</td>
-                  </tr>`).join("")}
-                </tbody>
-              </table>
-            </div>
+                    <td class="ov-col-num" style="color:${pctCol}">${winPct}%</td>
+                    <td class="ov-col-num">${r.PF.toFixed(0)}</td>
+                    <td class="ov-col-num ov-col-dim">${r.seasons}</td>
+                  </tr>`;
+                }).join("")}
+              </tbody>
+            </table>
           </div>
-          <div>
-            <div class="overview-section-title" style="margin-top:var(--space-5)">
-              🏆 Best Seasons by Wins
-            </div>
-            <div class="ov-history-table-wrap">
-              <table class="ov-history-table">
-                <thead><tr><th>Manager</th><th style="text-align:right">Season</th><th style="text-align:right">W–L</th><th style="text-align:right">PF</th></tr></thead>
-                <tbody>
-                  ${top5BestWins.map(r => `<tr class="ov-history-row">
-                    <td style="font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(r.name)}</td>
-                    <td class="ov-col-num ov-col-dim">${r.season}</td>
-                    <td class="ov-col-num" style="color:var(--color-gold)">${r.W}–${r.L}</td>
-                    <td class="ov-col-num">${r.PF.toFixed(1)}</td>
-                  </tr>`).join("")}
-                </tbody>
-              </table>
-            </div>
+        </details>
+
+        <!-- Best Seasons by PF accordion -->
+        <details class="ov-accordion">
+          <summary class="ov-accordion-summary">
+            <span>🔥 Best Seasons by PF</span>
+            <span class="ov-accordion-meta">Top 5</span>
+          </summary>
+          <div class="ov-history-table-wrap">
+            <table class="ov-history-table ov-history-table--compact">
+              <thead><tr>
+                <th>#</th><th>Manager</th>
+                <th style="text-align:right">Yr</th>
+                <th style="text-align:right">W–L</th>
+                <th style="text-align:right">PF</th>
+              </tr></thead>
+              <tbody>
+                ${top5BestPF.map((r, i) => `<tr class="ov-history-row">
+                  <td class="ov-col-num ov-col-dim">${i+1}</td>
+                  <td class="ov-col-manager">${_e(r.name)}</td>
+                  <td class="ov-col-num ov-col-dim">${r.season}</td>
+                  <td class="ov-col-num">${r.W}–${r.L}</td>
+                  <td class="ov-col-num" style="color:var(--color-green);font-weight:700">${r.PF.toFixed(1)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </details>
 
-        <!-- Top Scoring Games -->
-        <div class="overview-section-title" style="margin-top:var(--space-5)">
-          ⚡ Top 10 Highest Scoring Games
-        </div>
-        <div class="ov-history-table-wrap">
-          <table class="ov-history-table">
-            <thead><tr>
-              <th>#</th><th>Manager</th>
-              <th style="text-align:right">Points</th>
-              <th style="text-align:right">Season</th>
-              <th style="text-align:right">Week</th>
-            </tr></thead>
-            <tbody>
-              ${top10Scores.map((r, i) => `<tr class="ov-history-row">
-                <td class="ov-col-num ov-col-dim">${i+1}</td>
-                <td style="font-weight:600">${_e(r.name)}</td>
-                <td class="ov-col-num" style="color:var(--color-gold);font-weight:700">${r.pts.toFixed(2)}</td>
-                <td class="ov-col-num ov-col-dim">${r.season}</td>
-                <td class="ov-col-num ov-col-dim">Wk ${r.week}</td>
-              </tr>`).join("")}
-            </tbody>
-          </table>
-        </div>
+        <!-- Top Scoring Games accordion -->
+        <details class="ov-accordion">
+          <summary class="ov-accordion-summary">
+            <span>⚡ Highest Scoring Games</span>
+            <span class="ov-accordion-meta">Top 10</span>
+          </summary>
+          <div class="ov-history-table-wrap">
+            <table class="ov-history-table ov-history-table--compact">
+              <thead><tr>
+                <th>#</th><th>Manager</th>
+                <th style="text-align:right">Pts</th>
+                <th style="text-align:right">Yr W</th>
+              </tr></thead>
+              <tbody>
+                ${top10Scores.map((r, i) => `<tr class="ov-history-row">
+                  <td class="ov-col-num ov-col-dim">${i+1}</td>
+                  <td class="ov-col-manager">${_e(r.name)}</td>
+                  <td class="ov-col-num" style="color:var(--color-gold);font-weight:700">${r.pts.toFixed(2)}</td>
+                  <td class="ov-col-num ov-col-dim">${r.season} W${r.week}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </details>
 
-        <!-- Top Blowouts -->
-        <div class="overview-section-title" style="margin-top:var(--space-5)">
-          💥 Top 10 Biggest Blowouts
-        </div>
-        <div class="ov-history-table-wrap" style="margin-bottom:var(--space-4)">
-          <table class="ov-history-table">
-            <thead><tr>
-              <th>#</th><th>Winner</th><th>Loser</th>
-              <th style="text-align:right">Score</th>
-              <th style="text-align:right">Margin</th>
-              <th style="text-align:right">Wk</th>
-            </tr></thead>
-            <tbody>
-              ${top10Blowouts.map((r, i) => `<tr class="ov-history-row">
-                <td class="ov-col-num ov-col-dim">${i+1}</td>
-                <td style="font-weight:600;color:var(--color-green)">${_e(r.winnerName)}</td>
-                <td style="color:var(--color-text-dim)">${_e(r.loserName)}</td>
-                <td class="ov-col-num" style="font-size:.78rem">${r.winnerPts.toFixed(1)}–${r.loserPts.toFixed(1)}</td>
-                <td class="ov-col-num" style="color:var(--color-red);font-weight:700">+${r.margin.toFixed(1)}</td>
-                <td class="ov-col-num ov-col-dim">${r.season} W${r.week}</td>
-              </tr>`).join("")}
-            </tbody>
-          </table>
-        </div>
+        <!-- Biggest Blowouts accordion -->
+        <details class="ov-accordion" style="margin-bottom:var(--space-3)">
+          <summary class="ov-accordion-summary">
+            <span>💥 Biggest Blowouts</span>
+            <span class="ov-accordion-meta">Top 10</span>
+          </summary>
+          <div class="ov-history-table-wrap">
+            <table class="ov-history-table ov-history-table--compact">
+              <thead><tr>
+                <th>#</th><th>Matchup</th>
+                <th style="text-align:right">Margin</th>
+                <th style="text-align:right">Yr W</th>
+              </tr></thead>
+              <tbody>
+                ${top10Blowouts.map((r, i) => `<tr class="ov-history-row">
+                  <td class="ov-col-num ov-col-dim">${i+1}</td>
+                  <td>
+                    <div class="ov-blowout-winner">${_e(r.winnerName)} <span style="color:var(--color-green);font-weight:700">${r.winnerPts.toFixed(1)}</span></div>
+                    <div class="ov-blowout-loser">${_e(r.loserName)} <span style="color:var(--color-text-dim)">${r.loserPts.toFixed(1)}</span></div>
+                  </td>
+                  <td class="ov-col-num" style="color:var(--color-red);font-weight:700">+${r.margin.toFixed(1)}</td>
+                  <td class="ov-col-num ov-col-dim">${r.season} W${r.week}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </details>
       `;
 
       csEl._csCache = html;
@@ -3626,55 +3598,50 @@ const Profile = (() => {
       </div>` : ""}
 
       ${hasHistory ? `
-      <!-- ── Franchise History Table ── -->
-      <div class="overview-section-title" style="margin-top:var(--space-5);display:flex;align-items:center;justify-content:space-between;">
-        <span>Franchise History</span>
-        ${isDynastyStyle && totalPF > 0 ? `<span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim);">
-          Avg PF: ${(totalPF / allSeasons.length).toFixed(1)}
-          ${runnerUps > 0 ? ` · 🥈×${runnerUps}` : ""}
-        </span>` : `<span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim);">
-          ${totalWins}W–${totalLosses}L all-time
-          ${titles > 0 ? ` · 🏆×${titles}` : ""}
-          ${runnerUps > 0 ? ` · 🥈×${runnerUps}` : ""}
-        </span>`}
-      </div>
-      <div class="ov-history-table-wrap">
-        <table class="ov-history-table">
-          <thead><tr>
-            ${_th("season",  "Year")}
-            <th>Team</th>
-            ${_th("record",  "W–L")}
-            ${_th("pf",      "PF")}
-            ${_th("pa",      "PA")}
-            ${_th("standing","Rank")}
-            ${_th("finish",  "Finish")}
-          </tr></thead>
-          <tbody>
-            ${sortedSeasons.map(([key, s]) => {
-              const f    = s.playoffFinish;
-              const icon = f === 1 ? "🏆" : f === 2 ? "🥈" : f === 3 ? "🥉" : (f && f <= 7 ? "🏅" : "");
-              const finishTxt = s.playoffResult
-                || (f === 1 ? "Champion" : f === 2 ? "Runner-Up" : f === 3 ? "3rd Place"
-                    : f != null ? "Playoffs" : (_isSeasonComplete(s) ? "—" : "Active"));
-              const isCurrent = key === leagueKey;
-              const pfStr = s.pointsFor     ? parseFloat(s.pointsFor).toFixed(1)     : "—";
-              const paStr = s.pointsAgainst ? parseFloat(s.pointsAgainst).toFixed(1) : "—";
-              const teamDisplay = s.teamName && s.teamName !== "My Team" ? s.teamName : (s.leagueName || "");
-              return `
-                <tr class="ov-history-row ${isCurrent ? "ov-history-row--current" : ""}"
-                  onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;" title="View ${s.season} season">
-                  <td class="ov-col-season">${s.season}</td>
-                  <td class="ov-col-team">${_escHtml(teamDisplay)}</td>
-                  <td class="ov-col-num">${s.wins || 0}–${s.losses || 0}</td>
-                  <td class="ov-col-num">${pfStr}</td>
-                  <td class="ov-col-num ov-col-dim">${paStr}</td>
-                  <td class="ov-col-num">${s.standing ? "#" + s.standing : "—"}</td>
-                  <td class="ov-col-finish">${icon ? icon + " " : ""}${_escHtml(finishTxt)}</td>
-                </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>` : ""}
+      <!-- ── Franchise History accordion ── -->
+      <details class="ov-accordion" open>
+        <summary class="ov-accordion-summary">
+          <span>Franchise History</span>
+          <span class="ov-accordion-meta">
+            ${totalWins}W–${totalLosses}L
+            ${titles > 0 ? ` · 🏆×${titles}` : ""}
+          </span>
+        </summary>
+        <div class="ov-history-table-wrap">
+          <table class="ov-history-table ov-history-table--compact">
+            <thead><tr>
+              ${_th("season",  "Yr")}
+              <th>Team</th>
+              ${_th("record",  "W–L")}
+              ${_th("pf",      "PF")}
+              ${_th("standing","Rank")}
+              ${_th("finish",  "Result")}
+            </tr></thead>
+            <tbody>
+              ${sortedSeasons.map(([key, s]) => {
+                const f    = s.playoffFinish;
+                const icon = f === 1 ? "🏆" : f === 2 ? "🥈" : f === 3 ? "🥉" : (f && f <= 7 ? "🏅" : "");
+                const finishTxt = s.playoffResult
+                  || (f === 1 ? "Champ" : f === 2 ? "Runner-Up" : f === 3 ? "3rd"
+                      : f != null ? "Playoffs" : (_isSeasonComplete(s) ? "—" : "Active"));
+                const isCurrent = key === leagueKey;
+                const pfStr = s.pointsFor ? parseFloat(s.pointsFor).toFixed(0) : "—";
+                const teamDisplay = s.teamName && s.teamName !== "My Team" ? s.teamName : "";
+                return `
+                  <tr class="ov-history-row ${isCurrent ? "ov-history-row--current" : ""}"
+                    onclick="Profile.switchDetailSeason('${key}')" style="cursor:pointer;">
+                    <td class="ov-col-season">${s.season}</td>
+                    <td class="ov-col-team">${_escHtml(teamDisplay)}</td>
+                    <td class="ov-col-num">${s.wins || 0}–${s.losses || 0}</td>
+                    <td class="ov-col-num">${pfStr}</td>
+                    <td class="ov-col-num">${s.standing ? "#" + s.standing : "—"}</td>
+                    <td class="ov-col-finish">${icon ? icon + " " : ""}${_escHtml(finishTxt)}</td>
+                  </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </details>` : ""}
     `;
   }
 
