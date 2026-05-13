@@ -364,8 +364,10 @@ const Profile = (() => {
             ...(_leagueMeta[key] || {}),
             // Shared fields overlay — don't overwrite personal fields
             ...(s.leagueTypeOverride  != null ? { leagueTypeOverride:  s.leagueTypeOverride  } : {}),
-            ...(s.auctionEnabled      != null ? { auctionEnabled:      s.auctionEnabled      } : {}),
-            ...(s.auctionIncludePicks != null ? { auctionIncludePicks: s.auctionIncludePicks } : {}),
+            ...(s.auctionEnabled        != null ? { auctionEnabled:        s.auctionEnabled        } : {}),
+            ...(s.auctionIncludePicks   != null ? { auctionIncludePicks:   s.auctionIncludePicks   } : {}),
+            ...(s.customPlayoffEnabled  != null ? { customPlayoffEnabled:  s.customPlayoffEnabled  } : {}),
+            ...(s.customPlayoff         != null ? { customPlayoff:         s.customPlayoff         } : {}),
             ...(s.commishGroup        != null ? { commishGroup:        s.commishGroup        } : {}),
           };
           // Apply type override to the league object too
@@ -2366,9 +2368,10 @@ const Profile = (() => {
     if (commishSection) commishSection.classList.toggle("hidden", !isCommish);
 
     if (isCommish) {
-      document.getElementById("label-commish-input").value   = meta.commishGroup || "";
-      document.getElementById("label-auction-check").checked = !!meta.auctionEnabled;
-      document.getElementById("label-picks-check").checked   = !!meta.auctionIncludePicks;
+      document.getElementById("label-commish-input").value        = meta.commishGroup || "";
+      document.getElementById("label-auction-check").checked      = !!meta.auctionEnabled;
+      document.getElementById("label-picks-check").checked        = !!meta.auctionIncludePicks;
+      document.getElementById("label-custom-playoffs-check").checked = !!meta.customPlayoffEnabled;
       const typeEl = document.getElementById("label-type-override");
       if (typeEl) typeEl.value = meta.leagueTypeOverride || "";
       // Merge section — detect candidates or show current merge state
@@ -2462,10 +2465,11 @@ const Profile = (() => {
         archived: document.getElementById("label-archive-check")?.checked || false,
       };
       if (isCommish) {
-        metaUpdate.commishGroup        = commishGroup;
-        metaUpdate.auctionEnabled      = document.getElementById("label-auction-check")?.checked || false;
-        metaUpdate.auctionIncludePicks = document.getElementById("label-picks-check")?.checked   || false;
-        metaUpdate.leagueTypeOverride  = typeOverride || null;
+        metaUpdate.commishGroup          = commishGroup;
+        metaUpdate.auctionEnabled        = document.getElementById("label-auction-check")?.checked || false;
+        metaUpdate.auctionIncludePicks   = document.getElementById("label-picks-check")?.checked   || false;
+        metaUpdate.leagueTypeOverride    = typeOverride || null;
+        metaUpdate.customPlayoffEnabled  = document.getElementById("label-custom-playoffs-check")?.checked || false;
       }
 
       await saveLeagueMeta(_currentUsername, leagueKey, metaUpdate);
@@ -2937,6 +2941,13 @@ const Profile = (() => {
       );
     }
 
+    // Conditionally inject Custom Playoffs tab after regular Playoffs
+    if (meta.customPlayoffEnabled) {
+      tabs.splice(tabs.findIndex(t => t.val === "playoffs") + 1, 0,
+        { val: "customplayoffs", label: "🏆 Custom Playoffs" }
+      );
+    }
+
     const currentVal = sel.value;
     sel.innerHTML = tabs.map(t =>
       `<option value="${t.val}">${t.label}</option>`
@@ -3076,6 +3087,10 @@ const Profile = (() => {
       );
     }
     if (tab === "chat")        _renderChat(el, leagueKey, league);
+    if (tab === "customplayoffs") {
+      const meta5 = _leagueMeta[leagueKey] || {};
+      DLRCustomPlayoffs.init(leagueKey, league, _currentUsername, meta5);
+    }
   }
 
   async function _renderOverview(el, leagueKey, league) {
