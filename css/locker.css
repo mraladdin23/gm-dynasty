@@ -6145,3 +6145,40 @@ select option { background: var(--color-bg-2); }
     display: none; /* hide team name col on very small screens */
   }
 }
+
+/* ─────────────────────────────────────────────────────────
+   F1 — Career Stats Section (league history analytics)
+   ───────────────────────────────────────────────────────── */
+
+.ov-career-stats-wrap {
+  margin-top: var(--space-4);
+}
+
+.ov-career-stats-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  color: var(--color-text-dim);
+  font-size: .85rem;
+}
+
+.ov-cs-note {
+  padding: var(--space-3) 0;
+  font-size: .82rem;
+  color: var(--color-text-dim);
+}
+
+/* Two-column layout for Best Seasons side by side */
+.ov-cs-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 560px) {
+  .ov-cs-two-col {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
