@@ -929,35 +929,26 @@
       </div>
       <div class="modal-body" style="max-height:72vh;overflow-y:auto">
 
-        <!-- Global settings -->
-        <div class="cp-form-row" style="margin-bottom:var(--space-3)">
-          <div class="form-group">
-            <label>Seeding Method</label>
-            <select id="cp-seed-method">
-              <option value="record">By Record</option>
-              <option value="pf">By Points For</option>
-              <option value="manual">Manual</option>
-            </select>
-          </div>
-          <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:2px">
-            <label class="label-checkbox">
-              <input type="checkbox" id="cp-reseed" />
-              <span>Reseed after each round</span>
-            </label>
-          </div>
+        <!-- Reg season end week -->
+        <div class="cp-reg-week-row">
+          <label for="cp-reg-week">End of Regular Season Week</label>
+          <input type="number" id="cp-reg-week" min="1" max="22" placeholder="e.g. 13" />
+          <button class="btn-secondary btn-sm" id="cp-update-standings-btn"
+            onclick="DLRCustomPlayoffs.updateRegStandings()">&#8635; Update Standings</button>
+          <span class="cp-reg-week-hint">Computes W-L-PF from actual results to sort seeds correctly.</span>
         </div>
 
         <!-- Seeds — all participants in seeded order -->
         <div class="label-commish-divider" style="margin-bottom:var(--space-2)">
           <span>Seedings</span>
-          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim);margin-left:var(--space-2)">All teams in bracket, #1 (best) → last</span>
+          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim);margin-left:var(--space-2)">#1 (best seed) → last qualifier</span>
         </div>
         <div id="cp-seeds-body" class="cp-seeds-body"></div>
 
-        <!-- Rounds — define who plays each round -->
+        <!-- Rounds -->
         <div class="label-commish-divider" style="margin:var(--space-4) 0 var(--space-2)">
           <span>Rounds</span>
-          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim);margin-left:var(--space-2)">Define which seeds play — all others get a BYE</span>
+          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim);margin-left:var(--space-2)">Matchup assignments are set via the bracket panel after saving</span>
         </div>
         <div id="cp-rounds-body" class="cp-rounds-body"></div>
 
