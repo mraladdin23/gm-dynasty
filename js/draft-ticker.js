@@ -414,11 +414,17 @@ const DraftTicker = (() => {
 
     if (draft.status === "drafting" || draft.status === "paused") {
       try {
-        const pr = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`);
+        const [pr, tpr] = await Promise.all([
+          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`),
+          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`)
+        ]);
         if (pr.ok) {
           const picks = await pr.json();
           status.picksMade  = Array.isArray(picks) ? picks.length : 0;
           status.picks_hash = `${status.picksMade}:${picks[picks.length-1]?.player_id || ""}`;
+        }
+        if (tpr.ok) {
+          status.traded_picks = await tpr.json();
         }
       } catch(e) {}
     }

@@ -45,7 +45,8 @@ const DLRCustomPlayoffs = (() => {
     _username     = username;
     _config       = leagueMeta?.customPlayoff || null;
     _scoreCache   = {};
-    _regStandings = null;
+    // Restore computed standings from saved config so they survive page reloads
+    _regStandings = _config?.regStandings || null;
 
     const el = document.getElementById("dtab-customplayoffs");
     if (!el) return;
@@ -288,37 +289,71 @@ const DLRCustomPlayoffs = (() => {
       }
     }
 
-    let targetRi;
+    // Determine default target round: next unassigned, or next after last scored
+    let defaultTargetRi = 0;
     if (lastScoredRi >= 0 && lastScoredRi < nr - 1) {
-      targetRi = lastScoredRi + 1;
-    } else if ((rounds[0]?.matchups || []).length === 0) {
-      targetRi = 0;
+      defaultTargetRi = lastScoredRi + 1;
     } else {
-      return "";
+      // Find first round with no matchups
+      for (let ri = 0; ri < nr; ri++) {
+        if (!(rounds[ri]?.matchups || []).length) { defaultTargetRi = ri; break; }
+        defaultTargetRi = ri; // fall through to last round if all assigned
+      }
     }
-
-    // Build pool
-    const pool = [];
-    if (lastScoredRi >= 0) {
-      bracketData[lastScoredRi].matchups.forEach(mu => {
-        const adv = mu.advanceCount || 1;
-        mu.teams.slice(0, adv).forEach(t => { if (t.rosterId) pool.push(t.rosterId); });
-      });
-      (bracketData[lastScoredRi].byes || []).forEach(b => { if (b.rosterId) pool.push(b.rosterId); });
-    } else {
-      (_config.seeds || []).forEach(s => { if (s.rosterId) pool.push(s.rosterId); });
-    }
-    if (!pool.length) return "";
 
     const getRN = (ri) => rounds[ri]?.label?.trim() ||
       (ri === nr - 1 ? "🏆 Championship" : ri === nr - 2 ? "Semifinals"
        : ri === nr - 3 ? "Quarterfinals" : `Round ${ri + 1}`);
 
+    // Round selector tabs
+    const roundTabs = rounds.map((r, ri) =>
+      `<button class="cp-round-tab btn-sm ${ri === defaultTargetRi ? "btn-primary" : "btn-secondary"}"
+        data-ri="${ri}" onclick="DLRCustomPlayoffs._switchAssignRound(${ri})">${_esc(getRN(ri))}</button>`
+    ).join("");
+
+    // Build the panel for the default target round
+    const panelContent = _buildAssignRoundContent(defaultTargetRi, bracketData, getRN, lastScoredRi);
+
+    return `<div class="trn-section-card" style="margin-top:var(--space-4);max-width:680px" id="cp-assign-panel" data-last-scored="${lastScoredRi}">
+      <div class="trn-section-card-title">Manage Matchups</div>
+      <div class="cp-round-tabs" style="display:flex;flex-wrap:wrap;gap:var(--space-1);margin-bottom:var(--space-3)">${roundTabs}</div>
+      <div id="cp-assign-round-content">${panelContent}</div>
+    </div>`;
+  }
+
+  function _buildAssignRoundContent(targetRi, bracketData, getRN, lastScoredRi) {
+    const rounds   = _config.rounds || [];
+    const nr       = rounds.length;
+    getRN = getRN || ((ri) => rounds[ri]?.label?.trim() ||
+      (ri === nr - 1 ? "🏆 Championship" : ri === nr - 2 ? "Semifinals"
+       : ri === nr - 3 ? "Quarterfinals" : `Round ${ri + 1}`));
+    lastScoredRi = lastScoredRi ?? -1;
+
+    // Build pool for this round
+    const pool = [];
+    if (lastScoredRi >= 0 && targetRi > 0) {
+      // Use winners + byes from the round before targetRi
+      const sourceRi = targetRi - 1;
+      const srcRnd   = bracketData?.[sourceRi];
+      if (srcRnd) {
+        srcRnd.matchups.forEach(mu => {
+          const adv = mu.advanceCount || 1;
+          mu.teams.slice(0, adv).forEach(t => { if (t.rosterId) pool.push(t.rosterId); });
+        });
+        (srcRnd.byes || []).forEach(b => { if (b.rosterId) pool.push(b.rosterId); });
+      }
+    }
+    // If pool is still empty, use all seeds (round 0 or unscored source round)
+    if (!pool.length) {
+      (_config.seeds || []).forEach(s => { if (s.rosterId) pool.push(s.rosterId); });
+    }
+
     const cfgRound = rounds[targetRi] || {};
     const cfgMus   = cfgRound.matchups || [];
     const cfgByes  = cfgRound.byes    || [];
     const initMus  = cfgMus.length ? cfgMus : [{ teams: [], advanceCount: 1 }];
-    const prevLabel = lastScoredRi >= 0 ? `${_esc(getRN(lastScoredRi))} complete — ` : "";
+    const prevLabel = targetRi > 0 && lastScoredRi >= targetRi - 1
+      ? `${_esc(getRN(targetRi - 1))} complete — ` : "";
 
     const matchupSlots = initMus.map((mu, mi) => _buildMatchupSlotHTML(mi, mu, pool)).join("");
 
@@ -332,9 +367,7 @@ const DLRCustomPlayoffs = (() => {
       </div>`
     ).join("");
 
-    return `<div class="trn-section-card" style="margin-top:var(--space-4);max-width:680px" id="cp-assign-panel">
-      <div class="trn-section-card-title">Set ${_esc(getRN(targetRi))} Matchups</div>
-      <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+    return `<p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
         ${prevLabel}${pool.length} teams available. Each matchup supports any number of teams.
       </p>
       <div id="cp-assign-slots" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-3)">
@@ -351,8 +384,41 @@ const DLRCustomPlayoffs = (() => {
       <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
         <button class="btn-primary btn-sm" id="cp-assign-save" data-target-ri="${targetRi}">💾 Save ${_esc(getRN(targetRi))} Matchups</button>
         <button class="btn-secondary btn-sm" id="cp-assign-clear" data-target-ri="${targetRi}">✕ Clear Round</button>
-      </div>
-    </div>`;
+      </div>`;
+  }
+
+  // Switch which round the assign panel is editing
+  async function _switchAssignRound(targetRi) {
+    const panel = document.getElementById("cp-assign-panel");
+    if (!panel) return;
+    const lastScoredRi = parseInt(panel.dataset.lastScored ?? "-1");
+    const rounds = _config.rounds || [];
+    const nr = rounds.length;
+    const getRN = (ri) => rounds[ri]?.label?.trim() ||
+      (ri === nr - 1 ? "🏆 Championship" : ri === nr - 2 ? "Semifinals"
+       : ri === nr - 3 ? "Quarterfinals" : `Round ${ri + 1}`);
+
+    // Re-fetch scored bracket data so pool is fresh
+    const bracketData = await _buildBracket();
+    const content = _buildAssignRoundContent(targetRi, bracketData, getRN, lastScoredRi);
+    const contentEl = document.getElementById("cp-assign-round-content");
+    if (contentEl) contentEl.innerHTML = content;
+
+    // Update tab highlights
+    panel.querySelectorAll(".cp-round-tab").forEach(btn => {
+      const ri = parseInt(btn.dataset.ri);
+      btn.classList.toggle("btn-primary",   ri === targetRi);
+      btn.classList.toggle("btn-secondary", ri !== targetRi);
+    });
+
+    // Re-wire save/clear buttons and sync selects
+    document.getElementById("cp-assign-save")?.addEventListener("click", async function() {
+      await _saveAssignments(parseInt(this.dataset.targetRi));
+    });
+    document.getElementById("cp-assign-clear")?.addEventListener("click", async function() {
+      await _clearRound(parseInt(this.dataset.targetRi));
+    });
+    _syncSelects();
   }
 
   function _buildMatchupSlotHTML(mi, mu, pool) {
@@ -388,8 +454,6 @@ const DLRCustomPlayoffs = (() => {
     });
     _syncSelects();
   }
-
-  // ── Disable already-selected teams across all selects ─
   function _syncSelects() {
     const panel = document.getElementById("cp-assign-panel");
     if (!panel) return;
@@ -603,6 +667,15 @@ const DLRCustomPlayoffs = (() => {
       Object.values(standings).forEach(s => { s.pf = Math.round(s.pf * 100) / 100; });
       _regStandings = standings;
       modal._regStandings = standings;
+      // Immediately persist to Firebase so standings survive without needing saveConfig
+      if (_leagueKey && _username && _config) {
+        const updated = { ...(_config || {}), regSeasonEndWeek: endWeek, regStandings: standings };
+        firebase.database()
+          .ref(`gmd/users/${_username.toLowerCase()}/leagueMeta/${_leagueKey}`)
+          .update({ customPlayoff: updated }).catch(() => {});
+        _config = updated;
+        if (typeof _onMetaSave === "function") _onMetaSave(_leagueKey, updated);
+      }
       const opts = _seedOpts(standings);
       modal._opts = opts;
       const curSelections = [...(modal.querySelectorAll("#cp-seeds-body .cp-seed-select") || [])]
@@ -745,7 +818,11 @@ const DLRCustomPlayoffs = (() => {
         };
       });
       const regSeasonEndWeek = parseInt(modal.querySelector("#cp-reg-week")?.value) || null;
-      const newConfig = { seeds, rounds, ...(regSeasonEndWeek ? { regSeasonEndWeek } : {}) };
+      const newConfig = {
+        seeds, rounds,
+        ...(regSeasonEndWeek ? { regSeasonEndWeek } : {}),
+        ...(_regStandings   ? { regStandings: _regStandings } : {})
+      };
       await firebase.database()
         .ref(`gmd/users/${_username.toLowerCase()}/leagueMeta/${_leagueKey}`)
         .update({ customPlayoff: newConfig });
@@ -769,7 +846,7 @@ const DLRCustomPlayoffs = (() => {
     init, reset,
     openConfig, closeConfig, saveConfig,
     refreshScores, setMetaCallback,
-    updateRegStandings, _syncSelects,
+    updateRegStandings, _syncSelects, _switchAssignRound,
     _addSeedRow, _renumberSeeds,
     _addRound, _renumberRounds,
     _addAssignTeam, _removeAssignTeam,
