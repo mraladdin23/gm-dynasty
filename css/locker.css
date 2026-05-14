@@ -6792,3 +6792,47 @@ details.ov-accordion[open] .ov-accordion-summary::after {
 .cp-st-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .cp-st-rec  { text-align: center; color: var(--color-text-dim); }
 .cp-st-pf   { text-align: right; color: var(--color-text-dim); }
+
+/* ── Custom Playoffs v4 — finals section + assign panel fixes ── */
+
+/* Championship round section — gold label instead of dim */
+.bracket-finals-section {
+  margin-bottom: var(--space-4);
+}
+.bracket-finals-section .bracket-section-label,
+.bracket-finals-section .bracket-finals-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.bracket-finals-section .bracket-section-games {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+/* N-team matchup: winning slots get score shown in gold */
+.bracket-slot--win .bracket-score { color: var(--color-gold); font-weight: 700; }
+
+/* Assignment panel — remove button consistent with add */
+.cp-assign-matchup-header .btn-secondary { flex-shrink: 0; }
+.cp-assign-bye-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+.cp-assign-bye-row .cp-bye-sel {
+  flex: 1;
+  font-size: .8rem;
+  padding: 4px 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
