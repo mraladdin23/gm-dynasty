@@ -366,8 +366,8 @@ const Profile = (() => {
             ...(s.leagueTypeOverride  != null ? { leagueTypeOverride:  s.leagueTypeOverride  } : {}),
             ...(s.auctionEnabled        != null ? { auctionEnabled:        s.auctionEnabled        } : {}),
             ...(s.auctionIncludePicks   != null ? { auctionIncludePicks:   s.auctionIncludePicks   } : {}),
-            ...(s.customPlayoffEnabled  != null ? { customPlayoffEnabled:  s.customPlayoffEnabled  } : {}),
-            ...(s.customPlayoff         != null ? { customPlayoff:         s.customPlayoff         } : {}),
+            // customPlayoffEnabled lives in personal path — don't overlay from shared (would overwrite)
+            ...(s.customPlayoff != null ? { customPlayoff: s.customPlayoff } : {}),
             ...(s.commishGroup        != null ? { commishGroup:        s.commishGroup        } : {}),
           };
           // Apply type override to the league object too
@@ -388,7 +388,10 @@ const Profile = (() => {
     const existing = _leagueMeta[leagueKey] || {};
     const merged   = { ...existing, ...updates };
     Object.keys(merged).forEach(k => {
-      if (merged[k] === null || merged[k] === undefined || merged[k] === "") delete merged[k];
+      // Only strip null/undefined/"" — preserve false booleans (e.g. customPlayoffEnabled)
+      if (merged[k] === null || merged[k] === undefined || merged[k] === "") {
+        if (typeof merged[k] !== "boolean") delete merged[k];
+      }
     });
     _leagueMeta[leagueKey] = merged;
 
@@ -2473,6 +2476,14 @@ const Profile = (() => {
       }
 
       await saveLeagueMeta(_currentUsername, leagueKey, metaUpdate);
+
+      // customPlayoffEnabled written directly to personal leagueMeta path —
+      // not a shared commish field so it bypasses the shared fields whitelist
+      if (isCommish) {
+        await firebase.database()
+          .ref(`gmd/users/${_currentUsername.toLowerCase()}/leagueMeta/${leagueKey}`)
+          .update({ customPlayoffEnabled: !!metaUpdate.customPlayoffEnabled });
+      }
 
       // Propagate leagueTypeOverride to all seasons in the same franchise chain
       if (isCommish && typeOverride) {
