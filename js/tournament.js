@@ -8633,8 +8633,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             allMatchups.push({
               leagueId: lg.leagueId, leagueName: lg.name,
               conference: lg.conference, division: lg.division, platform: "sleeper",
-              home: { name: aName, score: parseFloat(apts.toFixed(2)) },
-              away: { name: bName, score: parseFloat(bpts.toFixed(2)) }
+              home: {
+                name: aName, score: parseFloat(apts.toFixed(2)),
+                rosterId: String(a.roster_id),
+                starters: a.starters || [], starters_points: a.starters_points || {},
+                players: a.players || [], players_points: a.players_points || {}
+              },
+              away: {
+                name: bName, score: parseFloat(bpts.toFixed(2)),
+                rosterId: String(b.roster_id),
+                starters: b.starters || [], starters_points: b.starters_points || {},
+                players: b.players || [], players_points: b.players_points || {}
+              }
             });
           });
         } catch(e) {}
@@ -8745,13 +8755,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const platBadge = { sleeper: "💤", mfl: "⚙️", yahoo: "🟣" };
 
-    const cardHtml = pageSlice.map(m => {
+    const cardHtml = pageSlice.map((m, mi) => {
       const homeWon    = m.home.score > m.away.score;
       const awayWon    = m.away.score > m.home.score;
       const inProgress = m.home.score === 0 && m.away.score === 0;
       const diff       = Math.abs(m.home.score - m.away.score).toFixed(2);
+      const hasSleeper = m.platform === "sleeper";
+      const hasStarters = hasSleeper && (m.home.starters?.length > 0 || m.away.starters?.length > 0);
+      const cardId = `trn-wmu-card-${_weeklyMuWeek}-${mi}`;
       return `
-        <div class="trn-wmu-card">
+        <div class="trn-wmu-card${hasStarters ? " trn-wmu-card--expandable" : ""}" id="${cardId}"
+          ${hasStarters ? `onclick="TournamentApp._expandTrnMatchup(this)"` : ""}>
           <div class="trn-wmu-team ${homeWon ? "trn-wmu-team--win" : awayWon ? "trn-wmu-team--loss" : ""}">
             <span class="trn-wmu-name">${_esc(m.home.name)}</span>
             <span class="trn-wmu-score ${homeWon ? "trn-wmu-score--win" : ""}">${inProgress ? "–" : m.home.score.toFixed(2)}</span>
@@ -8764,7 +8778,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <div class="trn-wmu-footer">
             <span class="trn-wmu-league-name" title="${_esc(m.leagueName)}">${platBadge[m.platform] || ""} ${_esc(m.leagueName)}</span>
             ${!inProgress ? `<span class="trn-wmu-diff">Δ${diff}</span>` : `<span class="trn-wmu-diff trn-wmu-diff--pending">⏳</span>`}
+            ${hasStarters ? `<span class="trn-wmu-expand-hint">Tap for lineups ↓</span>` : ""}
           </div>
+          ${hasStarters ? `<div class="trn-wmu-detail hidden" data-home='${JSON.stringify({name:m.home.name,starters:m.home.starters,sp:m.home.starters_points,pp:m.home.players_points,players:m.home.players})}' data-away='${JSON.stringify({name:m.away.name,starters:m.away.starters,sp:m.away.starters_points,pp:m.away.players_points,players:m.away.players})}'>
+            <div class="trn-wmu-detail-loading"><div class="spinner spinner--sm"></div></div>
+          </div>` : ""}
         </div>`;
     }).join("");
 
@@ -8782,6 +8800,99 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     document.getElementById("trn-wmu-prev")?.addEventListener("click", () => { _weeklyMuPage--; _renderWeeklyMatchupsContent(leagueList, year); });
     document.getElementById("trn-wmu-next")?.addEventListener("click", () => { _weeklyMuPage++; _renderWeeklyMatchupsContent(leagueList, year); });
+  }
+
+  // ── Tournament matchup expand (lineup detail) ────────────────────────────
+  // Called onclick from trn-wmu-card--expandable cards.
+  // On first tap: populates the .trn-wmu-detail panel using stored starters data.
+  // On subsequent taps: just toggles visibility.
+  async function _expandTrnMatchup(card) {
+    const detail = card.querySelector(".trn-wmu-detail");
+    if (!detail) return;
+
+    // Toggle if already loaded
+    if (card.dataset.detailLoaded === "1") {
+      detail.classList.toggle("hidden");
+      const hint = card.querySelector(".trn-wmu-expand-hint");
+      if (hint) hint.textContent = detail.classList.contains("hidden") ? "Tap for lineups ↓" : "Tap to collapse ↑";
+      return;
+    }
+
+    // First tap — parse stored data attributes and render
+    detail.classList.remove("hidden");
+    const hint = card.querySelector(".trn-wmu-expand-hint");
+    if (hint) hint.textContent = "Tap to collapse ↑";
+
+    try {
+      const homeData = JSON.parse(detail.dataset.home || "{}");
+      const awayData = JSON.parse(detail.dataset.away || "{}");
+
+      // Load DLRPlayers for name resolution (no-op if already warm)
+      const players = await DLRPlayers.load();
+      const pName = id => {
+        const p = players?.[id];
+        return p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() || id : id;
+      };
+      const pPos = id => {
+        const p = players?.[id];
+        return (p?.position || p?.fantasy_positions?.[0] || "?").toUpperCase();
+      };
+
+      const POS_COLOR = {
+        QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)",
+        TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)"
+      };
+
+      const renderSide = (side) => {
+        const starters = side.starters || [];
+        const sp = side.sp || {};
+        const pp = side.pp || {};
+        const bench = (side.players || []).filter(id => !starters.includes(id));
+        let rows = "";
+        starters.forEach(id => {
+          const pts = +(sp[id] ?? pp[id] ?? 0);
+          const pos = pPos(id);
+          const col = POS_COLOR[pos] || "var(--color-text-dim)";
+          rows += `<div class="trn-wmu-sbs-row">
+            <span class="trn-wmu-sbs-pos" style="color:${col}">${pos}</span>
+            <span class="trn-wmu-sbs-name">${_esc(pName(id))}</span>
+            <span class="trn-wmu-sbs-pts">${pts > 0 ? pts.toFixed(2) : "–"}</span>
+          </div>`;
+        });
+        if (bench.length) {
+          rows += `<div class="trn-wmu-sbs-bench-hdr">Bench</div>`;
+          bench.forEach(id => {
+            const pts = +(pp[id] ?? 0);
+            const pos = pPos(id);
+            const col = POS_COLOR[pos] || "var(--color-text-dim)";
+            rows += `<div class="trn-wmu-sbs-row trn-wmu-sbs-row--bench">
+              <span class="trn-wmu-sbs-pos dim" style="color:${col}">${pos}</span>
+              <span class="trn-wmu-sbs-name dim">${_esc(pName(id))}</span>
+              <span class="trn-wmu-sbs-pts dim">${pts > 0 ? pts.toFixed(2) : "–"}</span>
+            </div>`;
+          });
+        }
+        return rows || `<div class="trn-wmu-sbs-empty">No lineup data</div>`;
+      };
+
+      detail.innerHTML = `
+        <div class="trn-wmu-sbs">
+          <div class="trn-wmu-sbs-col">
+            <div class="trn-wmu-sbs-header">${_esc(homeData.name)}</div>
+            ${renderSide(homeData)}
+          </div>
+          <div class="trn-wmu-sbs-divider"></div>
+          <div class="trn-wmu-sbs-col">
+            <div class="trn-wmu-sbs-header">${_esc(awayData.name)}</div>
+            ${renderSide(awayData)}
+          </div>
+        </div>`;
+
+      card.dataset.detailLoaded = "1";
+
+    } catch(e) {
+      detail.innerHTML = `<div class="trn-wmu-sbs-empty" style="color:var(--color-text-dim)">Could not load lineup: ${_esc(e.message)}</div>`;
+    }
   }
 
   // ── Tournament Message Board ───────────────────────────────────────────────
@@ -14922,7 +15033,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // ── Public API ─────────────────────────────────────────
   return {
     init,
-    runDiscovery
+    runDiscovery,
+    _expandTrnMatchup
   };
 
 })();
