@@ -1,37 +1,36 @@
 // ─────────────────────────────────────────────────────────
-//  Dynasty Locker Room — Custom Playoffs Module  v2
-//  Fully flexible bracket: any team count, any round count,
-//  per-round byes, scores auto-populated from Sleeper API.
+//  Dynasty Locker Room — Custom Playoffs  v3
+//
+//  Supports matchups with ANY number of teams per group.
+//  A "matchup" is a group of N teams playing the same week;
+//  top advanceCount teams advance to the next round.
 //
 //  Config shape (stored at leagueMeta.customPlayoff):
 //  {
-//    enabled: true,
-//    reseed: false,
-//    seedingMethod: "record"|"pf"|"manual",
-//    seeds: [{rosterId}],          // ordered 1→N
+//    seeds: [{rosterId}],            // ordered qualifier list #1→N
 //    rounds: [
 //      {
-//        label: "Round 1",         // display name (optional)
-//        startWeek: 14,            // NFL week this round begins
+//        label:         "Wild Card",
+//        startWeek:     14,
 //        weeksPerRound: 1,
-//        playingSeeds: [9,10,11,12], // 1-based seed numbers that PLAY
-//                                    // all other seeds in the bracket get a BYE
-//        advanceCount: null,        // winners advancing (null = half of playing)
+//        matchups: [
+//          { teams: [rosterId,...], advanceCount: 1 },
+//          ...
+//        ],
+//        byes: [rosterId, ...]       // sit out this round
 //      }, ...
 //    ]
 //  }
 //
-//  How the bracket builds:
-//    Pool starts as all seeds in seed order.
-//    Each round:
-//      - playingSeeds (1-based indices into CURRENT pool) play head-to-head
-//      - all others in pool get a bye into next round's pool
-//      - winners advance; new pool = byes + winners (reseeded if reseed=true)
+//  Bracket rendering uses the WC-style card layout. Card height
+//  scales with team count. Scores auto-populate from Sleeper.
+//  After a round completes, a "Set Next Round" panel appears
+//  with dropdowns for assigning any number of teams per matchup.
 // ─────────────────────────────────────────────────────────
 
 const DLRCustomPlayoffs = (() => {
 
-  // ── Module state ──────────────────────────────────────
+  // ── State ─────────────────────────────────────────────
   let _leagueKey  = null;
   let _leagueId   = null;
   let _season     = null;
@@ -41,84 +40,45 @@ const DLRCustomPlayoffs = (() => {
   let _rosters    = [];
   let _users      = [];
   let _scoreCache = {};
-  let _leagueSize = 0;
-  let _regRecords = {};   // rosterId → {wins, losses, pf} from reg-season weeks only
-  let _onMetaSave = null; // callback(leagueKey, config) to sync profile.js after save
+  let _onMetaSave = null;
 
-  // ── Public entry point ────────────────────────────────
+  // ── Entry point ───────────────────────────────────────
   async function init(leagueKey, league, username, leagueMeta) {
-    _leagueKey  = leagueKey;
-    _leagueId   = league.leagueId;
-    _season     = league.season;
-    _isCommish  = !!league.isCommissioner;
-    _username   = username;
-    _config     = leagueMeta?.customPlayoff || null;
+    _leagueKey = leagueKey;
+    _leagueId  = league.leagueId;
+    _season    = league.season;
+    _isCommish = !!league.isCommissioner;
+    _username  = username;
+    _config    = leagueMeta?.customPlayoff || null;
     _scoreCache = {};
 
     const el = document.getElementById("dtab-customplayoffs");
     if (!el) return;
-
     el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading…</span></div>`;
 
-    // Always fetch rosters+users upfront — needed for config modal team dropdowns
     try {
       [_rosters, _users] = await Promise.all([
         fetch(`https://api.sleeper.app/v1/league/${_leagueId}/rosters`).then(r => r.json()).catch(() => []),
         fetch(`https://api.sleeper.app/v1/league/${_leagueId}/users`).then(r => r.json()).catch(() => [])
       ]);
-      _leagueSize = (_rosters || []).length;
-    } catch(e) {
-      _rosters = []; _users = []; _leagueSize = 0;
-    }
+    } catch(e) { _rosters = []; _users = []; }
 
-    // Compute reg-season records from matchup history (stop before playoff start week)
-    // Uses the first round's startWeek as the playoff start, falling back to league metadata
-    if (_config?.rounds?.length) {
-      const playoffStart = _config.rounds[0]?.startWeek || null;
-      if (playoffStart && playoffStart > 1) {
-        try { await _computeRegRecords(playoffStart); } catch(e) { _regRecords = {}; }
-      } else {
-        _regRecords = {};
-      }
+    if (!_config?.seeds?.length || !_config?.rounds?.length) {
+      _renderEmpty(el); return;
     }
-
-    if (!_config?.rounds?.length) {
-      _renderEmpty(el);
-      return;
-    }
-
     try {
-      await _renderBracket(el);
+      await _render(el);
     } catch(e) {
-      el.innerHTML = `<div class="cp-error">⚠ Could not render bracket: ${_esc(e.message)}</div>`;
+      el.innerHTML = `<div class="cp-error">⚠ ${_esc(e.message)}</div>`;
     }
   }
 
   function reset() {
     _leagueKey = _leagueId = _season = _username = _config = null;
-    _rosters = []; _users = []; _scoreCache = {}; _leagueSize = 0; _regRecords = {};
+    _rosters = []; _users = []; _scoreCache = {};
   }
 
-  function _renderEmpty(el) {
-    if (_isCommish) {
-      el.innerHTML = `
-        <div class="cp-empty">
-          <div class="cp-empty-icon">🏆</div>
-          <div class="cp-empty-title">Custom Playoffs Not Configured</div>
-          <div class="cp-empty-sub">Build a completely custom bracket — any number of teams, rounds, and byes. Define exactly which seeds play each round.</div>
-          <button class="btn-primary" onclick="DLRCustomPlayoffs.openConfig()">⚙ Configure Custom Playoffs</button>
-        </div>`;
-    } else {
-      el.innerHTML = `
-        <div class="cp-empty">
-          <div class="cp-empty-icon">🏆</div>
-          <div class="cp-empty-title">Custom Playoffs</div>
-          <div class="cp-empty-sub">Not yet configured by the commissioner.</div>
-        </div>`;
-    }
-  }
-
-  // ── Team helpers ──────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────
   function _userMap() {
     const m = {};
     (_users || []).forEach(u => {
@@ -127,74 +87,18 @@ const DLRCustomPlayoffs = (() => {
     return m;
   }
   function _rosterName(rosterId) {
+    if (!rosterId) return "TBD";
     const um = _userMap();
     const r  = (_rosters || []).find(r => String(r.roster_id) === String(rosterId));
     return r ? (um[r.owner_id] || `Team ${rosterId}`) : `Team ${rosterId}`;
   }
   function _rosterRecord(rosterId) {
-    // Use reg-season computed records if available (excludes playoff weeks)
-    const rid = String(rosterId);
-    if (_regRecords[rid]) return _regRecords[rid];
-    const r = (_rosters || []).find(r => String(r.roster_id) === rid);
+    const r = (_rosters || []).find(r => String(r.roster_id) === String(rosterId));
     if (!r) return { wins: 0, losses: 0, pf: 0 };
     const pf = (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100;
     return { wins: r.settings?.wins || 0, losses: r.settings?.losses || 0, pf };
   }
-
-  // Compute W/L/PF from matchup history for weeks 1..(playoffStart-1)
-  async function _computeRegRecords(playoffStart) {
-    _regRecords = {};
-    const lastRegWeek = playoffStart - 1;
-    if (lastRegWeek < 1) return;
-
-    // Fetch all weeks in parallel (up to lastRegWeek)
-    const weekMaps = await Promise.all(
-      Array.from({ length: lastRegWeek }, (_, i) => _fetchWeek(i + 1))
-    );
-
-    // Group week matchups by matchup_id to find opponents
-    // We need the raw matchup data — _fetchWeek gives {rosterId: pts} maps
-    // Re-fetch raw matchup data to get matchup_id pairings
-    const rawWeeks = await Promise.all(
-      Array.from({ length: lastRegWeek }, (_, i) =>
-        fetch(`https://api.sleeper.app/v1/league/${_leagueId}/matchups/${i + 1}`)
-          .then(r => r.ok ? r.json() : []).catch(() => [])
-      )
-    );
-
-    const wins = {}, losses = {}, pf = {};
-    rawWeeks.forEach(weekData => {
-      if (!Array.isArray(weekData)) return;
-      const byMid = {};
-      weekData.forEach(m => {
-        if (m.matchup_id) (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m);
-      });
-      Object.values(byMid).forEach(pair => {
-        if (pair.length !== 2) return;
-        const [a, b] = pair;
-        const aId = String(a.roster_id), bId = String(b.roster_id);
-        const aP = a.points || 0, bP = b.points || 0;
-        pf[aId] = (pf[aId] || 0) + aP;
-        pf[bId] = (pf[bId] || 0) + bP;
-        if (aP > bP) { wins[aId] = (wins[aId] || 0) + 1; losses[bId] = (losses[bId] || 0) + 1; }
-        else if (bP > aP) { wins[bId] = (wins[bId] || 0) + 1; losses[aId] = (losses[aId] || 0) + 1; }
-        else { wins[aId] = (wins[aId] || 0) + 0.5; losses[aId] = (losses[aId] || 0) + 0.5;
-               wins[bId] = (wins[bId] || 0) + 0.5; losses[bId] = (losses[bId] || 0) + 0.5; }
-      });
-    });
-
-    (_rosters || []).forEach(r => {
-      const id = String(r.roster_id);
-      _regRecords[id] = { wins: wins[id] || 0, losses: losses[id] || 0, pf: pf[id] || 0 };
-    });
-  }
-  function _sortPool(pool) {
-    return [...pool].sort((a, b) => {
-      const ra = _rosterRecord(a.rosterId), rb = _rosterRecord(b.rosterId);
-      return (rb.wins - ra.wins) || (rb.pf - ra.pf);
-    });
-  }
-  function _rosterOpts() {
+  function _seedOpts() {
     const um = _userMap();
     return [...(_rosters || [])].sort((a, b) => {
       const wa = a.settings?.wins || 0, wb = b.settings?.wins || 0;
@@ -204,6 +108,9 @@ const DLRCustomPlayoffs = (() => {
       name: um[r.owner_id] || `Team ${r.roster_id}`,
       rec: `${r.settings?.wins || 0}-${r.settings?.losses || 0}`
     }));
+  }
+  function _esc(s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   // ── Score fetching ────────────────────────────────────
@@ -222,7 +129,7 @@ const DLRCustomPlayoffs = (() => {
   }
 
   async function _scoreForRoster(rosterId, roundIdx) {
-    const round   = _config.rounds[roundIdx] || {};
+    const round   = (_config.rounds || [])[roundIdx] || {};
     const startWk = round.startWeek;
     if (!startWk || !rosterId) return null;
     const wpr = round.weeksPerRound || 1;
@@ -235,156 +142,167 @@ const DLRCustomPlayoffs = (() => {
     return found > 0 ? total : null;
   }
 
-  // ── Build bracket ─────────────────────────────────────
-  // Returns: array of round objects { matchups[], byes[] }
-  async function _buildBracket() {
-    const cfg     = _config;
-    const rounds  = cfg.rounds || [];
-    const reseed  = !!cfg.reseed;
+  async function refreshScores() {
+    _scoreCache = {};
+    const el = document.getElementById("dtab-customplayoffs");
+    if (el && _config?.rounds?.length) await _render(el);
+  }
 
-    const allSeeds = (cfg.seeds || []).map(s => ({
-      rosterId: String(s.rosterId),
-      name: _rosterName(s.rosterId)
-    }));
+  // ── Card geometry ─────────────────────────────────────
+  // Row height scales so N-team cards look proportional.
+  const ROW_H  = 32;   // px per team row
+  const DIV_H  = 1;    // divider between rows
+  const PAD    = 8;    // top+bottom card padding
+  const CARD_G = 14;   // gap between matchup cards in a column
 
-    const result = [];
-    let pool = [...allSeeds]; // active pool, ordered by current seeding
+  function _cardH(n) {
+    return Math.max(n, 1) * ROW_H + Math.max(n - 1, 0) * DIV_H + PAD;
+  }
+
+  // Build absolute positions for all matchup cards.
+  // Round 0: stack sequentially.
+  // Round ri > 0: centre of card mi = mean centre of the cards from ri-1
+  //   that feed into it (one per team slot, in order of cumulative advanceCounts).
+  function _buildPositions(rounds, bracketData) {
+    const positions = []; // positions[ri][mi] = { top, height, centre }
 
     for (let ri = 0; ri < rounds.length; ri++) {
-      const round      = rounds[ri];
-      const playSeeds  = (round.playingSeeds || []).map(n => parseInt(n)).filter(n => !isNaN(n) && n > 0);
-      const activePool = (reseed && ri > 0) ? _sortPool(pool) : pool;
+      const matchups = bracketData[ri] || [];
+      const row      = [];
 
-      // Resolve playing slots — playSeeds are 1-based positions in the current pool
-      let playing, byes;
-      if (playSeeds.length > 0) {
-        const playSet = new Set(playSeeds.map(s => s - 1)); // 0-based
-        playing = activePool.filter((_, i) => playSet.has(i));
-        byes    = activePool.filter((_, i) => !playSet.has(i));
+      if (ri === 0) {
+        let y = 0;
+        for (let mi = 0; mi < matchups.length; mi++) {
+          const h = _cardH(matchups[mi].teams.length);
+          row.push({ top: y, height: h, centre: y + h / 2 });
+          y += h + CARD_G;
+        }
       } else {
-        // No explicit seeds — everyone plays
-        playing = [...activePool];
-        byes    = [];
-      }
+        const prevPos   = positions[ri - 1] || [];
+        const prevRound = bracketData[ri - 1] || [];
 
-      // Pair: 1st vs last, 2nd vs 2nd-last, etc.
-      const matchups = [];
-      const half = Math.floor(playing.length / 2);
-      for (let i = 0; i < half; i++) {
-        const slotA  = playing[i];
-        const slotB  = playing[playing.length - 1 - i];
-        const scoreA = await _scoreForRoster(slotA?.rosterId, ri);
-        const scoreB = await _scoreForRoster(slotB?.rosterId, ri);
-        matchups.push({ slotA, slotB, scoreA, scoreB });
+        // Expand prev centres: each prev matchup contributes advanceCount feed slots
+        const feedCentres = [];
+        for (let pmi = 0; pmi < prevRound.length; pmi++) {
+          const adv = prevRound[pmi].advanceCount || 1;
+          for (let k = 0; k < adv; k++) {
+            feedCentres.push(prevPos[pmi]?.centre ?? 0);
+          }
+        }
+
+        let feedIdx = 0;
+        for (let mi = 0; mi < matchups.length; mi++) {
+          const h     = _cardH(matchups[mi].teams.length);
+          const slots = Math.max(matchups[mi].teams.length, 2);
+          const feeds = feedCentres.slice(feedIdx, feedIdx + slots);
+          feedIdx += slots;
+          const centre = feeds.length
+            ? feeds.reduce((s, c) => s + c, 0) / feeds.length
+            : (row[mi - 1] ? row[mi - 1].centre + row[mi - 1].height / 2 + CARD_G + h / 2 : h / 2);
+          row.push({ top: Math.round(centre - h / 2), height: h, centre });
+        }
       }
-      // Odd team out gets a bye too
-      if (playing.length % 2 === 1) byes.push(playing[half]);
+      positions.push(row);
+    }
+    return positions;
+  }
+
+  // ── Build scored bracket data ─────────────────────────
+  // bracketData[ri] = { matchups: [{teams:[{rosterId,name,score}], advanceCount}], byes:[{...}] }
+  async function _buildBracket() {
+    const rounds = _config.rounds || [];
+    const result = [];
+
+    for (let ri = 0; ri < rounds.length; ri++) {
+      const round  = rounds[ri];
+      const cfgMus = round.matchups || [];
+
+      const matchups = await Promise.all(cfgMus.map(async mu => {
+        const rawTeams = mu.teams || [];
+        const teams = await Promise.all(rawTeams.map(async rid => ({
+          rosterId: String(rid || ""),
+          name:     _rosterName(rid),
+          score:    rid ? await _scoreForRoster(rid, ri) : null
+        })));
+        // Sort by score descending when scores available; otherwise keep assignment order
+        const hasScores = teams.some(t => t.score != null);
+        if (hasScores) teams.sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
+        return { teams, advanceCount: mu.advanceCount || 1 };
+      }));
+
+      const byes = (round.byes || []).map(rid => ({
+        rosterId: String(rid), name: _rosterName(rid)
+      }));
 
       result.push({ matchups, byes });
-
-      // Build next pool: byes first (they maintain position), then winners
-      const winners = matchups.map(m => {
-        if (m.scoreA == null || m.scoreB == null) return null;
-        return m.scoreA >= m.scoreB ? m.slotA : m.slotB;
-      }).filter(Boolean);
-
-      const advCount = round.advanceCount ?? winners.length;
-      const advancing = winners.slice(0, advCount);
-      const nextPool  = [...byes, ...advancing];
-      pool = reseed ? _sortPool(nextPool) : nextPool;
     }
-
     return result;
   }
 
-  // ── Render bracket ────────────────────────────────────
-  async function _renderBracket(el) {
+  // ── Main render ───────────────────────────────────────
+  async function _render(el) {
     el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Fetching scores…</span></div>`;
 
     const cfg    = _config;
     const rounds = cfg.rounds || [];
     const nr     = rounds.length;
-    const bracket = await _buildBracket();
 
-    const getRoundLabel = (ri) => rounds[ri]?.label?.trim() ||
-      (ri === nr - 1 ? "🏆 Championship" : ri === nr - 2 ? "Semifinals" : ri === nr - 3 ? "Quarterfinals" : `Round ${ri + 1}`);
+    const bracketData = await _buildBracket();
+    const positions   = _buildPositions(rounds, bracketData.map(r => r.matchups));
 
-    // ── Canvas math ──
-    // We compute absolute centre Y for each matchup in each round.
-    // Round 0: each matchup pair stacks sequentially.
-    // Later rounds: centre = midpoint between centres of the two feeding matchups.
-    // With byes the feed is not always clean binary, so we use:
-    //   round ri matchup mi centre = average of feeding matchup centres from ri-1
-    // For simplicity without full tree tracking, we use spacing proportional to
-    // round 0 layout, scaled by 2^ri gaps.
+    const getRoundLabel = (ri) =>
+      rounds[ri]?.label?.trim() ||
+      (ri === nr - 1 ? "🏆 Championship" : ri === nr - 2 ? "Semifinals"
+       : ri === nr - 3 ? "Quarterfinals" : `Round ${ri + 1}`);
 
-    const cardH = 44;
-    const pairG = 8;
-    const unit  = cardH + pairG; // base spacing unit
+    const getWeekTag = (ri) => {
+      const r = rounds[ri];
+      if (!r?.startWeek) return "";
+      const wpr = r.weeksPerRound || 1;
+      const lbl = wpr > 1 ? `Wks ${r.startWeek}–${r.startWeek + wpr - 1}` : `Wk ${r.startWeek}`;
+      return `<span class="trn-wc-week-tag">${_esc(lbl)}</span>`;
+    };
 
-    // Compute centres for all matchups across rounds
-    const centres = []; // centres[ri][mi] = Y centre pixels
+    // ── Build bracket columns ─────────────────────────
+    const cols = bracketData.map((rnd, ri) => {
+      const pos    = positions[ri] || [];
+      const totalH = pos.length
+        ? Math.max(...pos.map(p => p.top + p.height))
+        : _cardH(2);
 
-    for (let ri = 0; ri < nr; ri++) {
-      const n = bracket[ri]?.matchups?.length || 0;
-      if (ri === 0) {
-        // Stack matchups sequentially in pairs
-        const row = [];
-        for (let mi = 0; mi < n; mi++) {
-          // Each pair shares vertical space of (2*cardH + 3*pairG)
-          const pairIdx = Math.floor(mi / 2);
-          const inPair  = mi % 2;
-          row.push(pairIdx * (2 * cardH + 3 * pairG) + inPair * (cardH + pairG) + cardH / 2);
-        }
-        centres.push(row);
-      } else {
-        const prevCentres = centres[ri - 1] || [];
-        const row = [];
-        for (let mi = 0; mi < n; mi++) {
-          // Each matchup in ri feeds from 2 matchups in ri-1
-          const feedA = prevCentres[mi * 2]     ?? prevCentres[0] ?? cardH / 2;
-          const feedB = prevCentres[mi * 2 + 1] ?? feedA;
-          row.push((feedA + feedB) / 2);
-        }
-        centres.push(row);
-      }
-    }
+      const cards = rnd.matchups.map((mu, mi) => {
+        const p        = pos[mi] || { top: 0, height: _cardH(mu.teams.length) };
+        const hasScores = mu.teams.some(t => t.score != null);
+        const adv      = mu.advanceCount || 1;
 
-    // Build HTML
-    const cols = bracket.map((rnd, ri) => {
-      const n      = rnd.matchups.length;
-      const cRow   = centres[ri] || [];
-      const maxC   = Math.max(...cRow, cardH / 2);
-      const totalH = Math.round(maxC + cardH / 2);
-      const wkLbl  = _weekLabel(ri);
-
-      const cards = rnd.matchups.map((m, mi) => {
-        const hasA = m.scoreA != null, hasB = m.scoreB != null;
-        const hasScores = hasA && hasB;
-        const winA = hasScores && m.scoreA > m.scoreB;
-        const winB = hasScores && m.scoreB > m.scoreA;
-        const top  = Math.round((cRow[mi] ?? 0) - cardH / 2);
-
-        // Connector to sibling
-        const hasSib  = (mi % 2 === 0 && mi + 1 < n) || mi % 2 === 1;
-        const sibC    = cRow[mi % 2 === 0 ? mi + 1 : mi - 1] ?? 0;
-        const gap     = hasSib ? Math.abs((cRow[mi] ?? 0) - sibC) : 0;
+        // Connector line to sibling (same WC pattern: pairs connect)
+        const hasSib  = (mi % 2 === 0 && mi + 1 < rnd.matchups.length) || mi % 2 === 1;
+        const sibPos  = pos[mi % 2 === 0 ? mi + 1 : mi - 1];
+        const gap     = (hasSib && sibPos) ? Math.abs(p.centre - sibPos.centre) : 0;
         const connCls = (ri < nr - 1 && hasSib)
           ? (mi % 2 === 0 ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
 
-        const tRow = (slot, score, isWin, isLoss) => {
-          if (!slot) return `<div class="trn-wc-bteam trn-wc-bt--tbd"><span class="trn-wc-bteam-name">TBD</span></div>`;
-          const cls = isWin ? "trn-wc-bt--win" : isLoss ? "trn-wc-bt--loss" : "";
-          return `<div class="trn-wc-bteam ${cls}">
-            <span class="trn-wc-bteam-name" title="${_esc(slot.name)}">${_esc(slot.name)}</span>
-            ${hasScores ? `<span class="trn-wc-bteam-score">${(score || 0).toFixed(1)}</span>` : ""}
+        const rows = mu.teams.map((t, rank) => {
+          const advancing  = hasScores && rank < adv;
+          const eliminated = hasScores && rank >= adv;
+          const cls  = advancing ? "cp-mu-team--adv" : eliminated ? "cp-mu-team--out" : "";
+          const badge = advancing ? `<span class="cp-adv-badge">ADV</span>` : "";
+          const scoreStr = t.score != null ? t.score.toFixed(2) : "";
+          const rankNum  = hasScores ? `<span class="cp-mu-rank">${rank + 1}</span>` : "";
+          return `<div class="cp-mu-team ${cls}">
+            ${rankNum}
+            <span class="cp-mu-name" title="${_esc(t.name)}">${_esc(t.name || "TBD")}</span>
+            ${scoreStr ? `<span class="cp-mu-score">${scoreStr}</span>` : ""}
+            ${badge}
           </div>`;
-        };
+        }).join(`<div class="trn-wc-card-divider"></div>`);
 
-        return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
-          ${tRow(m.slotA, m.scoreA, winA, winB)}
-          <div class="trn-wc-card-divider"></div>
-          ${tRow(m.slotB, m.scoreB, winB, winA)}
+        // "N advance" label in card footer
+        const footer = mu.teams.length > 2
+          ? `<div class="cp-mu-footer">Top ${adv} advance</div>` : "";
+
+        return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${p.top}px;left:0;right:0;--wc-gap:${gap}px">
+          ${rows}${footer}
         </div>`;
       }).join("");
 
@@ -394,19 +312,20 @@ const DLRCustomPlayoffs = (() => {
           ).join("")}</div>` : "";
 
       return `<div class="trn-wc-col" data-ri="${ri}">
-        <div class="trn-wc-col-header">${getRoundLabel(ri)}${wkLbl ? ` <span class="trn-wc-week-tag">${_esc(wkLbl)}</span>` : ""}</div>
+        <div class="trn-wc-col-header">${_esc(getRoundLabel(ri))} ${getWeekTag(ri)}</div>
         <div class="trn-wc-col-cards" style="position:relative;height:${totalH}px">${cards}</div>
         ${byePills}
       </div>`;
     }).join("");
 
-    // Champion col
-    const finalMatch = bracket[nr - 1]?.matchups?.[0] || {};
-    const champName  = (finalMatch.scoreA != null && finalMatch.scoreB != null)
-      ? (finalMatch.scoreA >= finalMatch.scoreB ? finalMatch.slotA?.name : finalMatch.slotB?.name) : "";
+    // Champion col — top team from last round's first matchup (after scoring)
+    const lastRnd  = bracketData[nr - 1];
+    const lastMu   = lastRnd?.matchups?.[0];
+    const champName = (lastMu?.teams?.[0]?.score != null) ? lastMu.teams[0].name : "";
+
     const champCol = `<div class="trn-wc-col trn-wc-col--champ">
       <div class="trn-wc-col-header">🏆 Champion</div>
-      <div class="trn-wc-col-cards" style="display:flex;align-items:center;min-height:${cardH + 16}px">
+      <div class="trn-wc-col-cards" style="display:flex;align-items:center;min-height:${_cardH(1)}px">
         <div class="trn-wc-card trn-wc-card--champion">
           <div class="trn-wc-bteam trn-wc-bt--champ">
             <span class="trn-wc-bteam-name">${_esc(champName || "TBD")}</span>
@@ -426,9 +345,11 @@ const DLRCustomPlayoffs = (() => {
       </div>`;
     }).join("");
 
+    const assignPanel = _isCommish ? _buildAssignPanel(bracketData) : "";
+
     const commishBar = _isCommish
       ? `<div class="cp-commish-bar">
-          <button class="btn-secondary btn-sm" onclick="DLRCustomPlayoffs.openConfig()">⚙ Edit Config</button>
+          <button class="btn-secondary btn-sm" onclick="DLRCustomPlayoffs.openConfig()">⚙ Setup</button>
           <button class="btn-secondary btn-sm" onclick="DLRCustomPlayoffs.refreshScores()">↺ Refresh Scores</button>
         </div>` : "";
 
@@ -437,63 +358,332 @@ const DLRCustomPlayoffs = (() => {
       <div class="trn-wc-bracket-wrap">
         <div class="trn-wc-bracket">${cols}${champCol}</div>
       </div>
-      <div class="trn-po-seed-list" style="margin-top:var(--space-4)">${seedRows}</div>
-    `;
+      ${assignPanel}
+      <div class="trn-po-seed-list" style="margin-top:var(--space-4)">${seedRows}</div>`;
+
+    _wireAssignPanel();
   }
 
-  function _weekLabel(ri) {
-    const round = _config?.rounds?.[ri];
-    if (!round?.startWeek) return "";
-    const wpr = round.weeksPerRound || 1;
-    return wpr > 1 ? `Wks ${round.startWeek}–${round.startWeek + wpr - 1}` : `Wk ${round.startWeek}`;
+  // ── Assignment panel ──────────────────────────────────
+  // Determines the "pool" of available teams for the target round:
+  //   winners of the last fully-scored round + that round's byes
+  // Then shows dropdowns to build matchup groups of any size.
+  function _buildAssignPanel(bracketData) {
+    const rounds = _config.rounds || [];
+    const nr     = rounds.length;
+
+    // Find the last round where every matchup has been fully scored
+    let lastScoredRi = -1;
+    for (let ri = 0; ri < nr; ri++) {
+      const rnd = bracketData[ri];
+      if (rnd.matchups.length > 0 &&
+          rnd.matchups.every(mu => mu.teams.length > 0 && mu.teams.every(t => t.score != null))) {
+        lastScoredRi = ri;
+      }
+    }
+
+    // Show panel for the round after the last scored one
+    // Also show panel for round 0 if it has no matchups yet (initial setup)
+    let targetRi;
+    if (lastScoredRi >= 0 && lastScoredRi < nr - 1) {
+      targetRi = lastScoredRi + 1;
+    } else if ((rounds[0]?.matchups || []).length === 0) {
+      targetRi = 0;
+    } else {
+      return ""; // nothing to assign
+    }
+
+    // Build pool
+    const pool = [];
+    if (lastScoredRi >= 0) {
+      // Winners from last scored round
+      bracketData[lastScoredRi].matchups.forEach(mu => {
+        const adv = mu.advanceCount || 1;
+        mu.teams.slice(0, adv).forEach(t => { if (t.rosterId) pool.push(t.rosterId); });
+      });
+      // Byes from last scored round carry forward
+      (bracketData[lastScoredRi].byes || []).forEach(b => { if (b.rosterId) pool.push(b.rosterId); });
+    } else {
+      // Round 0 — use all seeds
+      ((_config.seeds || [])).forEach(s => { if (s.rosterId) pool.push(s.rosterId); });
+    }
+    if (!pool.length) return "";
+
+    const getRN = (ri) =>
+      rounds[ri]?.label?.trim() ||
+      (ri === nr - 1 ? "🏆 Championship" : ri === nr - 2 ? "Semifinals"
+       : ri === nr - 3 ? "Quarterfinals" : `Round ${ri + 1}`);
+
+    // Current assignments for target round
+    const cfgRound = rounds[targetRi] || {};
+    const cfgMus   = cfgRound.matchups || [];
+    const cfgByes  = cfgRound.byes    || [];
+
+    // If no matchups assigned yet, default to one empty 2-team matchup
+    const initMus = cfgMus.length ? cfgMus : [{ teams: [], advanceCount: 1 }];
+
+    const poolSelOpts = (cur) =>
+      `<option value="">— Select team —</option>` +
+      pool.map(rid =>
+        `<option value="${rid}" ${rid === cur ? "selected" : ""}>${_esc(_rosterName(rid))}</option>`
+      ).join("");
+
+    const matchupSlots = initMus.map((mu, mi) => {
+      const advVal   = mu.advanceCount || 1;
+      const teamSels = (mu.teams?.length ? mu.teams : ["", ""])
+        .map((rid, ti) =>
+          `<select class="cp-assign-sel" data-mi="${mi}" data-ti="${ti}">${poolSelOpts(rid)}</select>`
+        ).join("");
+
+      return `<div class="cp-assign-matchup" data-mi="${mi}">
+        <div class="cp-assign-matchup-header">
+          <span class="cp-assign-num">Matchup ${mi + 1}</span>
+          <label class="cp-assign-adv-label">Advance:
+            <input type="number" class="cp-assign-adv" data-mi="${mi}"
+              min="1" max="${Math.max(mu.teams?.length || 2, 2)}" value="${advVal}" />
+          </label>
+          <button class="cp-row-remove" onclick="DLRCustomPlayoffs._removeAssignTeam(${mi})" title="Remove last team">− Team</button>
+          <button class="btn-secondary btn-sm" onclick="DLRCustomPlayoffs._addAssignTeam(${mi})">+ Team</button>
+          <button class="cp-row-remove" style="margin-left:auto" onclick="this.closest('.cp-assign-matchup').remove()" title="Remove matchup">✕</button>
+        </div>
+        <div class="cp-assign-teams" id="cp-assign-mu-${mi}">${teamSels}</div>
+      </div>`;
+    }).join("");
+
+    const byeSelects = cfgByes.map((rid, bi) =>
+      `<div class="cp-assign-bye-row">
+        <select class="cp-bye-sel" data-bi="${bi}">${poolSelOpts(rid)}</select>
+        <button class="cp-row-remove" onclick="this.parentElement.remove()" title="Remove bye">✕</button>
+      </div>`
+    ).join("");
+
+    const prevLabel = lastScoredRi >= 0 ? `${_esc(getRN(lastScoredRi))} complete — ` : "";
+
+    return `<div class="trn-section-card" style="margin-top:var(--space-4);max-width:680px" id="cp-assign-panel">
+      <div class="trn-section-card-title">Set ${_esc(getRN(targetRi))} Matchups</div>
+      <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+        ${prevLabel}${pool.length} teams available. Each matchup can include any number of teams.
+        Set how many advance from each matchup using the Advance field.
+      </p>
+      <div id="cp-assign-slots" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-3)">
+        ${matchupSlots}
+        <button class="btn-secondary btn-sm" style="align-self:flex-start"
+          onclick="DLRCustomPlayoffs._addAssignMatchup()">+ Add Matchup</button>
+      </div>
+      <div style="margin-bottom:var(--space-3)">
+        <div class="label-commish-divider" style="margin-bottom:var(--space-2)"><span>Byes for ${_esc(getRN(targetRi))}</span></div>
+        <div id="cp-assign-byes">${byeSelects}</div>
+        <button class="btn-secondary btn-sm" style="margin-top:var(--space-1)"
+          onclick="DLRCustomPlayoffs._addAssignBye()">+ Add Bye</button>
+      </div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+        <button class="btn-primary btn-sm" id="cp-assign-save" data-target-ri="${targetRi}">💾 Save ${_esc(getRN(targetRi))} Matchups</button>
+        <button class="btn-secondary btn-sm" id="cp-assign-clear" data-target-ri="${targetRi}">✕ Clear Round</button>
+      </div>
+    </div>`;
   }
 
-  async function refreshScores() {
+  function _wireAssignPanel() {
+    document.getElementById("cp-assign-save")?.addEventListener("click", async function() {
+      await _saveAssignments(parseInt(this.dataset.targetRi));
+    });
+    document.getElementById("cp-assign-clear")?.addEventListener("click", async function() {
+      await _clearRound(parseInt(this.dataset.targetRi));
+    });
+  }
+
+  // Dynamic panel controls exposed to inline onclick
+  function _addAssignTeam(mi) {
+    const container = document.getElementById(`cp-assign-mu-${mi}`);
+    if (!container) return;
+    const pool = _getAssignPool();
+    const ti   = container.querySelectorAll(".cp-assign-sel").length;
+    const sel  = document.createElement("select");
+    sel.className = "cp-assign-sel";
+    sel.dataset.mi = mi;
+    sel.dataset.ti = ti;
+    sel.innerHTML = `<option value="">— Select team —</option>` +
+      pool.map(r => `<option value="${r}">${_esc(_rosterName(r))}</option>`).join("");
+    container.appendChild(sel);
+    const advInp = document.querySelector(`.cp-assign-adv[data-mi="${mi}"]`);
+    if (advInp) advInp.max = ti + 1;
+  }
+
+  function _removeAssignTeam(mi) {
+    const container = document.getElementById(`cp-assign-mu-${mi}`);
+    if (!container) return;
+    const sels = container.querySelectorAll(".cp-assign-sel");
+    if (sels.length > 1) sels[sels.length - 1].remove();
+  }
+
+  function _addAssignMatchup() {
+    const slots = document.getElementById("cp-assign-slots");
+    if (!slots) return;
+    const mi   = slots.querySelectorAll(".cp-assign-matchup").length;
+    const pool = _getAssignPool();
+    const opts = `<option value="">— Select team —</option>` +
+      pool.map(r => `<option value="${r}">${_esc(_rosterName(r))}</option>`).join("");
+
+    const div  = document.createElement("div");
+    div.className = "cp-assign-matchup";
+    div.dataset.mi = mi;
+    div.innerHTML = `
+      <div class="cp-assign-matchup-header">
+        <span class="cp-assign-num">Matchup ${mi + 1}</span>
+        <label class="cp-assign-adv-label">Advance:
+          <input type="number" class="cp-assign-adv" data-mi="${mi}" min="1" max="2" value="1" />
+        </label>
+        <button class="cp-row-remove" onclick="DLRCustomPlayoffs._removeAssignTeam(${mi})" title="Remove last team">− Team</button>
+        <button class="btn-secondary btn-sm" onclick="DLRCustomPlayoffs._addAssignTeam(${mi})">+ Team</button>
+        <button class="cp-row-remove" style="margin-left:auto" onclick="this.closest('.cp-assign-matchup').remove()" title="Remove matchup">✕</button>
+      </div>
+      <div class="cp-assign-teams" id="cp-assign-mu-${mi}">
+        <select class="cp-assign-sel" data-mi="${mi}" data-ti="0">${opts}</select>
+        <select class="cp-assign-sel" data-mi="${mi}" data-ti="1">${opts}</select>
+      </div>`;
+    slots.insertBefore(div, slots.querySelector(".btn-secondary"));
+  }
+
+  function _addAssignBye() {
+    const byesDiv = document.getElementById("cp-assign-byes");
+    if (!byesDiv) return;
+    const pool = _getAssignPool();
+    const bi   = byesDiv.querySelectorAll(".cp-bye-sel").length;
+    const div  = document.createElement("div");
+    div.className = "cp-assign-bye-row";
+    div.innerHTML = `
+      <select class="cp-bye-sel" data-bi="${bi}">
+        <option value="">— Select team —</option>
+        ${pool.map(r => `<option value="${r}">${_esc(_rosterName(r))}</option>`).join("")}
+      </select>
+      <button class="cp-row-remove" onclick="this.parentElement.remove()" title="Remove bye">✕</button>`;
+    byesDiv.appendChild(div);
+  }
+
+  // Derive available pool from the current config state (no live bracket needed)
+  function _getAssignPool() {
+    const rounds = _config?.rounds || [];
+    const seeds  = (_config?.seeds || []).map(s => s.rosterId).filter(Boolean);
+    if (!rounds.length) return seeds;
+    // Find last round with matchups assigned
+    let lastRi = -1;
+    for (let ri = 0; ri < rounds.length; ri++) {
+      if ((rounds[ri].matchups || []).some(mu => (mu.teams || []).length)) lastRi = ri;
+    }
+    if (lastRi < 0) return seeds;
+    const lr  = rounds[lastRi];
+    const out = [];
+    (lr.matchups || []).forEach(mu => {
+      const adv = mu.advanceCount || 1;
+      (mu.teams || []).slice(0, adv).forEach(rid => { if (rid) out.push(rid); });
+    });
+    (lr.byes || []).forEach(rid => { if (rid) out.push(rid); });
+    return [...new Set(out.length ? out : seeds)];
+  }
+
+  // ── Save / clear assignments ───────────────────────────
+  async function _saveAssignments(targetRi) {
+    const btn = document.getElementById("cp-assign-save");
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    try {
+      const slots = document.getElementById("cp-assign-slots");
+      const matchups = [];
+      slots?.querySelectorAll(".cp-assign-matchup").forEach(card => {
+        const mi    = parseInt(card.dataset.mi);
+        const adv   = parseInt(card.querySelector(".cp-assign-adv")?.value) || 1;
+        const teams = [...card.querySelectorAll(".cp-assign-sel")]
+          .map(s => s.value).filter(Boolean);
+        if (teams.length) matchups.push({ teams, advanceCount: adv });
+      });
+
+      const byes = [...(document.querySelectorAll("#cp-assign-byes .cp-bye-sel") || [])]
+        .map(s => s.value).filter(Boolean);
+
+      if (!matchups.length) { showToast("Add at least one matchup.", "error"); return; }
+
+      const newConfig = JSON.parse(JSON.stringify(_config));
+      if (!newConfig.rounds[targetRi]) newConfig.rounds[targetRi] = {};
+      newConfig.rounds[targetRi].matchups = matchups;
+      newConfig.rounds[targetRi].byes     = byes;
+
+      await firebase.database()
+        .ref(`gmd/users/${_username.toLowerCase()}/leagueMeta/${_leagueKey}`)
+        .update({ customPlayoff: newConfig });
+
+      _config = newConfig;
+      if (typeof _onMetaSave === "function") _onMetaSave(_leagueKey, newConfig);
+      showToast("Matchups saved ✓");
+      _scoreCache = {};
+      const el = document.getElementById("dtab-customplayoffs");
+      if (el) await _render(el);
+    } catch(e) {
+      showToast("Save failed: " + e.message, "error");
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "💾 Save Matchups"; }
+    }
+  }
+
+  async function _clearRound(ri) {
+    const newConfig = JSON.parse(JSON.stringify(_config));
+    if (newConfig.rounds[ri]) { newConfig.rounds[ri].matchups = []; newConfig.rounds[ri].byes = []; }
+    await firebase.database()
+      .ref(`gmd/users/${_username.toLowerCase()}/leagueMeta/${_leagueKey}`)
+      .update({ customPlayoff: newConfig });
+    _config = newConfig;
+    if (typeof _onMetaSave === "function") _onMetaSave(_leagueKey, newConfig);
+    showToast("Round cleared.");
     _scoreCache = {};
     const el = document.getElementById("dtab-customplayoffs");
-    if (el && _config?.rounds?.length) await _renderBracket(el);
+    if (el) await _render(el);
   }
 
-  // ── Config modal ──────────────────────────────────────
+  // ── Empty state ───────────────────────────────────────
+  function _renderEmpty(el) {
+    if (_isCommish) {
+      el.innerHTML = `
+        <div class="cp-empty">
+          <div class="cp-empty-icon">🏆</div>
+          <div class="cp-empty-title">Custom Playoffs Not Configured</div>
+          <div class="cp-empty-sub">Define your qualifying teams and rounds. Each matchup can include any number of teams — 2-team head-to-head, 3-team pods, 4-team groups, anything you need.</div>
+          <button class="btn-primary" onclick="DLRCustomPlayoffs.openConfig()">⚙ Set Up Custom Playoffs</button>
+        </div>`;
+    } else {
+      el.innerHTML = `<div class="cp-empty">
+        <div class="cp-empty-icon">🏆</div>
+        <div class="cp-empty-title">Custom Playoffs</div>
+        <div class="cp-empty-sub">Not yet configured by the commissioner.</div>
+      </div>`;
+    }
+  }
+
+  // ── Config modal (seeds + round schedule only) ────────
   async function openConfig() {
     const modal = document.getElementById("cp-config-modal");
     if (!modal) return;
-
-    const cfg     = _config || {};
-    const opts    = _rosterOpts();
-    modal._opts   = opts; // store for dynamic row additions
-
-    // Set dropdowns
-    modal.querySelector("#cp-seed-method").value = cfg.seedingMethod || "record";
-    modal.querySelector("#cp-reseed").checked    = !!cfg.reseed;
-
-    // Seed rows
-    const savedSeeds = cfg.seeds?.length
-      ? cfg.seeds
-      : opts.map(r => ({ rosterId: r.rosterId })); // auto-populate all teams
+    const cfg  = _config || {};
+    const opts = _seedOpts();
+    modal._opts = opts;
+    const savedSeeds = cfg.seeds?.length ? cfg.seeds : opts.map(r => ({ rosterId: r.rosterId }));
     _buildSeedRows(modal, savedSeeds);
-
-    // Round rows
     _buildRoundRows(modal, cfg.rounds || []);
-
     modal.classList.remove("hidden");
   }
 
-  // ── Seed rows ─────────────────────────────────────────
   function _buildSeedRows(modal, seeds) {
     const body = modal.querySelector("#cp-seeds-body");
     const opts = modal._opts || [];
     body.innerHTML = seeds.map((s, i) => _seedRowHTML(i, s?.rosterId || "", opts)).join("")
-      + `<button class="btn-secondary btn-sm" style="margin-top:var(--space-2);width:100%" onclick="DLRCustomPlayoffs._addSeedRow()">+ Add Team</button>`;
+      + `<button class="btn-secondary btn-sm" style="margin-top:var(--space-2);width:100%"
+           onclick="DLRCustomPlayoffs._addSeedRow()">+ Add Team</button>`;
   }
 
   function _seedRowHTML(i, rosterId, opts) {
-    const opts2 = opts || (document.getElementById("cp-config-modal")?._opts || []);
+    const o = opts || (document.getElementById("cp-config-modal")?._opts || []);
     return `<div class="cp-seed-row">
       <span class="cp-seed-num">#${i + 1}</span>
       <select class="cp-seed-select">
         <option value="">— Select team —</option>
-        ${opts2.map(r => `<option value="${r.rosterId}" ${r.rosterId === String(rosterId) ? "selected" : ""}>${_esc(r.name)} (${r.rec})</option>`).join("")}
+        ${o.map(r => `<option value="${r.rosterId}" ${r.rosterId === String(rosterId) ? "selected" : ""}>${_esc(r.name)} (${r.rec})</option>`).join("")}
       </select>
       <button class="cp-row-remove" onclick="this.closest('.cp-seed-row').remove();DLRCustomPlayoffs._renumberSeeds()" title="Remove">✕</button>
     </div>`;
@@ -504,8 +694,8 @@ const DLRCustomPlayoffs = (() => {
     const body  = modal?.querySelector("#cp-seeds-body");
     const opts  = modal?._opts || [];
     if (!body) return;
-    const idx  = body.querySelectorAll(".cp-seed-row").length;
-    const div  = document.createElement("div");
+    const idx = body.querySelectorAll(".cp-seed-row").length;
+    const div = document.createElement("div");
     div.innerHTML = _seedRowHTML(idx, "", opts);
     body.insertBefore(div.firstElementChild, body.querySelector(".btn-secondary"));
     _renumberSeeds();
@@ -517,17 +707,16 @@ const DLRCustomPlayoffs = (() => {
       .forEach((row, i) => { const n = row.querySelector(".cp-seed-num"); if (n) n.textContent = `#${i + 1}`; });
   }
 
-  // ── Round rows ────────────────────────────────────────
   function _buildRoundRows(modal, rounds) {
     const body = modal.querySelector("#cp-rounds-body");
-    const init = rounds.length ? rounds : [{ startWeek: "", weeksPerRound: 1, playingSeeds: [] }];
+    const init = rounds.length ? rounds : [{ startWeek: "", weeksPerRound: 1 }];
     body.innerHTML = init.map((r, ri) => _roundRowHTML(ri, r)).join("")
-      + `<button class="btn-secondary btn-sm" style="margin-top:var(--space-2);width:100%" onclick="DLRCustomPlayoffs._addRound()">+ Add Round</button>`;
+      + `<button class="btn-secondary btn-sm" style="margin-top:var(--space-2);width:100%"
+           onclick="DLRCustomPlayoffs._addRound()">+ Add Round</button>`;
   }
 
   function _roundRowHTML(ri, r) {
-    const playStr  = (r.playingSeeds || []).join(", ");
-    const lbl      = r.label || `Round ${ri + 1}`;
+    const lbl = r.label || `Round ${ri + 1}`;
     return `<div class="cp-round-card">
       <div class="cp-round-card-header">
         <input class="cp-round-label-input" type="text" value="${_esc(lbl)}" placeholder="Round name" />
@@ -541,14 +730,6 @@ const DLRCustomPlayoffs = (() => {
         <div class="cp-round-field">
           <label>Wks/Round</label>
           <input type="number" class="cp-round-wpr" min="1" max="4" value="${r.weeksPerRound || 1}" />
-        </div>
-        <div class="cp-round-field cp-round-field--wide">
-          <label>Seeds That Play <span class="cp-field-hint">(seed #s, comma-separated — all others get a BYE)</span></label>
-          <input type="text" class="cp-round-playing" value="${_esc(playStr)}" placeholder="e.g. 9,10,11,12" />
-        </div>
-        <div class="cp-round-field">
-          <label>Winners Advancing <span class="cp-field-hint">(blank = half)</span></label>
-          <input type="number" class="cp-round-advance" min="1" value="${r.advanceCount || ""}" placeholder="auto" />
         </div>
       </div>
     </div>`;
@@ -578,17 +759,12 @@ const DLRCustomPlayoffs = (() => {
     document.getElementById("cp-config-modal")?.classList.add("hidden");
   }
 
-  // ── Save ──────────────────────────────────────────────
   async function saveConfig() {
     const modal   = document.getElementById("cp-config-modal");
     const saveBtn = modal?.querySelector("#cp-save-btn");
     if (!modal || !_leagueKey || !_username) return;
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
-
     try {
-      const seedingMethod = modal.querySelector("#cp-seed-method").value || "record";
-      const reseed        = modal.querySelector("#cp-reseed").checked;
-
       const seeds = [...modal.querySelectorAll("#cp-seeds-body .cp-seed-select")]
         .map(s => ({ rosterId: s.value })).filter(s => s.rosterId);
       if (seeds.length < 2) { showToast("Add at least 2 teams.", "error"); return; }
@@ -596,35 +772,30 @@ const DLRCustomPlayoffs = (() => {
       const roundCards = [...modal.querySelectorAll("#cp-rounds-body .cp-round-card")];
       if (!roundCards.length) { showToast("Add at least one round.", "error"); return; }
 
-      const rounds = roundCards.map(card => ({
-        label:         card.querySelector(".cp-round-label-input")?.value?.trim() || null,
-        startWeek:     parseInt(card.querySelector(".cp-round-start")?.value) || null,
-        weeksPerRound: parseInt(card.querySelector(".cp-round-wpr")?.value) || 1,
-        playingSeeds:  (card.querySelector(".cp-round-playing")?.value || "")
-                         .split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0),
-        advanceCount:  parseInt(card.querySelector(".cp-round-advance")?.value) || null
-      }));
+      const rounds = roundCards.map((card, ri) => {
+        const existing = (_config?.rounds || [])[ri] || {};
+        return {
+          label:         card.querySelector(".cp-round-label-input")?.value?.trim() || null,
+          startWeek:     parseInt(card.querySelector(".cp-round-start")?.value) || null,
+          weeksPerRound: parseInt(card.querySelector(".cp-round-wpr")?.value) || 1,
+          matchups:      existing.matchups || [],   // preserve existing assignments
+          byes:          existing.byes     || []
+        };
+      });
 
-      const newConfig = { enabled: true, seedingMethod, reseed, seeds, rounds };
+      const newConfig = { seeds, rounds };
 
-      // Write directly to personal leagueMeta path
       await firebase.database()
         .ref(`gmd/users/${_username.toLowerCase()}/leagueMeta/${_leagueKey}`)
         .update({ customPlayoff: newConfig });
 
-      _config = newConfig; _scoreCache = {};
-      // Sync profile.js _leagueMeta so navigating away and back preserves the config
+      _config = newConfig;
       if (typeof _onMetaSave === "function") _onMetaSave(_leagueKey, newConfig);
       closeConfig();
       showToast("Custom playoffs saved ✓");
-      // Recompute reg-season records with new playoff start week
-      const newPlayoffStart = newConfig.rounds?.[0]?.startWeek || null;
-      if (newPlayoffStart && newPlayoffStart > 1) {
-        try { await _computeRegRecords(newPlayoffStart); } catch(e) {}
-      }
+      _scoreCache = {};
       const el = document.getElementById("dtab-customplayoffs");
-      if (el) await _renderBracket(el);
-
+      if (el) await _render(el);
     } catch(e) {
       showToast("Save failed: " + e.message, "error");
     } finally {
@@ -632,19 +803,16 @@ const DLRCustomPlayoffs = (() => {
     }
   }
 
-  function _esc(s) {
-    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
   function setMetaCallback(fn) { _onMetaSave = fn; }
 
   return {
     init, reset,
     openConfig, closeConfig, saveConfig,
-    refreshScores,
-    setMetaCallback,
+    refreshScores, setMetaCallback,
     _addSeedRow, _renumberSeeds,
-    _addRound, _renumberRounds
+    _addRound, _renumberRounds,
+    _addAssignTeam, _removeAssignTeam,
+    _addAssignMatchup, _addAssignBye
   };
 
 })();
