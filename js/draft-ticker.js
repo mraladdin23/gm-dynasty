@@ -166,7 +166,11 @@ const DraftTicker = (() => {
 
     const draft_order       = status.draft_order;
     const slot_to_roster_id = status.slot_to_roster_id || null;
-    const totalTeams        = Object.keys(draft_order).length || 12;
+
+    // Bug fix: use settings.teams (stored as totalTeams) NOT draft_order key count.
+    // draft_order only has entries for human owners — a 12-team league where one
+    // slot is CPU/empty will have 11 keys, breaking round/pick math entirely.
+    const totalTeams        = status.settingsTeams || Object.keys(draft_order).length || 12;
     const totalPicks        = status.totalPicks || totalTeams;
     const nextOverall       = (status.picksMade || 0) + 1;
     const isLinear          = (status.draftType || "snake") === "linear";
@@ -179,10 +183,11 @@ const DraftTicker = (() => {
     if (mySlot == null) return null;
 
     // Step 2: find my rosterId via slot_to_roster_id
-    // If not available (shouldn't happen for live drafts), fall back to slot
-    const myRosterId = slot_to_roster_id
-      ? Number(slot_to_roster_id[String(mySlot)] ?? mySlot)
-      : mySlot;
+    // Bug fix: if slot_to_roster_id is missing/empty, we cannot reliably compute picks.
+    // The fallback to slot number is wrong for leagues where slot ≠ rosterId.
+    // Return null rather than show a confidently wrong pick number.
+    if (!slot_to_roster_id || Object.keys(slot_to_roster_id).length === 0) return null;
+    const myRosterId = Number(slot_to_roster_id[String(mySlot)] ?? mySlot);
 
     // Step 3: build trade lookup — key: "round-originalRosterId" → currentOwnerRosterId
     // traded_picks.roster_id = the original roster that owned this pick
@@ -204,9 +209,7 @@ const DraftTicker = (() => {
         : (round % 2 === 1 ? inRound : totalTeams + 1 - inRound);
 
       // Who originally owns this slot?
-      const originalRosterId = slot_to_roster_id
-        ? Number(slot_to_roster_id[String(slotAtPos)] ?? slotAtPos)
-        : slotAtPos;
+      const originalRosterId = Number(slot_to_roster_id[String(slotAtPos)] ?? slotAtPos);
 
       // Has it been traded? Check by originalRosterId (not slot)
       const tradeKey     = `${round}-${originalRosterId}`;
@@ -402,6 +405,7 @@ const DraftTicker = (() => {
       status:            draft.status,
       draftId:           draft.draft_id,
       draftType:         draft.type,
+      settingsTeams:     draft.settings?.teams || null,
       totalPicks:        (draft.settings?.teams || 12) * (draft.settings?.rounds || 15) || null,
       draft_order:       draft.draft_order       || {},
       slot_to_roster_id: draft.slot_to_roster_id || {},
@@ -686,7 +690,7 @@ const DraftTicker = (() => {
         const picksMade   = Array.isArray(arr) ? arr.length : 0;
         const last        = Array.isArray(arr) ? arr[arr.length - 1] : null;
         const cached      = _statusCache.get(item.leagueId) || {};
-        const teams       = Object.keys(cached.draft_order || {}).length || 12;
+        const teams       = cached.settingsTeams || Object.keys(cached.draft_order || {}).length || 12;
         const totalPicks  = cached.totalPicks || item.totalPicks || teams;
         const next        = picksMade + 1;
 
