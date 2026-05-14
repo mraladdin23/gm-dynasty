@@ -39,8 +39,9 @@ const DLRCustomPlayoffs = (() => {
   let _config     = null;
   let _rosters    = [];
   let _users      = [];
-  let _scoreCache = {};
-  let _onMetaSave = null;
+  let _scoreCache    = {};
+  let _onMetaSave    = null;
+  let _regStandings  = null;  // { rosterId → { wins, losses, pf } } — computed from reg season weeks
 
   // ── Entry point ───────────────────────────────────────
   async function init(leagueKey, league, username, leagueMeta) {
@@ -75,7 +76,7 @@ const DLRCustomPlayoffs = (() => {
 
   function reset() {
     _leagueKey = _leagueId = _season = _username = _config = null;
-    _rosters = []; _users = []; _scoreCache = {};
+    _rosters = []; _users = []; _scoreCache = {}; _regStandings = null;
   }
 
   // ── Helpers ───────────────────────────────────────────
@@ -92,22 +93,30 @@ const DLRCustomPlayoffs = (() => {
     const r  = (_rosters || []).find(r => String(r.roster_id) === String(rosterId));
     return r ? (um[r.owner_id] || `Team ${rosterId}`) : `Team ${rosterId}`;
   }
-  function _rosterRecord(rosterId) {
+  function _rosterRecord(rosterId, standings) {
+    // Use computed reg-season standings if provided, else fall back to live roster settings
+    if (standings && standings[String(rosterId)]) return standings[String(rosterId)];
     const r = (_rosters || []).find(r => String(r.roster_id) === String(rosterId));
     if (!r) return { wins: 0, losses: 0, pf: 0 };
     const pf = (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100;
     return { wins: r.settings?.wins || 0, losses: r.settings?.losses || 0, pf };
   }
-  function _seedOpts() {
+  function _seedOpts(standings) {
+    // standings = { rosterId → { wins, losses, pf } } or null → use live roster settings
     const um = _userMap();
     return [...(_rosters || [])].sort((a, b) => {
-      const wa = a.settings?.wins || 0, wb = b.settings?.wins || 0;
-      return wb - wa || (b.settings?.fpts || 0) - (a.settings?.fpts || 0);
-    }).map(r => ({
-      rosterId: String(r.roster_id),
-      name: um[r.owner_id] || `Team ${r.roster_id}`,
-      rec: `${r.settings?.wins || 0}-${r.settings?.losses || 0}`
-    }));
+      const ra = _rosterRecord(String(a.roster_id), standings);
+      const rb = _rosterRecord(String(b.roster_id), standings);
+      return rb.wins - ra.wins || rb.pf - ra.pf;
+    }).map(r => {
+      const rec = _rosterRecord(String(r.roster_id), standings);
+      return {
+        rosterId: String(r.roster_id),
+        name: um[r.owner_id] || `Team ${r.roster_id}`,
+        rec:  `${rec.wins}-${rec.losses}`,
+        pf:   rec.pf
+      };
+    });
   }
   function _esc(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -334,14 +343,14 @@ const DLRCustomPlayoffs = (() => {
       </div>
     </div>`;
 
-    // Seed list
+    // Seed list — use reg-season standings if available
     const seedRows = (cfg.seeds || []).map((s, i) => {
-      const rec = _rosterRecord(s.rosterId);
+      const rec = _rosterRecord(s.rosterId, _regStandings);
+      const pfStr = rec.pf > 0 ? ` · ${rec.pf.toFixed(1)} pts` : "";
       return `<div class="trn-po-seed-row">
         <span class="trn-po-seed-num">#${i + 1}</span>
         <span class="trn-po-seed-name">${_esc(_rosterName(s.rosterId))}</span>
-        <span class="trn-po-seed-record">${rec.wins}–${rec.losses}</span>
-        <span class="trn-po-seed-pf">${rec.pf.toFixed(1)} pts</span>
+        <span class="trn-po-seed-record">${rec.wins}–${rec.losses}${pfStr}</span>
       </div>`;
     }).join("");
 
@@ -660,13 +669,138 @@ const DLRCustomPlayoffs = (() => {
   async function openConfig() {
     const modal = document.getElementById("cp-config-modal");
     if (!modal) return;
-    const cfg  = _config || {};
-    const opts = _seedOpts();
+    const cfg = _config || {};
+
+    // Populate reg season week input
+    const regWkInp = modal.querySelector("#cp-reg-week");
+    if (regWkInp) regWkInp.value = cfg.regSeasonEndWeek || "";
+
+    // Use already-computed standings if available, else fall back to live
+    const opts = _seedOpts(_regStandings);
     modal._opts = opts;
+    modal._regStandings = _regStandings;
+
     const savedSeeds = cfg.seeds?.length ? cfg.seeds : opts.map(r => ({ rosterId: r.rosterId }));
     _buildSeedRows(modal, savedSeeds);
     _buildRoundRows(modal, cfg.rounds || []);
     modal.classList.remove("hidden");
+  }
+
+  // ── Reg-season standings computation ─────────────────
+  // Fetches Sleeper matchup data for weeks 1→endWeek and computes
+  // W/L/PF per roster from actual head-to-head results.
+  async function updateRegStandings() {
+    const modal    = document.getElementById("cp-config-modal");
+    const regWkInp = modal?.querySelector("#cp-reg-week");
+    const btn      = modal?.querySelector("#cp-update-standings-btn");
+    const endWeek  = parseInt(regWkInp?.value);
+    if (!endWeek || endWeek < 1 || endWeek > 22) {
+      showToast("Enter a valid end week (1–22).", "error"); return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = "Fetching…"; }
+
+    try {
+      // Fetch all weeks in parallel
+      const weekPromises = [];
+      for (let w = 1; w <= endWeek; w++) {
+        weekPromises.push(
+          fetch(`https://api.sleeper.app/v1/league/${_leagueId}/matchups/${w}`)
+            .then(r => r.ok ? r.json() : []).catch(() => [])
+        );
+      }
+      const allWeeks = await Promise.all(weekPromises);
+
+      // Build standings: group by matchup_id per week, compare points
+      const standings = {}; // rosterId → { wins, losses, pf }
+      (_rosters || []).forEach(r => {
+        standings[String(r.roster_id)] = { wins: 0, losses: 0, pf: 0 };
+      });
+
+      allWeeks.forEach(weekData => {
+        if (!Array.isArray(weekData)) return;
+        // Group by matchup_id
+        const groups = {};
+        weekData.forEach(entry => {
+          const mid = entry.matchup_id;
+          if (!mid) return;
+          if (!groups[mid]) groups[mid] = [];
+          groups[mid].push(entry);
+        });
+        Object.values(groups).forEach(group => {
+          if (group.length !== 2) return; // skip byes / oddities
+          const [a, b] = group;
+          const aPts = a.points || 0, bPts = b.points || 0;
+          const aId  = String(a.roster_id), bId = String(b.roster_id);
+          if (standings[aId]) {
+            standings[aId].pf += aPts;
+            if (aPts > bPts) standings[aId].wins++;
+            else if (bPts > aPts) standings[aId].losses++;
+          }
+          if (standings[bId]) {
+            standings[bId].pf += bPts;
+            if (bPts > aPts) standings[bId].wins++;
+            else if (aPts > bPts) standings[bId].losses++;
+          }
+        });
+      });
+
+      // Round pf
+      Object.values(standings).forEach(s => { s.pf = Math.round(s.pf * 100) / 100; });
+
+      // Store globally and on modal
+      _regStandings = standings;
+      modal._regStandings = standings;
+
+      // Re-build opts with new standings
+      const opts = _seedOpts(standings);
+      modal._opts = opts;
+
+      // Rebuild seed rows preserving current selections
+      const curSelections = [...(modal.querySelectorAll("#cp-seeds-body .cp-seed-select") || [])]
+        .map(s => ({ rosterId: s.value })).filter(s => s.rosterId);
+      const seeds = curSelections.length ? curSelections : opts.map(r => ({ rosterId: r.rosterId }));
+      _buildSeedRows(modal, seeds);
+
+      // Show standings preview
+      _renderStandingsPreview(modal, standings, opts, endWeek);
+      showToast(`Standings updated through Week ${endWeek} ✓`);
+
+    } catch(e) {
+      showToast("Failed to fetch standings: " + e.message, "error");
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "↺ Update Standings"; }
+    }
+  }
+
+  function _renderStandingsPreview(modal, standings, opts, endWeek) {
+    let preview = modal.querySelector("#cp-standings-preview");
+    if (!preview) {
+      preview = document.createElement("div");
+      preview.id = "cp-standings-preview";
+      preview.className = "cp-standings-preview";
+      // Insert after the reg-week row
+      const regRow = modal.querySelector(".cp-reg-week-row");
+      regRow?.insertAdjacentElement("afterend", preview);
+    }
+    preview.innerHTML = `
+      <div class="cp-standings-preview-title">Standings through Week ${endWeek}</div>
+      <div class="cp-standings-table">
+        <div class="cp-st-header">
+          <span class="cp-st-rank">#</span>
+          <span class="cp-st-name">Team</span>
+          <span class="cp-st-rec">W–L</span>
+          <span class="cp-st-pf">PF</span>
+        </div>
+        ${opts.map((r, i) => {
+          const s = standings[r.rosterId] || { wins: 0, losses: 0, pf: 0 };
+          return `<div class="cp-st-row">
+            <span class="cp-st-rank">${i + 1}</span>
+            <span class="cp-st-name">${_esc(r.name)}</span>
+            <span class="cp-st-rec">${s.wins}–${s.losses}</span>
+            <span class="cp-st-pf">${s.pf.toFixed(1)}</span>
+          </div>`;
+        }).join("")}
+      </div>`;
   }
 
   function _buildSeedRows(modal, seeds) {
@@ -783,7 +917,8 @@ const DLRCustomPlayoffs = (() => {
         };
       });
 
-      const newConfig = { seeds, rounds };
+      const regSeasonEndWeek = parseInt(modal.querySelector("#cp-reg-week")?.value) || null;
+      const newConfig = { seeds, rounds, ...(regSeasonEndWeek ? { regSeasonEndWeek } : {}) };
 
       await firebase.database()
         .ref(`gmd/users/${_username.toLowerCase()}/leagueMeta/${_leagueKey}`)
@@ -809,6 +944,7 @@ const DLRCustomPlayoffs = (() => {
     init, reset,
     openConfig, closeConfig, saveConfig,
     refreshScores, setMetaCallback,
+    updateRegStandings,
     _addSeedRow, _renumberSeeds,
     _addRound, _renumberRounds,
     _addAssignTeam, _removeAssignTeam,
