@@ -42,6 +42,8 @@ const DLRCustomPlayoffs = (() => {
   let _users      = [];
   let _scoreCache = {};
   let _leagueSize = 0;
+  let _regRecords = {};   // rosterId → {wins, losses, pf} from reg-season weeks only
+  let _onMetaSave = null; // callback(leagueKey, config) to sync profile.js after save
 
   // ── Public entry point ────────────────────────────────
   async function init(leagueKey, league, username, leagueMeta) {
@@ -69,6 +71,17 @@ const DLRCustomPlayoffs = (() => {
       _rosters = []; _users = []; _leagueSize = 0;
     }
 
+    // Compute reg-season records from matchup history (stop before playoff start week)
+    // Uses the first round's startWeek as the playoff start, falling back to league metadata
+    if (_config?.rounds?.length) {
+      const playoffStart = _config.rounds[0]?.startWeek || null;
+      if (playoffStart && playoffStart > 1) {
+        try { await _computeRegRecords(playoffStart); } catch(e) { _regRecords = {}; }
+      } else {
+        _regRecords = {};
+      }
+    }
+
     if (!_config?.rounds?.length) {
       _renderEmpty(el);
       return;
@@ -83,7 +96,7 @@ const DLRCustomPlayoffs = (() => {
 
   function reset() {
     _leagueKey = _leagueId = _season = _username = _config = null;
-    _rosters = []; _users = []; _scoreCache = {}; _leagueSize = 0;
+    _rosters = []; _users = []; _scoreCache = {}; _leagueSize = 0; _regRecords = {};
   }
 
   function _renderEmpty(el) {
@@ -119,10 +132,61 @@ const DLRCustomPlayoffs = (() => {
     return r ? (um[r.owner_id] || `Team ${rosterId}`) : `Team ${rosterId}`;
   }
   function _rosterRecord(rosterId) {
-    const r = (_rosters || []).find(r => String(r.roster_id) === String(rosterId));
+    // Use reg-season computed records if available (excludes playoff weeks)
+    const rid = String(rosterId);
+    if (_regRecords[rid]) return _regRecords[rid];
+    const r = (_rosters || []).find(r => String(r.roster_id) === rid);
     if (!r) return { wins: 0, losses: 0, pf: 0 };
     const pf = (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100;
     return { wins: r.settings?.wins || 0, losses: r.settings?.losses || 0, pf };
+  }
+
+  // Compute W/L/PF from matchup history for weeks 1..(playoffStart-1)
+  async function _computeRegRecords(playoffStart) {
+    _regRecords = {};
+    const lastRegWeek = playoffStart - 1;
+    if (lastRegWeek < 1) return;
+
+    // Fetch all weeks in parallel (up to lastRegWeek)
+    const weekMaps = await Promise.all(
+      Array.from({ length: lastRegWeek }, (_, i) => _fetchWeek(i + 1))
+    );
+
+    // Group week matchups by matchup_id to find opponents
+    // We need the raw matchup data — _fetchWeek gives {rosterId: pts} maps
+    // Re-fetch raw matchup data to get matchup_id pairings
+    const rawWeeks = await Promise.all(
+      Array.from({ length: lastRegWeek }, (_, i) =>
+        fetch(`https://api.sleeper.app/v1/league/${_leagueId}/matchups/${i + 1}`)
+          .then(r => r.ok ? r.json() : []).catch(() => [])
+      )
+    );
+
+    const wins = {}, losses = {}, pf = {};
+    rawWeeks.forEach(weekData => {
+      if (!Array.isArray(weekData)) return;
+      const byMid = {};
+      weekData.forEach(m => {
+        if (m.matchup_id) (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m);
+      });
+      Object.values(byMid).forEach(pair => {
+        if (pair.length !== 2) return;
+        const [a, b] = pair;
+        const aId = String(a.roster_id), bId = String(b.roster_id);
+        const aP = a.points || 0, bP = b.points || 0;
+        pf[aId] = (pf[aId] || 0) + aP;
+        pf[bId] = (pf[bId] || 0) + bP;
+        if (aP > bP) { wins[aId] = (wins[aId] || 0) + 1; losses[bId] = (losses[bId] || 0) + 1; }
+        else if (bP > aP) { wins[bId] = (wins[bId] || 0) + 1; losses[aId] = (losses[aId] || 0) + 1; }
+        else { wins[aId] = (wins[aId] || 0) + 0.5; losses[aId] = (losses[aId] || 0) + 0.5;
+               wins[bId] = (wins[bId] || 0) + 0.5; losses[bId] = (losses[bId] || 0) + 0.5; }
+      });
+    });
+
+    (_rosters || []).forEach(r => {
+      const id = String(r.roster_id);
+      _regRecords[id] = { wins: wins[id] || 0, losses: losses[id] || 0, pf: pf[id] || 0 };
+    });
   }
   function _sortPool(pool) {
     return [...pool].sort((a, b) => {
@@ -549,8 +613,15 @@ const DLRCustomPlayoffs = (() => {
         .update({ customPlayoff: newConfig });
 
       _config = newConfig; _scoreCache = {};
+      // Sync profile.js _leagueMeta so navigating away and back preserves the config
+      if (typeof _onMetaSave === "function") _onMetaSave(_leagueKey, newConfig);
       closeConfig();
       showToast("Custom playoffs saved ✓");
+      // Recompute reg-season records with new playoff start week
+      const newPlayoffStart = newConfig.rounds?.[0]?.startWeek || null;
+      if (newPlayoffStart && newPlayoffStart > 1) {
+        try { await _computeRegRecords(newPlayoffStart); } catch(e) {}
+      }
       const el = document.getElementById("dtab-customplayoffs");
       if (el) await _renderBracket(el);
 
@@ -565,10 +636,13 @@ const DLRCustomPlayoffs = (() => {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  function setMetaCallback(fn) { _onMetaSave = fn; }
+
   return {
     init, reset,
     openConfig, closeConfig, saveConfig,
     refreshScores,
+    setMetaCallback,
     _addSeedRow, _renumberSeeds,
     _addRound, _renumberRounds
   };

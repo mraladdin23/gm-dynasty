@@ -109,15 +109,20 @@ function formatHeight(inches) {
   // ── Load both Sleeper + Mappings ──────────────────────────
   async function load(force = false) {
     if (_sleeperCache && _mappings && !force) return _sleeperCache;
-    if (_loadingPromise) return _loadingPromise;
+    // If another load() is already in flight, wait for it then return the populated cache
+    // (NOT the Promise.all array — that would break player lookups)
+    if (_loadingPromise) { await _loadingPromise; return _sleeperCache; }
 
     _loadingPromise = Promise.all([
       _loadSleeper(force),
       _loadMappings(force)
     ]);
 
-    await _loadingPromise;
-    _loadingPromise = null;
+    try {
+      await _loadingPromise;
+    } finally {
+      _loadingPromise = null;
+    }
     return _sleeperCache;
   }
 

@@ -3100,6 +3100,11 @@ const Profile = (() => {
     if (tab === "chat")        _renderChat(el, leagueKey, league);
     if (tab === "customplayoffs") {
       const meta5 = _leagueMeta[leagueKey] || {};
+      // Register callback so customplayoffs.js can update _leagueMeta in-memory after save
+      DLRCustomPlayoffs.setMetaCallback((lk, cfg) => {
+        if (!_leagueMeta[lk]) _leagueMeta[lk] = {};
+        _leagueMeta[lk].customPlayoff = cfg;
+      });
       DLRCustomPlayoffs.init(leagueKey, league, _currentUsername, meta5);
     }
   }
