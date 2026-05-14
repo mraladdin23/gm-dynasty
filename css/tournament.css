@@ -4750,3 +4750,90 @@
 @media (max-width: 600px) {
   .trn-form-field-row .trn-q-type { width: 100%; }
 }
+
+/* ── Tournament Matchup Expand (lineup detail) ────────── */
+.trn-wmu-card--expandable { cursor: pointer; }
+.trn-wmu-card--expandable:hover { background: var(--color-surface-hover, rgba(255,255,255,.03)); }
+
+.trn-wmu-expand-hint {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  margin-left: auto;
+}
+
+.trn-wmu-detail {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+.trn-wmu-detail-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3);
+}
+
+/* SBS lineup grid — two columns side by side */
+.trn-wmu-sbs {
+  display: grid;
+  grid-template-columns: 1fr 2px 1fr;
+  gap: 0;
+}
+.trn-wmu-sbs-divider {
+  background: var(--color-border);
+  margin: 0 var(--space-2);
+}
+.trn-wmu-sbs-col { min-width: 0; }
+.trn-wmu-sbs-header {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: 0 0 var(--space-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trn-wmu-sbs-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: .72rem;
+}
+.trn-wmu-sbs-row--bench { opacity: .65; }
+.trn-wmu-sbs-pos {
+  font-size: .65rem;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+}
+.trn-wmu-sbs-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .72rem;
+}
+.trn-wmu-sbs-pts {
+  font-size: .72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+  color: var(--color-text);
+}
+.trn-wmu-sbs-bench-hdr {
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: var(--space-1) 0 2px;
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-1);
+}
+.trn-wmu-sbs-empty {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: var(--space-2);
+}
