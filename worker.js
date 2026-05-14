@@ -237,6 +237,38 @@ export default {
         return new Response(JSON.stringify(data), { headers: corsHeaders() });
       }
 
+      // On-demand: fetch liveScoring for multiple leagues in one request
+      // Body: { leagueIds: string[], year: number, week?: number }
+      // Returns: { results: [{id, matchups: [{home,away}]}], errors: string[] }
+      if (path === "/mfl/liveScoringBatch" && req.method === "POST") {
+        const { leagueIds, year, week } = await req.json();
+        if (!leagueIds?.length) return new Response(JSON.stringify({ results: [], errors: [] }), { headers: corsHeaders() });
+        const season   = year || new Date().getFullYear();
+        const weekParam = week ? `&W=${week}` : "";
+        const CONCURRENCY = 10;
+        const results = [];
+        const errors  = [];
+        for (let i = 0; i < leagueIds.length; i += CONCURRENCY) {
+          const batch = leagueIds.slice(i, i + CONCURRENCY);
+          const batchResults = await Promise.allSettled(batch.map(async id => {
+            const r = await fetch(
+              `https://api.myfantasyleague.com/${season}/export?TYPE=liveScoring&L=${id}${weekParam}&JSON=1`,
+              { headers: mflHeaders() }
+            );
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const text = await r.text();
+            let data;
+            try { data = JSON.parse(text); } catch(e) { data = {}; }
+            return { id, data };
+          }));
+          batchResults.forEach((res, idx) => {
+            if (res.status === "fulfilled") results.push(res.value);
+            else errors.push(`${batch[idx]}: ${res.reason?.message || "failed"}`);
+          });
+        }
+        return new Response(JSON.stringify({ results, errors }), { headers: corsHeaders() });
+      }
+
       // On-demand: fetch a specific playoff bracket by bracket_id
       if (path === "/mfl/playoffBracket" && req.method === "POST") {
         const { leagueId, year, bracketId, username, password } = await req.json();

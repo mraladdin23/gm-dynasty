@@ -8652,36 +8652,47 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (i + 5 < sleeperLeagues.length) await new Promise(r => setTimeout(r, 80));
     }
 
-    // ── MFL — via worker liveScoring ─────────────────────────────────────────
-    for (const lg of leagueList.filter(l => l.platform === "mfl")) {
+    // ── MFL — via worker liveScoringBatch (batches of 50 leagueIds per request) ───────
+    const mflLeagues = leagueList.filter(l => l.platform === "mfl");
+    const MFL_BATCH = 50;
+    for (let i = 0; i < mflLeagues.length; i += MFL_BATCH) {
+      const batch = mflLeagues.slice(i, i + MFL_BATCH);
       try {
-        const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/mfl/liveScoring", {
+        const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/mfl/liveScoringBatch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ leagueId: lg.leagueId, year, week: _weeklyMuWeek })
+          body: JSON.stringify({ leagueIds: batch.map(l => l.leagueId), year, week: _weeklyMuWeek })
         });
         if (!r.ok) continue;
-        const d = await r.json();
-        const matchupArr = [].concat(d?.liveScoring?.matchup || d?.matchup || []);
-        for (const mu of matchupArr) {
-          const teams = [].concat(mu.franchise || []);
-          if (teams.length !== 2) continue;
-          const [a, b] = teams;
-          const apts = parseFloat(a.score) || 0;
-          const bpts = parseFloat(b.score) || 0;
-          if (apts === 0 && bpts === 0) continue;
-          let aName = teamMap[`${lg.leagueId}:${a.id}`]?.name || a.id;
-          let bName = teamMap[`${lg.leagueId}:${b.id}`]?.name || b.id;
-          if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
-          if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
-          allMatchups.push({
-            leagueId: lg.leagueId, leagueName: lg.name,
-            conference: lg.conference, division: lg.division, platform: "mfl",
-            home: { name: aName, score: parseFloat(apts.toFixed(2)) },
-            away: { name: bName, score: parseFloat(bpts.toFixed(2)) }
-          });
+        const resp = await r.json();
+        const lgMap = {};
+        batch.forEach(l => { lgMap[l.leagueId] = l; });
+        for (const { id, data } of (resp.results || [])) {
+          const lg = lgMap[id];
+          if (!lg) continue;
+          const matchupArr = [].concat(data?.liveScoring?.matchup || data?.matchup || []);
+          for (const mu of matchupArr) {
+            const teams = [].concat(mu.franchise || []);
+            if (teams.length !== 2) continue;
+            const [a, b] = teams;
+            const apts = parseFloat(a.score) || 0;
+            const bpts = parseFloat(b.score) || 0;
+            if (apts === 0 && bpts === 0) continue;
+            let aName = teamMap[`${lg.leagueId}:${a.id}`]?.name || a.id;
+            let bName = teamMap[`${lg.leagueId}:${b.id}`]?.name || b.id;
+            if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
+            if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+            allMatchups.push({
+              leagueId: lg.leagueId, leagueName: lg.name,
+              conference: lg.conference, division: lg.division, platform: "mfl",
+              home: { name: aName, score: parseFloat(apts.toFixed(2)) },
+              away: { name: bName, score: parseFloat(bpts.toFixed(2)) }
+            });
+          }
         }
       } catch(e) {}
+      // Small delay between outer batches to avoid hammering MFL
+      if (i + MFL_BATCH < mflLeagues.length) await new Promise(r => setTimeout(r, 150));
     }
 
     // ── Yahoo — via worker matchupRoster ─────────────────────────────────────
@@ -8765,7 +8776,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const cardId = `trn-wmu-card-${_weeklyMuWeek}-${mi}`;
       return `
         <div class="trn-wmu-card${hasStarters ? " trn-wmu-card--expandable" : ""}" id="${cardId}"
-          ${hasStarters ? `onclick="TournamentApp._expandTrnMatchup(this)"` : ""}>
+          ${hasStarters ? `onclick="DLRTournament._expandTrnMatchup(this)"` : ""}>
           <div class="trn-wmu-team ${homeWon ? "trn-wmu-team--win" : awayWon ? "trn-wmu-team--loss" : ""}">
             <span class="trn-wmu-name">${_esc(m.home.name)}</span>
             <span class="trn-wmu-score ${homeWon ? "trn-wmu-score--win" : ""}">${inProgress ? "–" : m.home.score.toFixed(2)}</span>
