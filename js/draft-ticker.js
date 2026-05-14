@@ -850,6 +850,84 @@ const DraftTicker = (() => {
     return report;
   }
 
-  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, refreshForModal, getLastItems: () => _lastItems, diagnose };
+  // ── Detailed pick-calc diagnostic ────────────────────
+  // Call from console: DraftTicker.diagnosePickCalc()
+  // Or for a specific league: DraftTicker.diagnosePickCalc("leagueId")
+  async function diagnosePickCalc(leagueId) {
+    const mySleeperUid = await _getMySleeperUserId();
+    const results = [];
+
+    const targets = leagueId
+      ? [[leagueId, _statusCache.get(leagueId)]]
+      : [..._statusCache.entries()].filter(([, s]) => s.status === "drafting" || s.status === "paused");
+
+    for (const [lid, status] of targets) {
+      if (!status) { results.push({ leagueId: lid, error: "not in cache" }); continue; }
+
+      const meta        = _leagueMeta.get(lid) || {};
+      const s2r         = status.slot_to_roster_id || {};
+      const draftOrder  = status.draft_order || {};
+      const totalTeams  = Object.keys(draftOrder).length || 12;
+      const isLinear    = (status.draftType || "snake") === "linear";
+
+      // My slot + rosterId
+      let mySlot = null;
+      for (const [uid, slot] of Object.entries(draftOrder)) {
+        if (String(uid) === String(mySleeperUid)) { mySlot = Number(slot); break; }
+      }
+      const myRosterId = mySlot != null
+        ? Number(s2r[String(mySlot)] ?? mySlot)
+        : null;
+
+      // Trade map
+      const tradeMap = {};
+      for (const tp of (status.traded_picks || [])) {
+        tradeMap[`${tp.round}-${tp.roster_id}`] = Number(tp.owner_id);
+      }
+
+      // Scan picks
+      const totalPicks  = status.totalPicks || totalTeams;
+      const nextOverall = (status.picksMade || 0) + 1;
+      const picksDetail = [];
+      for (let overall = nextOverall; overall <= Math.min(nextOverall + 30, totalPicks); overall++) {
+        const round      = Math.ceil(overall / totalTeams);
+        const inRound    = ((overall - 1) % totalTeams) + 1;
+        const slotAtPos  = isLinear ? inRound : (round % 2 === 1 ? inRound : totalTeams + 1 - inRound);
+        const origRoster = Number(s2r[String(slotAtPos)] ?? slotAtPos);
+        const tradeKey   = `${round}-${origRoster}`;
+        const curOwner   = tradeMap[tradeKey] !== undefined ? tradeMap[tradeKey] : origRoster;
+        const isMe       = curOwner === myRosterId;
+        const isTraded   = tradeMap[tradeKey] !== undefined;
+        picksDetail.push({
+          overall, round, inRound, slotAtPos, origRoster,
+          tradeKey, curOwner, isTraded, isMe
+        });
+        if (isMe) break; // stop at my first pick
+      }
+
+      results.push({
+        leagueName:   meta.leagueName || lid,
+        leagueId:     lid,
+        draftId:      status.draftId,
+        mySleeperUid,
+        mySlot,
+        myRosterId,
+        totalTeams,
+        totalPicks,
+        picksMade:    status.picksMade,
+        isLinear,
+        tradedPicksCount: (status.traded_picks || []).length,
+        tradedPicks:  (status.traded_picks || []).slice(0, 20), // first 20 for brevity
+        tradeMapKeys: Object.keys(tradeMap),
+        slot_to_roster_id: s2r,
+        next30picks:  picksDetail
+      });
+    }
+
+    console.log("[DraftTicker.diagnosePickCalc]", JSON.stringify(results, null, 2));
+    return results;
+  }
+
+  return { init, stop, openPanel: _openPanel, closePanel: _closePanel, refreshForModal, getLastItems: () => _lastItems, diagnose, diagnosePickCalc };
 
 })();

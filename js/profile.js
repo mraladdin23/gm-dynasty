@@ -2953,7 +2953,9 @@ const Profile = (() => {
     }
 
     // Conditionally inject Custom Playoffs tab after regular Playoffs
-    if (meta.customPlayoffEnabled) {
+    // Show if either: (a) user explicitly enabled it, or (b) a customPlayoff config
+    // exists in the meta (covers view-as where the flag is in the commish's personal meta)
+    if (meta.customPlayoffEnabled || meta.customPlayoff) {
       tabs.splice(tabs.findIndex(t => t.val === "playoffs") + 1, 0,
         { val: "customplayoffs", label: "🏆 Custom Playoffs" }
       );
