@@ -927,50 +927,39 @@
         <h3>⚙ Custom Playoff Setup</h3>
         <button class="modal-close" onclick="DLRCustomPlayoffs.closeConfig()">✕</button>
       </div>
-      <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <div class="modal-body" style="max-height:72vh;overflow-y:auto">
 
-        <!-- Bracket settings -->
-        <div class="form-group">
-          <label>Bracket Size</label>
-          <select id="cp-bracket-size">
-            <option value="4">4 teams</option>
-            <option value="8" selected>8 teams</option>
-            <option value="16">16 teams</option>
-          </select>
-        </div>
-        <div class="cp-form-row">
-          <div class="form-group">
-            <label>First-Round Byes</label>
-            <select id="cp-bye-count">
-              <option value="0">None</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="4">4</option>
-            </select>
-          </div>
+        <!-- Global settings -->
+        <div class="cp-form-row" style="margin-bottom:var(--space-3)">
           <div class="form-group">
             <label>Seeding Method</label>
             <select id="cp-seed-method">
               <option value="record">By Record</option>
               <option value="pf">By Points For</option>
-              <option value="manual">Manual (set below)</option>
+              <option value="manual">Manual</option>
             </select>
           </div>
-        </div>
-        <div class="label-options" style="margin-bottom:var(--space-3)">
-          <label class="label-checkbox">
-            <input type="checkbox" id="cp-reseed" />
-            <span>Reseed after each round</span>
-          </label>
+          <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:2px">
+            <label class="label-checkbox">
+              <input type="checkbox" id="cp-reseed" />
+              <span>Reseed after each round</span>
+            </label>
+          </div>
         </div>
 
-        <!-- Round week config -->
-        <div class="label-commish-divider" style="margin-bottom:var(--space-2)"><span>Round Schedule</span></div>
-        <div id="cp-rounds-body" class="cp-rounds-body"></div>
-
-        <!-- Seed assignments -->
-        <div class="label-commish-divider" style="margin:var(--space-3) 0 var(--space-2)"><span>Seedings</span></div>
+        <!-- Seeds — all participants in seeded order -->
+        <div class="label-commish-divider" style="margin-bottom:var(--space-2)">
+          <span>Seedings</span>
+          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim);margin-left:var(--space-2)">All teams in bracket, #1 (best) → last</span>
+        </div>
         <div id="cp-seeds-body" class="cp-seeds-body"></div>
+
+        <!-- Rounds — define who plays each round -->
+        <div class="label-commish-divider" style="margin:var(--space-4) 0 var(--space-2)">
+          <span>Rounds</span>
+          <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim);margin-left:var(--space-2)">Define which seeds play — all others get a BYE</span>
+        </div>
+        <div id="cp-rounds-body" class="cp-rounds-body"></div>
 
       </div>
       <div class="modal-footer">
