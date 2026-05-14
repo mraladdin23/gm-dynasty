@@ -3102,10 +3102,16 @@ const Profile = (() => {
     if (tab === "chat")        _renderChat(el, leagueKey, league);
     if (tab === "customplayoffs") {
       const meta5 = _leagueMeta[leagueKey] || {};
-      // Register callback so customplayoffs.js can update _leagueMeta in-memory after save
+      // Register callback so customplayoffs.js can update _leagueMeta in-memory AND
+      // persist to the shared commish path (gmd/leagueSettings/{leagueId}) so all
+      // league members see the Custom Playoffs tab when they open the league detail
       DLRCustomPlayoffs.setMetaCallback((lk, cfg) => {
         if (!_leagueMeta[lk]) _leagueMeta[lk] = {};
         _leagueMeta[lk].customPlayoff = cfg;
+        // Route through saveLeagueMeta → GMDB.saveLeagueMetaEntry which writes
+        // customPlayoff to the shared leagueSettings path (now that firebase-db.js
+        // includes it in the shared fields whitelist)
+        saveLeagueMeta(_currentUsername, lk, { customPlayoff: cfg }).catch(() => {});
       });
       DLRCustomPlayoffs.init(leagueKey, league, _currentUsername, meta5);
     }
@@ -3758,6 +3764,54 @@ const Profile = (() => {
     closeLeagueDetail();
   }
 
+  // ── Custom playoffs diagnostic ────────────────────────
+  // Call from console: await Profile.diagnoseCustomPlayoffs()
+  // Run while viewing-as another user to see exactly what's in their meta
+  async function diagnoseCustomPlayoffs(leagueKey) {
+    const lk     = leagueKey || _detailLeagueKey;
+    const league = _allLeagues[lk];
+    const meta   = _leagueMeta[lk] || {};
+    const leagueId = league?.leagueId;
+
+    const report = {
+      viewingAs:                  _currentUsername,
+      leagueKey:                  lk,
+      leagueId,
+      leagueName:                 league?.leagueName,
+      isCommissioner:             league?.isCommissioner,
+      meta_customPlayoffEnabled:  meta.customPlayoffEnabled,
+      meta_customPlayoff_exists:  !!meta.customPlayoff,
+      meta_customPlayoff_seeds:   meta.customPlayoff?.seeds?.length ?? null,
+      meta_customPlayoff_rounds:  meta.customPlayoff?.rounds?.length ?? null,
+      tab_would_show:             !!(meta.customPlayoffEnabled || meta.customPlayoff),
+      all_meta_keys:              Object.keys(meta),
+    };
+
+    // Raw personal Firebase path for the current viewed user
+    try {
+      const snap = await firebase.database()
+        .ref(`gmd/users/${_currentUsername.toLowerCase()}/leagueMeta/${lk}`)
+        .once("value");
+      report.firebase_personal = snap.val();
+    } catch(e) { report.firebase_personal_error = e.message; }
+
+    // Shared leagueSettings path (what all members see)
+    if (leagueId) {
+      try {
+        const snap = await firebase.database()
+          .ref(`gmd/leagueSettings/${leagueId}`)
+          .once("value");
+        const s = snap.val() || {};
+        report.shared_customPlayoff_exists = !!s.customPlayoff;
+        report.shared_customPlayoff_seeds  = s.customPlayoff?.seeds?.length ?? null;
+        report.shared_all_keys             = Object.keys(s);
+      } catch(e) { report.shared_error = e.message; }
+    }
+
+    console.log("[Profile.diagnoseCustomPlayoffs]", JSON.stringify(report, null, 2));
+    return report;
+  }
+
   // ── Public API ─────────────────────────────────────────
   return {
     linkSleeper,
@@ -3788,7 +3842,8 @@ const Profile = (() => {
     clearFilters,
     syncMFLTeams,
     syncYahooLeague,
-    deleteAllPlatformLeagues: _deleteAllPlatformLeagues
+    deleteAllPlatformLeagues: _deleteAllPlatformLeagues,
+    diagnoseCustomPlayoffs
   };
 
 })();

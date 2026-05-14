@@ -349,6 +349,7 @@ const GMDB = (() => {
       if (meta.auctionEnabled      !== undefined) shared.auctionEnabled      = meta.auctionEnabled      || false;
       if (meta.auctionIncludePicks !== undefined) shared.auctionIncludePicks = meta.auctionIncludePicks || false;
       if (meta.commishGroup        !== undefined) shared.commishGroup        = meta.commishGroup        || null;
+      if (meta.customPlayoff       !== undefined) shared.customPlayoff       = meta.customPlayoff       || null;
       if (Object.keys(shared).length) {
         await leagueSettingsRef(leagueId).update(shared);
       }
