@@ -6554,3 +6554,168 @@ details.ov-accordion[open] .ov-accordion-summary::after {
   border-radius: 10px;
   padding: 1px 5px;
 }
+
+/* ─────────────────────────────────────────────────────────
+   Custom Playoffs v3 — N-team matchup cards + assignment panel
+   ───────────────────────────────────────────────────────── */
+
+/* N-team matchup card rows */
+.cp-mu-team {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 8px;
+  font-size: .78rem;
+  transition: background .15s;
+}
+.cp-mu-team--adv {
+  background: rgba(34, 197, 94, .10);
+}
+.cp-mu-team--out {
+  opacity: .45;
+}
+.cp-mu-rank {
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  min-width: 14px;
+  text-align: right;
+}
+.cp-mu-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: .78rem;
+  color: var(--color-text);
+}
+.cp-mu-team--adv .cp-mu-name {
+  color: var(--color-text);
+}
+.cp-mu-team--out .cp-mu-name {
+  color: var(--color-text-dim);
+}
+.cp-mu-score {
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap;
+  margin-left: 4px;
+}
+.cp-adv-badge {
+  font-size: .58rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  color: #16a34a;
+  background: rgba(34, 197, 94, .18);
+  border-radius: 6px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* "Top N advance" footer inside matchup card */
+.cp-mu-footer {
+  font-size: .65rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: 2px 8px 4px;
+  border-top: 1px dashed var(--color-border);
+  letter-spacing: .02em;
+}
+
+/* ── Assignment panel ── */
+.cp-assign-matchup {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cp-assign-matchup-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 6px var(--space-3);
+  background: var(--color-surface-2, var(--color-surface));
+  border-bottom: 1px solid var(--color-border);
+}
+.cp-assign-num {
+  font-size: .75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cp-assign-adv-label {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.cp-assign-adv-label input {
+  width: 42px;
+  padding: 2px 4px;
+  font-size: .78rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.cp-assign-teams {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-2) var(--space-3);
+}
+.cp-assign-sel {
+  width: 100%;
+  font-size: .8rem;
+  padding: 4px 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.cp-assign-bye-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+.cp-assign-bye-row .cp-bye-sel {
+  flex: 1;
+  font-size: .8rem;
+  padding: 4px 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+
+/* Commish divider label */
+.label-commish-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.label-commish-divider::before,
+.label-commish-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+/* Fix .cp-round-fields grid for v3 (only 2 fields now, no playing-seeds/advance cols) */
+.cp-round-fields { grid-template-columns: 80px 80px; }
+@media (max-width: 480px) {
+  .cp-round-fields { grid-template-columns: 1fr 1fr; }
+}
