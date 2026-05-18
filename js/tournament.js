@@ -1071,12 +1071,15 @@ const DLRTournament = (() => {
       ${showAdmin ? `
         <div class="trn-section-card" style="border-color:var(--color-gold);background:rgba(240,180,41,.04)">
           <div class="trn-section-card-title">Admin</div>
-          <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+          <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;margin-bottom:var(--space-3)">
             <div style="font-size:.85rem;color:var(--color-text-dim);flex:1;min-width:160px">
               Set up your tournament, manage leagues, registrants, and yearly configuration.
             </div>
             <button class="btn-primary btn-sm" id="trn-open-wizard-btn">🪄 Setup Wizard</button>
             <button class="btn-secondary btn-sm" id="trn-goto-admin-btn">⚙ Admin Panel</button>
+          </div>
+          <div class="trn-danger-zone" style="margin-top:0;padding-top:var(--space-3)">
+            <button class="btn-ghost btn-sm trn-danger-btn" id="trn-delete-tournament-btn">🗑 Delete Tournament</button>
           </div>
         </div>` : ""}
     `;
@@ -1100,6 +1103,7 @@ const DLRTournament = (() => {
       }
     });
     document.getElementById("trn-open-wizard-btn")?.addEventListener("click", () => _openSetupWizard(tid, t));
+    document.getElementById("trn-delete-tournament-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
     document.getElementById("trn-goto-admin-btn")?.addEventListener("click", () => {
       _activeTopNav = "admin";
       document.querySelectorAll(".trn-top-nav-pill").forEach(b =>
@@ -1422,13 +1426,20 @@ const DLRTournament = (() => {
     if (_wizardStep < 1 || _wizardStep > 7) _wizardStep = 1;
 
     function _wizardStepBar() {
-      return `<div class="trn-wizard-steps">
-        ${ALL_STEPS.map(s => `
-          <button class="trn-wizard-step-btn${_wizardStep===s.num?" trn-wizard-step-btn--active":""}"
-            data-wstep="${s.num}" title="${s.label}">
-            <span class="trn-wizard-step-num">${s.num >= 4 ? "Y" : s.num}</span>
-            <span class="trn-wizard-step-label">${s.label}</span>
-          </button>`).join('<div class="trn-wizard-step-connector"></div>')}
+      const globalLabels = ["Identity","Roles","History"];
+      const yearLabels   = ["Year Setup","Leagues","Playoffs","Rules"];
+      return `<div class="trn-wizard-steps" style="display:flex;align-items:center;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:4px;gap:0;margin-bottom:var(--space-4)">
+        ${ALL_STEPS.map(s => {
+          const isYearStep = s.num >= 4;
+          const shortLabel = isYearStep ? yearLabels[s.num-4] : globalLabels[s.num-1];
+          const isActive = _wizardStep===s.num;
+          return `<button class="trn-wizard-step-btn${isActive?" trn-wizard-step-btn--active":""}"
+            data-wstep="${s.num}" title="${s.label}"
+            style="display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;padding:0 6px;flex-shrink:0;min-width:52px;opacity:${isActive?"1":"0.5"};transition:opacity .15s">
+            <span style="width:22px;height:22px;border-radius:50%;background:${isActive?"var(--color-gold)":"var(--color-border)"};color:${isActive?"#fff":"var(--color-text-dim)"};font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${s.num >= 4 ? "★" : s.num}</span>
+            <span style="font-size:.62rem;font-weight:600;color:${isActive?"var(--color-gold)":"var(--color-text-dim)"};text-align:center;white-space:nowrap;line-height:1.2">${shortLabel}</span>
+          </button>`;
+        }).join('<div style="flex:1;min-width:8px;max-width:24px;height:1px;background:var(--color-border);margin-bottom:14px;flex-shrink:1"></div>')}
       </div>`;
     }
 
@@ -1660,7 +1671,7 @@ const DLRTournament = (() => {
         <h3>${_buildStep1Label()}</h3>
         <button class="modal-close" id="trn-modal-close">✕</button>
       </div>
-      <div class="modal-body trn-wizard-modal-body" style="max-height:72vh;overflow-y:auto">
+      <div class="modal-body trn-wizard-modal-body" style="max-height:65vh;overflow-y:auto;overflow-x:hidden;box-sizing:border-box">
         ${_wizardStepBar()}
         <div class="trn-wizard-body">${_buildStepBody(_wizardStep)}</div>
       </div>
@@ -1688,8 +1699,9 @@ const DLRTournament = (() => {
     });
 
     modal.querySelector("#trn-wiz-next-btn")?.addEventListener("click", async () => {
-      const saved = await _saveWizardStep(tid, t, _wizardStep, modal);
-      if (!saved) return; // validation failed
+      // Save best-effort — never block navigation on validation failure.
+      // The user can always come back to complete a step later.
+      await _saveWizardStep(tid, t, _wizardStep, modal);
       if (_wizardStep < 7) { _wizardStep++; _rerenderWizard(tid, t, modal); }
       else {
         _closeModal();
@@ -1703,11 +1715,12 @@ const DLRTournament = (() => {
       }
     });
 
-    // Step pill clicks — allow jumping to any step
+    // Step pill clicks — allow jumping to any step (best-effort save of current step)
     modal.querySelectorAll(".trn-wizard-step-btn").forEach(btn => {
       btn.addEventListener("click", async () => {
         const step = parseInt(btn.dataset.wstep);
-        await _saveWizardStep(tid, t, _wizardStep, modal);
+        if (step === _wizardStep) return;
+        await _saveWizardStep(tid, t, _wizardStep, modal); // best-effort, never blocks
         _wizardStep = step;
         _rerenderWizard(tid, t, modal);
       });
@@ -1776,7 +1789,7 @@ const DLRTournament = (() => {
     try {
       if (step === 1) {
         const name    = modal.querySelector("#wiz-name")?.value.trim();
-        if (!name) { showToast("Tournament name is required", "error"); return false; }
+        if (!name) return true; // skip save if empty, don't block
         const tagline = modal.querySelector("#wiz-tagline")?.value.trim() || "";
         const bio     = modal.querySelector("#wiz-bio")?.value || "";
         const email   = modal.querySelector("#wiz-admin-email")?.value.trim() || "";
@@ -6487,6 +6500,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // Qualification count — how many teams advance to playoffs
     const stQualCount  = _computeQualCount(t, stPo);
 
+    const leagues = [...new Set(allRows.map(r => r.leagueName).filter(Boolean))].sort();
+    const hasLeagueFilter = leagues.length > 1;
+
     body.innerHTML = `
       <div class="trn-standings-toolbar">
         <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
@@ -6498,6 +6514,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             ${divisions.map(d => `<option value="div_${_esc(d)}">${_esc(d)}</option>`).join("")}
           </select>` : ""}
         </div>
+        ${hasLeagueFilter ? `
+        <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
+          <select id="trn-st-league" class="trn-filter-select" style="min-width:0">
+            <option value="">All Leagues</option>
+            ${leagues.map(l => `<option value="${_esc(l)}">${_esc(l)}</option>`).join("")}
+          </select>
+        </div>` : ""}
         <input type="text" id="trn-st-search" placeholder="Search team or league…" class="trn-st-search" />
       </div>
       <div class="trn-standings-meta">
@@ -6512,9 +6535,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     `;
 
     const refilter = () => {
-      const q    = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
-      const grpVal = document.getElementById("trn-st-group")?.value || "flat";
+      const q        = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
+      const grpVal   = document.getElementById("trn-st-group")?.value || "flat";
+      const leagueVal = document.getElementById("trn-st-league")?.value || "";
       let rows = allRows;
+      if (leagueVal) rows = rows.filter(r => r.leagueName === leagueVal);
       if (q) rows = rows.filter(r =>
         r.teamName.toLowerCase().includes(q) ||
         (r.rawTeamName||"").toLowerCase().includes(q) ||
@@ -6538,6 +6563,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     document.getElementById("trn-st-search")?.addEventListener("input", refilter);
     document.getElementById("trn-st-group")?.addEventListener("change", refilter);
+    document.getElementById("trn-st-league")?.addEventListener("change", refilter);
     _wireStandingSortHeaders(allRows, hasConf, hasDiv);
   }
 
