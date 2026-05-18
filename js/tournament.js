@@ -57,11 +57,24 @@ const DLRTournament = (() => {
   let _currentUsername    = null;
   let _tournaments        = {};
   let _activeTournamentId = null;
+
+  // New top-level nav state — five sections for admin, four for user
+  // admin: overview | admin | history | players | chat
+  // user:  overview | history | players | chat
+  let _activeTopNav       = "overview"; // current top-level nav section
+  let _activeHistoryTab   = "standings"; // sub-tab within Tournament History
+  let _activeAdminMgmtTab = "registrants"; // sub-tab within Admin panel
+  // Legacy compat — some internal render fns still read these
   let _activeAdminTab     = "overview";
   let _activeUserTab      = "info";
+
   let _tournamentYear     = null;   // global year filter — null = latest
   let _rulesEditorYear    = null;   // year currently shown in admin rules editor
   let _viewingAsUser      = false;  // admin clicked "View" (participant mode)
+
+  // Wizard state
+  let _wizardStep         = 1;      // current wizard step (1-8)
+  let _wizardYear         = null;   // year being edited in wizard per-year steps
 
   // ── Firebase helpers ───────────────────────────────────
   function _tRef(tid)        { return GMD.child(`tournaments/${tid}`); }
@@ -549,7 +562,10 @@ const DLRTournament = (() => {
       _tournaments[tid] = tournament;
       _activeTournamentId = tid;
       _writePublicSummary(tid, tournament);
-      _openTournamentView(tid);
+      _wizardStep = 1;
+      _openTournamentView(tid, "overview");
+      // Auto-open wizard for new tournaments after a brief delay
+      setTimeout(() => _openSetupWizard(tid, tournament), 400);
     } catch(err) {
       if (btn) { btn.disabled = false; btn.textContent = "Create Tournament"; }
       if (errEl) { errEl.textContent = err.message; errEl.classList.remove("hidden"); }
@@ -681,13 +697,39 @@ const DLRTournament = (() => {
   }
 
   // ── Tournament detail view ─────────────────────────────
-  async function _openTournamentView(tid) {
+  // ── Resolve default year for Tournament History ────────
+  // Priority: active season (has standings + not published) > latest completed > reg-open future
+  function _resolveDefaultYear(t) {
+    const years = _playoffYears(t).sort((a, b) => b - a); // desc strings
+    const scVals = Object.values(t.standingsCache || {});
+    // 1. Most recent year that has standings but is NOT yet published (active season)
+    const active = years.find(y => {
+      const hasStandings = scVals.some(e => String(e.year) === String(y));
+      const published    = t.playoffs?.[y]?.published;
+      return hasStandings && !published;
+    });
+    if (active) return Number(active);
+    // 2. Most recent completed year (has standings, published or not)
+    const completed = years.find(y => scVals.some(e => String(e.year) === String(y)));
+    if (completed) return Number(completed);
+    // 3. Fallback: any year with registrationOpen (pre-season, no history yet)
+    const regOpen = years.find(y => t.playoffs?.[y]?.registrationOpen);
+    if (regOpen) return Number(regOpen);
+    return years.length ? Number(years[0]) : null;
+  }
+
+  // ── Check if registration is open for any year ─────────
+  function _getRegOpenYear(t) {
+    const years = _playoffYears(t);
+    return years.find(y => t.playoffs?.[y]?.registrationOpen) || null;
+  }
+
+  async function _openTournamentView(tid, navSection) {
     _activeTournamentId = tid;
     const container = document.getElementById("view-tournament");
     if (!container) return;
 
-    // Reset per-tournament analytics caches so stale data from the previous
-    // tournament never bleeds through before a fresh fetch completes.
+    // Reset per-tournament analytics caches
     _draftCache     = null;
     _matchupsCache  = {};
     _recapCache     = {};
@@ -710,153 +752,150 @@ const DLRTournament = (() => {
     if (!t) { showToast("Tournament not found", "error"); return; }
     _tournaments[tid] = t;
 
-    const isAdmin      = t.roles?.[_currentUsername]?.role === "admin";
-    const isSubAdmin   = t.roles?.[_currentUsername]?.role === "sub_admin";
-    const canAdmin     = isAdmin || isSubAdmin;
-    // Admin can choose to view as participant via the card's "View" button
-    const showAdminNav = canAdmin && !_viewingAsUser;
-    const meta         = t.meta || {};
+    const isAdmin    = t.roles?.[_currentUsername]?.role === "admin";
+    const isSubAdmin = t.roles?.[_currentUsername]?.role === "sub_admin";
+    const canAdmin   = isAdmin || isSubAdmin;
+    const showAdmin  = canAdmin && !_viewingAsUser;
+    const meta       = t.meta || {};
 
-    // Derive available years from standingsCache for the global year selector
-    const scEntries    = Object.entries(t.standingsCache || {});
-    const hasNewKeys   = scEntries.some(([k]) => /^\d{4}_/.test(k));
-    const yearEntries  = hasNewKeys ? scEntries.filter(([k]) => /^\d{4}_/.test(k)) : scEntries;
-    const availableYrs = [...new Set(yearEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a,b) => b-a);
-    if (!_tournamentYear || !availableYrs.includes(_tournamentYear)) {
-      _tournamentYear = availableYrs[0] || null;
+    // Resolve year
+    const resolvedYear = _resolveDefaultYear(t);
+    if (!_tournamentYear || _tournamentYear !== resolvedYear) {
+      _tournamentYear = resolvedYear;
     }
-    // Keep _standingsYear in sync
     _standingsYear = _tournamentYear;
 
-    // Year selector shown for BOTH admin and user when multiple years exist
-    const yearSel = availableYrs.length > 1 ? `
-      <div class="trn-year-selector">
-        <select id="trn-global-year" class="trn-filter-select">
-          ${availableYrs.map(y => `<option value="${y}" ${y === _tournamentYear ? "selected" : ""}>${y}</option>`).join("")}
-        </select>
-      </div>` : availableYrs.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${availableYrs[0]}</span></div>` : "";
+    // Collect all years for pills
+    const scEntries  = Object.entries(t.standingsCache || {});
+    const hasNewKeys = scEntries.some(([k]) => /^\d{4}_/.test(k));
+    const yearEntries = hasNewKeys ? scEntries.filter(([k]) => /^\d{4}_/.test(k)) : scEntries;
+    const scYears    = [...new Set(yearEntries.map(([, lc]) => lc.year).filter(Boolean))].map(Number);
+    const poYears    = _playoffYears(t).map(Number);
+    const allYears   = [...new Set([...scYears, ...poYears])].sort((a, b) => b - a);
 
-    // Build tab options based on mode
-    const hasPlayoffConfig = !!(Object.keys(t.playoffs||{}).some(k => /^\d{4}$/.test(k)
-      ? (t.playoffs[k]?.mode) : k === "mode"));
-    const adminOpts = `
-      <option value="overview"      ${_activeAdminTab === "overview"      ? "selected" : ""}>📊 Overview</option>
-      <option value="leagues"       ${_activeAdminTab === "leagues"       ? "selected" : ""}>🏟 Leagues</option>
-      <option value="roles"         ${_activeAdminTab === "roles"         ? "selected" : ""}>👤 Roles</option>
-      <option value="registration"  ${_activeAdminTab === "registration"  ? "selected" : ""}>📝 Registration Form</option>
-      <option value="registrations" ${_activeAdminTab === "registrations" ? "selected" : ""}>📋 Registrants${Object.keys(t.registrations||{}).length ? " (" + Object.keys(t.registrations).length + ")" : ""}</option>
-      <option value="participants"  ${_activeAdminTab === "participants"  ? "selected" : ""}>👥 Participants${Object.keys(t.participants||{}).length ? " (" + Object.keys(t.participants).length + ")" : ""}</option>
-      <option value="standings"     ${_activeAdminTab === "standings"     ? "selected" : ""}>🏆 Standings</option>
-      <option value="playoffs"      ${_activeAdminTab === "playoffs"      ? "selected" : ""}>🥇 Playoffs</option>
-      <option value="info_edit"     ${_activeAdminTab === "info_edit"     ? "selected" : ""}>✏ Info / Rules</option>
-      <option value="players"       ${_activeAdminTab === "players"       ? "selected" : ""}>👥 Players</option>
-      <option value="mostrostered"  ${_activeAdminTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
-      <option value="adpvsfinish"   ${_activeAdminTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>
-      <option value="board"         ${_activeAdminTab === "board"         ? "selected" : ""}>💬 Board</option>`;
+    // Set nav section
+    if (navSection) _activeTopNav = navSection;
+    // Default to overview on first load
+    if (!["overview","admin","history","players","chat"].includes(_activeTopNav)) {
+      _activeTopNav = "overview";
+    }
+    // Non-admins can't see admin section
+    if (!showAdmin && _activeTopNav === "admin") _activeTopNav = "overview";
 
-    const userOpts = `
-      <option value="info"      ${_activeUserTab === "info"      ? "selected" : ""}>ℹ Info</option>
-      <option value="rules"     ${_activeUserTab === "rules"     ? "selected" : ""}>📋 Rules</option>
-      <option value="standings" ${_activeUserTab === "standings" ? "selected" : ""}>🏆 Standings</option>
-      ${hasPlayoffConfig ? `<option value="playoffs" ${_activeUserTab === "playoffs" ? "selected" : ""}>🥇 Playoffs</option>` : ""}
-      <option value="draft"         ${_activeUserTab === "draft"         ? "selected" : ""}>📋 Draft</option>
-      <option value="matchups"       ${_activeUserTab === "matchups"       ? "selected" : ""}>🏈 Matchups</option>
-      <option value="match_analysis" ${_activeUserTab === "match_analysis" ? "selected" : ""}>📊 Match Analysis</option>
-      <option value="rosters"       ${_activeUserTab === "rosters"       ? "selected" : ""}>🗂 Rosters</option>
-      <option value="players"       ${_activeUserTab === "players"       ? "selected" : ""}>👥 Players</option>
-      <option value="mostrostered"  ${_activeUserTab === "mostrostered"  ? "selected" : ""}>🏈 Most Rostered</option>
-      <option value="adpvsfinish"   ${_activeUserTab === "adpvsfinish"   ? "selected" : ""}>🎯 ADP vs Finish</option>
-      <option value="board"         ${_activeUserTab === "board"         ? "selected" : ""}>💬 Board</option>`;
-    const regOpen = ["registration_open","active"].includes(meta.status);
-    const regBtnHtml = (!showAdminNav && regOpen) ? `<button class="btn-primary btn-sm trn-reg-pill" id="trn-register-pill-btn">📬 Register</button>` : "";
+    // Determine if registration is open
+    const regOpenYear = _getRegOpenYear(t);
+    const anyRegOpen  = !!regOpenYear;
+
+    // Build nav pills HTML
+    const _navPill = (id, label, active) =>
+      `<button class="trn-top-nav-pill${active ? " trn-top-nav-pill--active" : ""}" data-nav="${id}">${label}</button>`;
+
+    const adminPills = showAdmin ? _navPill("admin", "⚙ Admin", _activeTopNav === "admin") : "";
+
+    const navPillsHtml = `
+      ${_navPill("overview", "Overview", _activeTopNav === "overview")}
+      ${adminPills}
+      ${_navPill("history",  "Tournament History", _activeTopNav === "history")}
+      ${_navPill("players",  "Player Records",     _activeTopNav === "players")}
+      ${_navPill("chat",     "Chat",               _activeTopNav === "chat")}
+    `;
+
+    // Mobile nav select
+    const navSelectOpts = [
+      `<option value="overview" ${_activeTopNav==="overview"?"selected":""}>Overview</option>`,
+      showAdmin ? `<option value="admin" ${_activeTopNav==="admin"?"selected":""}>⚙ Admin</option>` : "",
+      `<option value="history"  ${_activeTopNav==="history" ?"selected":""}>Tournament History</option>`,
+      `<option value="players"  ${_activeTopNav==="players" ?"selected":""}>Player Records</option>`,
+      `<option value="chat"     ${_activeTopNav==="chat"    ?"selected":""}>Chat</option>`,
+    ].join("");
+
+    // Register button: only shown to non-admins when a year has registration open
+    const regBtnHtml = (!showAdmin && anyRegOpen)
+      ? `<button class="btn-primary btn-sm" id="trn-register-pill-btn">📬 Register</button>`
+      : "";
 
     container.innerHTML = `
       <div class="trn-detail-container">
 
-        <!-- Back + Header -->
+        <!-- Topbar: back + title + action buttons -->
         <div class="trn-detail-topbar">
           <button class="btn-ghost btn-sm" id="trn-back-btn">← All Tournaments</button>
-          <div style="display:flex;align-items:center;gap:var(--space-2)">
-            ${canAdmin && _viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-switch-manage-btn">🛠 Manage</button>` : ""}
-            ${canAdmin && !_viewingAsUser ? `<button class="btn-ghost btn-sm" id="trn-switch-view-btn">👁 View</button>` : ""}
-            <span class="trn-status-badge trn-status-${meta.status || "draft"}">
-              ${STATUS_ICONS[meta.status] || ""} ${STATUS_LABELS[meta.status] || "Draft"}
-            </span>
+          <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+            ${regBtnHtml}
+            ${showAdmin && _viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-switch-manage-btn">🛠 Manage</button>` : ""}
+            ${showAdmin && !_viewingAsUser ? `<button class="btn-ghost btn-sm" id="trn-switch-view-btn">👁 View as User</button>` : ""}
           </div>
         </div>
 
+        <!-- Tournament name + tagline -->
         <div class="trn-detail-title-row">
           <div>
             <h2 class="trn-detail-name">${_esc(meta.name || "Untitled")}</h2>
             ${meta.tagline ? `<p class="trn-detail-tagline">${_esc(meta.tagline)}</p>` : ""}
           </div>
-          <div style="display:flex;gap:var(--space-2);align-items:center;flex-shrink:0">
-            ${regBtnHtml}
-            ${canAdmin && !_viewingAsUser ? `<button class="btn-secondary btn-sm" id="trn-edit-meta-btn">✏ Edit</button>` : ""}
-          </div>
         </div>
 
-        <!-- Global year + tab nav row -->
-        <div class="trn-nav-row">
-          ${yearSel}
-          <select class="trn-tab-select trn-tab-select--main" id="trn-tab-select">
-            ${showAdminNav ? adminOpts : userOpts}
+        ${_viewingAsUser && showAdmin ? `
+          <div class="trn-preview-banner">
+            <span>👁 Previewing as user</span>
+            <button class="btn-secondary btn-sm" id="trn-exit-preview-btn">Exit Preview</button>
+          </div>` : ""}
+
+        <!-- Top nav: pills (desktop) + select (mobile) -->
+        <nav class="trn-top-nav" aria-label="Tournament navigation">
+          <div class="trn-top-nav-pills">${navPillsHtml}</div>
+          <select class="trn-tab-select trn-top-nav-select" id="trn-top-nav-select">
+            ${navSelectOpts}
           </select>
-        </div>
+        </nav>
 
-        <div id="trn-tab-body" class="trn-tab-body"></div>
+        <!-- Section body -->
+        <div id="trn-section-body"></div>
       </div>
     `;
 
+    // ── Wire nav events ────────────────────────────────────
     document.getElementById("trn-back-btn")?.addEventListener("click", () => _renderView(_landingTab));
-    document.getElementById("trn-edit-meta-btn")?.addEventListener("click", () => _openEditMetaModal(tid, t));
-    document.getElementById("trn-register-pill-btn")?.addEventListener("click", () => {
-      // Open register as a full-page overlay rather than switching tabs
-      _openRegisterPage(tid, t);
-    });
+    document.getElementById("trn-register-pill-btn")?.addEventListener("click", () => _openRegisterPage(tid, t));
     document.getElementById("trn-switch-view-btn")?.addEventListener("click", () => {
       _viewingAsUser = true;
-      _activeUserTab = "info";
+      _activeTopNav  = "overview";
       _openTournamentView(tid);
     });
     document.getElementById("trn-switch-manage-btn")?.addEventListener("click", () => {
       _viewingAsUser = false;
       _openTournamentView(tid);
     });
-
-    // Global year selector
-    document.getElementById("trn-global-year")?.addEventListener("change", function() {
-      _tournamentYear = parseInt(this.value);
-      _standingsYear  = _tournamentYear;
-      // Invalidate analytics caches that are year-specific
-      _draftCache    = null;
-      _matchupsCache = {};
-      _recapCache    = {};
-      _rostersCache  = null;
-      _matchupsWeek  = null; // reset week so it defaults to latest for the new year
-      _weeklyMuCache  = {};
-      _weeklyMuWeek   = null;
-      _weeklyMuFilter = "all";
-      _weeklyMuPage   = 1;
-      // Re-render current tab with new year
-      const curTab = showAdminNav ? _activeAdminTab : _activeUserTab;
-      _renderTab(tid, curTab, t, showAdminNav);
+    document.getElementById("trn-exit-preview-btn")?.addEventListener("click", () => {
+      _viewingAsUser = false;
+      _openTournamentView(tid);
     });
 
-    // Tab select
-    document.getElementById("trn-tab-select")?.addEventListener("change", function() {
-      const tabName = this.value;
-      if (showAdminNav) _activeAdminTab = tabName;
-      else _activeUserTab = tabName;
-      _renderTab(tid, tabName, t, showAdminNav);
+    // Desktop nav pills
+    document.querySelectorAll(".trn-top-nav-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _activeTopNav = btn.dataset.nav;
+        _renderTopSection(tid, t, showAdmin, allYears);
+        document.querySelectorAll(".trn-top-nav-pill").forEach(b =>
+          b.classList.toggle("trn-top-nav-pill--active", b.dataset.nav === _activeTopNav));
+        const sel = document.getElementById("trn-top-nav-select");
+        if (sel) sel.value = _activeTopNav;
+      });
     });
 
-    // Render default tab
-    const defaultTab = showAdminNav ? _activeAdminTab : _activeUserTab;
-    _renderTab(tid, defaultTab, t, showAdminNav);
+    // Mobile nav select
+    document.getElementById("trn-top-nav-select")?.addEventListener("change", function() {
+      _activeTopNav = this.value;
+      _renderTopSection(tid, t, showAdmin, allYears);
+      document.querySelectorAll(".trn-top-nav-pill").forEach(b =>
+        b.classList.toggle("trn-top-nav-pill--active", b.dataset.nav === _activeTopNav));
+    });
+
+    // Render the current section
+    _renderTopSection(tid, t, showAdmin, allYears);
 
     // Toast for non-admin users with missing registration fields
-    if (!showAdminNav) {
+    if (!showAdmin) {
       const form    = t.meta?.registrationForm || {};
       const opts    = form.optionalFields || [];
       const missing = _getMissingFields(t, opts);
@@ -867,10 +906,1110 @@ const DLRTournament = (() => {
     }
   }
 
+  // ── Top-level section router ───────────────────────────
+  function _renderTopSection(tid, t, showAdmin, allYears) {
+    const body = document.getElementById("trn-section-body");
+    if (!body) return;
+    body.innerHTML = "";
+    switch (_activeTopNav) {
+      case "overview": return _renderOverviewSection(tid, t, body, showAdmin);
+      case "admin":    return showAdmin ? _renderAdminSection(tid, t, body, allYears) : _renderOverviewSection(tid, t, body, showAdmin);
+      case "history":  return _renderHistorySection(tid, t, body, allYears, showAdmin);
+      case "players":  return _renderPlayersTab(tid, t, body);
+      case "chat":     return _renderBoardTab(tid, t, body);
+      default:         return _renderOverviewSection(tid, t, body, showAdmin);
+    }
+  }
+
+  // ── Year pill bar helper ───────────────────────────────
+  // Renders a row of year pills; calls onChange(year) on click.
+  // allYears: number[] desc. activeYear: number.
+  function _renderYearPills(allYears, activeYear, onChange) {
+    if (!allYears.length) return "";
+    return `<div class="trn-year-pill-bar">
+      ${allYears.map(y => `
+        <button class="trn-year-pill${y === activeYear ? " trn-year-pill--active" : ""}"
+          data-yr="${y}">${y}</button>`).join("")}
+    </div>`;
+  }
+
+  function _wireYearPills(container, allYears, onChange) {
+    container.querySelectorAll(".trn-year-pill[data-yr]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const yr = Number(btn.dataset.yr);
+        _tournamentYear = yr;
+        _standingsYear  = yr;
+        // Invalidate year-specific caches
+        _draftCache    = null;
+        _matchupsCache = {};
+        _recapCache    = {};
+        _rostersCache  = null;
+        _matchupsWeek  = null;
+        _weeklyMuCache  = {};
+        _weeklyMuWeek   = null;
+        _weeklyMuFilter = "all";
+        _weeklyMuPage   = 1;
+        container.querySelectorAll(".trn-year-pill[data-yr]").forEach(b =>
+          b.classList.toggle("trn-year-pill--active", Number(b.dataset.yr) === yr));
+        onChange(yr);
+      });
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  SECTION: OVERVIEW
+  // ══════════════════════════════════════════════════════════
+  function _renderOverviewSection(tid, t, body, showAdmin) {
+    const meta  = t.meta  || {};
+    const rawBio = meta.bio || "";
+
+    // Bio: newlines → <br>, URLs autolinked
+    const linkedBio = rawBio
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/\n/g, "<br>")
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+
+    // Stats
+    const distinctYears = [...new Set(Object.values(t.standingsCache || {}).map(lc => lc.year).filter(Boolean))].length || null;
+    const leagueCount   = Object.keys(t.leagues || {}).length;
+    const regCount      = Object.keys(t.registrations || {}).length;
+
+    // Social links
+    const socialLinks = Array.isArray(meta.socialLinks) ? meta.socialLinks : _legacySocialLinks(meta.socialLinks);
+    const donationLinks = Array.isArray(meta.donationLinks) ? meta.donationLinks : (meta.donationLink ? [{label:"Donate / Entry Fee", url: meta.donationLink}] : []);
+    const socialIcons = { twitter:"𝕏", discord:"💬", reddit:"🤖", website:"🌐", instagram:"📸", youtube:"▶", facebook:"👥", twitch:"🎮" };
+
+    const socialHtml = socialLinks.filter(l => l.url).map(l => {
+      const key  = (l.label||"").toLowerCase();
+      const icon = socialIcons[key] || "🔗";
+      return `<a href="${_esc(l.url)}" target="_blank" rel="noopener" class="trn-social-link">${icon} ${_esc(l.label||l.url)}</a>`;
+    }).join("");
+
+    const donationHtml = donationLinks.filter(l => l.url).map(l =>
+      `<a href="${_esc(l.url)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">💰 ${_esc(l.label||"Donate / Entry Fee")}</a>`
+    ).join("");
+
+    // Rules (latest year)
+    const rby = t.rulesByYear || {};
+    const latestRulesYear = Object.keys(rby).map(Number).sort((a,b) => b-a)[0] || null;
+    const rules = latestRulesYear ? rby[latestRulesYear] : null;
+
+    // Scoring summary for current year
+    const years = _playoffYears(t);
+    const sumYear = _tournamentYear && years.includes(String(_tournamentYear)) ? String(_tournamentYear) : (years[0] || null);
+
+    // Contact commissioner
+    const contactBtn = meta.adminEmail
+      ? `<a href="mailto:${_esc(meta.adminEmail)}?subject=${encodeURIComponent("[" + (meta.name||"Tournament") + "] Question")}"
+           class="btn-secondary btn-sm trn-contact-btn">✉ Contact Commissioner</a>`
+      : "";
+
+    // Registration status
+    const regOpenYear = _getRegOpenYear(t);
+    const regStatusHtml = regOpenYear
+      ? `<div class="trn-reg-open-banner">📬 Registration open for ${regOpenYear}
+           <button class="btn-primary btn-sm" id="trn-overview-register-btn">Register Now</button>
+         </div>`
+      : "";
+
+    body.innerHTML = `
+      ${regStatusHtml}
+
+      <!-- Stats row -->
+      <div class="trn-overview-grid" style="margin-top:var(--space-4)">
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${distinctYears || leagueCount}</div>
+          <div class="trn-stat-label">${distinctYears ? "Seasons" : "Leagues"}</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${Object.keys(t.participants||{}).length || regCount}</div>
+          <div class="trn-stat-label">${Object.keys(t.participants||{}).length ? "Participants" : "Registered"}</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${leagueCount}</div>
+          <div class="trn-stat-label">Leagues</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${meta.regType === "invite" ? "Invite" : "Open"}</div>
+          <div class="trn-stat-label">Registration Type</div>
+        </div>
+      </div>
+
+      <!-- Bio -->
+      ${rawBio ? `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">About This Tournament</div>
+          <div class="trn-info-bio">${linkedBio}</div>
+        </div>` : ""}
+
+      <!-- Playoff/scoring summary for current year -->
+      ${sumYear ? _renderTournamentSummary(t, sumYear, tid) : ""}
+
+      <!-- Rules -->
+      ${rules?.content ? `
+        <div class="trn-section-card" id="trn-overview-rules-card">
+          <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>Rules</span>
+            ${rules.version ? `<span style="font-size:.75rem;color:var(--color-text-dim)">v${_esc(String(rules.version))}</span>` : ""}
+          </div>
+          <div class="trn-info-bio trn-rules-preview" id="trn-rules-preview-body">
+            ${rules.content.split("\n").slice(0,4).map(l=>_esc(l)).join("<br>")}
+            ${rules.content.split("\n").length > 4 ? "<br><em>…</em>" : ""}
+          </div>
+          <button class="btn-secondary btn-sm" id="trn-expand-rules-btn" style="margin-top:var(--space-3)">Show Full Rules</button>
+        </div>` : ""}
+
+      <!-- Social / donations / contact -->
+      ${socialHtml || donationHtml || contactBtn ? `
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">Connect</div>
+          ${socialHtml ? `<div class="trn-social-links">${socialHtml}</div>` : ""}
+          ${donationHtml ? `<div style="margin-top:var(--space-3)">${donationHtml}</div>` : ""}
+          ${contactBtn  ? `<div style="margin-top:var(--space-3)">${contactBtn}</div>` : ""}
+        </div>` : ""}
+
+      ${showAdmin ? `
+        <div class="trn-section-card" style="border-color:var(--color-gold);background:rgba(240,180,41,.04)">
+          <div class="trn-section-card-title">Admin</div>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+            <div style="font-size:.85rem;color:var(--color-text-dim);flex:1;min-width:160px">
+              Set up your tournament, manage leagues, registrants, and yearly configuration.
+            </div>
+            <button class="btn-primary btn-sm" id="trn-open-wizard-btn">🪄 Setup Wizard</button>
+            <button class="btn-secondary btn-sm" id="trn-goto-admin-btn">⚙ Admin Panel</button>
+          </div>
+        </div>` : ""}
+    `;
+
+    // Wire
+    document.getElementById("trn-overview-register-btn")?.addEventListener("click", () => {
+      _openRegisterPage(tid, t);
+    });
+    document.getElementById("trn-expand-rules-btn")?.addEventListener("click", function() {
+      const preview = document.getElementById("trn-rules-preview-body");
+      if (!preview) return;
+      const isExpanded = preview.classList.contains("trn-rules-full");
+      if (isExpanded) {
+        preview.classList.remove("trn-rules-full");
+        preview.innerHTML = rules.content.split("\n").slice(0,4).map(l=>_esc(l)).join("<br>") + "<br><em>…</em>";
+        this.textContent = "Show Full Rules";
+      } else {
+        preview.classList.add("trn-rules-full");
+        preview.innerHTML = rules.content.split("\n").map(l=>_esc(l)).join("<br>");
+        this.textContent = "Collapse Rules";
+      }
+    });
+    document.getElementById("trn-open-wizard-btn")?.addEventListener("click", () => _openSetupWizard(tid, t));
+    document.getElementById("trn-goto-admin-btn")?.addEventListener("click", () => {
+      _activeTopNav = "admin";
+      document.querySelectorAll(".trn-top-nav-pill").forEach(b =>
+        b.classList.toggle("trn-top-nav-pill--active", b.dataset.nav === "admin"));
+      const sel = document.getElementById("trn-top-nav-select");
+      if (sel) sel.value = "admin";
+      const scEntries  = Object.entries(t.standingsCache || {});
+      const hasNewKeys = scEntries.some(([k]) => /^\d{4}_/.test(k));
+      const yearEntries = hasNewKeys ? scEntries.filter(([k]) => /^\d{4}_/.test(k)) : scEntries;
+      const scYears    = [...new Set(yearEntries.map(([, lc]) => lc.year).filter(Boolean))].map(Number);
+      const poYears    = _playoffYears(t).map(Number);
+      const allYears   = [...new Set([...scYears, ...poYears])].sort((a, b) => b - a);
+      _renderTopSection(tid, t, true, allYears);
+    });
+
+    // Summary year pills wiring
+    document.querySelectorAll(".trn-summary-year-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const yr = btn.dataset.sumYear;
+        const el = document.getElementById("trn-tournament-summary");
+        if (!el) return;
+        const newHtml = _renderTournamentSummary(t, yr, tid);
+        const tmp = document.createElement("div");
+        tmp.innerHTML = newHtml;
+        el.replaceWith(tmp.firstElementChild);
+        document.querySelectorAll(".trn-summary-year-pill").forEach(b =>
+          b.classList.toggle("trn-summary-year-pill--active", b.dataset.sumYear === yr));
+      });
+    });
+  }
+
+  // Convert legacy socialLinks object {twitter:url,...} to array format
+  function _legacySocialLinks(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return [];
+    return Object.entries(obj).filter(([, url]) => url).map(([key, url]) => ({ label: key.charAt(0).toUpperCase()+key.slice(1), url }));
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  SECTION: TOURNAMENT HISTORY
+  // ══════════════════════════════════════════════════════════
+  function _renderHistorySection(tid, t, body, allYears, showAdmin) {
+    const activeYear = _tournamentYear || (allYears[0] || null);
+
+    // History sub-tabs
+    const histTabs = [
+      { id:"standings",     label:"Standings"       },
+      { id:"playoffs",      label:"Playoffs"        },
+      { id:"draft",         label:"Draft"           },
+      { id:"adpvsfinish",   label:"ADP"             },
+      { id:"matchups",      label:"Matchups"        },
+      { id:"match_analysis",label:"Match Analysis"  },
+      { id:"rosters",       label:"Rosters"         },
+      { id:"mostrostered",  label:"Most Rostered"   },
+    ];
+
+    const tabOpts = histTabs.map(tab =>
+      `<option value="${tab.id}" ${_activeHistoryTab===tab.id?"selected":""}>${tab.label}</option>`
+    ).join("");
+
+    body.innerHTML = `
+      <!-- Year pills -->
+      ${allYears.length > 1 ? _renderYearPills(allYears, activeYear, yr => {
+        _renderHistoryContent(tid, t, body, yr, showAdmin);
+      }) : allYears.length === 1 ? `<div class="trn-year-single-label">${allYears[0]}</div>` : ""}
+
+      <!-- History sub-nav: pills desktop, select mobile -->
+      <div class="trn-history-subnav">
+        <div class="trn-history-tabs">
+          ${histTabs.map(tab => `
+            <button class="trn-history-tab${_activeHistoryTab===tab.id?" trn-history-tab--active":""}"
+              data-hist="${tab.id}">${tab.label}</button>`).join("")}
+        </div>
+        <select class="trn-tab-select trn-history-select" id="trn-history-select">
+          ${tabOpts}
+        </select>
+      </div>
+
+      <div id="trn-history-content"></div>
+    `;
+
+    // Wire year pills
+    if (allYears.length > 1) {
+      _wireYearPills(body, allYears, yr => {
+        _renderHistoryContent(tid, t, body, yr, showAdmin);
+      });
+    }
+
+    // Wire history sub-tabs (desktop)
+    body.querySelectorAll(".trn-history-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _activeHistoryTab = btn.dataset.hist;
+        body.querySelectorAll(".trn-history-tab").forEach(b =>
+          b.classList.toggle("trn-history-tab--active", b.dataset.hist === _activeHistoryTab));
+        const sel = document.getElementById("trn-history-select");
+        if (sel) sel.value = _activeHistoryTab;
+        _renderHistoryContent(tid, t, body, _tournamentYear || activeYear, showAdmin);
+      });
+    });
+
+    // Wire history select (mobile)
+    document.getElementById("trn-history-select")?.addEventListener("change", function() {
+      _activeHistoryTab = this.value;
+      body.querySelectorAll(".trn-history-tab").forEach(b =>
+        b.classList.toggle("trn-history-tab--active", b.dataset.hist === _activeHistoryTab));
+      _renderHistoryContent(tid, t, body, _tournamentYear || activeYear, showAdmin);
+    });
+
+    // Render default content
+    _renderHistoryContent(tid, t, body, activeYear, showAdmin);
+  }
+
+  function _renderHistoryContent(tid, t, body, year, showAdmin) {
+    // Sync global year state
+    _tournamentYear = year;
+    _standingsYear  = year;
+    // Invalidate year-specific caches
+    _draftCache = null; _matchupsCache = {}; _recapCache = {}; _rostersCache = null;
+    _matchupsWeek = null; _weeklyMuCache = {}; _weeklyMuWeek = null;
+
+    const content = document.getElementById("trn-history-content");
+    if (!content) return;
+    content.innerHTML = "";
+
+    // Sync legacy _activeAdminTab / _activeUserTab for render functions that still read them
+    _activeAdminTab = _activeHistoryTab;
+    _activeUserTab  = _activeHistoryTab;
+
+    switch (_activeHistoryTab) {
+      case "standings":      return _renderStandingsTab(tid, t, content, showAdmin);
+      case "playoffs":       return _renderPlayoffsTab(tid, t, content);
+      case "draft":          return _renderAnalyticsDraft(tid, t, content);
+      case "adpvsfinish":    return _renderAnalyticsADPvFinish(tid, t, content);
+      case "matchups":       return _renderWeeklyMatchups(tid, t, content);
+      case "match_analysis": return _renderAnalyticsMatchups(tid, t, content);
+      case "rosters":        return _renderAnalyticsRosters(tid, t, content);
+      case "mostrostered":   return _renderAnalyticsMostRostered(tid, t, content);
+      default:               return _renderStandingsTab(tid, t, content, showAdmin);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  SECTION: ADMIN PANEL
+  // ══════════════════════════════════════════════════════════
+  function _renderAdminSection(tid, t, body, allYears) {
+    const activeYear = _tournamentYear || (allYears[0] || null);
+    const regCount   = Object.keys(t.registrations||{}).length;
+    const pCount     = Object.keys(t.participants||{}).length;
+    const pendingCount = Object.values(t.registrations||{}).filter(r=>r.status==="pending").length;
+
+    // Admin panel has: stats overview, Setup Wizard button, then year-scoped Registrants + Participants
+    body.innerHTML = `
+      <!-- Quick stats -->
+      <div class="trn-overview-grid" style="margin-top:var(--space-3)">
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${Object.keys(t.leagues||{}).length}</div>
+          <div class="trn-stat-label">Leagues</div>
+        </div>
+        <div class="trn-stat-card trn-stat-card--${pendingCount > 0 ? "warn" : "ok"}">
+          <div class="trn-stat-value">${pendingCount}</div>
+          <div class="trn-stat-label">Pending Review</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${regCount}</div>
+          <div class="trn-stat-label">Registrants</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${pCount}</div>
+          <div class="trn-stat-label">Participants</div>
+        </div>
+      </div>
+
+      <!-- Setup wizard + playoff config shortcuts -->
+      <div class="trn-section-card">
+        <div class="trn-section-card-title">Tournament Setup</div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;margin-bottom:var(--space-3)">
+          <div style="font-size:.85rem;color:var(--color-text-dim);flex:1;min-width:160px">
+            Configure tournament identity, roles, yearly settings, leagues, playoff format, and rules.
+          </div>
+          <button class="btn-primary btn-sm" id="trn-admin-wizard-btn">🪄 Setup Wizard</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
+          <button class="btn-secondary btn-sm" id="trn-admin-playoff-btn">🥇 Playoff Config</button>
+          <button class="btn-secondary btn-sm" id="trn-admin-scoring-btn">📊 Scoring Settings</button>
+          <button class="btn-secondary btn-sm" id="trn-admin-republish-btn">🔄 Re-publish</button>
+          <button class="btn-secondary btn-sm" id="trn-admin-preview-btn">👁 Preview as User</button>
+        </div>
+      </div>
+
+      <!-- Year pills for registrants/participants -->
+      ${allYears.length > 1 ? `
+        <div style="margin-bottom:var(--space-3)">
+          <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Year</div>
+          ${_renderYearPills(allYears, activeYear, yr => {
+            const c = document.getElementById("trn-admin-year-content");
+            if (c) _renderAdminYearContent(tid, t, c, yr);
+          })}
+        </div>` : allYears.length === 1 ? `<div class="trn-year-single-label">${allYears[0]}</div>` : ""}
+
+      <!-- Admin management sub-tabs -->
+      <div class="trn-admin-mgmt-tabs">
+        ${["registrants","participants"].map(id => `
+          <button class="trn-admin-mgmt-tab${_activeAdminMgmtTab===id?" trn-admin-mgmt-tab--active":""}"
+            data-mgmt="${id}">${id === "registrants"
+              ? "📋 Registrants" + (pendingCount ? ` <span class="trn-tab-count">${pendingCount}</span>` : "")
+              : "👥 Participants"}</button>`).join("")}
+      </div>
+
+      <div id="trn-admin-year-content"></div>
+    `;
+
+    // Wire year pills
+    if (allYears.length > 1) {
+      _wireYearPills(body, allYears, yr => {
+        const c = document.getElementById("trn-admin-year-content");
+        if (c) _renderAdminYearContent(tid, t, c, yr);
+      });
+    }
+
+    // Wire mgmt sub-tabs
+    body.querySelectorAll(".trn-admin-mgmt-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _activeAdminMgmtTab = btn.dataset.mgmt;
+        body.querySelectorAll(".trn-admin-mgmt-tab").forEach(b =>
+          b.classList.toggle("trn-admin-mgmt-tab--active", b.dataset.mgmt === _activeAdminMgmtTab));
+        const c = document.getElementById("trn-admin-year-content");
+        if (c) _renderAdminYearContent(tid, t, c, _tournamentYear || activeYear);
+      });
+    });
+
+    // Wizard + shortcut buttons
+    document.getElementById("trn-admin-wizard-btn")?.addEventListener("click", () => _openSetupWizard(tid, t));
+    document.getElementById("trn-admin-playoff-btn")?.addEventListener("click", () => _openPlayoffConfigModal(tid, t));
+    document.getElementById("trn-admin-scoring-btn")?.addEventListener("click", () => {
+      // Open scoring settings inline (reuse existing tab render)
+      const c = document.getElementById("trn-admin-year-content");
+      if (c) { c.innerHTML = ""; _renderScoringAdminBody(t.scoringSettings?.[_tournamentYear || activeYear] || {}); }
+    });
+    document.getElementById("trn-admin-republish-btn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("trn-admin-republish-btn");
+      if (btn) { btn.disabled = true; btn.textContent = "Publishing…"; }
+      try {
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        await _writePublicSummary(tid, _tournaments[tid]);
+        await _writePublicADP(tid);
+        showToast("Public summary re-published ✓");
+      } catch(e) { showToast("Re-publish failed", "error"); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = "🔄 Re-publish"; } }
+    });
+    document.getElementById("trn-admin-preview-btn")?.addEventListener("click", () => {
+      _viewingAsUser = true;
+      _activeTopNav  = "overview";
+      _openTournamentView(tid);
+    });
+
+    // Render initial year content
+    _renderAdminYearContent(tid, t, document.getElementById("trn-admin-year-content"), activeYear);
+  }
+
+  function _renderAdminYearContent(tid, t, container, year) {
+    if (!container) return;
+    _tournamentYear = year;
+    _standingsYear  = year;
+    container.innerHTML = "";
+    _activeAdminTab = _activeAdminMgmtTab; // keep legacy compat
+    switch (_activeAdminMgmtTab) {
+      case "registrants":  return _renderRegistrantsTab(tid, t, container);
+      case "participants": return _renderParticipantsTab(tid, t, container);
+      default:             return _renderRegistrantsTab(tid, t, container);
+    }
+  }
+
+  // ── Playoff config modal (admin shortcut) ──────────────
+  function _openPlayoffConfigModal(tid, t) {
+    const html = _renderPlayoffConfigHTML(tid, t, _tournamentYear ? String(_tournamentYear) : (_playoffYears(t)[0] || null));
+    _showModal(`
+      <div class="modal-header">
+        <h3>Playoff Configuration</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:75vh;overflow-y:auto">${html}</div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Close</button>
+      </div>
+    `);
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+    _wirePlayoffConfigListeners(tid, t, _tournamentYear ? String(_tournamentYear) : (_playoffYears(t)[0] || null));
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  SETUP WIZARD
+  //  Multi-step modal: global steps 1-3 + per-year steps 4-8
+  //  Writes to same Firebase paths as existing admin panel.
+  //  Pre-populates from existing data — safe to re-open anytime.
+  // ══════════════════════════════════════════════════════════
+
+  function _openSetupWizard(tid, t) {
+    // Determine years for the per-year steps
+    const poYears  = _playoffYears(t).map(Number).sort((a,b) => b-a);
+    const scYears  = [...new Set(Object.values(t.standingsCache||{}).map(lc=>lc.year).filter(Boolean).map(Number))];
+    const wizYears = [...new Set([...poYears, ...scYears])].sort((a,b) => b-a);
+    const curY     = new Date().getFullYear();
+    if (!wizYears.includes(curY) && !wizYears.length) wizYears.push(curY);
+    if (!_wizardYear || !wizYears.includes(_wizardYear)) _wizardYear = wizYears[0] || curY;
+
+    const GLOBAL_STEPS = [
+      { num:1, label:"Identity",   icon:"🏆" },
+      { num:2, label:"Roles",      icon:"👤" },
+      { num:3, label:"History",    icon:"📂" },
+    ];
+    const YEAR_STEPS = [
+      { num:4, label:"Year Setup",  icon:"📅" },
+      { num:5, label:"Leagues",     icon:"🏟" },
+      { num:6, label:"Playoffs",    icon:"🥇" },
+      { num:7, label:"Rules",       icon:"📋" },
+    ];
+    const ALL_STEPS = [...GLOBAL_STEPS, ...YEAR_STEPS];
+
+    if (_wizardStep < 1 || _wizardStep > 7) _wizardStep = 1;
+
+    function _wizardStepBar() {
+      return `<div class="trn-wizard-steps">
+        ${ALL_STEPS.map(s => `
+          <button class="trn-wizard-step-btn${_wizardStep===s.num?" trn-wizard-step-btn--active":""}"
+            data-wstep="${s.num}" title="${s.label}">
+            <span class="trn-wizard-step-num">${s.num >= 4 ? "Y" : s.num}</span>
+            <span class="trn-wizard-step-label">${s.label}</span>
+          </button>`).join('<div class="trn-wizard-step-connector"></div>')}
+      </div>`;
+    }
+
+    function _yearPillsForWizard() {
+      if (!wizYears.length) return "";
+      return `<div class="trn-wizard-year-bar">
+        <span style="font-size:.75rem;font-weight:700;color:var(--color-text-dim);text-transform:uppercase;letter-spacing:.05em;flex-shrink:0">Year:</span>
+        ${wizYears.map(y=>`<button class="trn-year-pill${y===_wizardYear?" trn-year-pill--active":""} trn-wiz-yr-pill" data-wyr="${y}">${y}</button>`).join("")}
+        <button class="btn-secondary btn-sm" id="trn-wiz-add-year-btn" style="flex-shrink:0">+ Add Year</button>
+      </div>`;
+    }
+
+    function _buildStep1Body() {
+      const meta = t.meta || {};
+      const sLinks = Array.isArray(meta.socialLinks) ? meta.socialLinks : _legacySocialLinks(meta.socialLinks);
+      const dLinks = Array.isArray(meta.donationLinks) ? meta.donationLinks : (meta.donationLink ? [{label:"Donate / Entry Fee", url:meta.donationLink}] : []);
+      const _linkRows = (arr, prefix, placeholder) => arr.length
+        ? arr.map((l,i) => `
+          <div class="trn-wizard-link-row" data-lrow="${i}">
+            <input type="text" class="trn-wiz-link-label" placeholder="Label (e.g. Discord)" value="${_esc(l.label||"")}" style="width:120px;flex-shrink:0" />
+            <input type="url" class="trn-wiz-link-url" placeholder="${placeholder}" value="${_esc(l.url||"")}" style="flex:1" />
+            <button class="btn-ghost btn-sm trn-wiz-link-del" data-prefix="${prefix}">✕</button>
+          </div>`).join("")
+        : "";
+      return `
+        <div class="form-group">
+          <label>Tournament Name <span class="required">*</span></label>
+          <input type="text" id="wiz-name" value="${_esc(meta.name||"")}" maxlength="80" />
+        </div>
+        <div class="form-group">
+          <label>Tagline</label>
+          <input type="text" id="wiz-tagline" value="${_esc(meta.tagline||"")}" maxlength="120" />
+        </div>
+        <div class="form-group">
+          <label>Bio / Description</label>
+          <textarea id="wiz-bio" rows="4" style="width:100%;resize:vertical;font-size:.875rem">${_esc(meta.bio||"")}</textarea>
+        </div>
+        <div class="form-group">
+          <label>Commissioner / Admin Email</label>
+          <input type="email" id="wiz-admin-email" value="${_esc(meta.adminEmail||"")}" placeholder="commissioner@example.com" />
+          <span class="field-hint">Used for the "Contact Commissioner" button and league invite emails.</span>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;text-transform:none;letter-spacing:0;font-size:.88rem;font-weight:600">
+            <input type="checkbox" id="wiz-private" ${meta.isPrivate?"checked":""} style="width:16px;height:16px;accent-color:var(--color-gold)" />
+            Keep tournament private
+          </label>
+        </div>
+        <div class="trn-section-card-title" style="margin-top:var(--space-4)">Social Links</div>
+        <div id="wiz-social-rows">${_linkRows(sLinks, "social", "https://discord.gg/…")}</div>
+        <button class="btn-secondary btn-sm" id="wiz-add-social-btn" style="margin-bottom:var(--space-4)">+ Add Social Link</button>
+
+        <div class="trn-section-card-title">Donation / Entry Fee Links</div>
+        <div id="wiz-donation-rows">${_linkRows(dLinks, "donation", "https://paypal.me/…")}</div>
+        <button class="btn-secondary btn-sm" id="wiz-add-donation-btn">+ Add Donation Link</button>
+      `;
+    }
+
+    function _buildStep2Body() {
+      const roles = t.roles || {};
+      const rows = Object.entries(roles).map(([uname, r]) => `
+        <div class="trn-role-row">
+          <div class="trn-role-user">
+            <div class="trn-role-avatar">${uname.charAt(0).toUpperCase()}</div>
+            <div>
+              <div class="trn-role-name">@${_esc(uname)}</div>
+              <div class="trn-role-scope">${r.role === "admin" ? "Full access" : "Limited access"}</div>
+            </div>
+          </div>
+          <div class="trn-role-right">
+            <span class="trn-role-badge trn-role-${r.role}">${r.role === "admin" ? "Admin" : "Sub-Admin"}</span>
+            ${r.role !== "admin" ? `<button class="btn-ghost btn-sm" data-remove-role="${_esc(uname)}">✕</button>` : ""}
+          </div>
+        </div>`).join("");
+      return `
+        <div class="trn-roles-list" id="wiz-roles-list">${rows || '<div class="trn-empty-inline">No roles set yet.</div>'}</div>
+        <div class="form-group" style="margin-top:var(--space-4)">
+          <label>Add Sub-Admin</label>
+          <div style="display:flex;gap:var(--space-2)">
+            <input type="text" id="wiz-new-role-user" placeholder="DLR username" style="flex:1" />
+            <button class="btn-secondary btn-sm" id="wiz-add-role-btn">Add</button>
+          </div>
+        </div>`;
+    }
+
+    function _buildStep3Body() {
+      return `
+        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+          <div class="trn-section-card-title">Import Historical Data</div>
+          <p style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            If your tournament has run previous seasons, you can import participant history now
+            to get career records populated from the start. Otherwise, leagues will sync automatically
+            as you add them each year.
+          </p>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
+            <label class="btn-secondary btn-sm" style="cursor:pointer">
+              📥 Import Participants CSV
+              <input type="file" accept=".csv" id="wiz-import-participants-file" style="display:none" />
+            </label>
+            <label class="btn-secondary btn-sm" style="cursor:pointer">
+              📥 Import Registrations CSV
+              <input type="file" accept=".csv" id="wiz-import-regs-file" style="display:none" />
+            </label>
+          </div>
+          <div id="wiz-import-status" style="margin-top:var(--space-3);font-size:.82rem;color:var(--color-text-dim)"></div>
+        </div>
+        <div class="trn-section-card">
+          <div class="trn-section-card-title">Or Sync Leagues Later</div>
+          <p style="font-size:.85rem;color:var(--color-text-dim)">
+            You can add leagues in Step 5 and standings will sync automatically each week once your season starts.
+            Historical records will build as seasons complete.
+          </p>
+          <button class="btn-primary btn-sm" id="wiz-skip-history-btn">Continue to Year Setup →</button>
+        </div>`;
+    }
+
+    function _buildStep4Body() {
+      const po = t.playoffs?.[_wizardYear] || {};
+      const regOpen = !!po.registrationOpen;
+      const rby = t.rulesByYear || {};
+      const yearsWithReg = wizYears.filter(y => t.playoffs?.[y]?.registrationOpen);
+      return `
+        ${_yearPillsForWizard()}
+        <div class="form-group" style="margin-top:var(--space-4)">
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;text-transform:none;letter-spacing:0;font-size:.88rem;font-weight:600">
+            <input type="checkbox" id="wiz-reg-open" ${regOpen?"checked":""} style="width:16px;height:16px;accent-color:var(--color-gold)" />
+            Registration open for ${_wizardYear}
+          </label>
+          <span class="field-hint">When checked, the Register button appears on the tournament page for this year.</span>
+        </div>
+
+        <div class="trn-section-card-title" style="margin-top:var(--space-4)">Registration Form for ${_wizardYear}</div>
+        <div id="wiz-reg-form-container"></div>
+
+        <div class="trn-section-card" style="margin-top:var(--space-4)">
+          <div class="trn-section-card-title">Email Past Participants</div>
+          <p style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Invite previous participants to register for ${_wizardYear}. Opens your email client with a pre-filled message.
+            Addresses are placed in BCC to protect privacy. Lists over 50 participants will be split across multiple drafts.
+          </p>
+          <button class="btn-secondary btn-sm" id="wiz-email-past-btn">✉ Email Past Participants</button>
+        </div>
+      `;
+    }
+
+    function _buildStep5Body() {
+      return `
+        ${_yearPillsForWizard()}
+        <div style="margin-top:var(--space-4)" id="wiz-leagues-container"></div>
+      `;
+    }
+
+    function _buildStep6Body() {
+      return `
+        ${_yearPillsForWizard()}
+        <div style="margin-top:var(--space-4)" id="wiz-playoff-container">
+          ${_renderPlayoffConfigHTML(tid, t, String(_wizardYear))}
+        </div>
+      `;
+    }
+
+    function _buildStep7Body() {
+      const rby  = t.rulesByYear || {};
+      const rules = rby[_wizardYear] || {};
+      return `
+        ${_yearPillsForWizard()}
+        <div style="margin-top:var(--space-4)">
+          <div class="form-group">
+            <label>Rules for ${_wizardYear}</label>
+            <textarea id="wiz-rules-input" rows="12"
+              placeholder="Enter the full rules for your tournament…"
+              style="width:100%;resize:vertical;font-family:inherit;font-size:.875rem">${_esc(rules.content||"")}</textarea>
+          </div>
+          ${rules.updatedAt ? `<div style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Last updated: ${new Date(rules.updatedAt).toLocaleString()}${rules.version?` — v${rules.version}`:""}
+          </div>` : ""}
+        </div>
+      `;
+    }
+
+    function _buildStepBody(step) {
+      switch(step) {
+        case 1: return _buildStep1Body();
+        case 2: return _buildStep2Body();
+        case 3: return _buildStep3Body();
+        case 4: return _buildStep4Body();
+        case 5: return _buildStep5Body();
+        case 6: return _buildStep6Body();
+        case 7: return _buildStep7Body();
+        default: return "";
+      }
+    }
+
+    function _buildStep1Label() {
+      switch(_wizardStep) {
+        case 1: return "Tournament Identity";
+        case 2: return "Roles & Access";
+        case 3: return "Historical Data";
+        case 4: return `Year ${_wizardYear} — Setup & Registration`;
+        case 5: return `Year ${_wizardYear} — Leagues`;
+        case 6: return `Year ${_wizardYear} — Playoff Configuration`;
+        case 7: return `Year ${_wizardYear} — Rules`;
+        default: return "";
+      }
+    }
+
+    function _renderWizardModal() {
+      const isFirst = _wizardStep === 1;
+      const isLast  = _wizardStep === 7;
+      const modal   = document.querySelector(".modal-overlay");
+      if (!modal) return;
+      const body    = modal.querySelector(".modal-body");
+      const title   = modal.querySelector(".modal-header h3");
+      const backBtn = modal.querySelector("#trn-wiz-back-btn");
+      const nextBtn = modal.querySelector("#trn-wiz-next-btn");
+      if (title) title.textContent = _buildStep1Label();
+      if (body)  body.innerHTML = `
+        ${_wizardStepBar()}
+        <div class="trn-wizard-body">${_buildStepBody(_wizardStep)}</div>
+      `;
+      if (backBtn) { backBtn.disabled = isFirst; backBtn.style.visibility = isFirst ? "hidden" : ""; }
+      if (nextBtn) { nextBtn.textContent = isLast ? "✓ Save & Close" : "Next →"; }
+      _wireWizardStep(tid, t, modal);
+    }
+
+    // Open modal shell first
+    _showModal(`
+      <div class="modal-header">
+        <h3>${_buildStep1Label()}</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-wizard-modal-body" style="max-height:72vh;overflow-y:auto">
+        ${_wizardStepBar()}
+        <div class="trn-wizard-body">${_buildStepBody(_wizardStep)}</div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:space-between">
+        <button class="btn-secondary" id="trn-wiz-back-btn" ${_wizardStep===1?"style='visibility:hidden'":""}>← Back</button>
+        <button class="btn-primary"   id="trn-wiz-next-btn">${_wizardStep===7?"✓ Save & Close":"Next →"}</button>
+      </div>
+    `);
+
+    document.getElementById("trn-modal-close")?.addEventListener("click", () => {
+      _closeModal();
+      _wizardStep = 1; // reset for next open
+    });
+
+    _wireWizardStep(tid, t, document.querySelector(".modal-overlay"));
+  }
+
+  // Wire all interactive elements for the current wizard step
+  function _wireWizardStep(tid, t, modal) {
+    if (!modal) return;
+
+    // Step navigation buttons
+    modal.querySelector("#trn-wiz-back-btn")?.addEventListener("click", () => {
+      if (_wizardStep > 1) { _wizardStep--; _rerenderWizard(tid, t, modal); }
+    });
+
+    modal.querySelector("#trn-wiz-next-btn")?.addEventListener("click", async () => {
+      const saved = await _saveWizardStep(tid, t, _wizardStep, modal);
+      if (!saved) return; // validation failed
+      if (_wizardStep < 7) { _wizardStep++; _rerenderWizard(tid, t, modal); }
+      else {
+        _closeModal();
+        _wizardStep = 1;
+        showToast("Tournament settings saved ✓");
+        // Reload tournament data and re-render
+        const snap = await _tRef(tid).once("value");
+        _tournaments[tid] = snap.val();
+        _writePublicSummary(tid, _tournaments[tid]);
+        _openTournamentView(tid, _activeTopNav);
+      }
+    });
+
+    // Step pill clicks — allow jumping to any step
+    modal.querySelectorAll(".trn-wizard-step-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const step = parseInt(btn.dataset.wstep);
+        await _saveWizardStep(tid, t, _wizardStep, modal);
+        _wizardStep = step;
+        _rerenderWizard(tid, t, modal);
+      });
+    });
+
+    // Step-specific wiring
+    if (_wizardStep === 1) _wireWizardStep1(tid, t, modal);
+    if (_wizardStep === 2) _wireWizardStep2(tid, t, modal);
+    if (_wizardStep === 3) _wireWizardStep3(tid, t, modal);
+    if (_wizardStep === 4) _wireWizardStep4(tid, t, modal);
+    if (_wizardStep === 5) _wireWizardStep5(tid, t, modal);
+    if (_wizardStep === 6) _wireWizardStep6(tid, t, modal);
+    if (_wizardStep === 7) _wireWizardStep7(tid, t, modal);
+
+    // Year pill switching (steps 4-7)
+    modal.querySelectorAll(".trn-wiz-yr-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _wizardYear = Number(btn.dataset.wyr);
+        modal.querySelectorAll(".trn-wiz-yr-pill").forEach(b =>
+          b.classList.toggle("trn-year-pill--active", Number(b.dataset.wyr) === _wizardYear));
+        const body = modal.querySelector(".trn-wizard-body");
+        if (body) body.innerHTML = _buildStepBodyForWizard(_wizardStep);
+        _wireWizardStep(tid, t, modal);
+      });
+    });
+
+    // Add Year button
+    modal.querySelector("#trn-wiz-add-year-btn")?.addEventListener("click", async () => {
+      const yr = parseInt(prompt("Enter year to add (e.g. 2026):", String(new Date().getFullYear())));
+      if (!yr || isNaN(yr) || yr < 2000 || yr > 2100) return;
+      try {
+        await _tPlayoffsRef(tid, yr).update({ registrationOpen: false });
+        if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+        if (!_tournaments[tid].playoffs[yr]) _tournaments[tid].playoffs[yr] = {};
+        _tournaments[tid].playoffs[yr].registrationOpen = false;
+        _wizardYear = yr;
+        showToast(`Year ${yr} added ✓`);
+        _rerenderWizard(tid, _tournaments[tid], modal);
+      } catch(e) { showToast("Failed to add year", "error"); }
+    });
+  }
+
+  function _buildStepBodyForWizard(step) {
+    // Re-use the inner build functions via the closure — they read _wizardYear
+    switch(step) {
+      case 4: return document.querySelector(".trn-wizard-body")?.innerHTML || ""; // refreshed below
+      default: return "";
+    }
+  }
+
+  function _rerenderWizard(tid, t, modal) {
+    const poYears  = _playoffYears(t).map(Number).sort((a,b)=>b-a);
+    const scYears  = [...new Set(Object.values(t.standingsCache||{}).map(lc=>lc.year).filter(Boolean).map(Number))];
+    const wizYears = [...new Set([...poYears, ...scYears])].sort((a,b)=>b-a);
+    const curY     = new Date().getFullYear();
+    if (!wizYears.length) wizYears.push(curY);
+    if (!_wizardYear || !wizYears.includes(_wizardYear)) _wizardYear = wizYears[0] || curY;
+
+    // Re-open wizard fresh with current state (simplest re-render)
+    _closeModal();
+    _openSetupWizard(tid, _tournaments[tid] || t);
+  }
+
+  // Save current wizard step to Firebase
+  async function _saveWizardStep(tid, t, step, modal) {
+    try {
+      if (step === 1) {
+        const name    = modal.querySelector("#wiz-name")?.value.trim();
+        if (!name) { showToast("Tournament name is required", "error"); return false; }
+        const tagline = modal.querySelector("#wiz-tagline")?.value.trim() || "";
+        const bio     = modal.querySelector("#wiz-bio")?.value || "";
+        const email   = modal.querySelector("#wiz-admin-email")?.value.trim() || "";
+        const priv    = modal.querySelector("#wiz-private")?.checked || false;
+
+        // Collect social links
+        const socialLinks = [];
+        modal.querySelectorAll("#wiz-social-rows .trn-wizard-link-row").forEach(row => {
+          const label = row.querySelector(".trn-wiz-link-label")?.value.trim() || "";
+          const url   = row.querySelector(".trn-wiz-link-url")?.value.trim() || "";
+          if (url) socialLinks.push({ label, url });
+        });
+
+        const donationLinks = [];
+        modal.querySelectorAll("#wiz-donation-rows .trn-wizard-link-row").forEach(row => {
+          const label = row.querySelector(".trn-wiz-link-label")?.value.trim() || "";
+          const url   = row.querySelector(".trn-wiz-link-url")?.value.trim() || "";
+          if (url) donationLinks.push({ label, url });
+        });
+
+        const updates = { name, tagline, bio, adminEmail: email||null, isPrivate: priv||null, socialLinks, donationLinks };
+        await _tMetaRef(tid).update(updates);
+        if (_tournaments[tid]?.meta) Object.assign(_tournaments[tid].meta, updates);
+        if (priv) { await GMD.child("publicTournaments/" + tid).remove(); }
+        else { _writePublicSummary(tid, _tournaments[tid]); }
+      }
+
+      if (step === 4) {
+        const regOpen = modal.querySelector("#wiz-reg-open")?.checked || false;
+        await _tPlayoffsRef(tid, _wizardYear).update({ registrationOpen: regOpen });
+        if (!_tournaments[tid]) _tournaments[tid] = {};
+        if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+        if (!_tournaments[tid].playoffs[_wizardYear]) _tournaments[tid].playoffs[_wizardYear] = {};
+        _tournaments[tid].playoffs[_wizardYear].registrationOpen = regOpen;
+      }
+
+      if (step === 7) {
+        const content = modal.querySelector("#wiz-rules-input")?.value || "";
+        if (content.trim()) {
+          const rby  = _tournaments[tid]?.rulesByYear || {};
+          const prev = rby[_wizardYear] || {};
+          const newRules = {
+            content,
+            version:   (parseInt(prev.version||0)) + 1,
+            updatedAt: Date.now(),
+            updatedBy: _currentUsername
+          };
+          await GMD.child(`tournaments/${tid}/rulesByYear/${_wizardYear}`).set(newRules);
+          if (!_tournaments[tid].rulesByYear) _tournaments[tid].rulesByYear = {};
+          _tournaments[tid].rulesByYear[_wizardYear] = newRules;
+          _writePublicSummary(tid, _tournaments[tid]);
+        }
+      }
+      return true;
+    } catch(e) {
+      showToast("Failed to save: " + e.message, "error");
+      return false;
+    }
+  }
+
+  // Step-specific wiring functions
+  function _wireWizardStep1(tid, t, modal) {
+    function _addLinkRow(containerId, prefix, placeholder) {
+      const c = modal.querySelector("#" + containerId);
+      if (!c) return;
+      const idx  = c.querySelectorAll(".trn-wizard-link-row").length;
+      const row  = document.createElement("div");
+      row.className = "trn-wizard-link-row";
+      row.dataset.lrow = idx;
+      row.innerHTML = `
+        <input type="text" class="trn-wiz-link-label" placeholder="Label" style="width:120px;flex-shrink:0" />
+        <input type="url" class="trn-wiz-link-url" placeholder="${placeholder}" style="flex:1" />
+        <button class="btn-ghost btn-sm trn-wiz-link-del" data-prefix="${prefix}">✕</button>
+      `;
+      c.appendChild(row);
+      row.querySelector(".trn-wiz-link-del")?.addEventListener("click", () => row.remove());
+    }
+    modal.querySelector("#wiz-add-social-btn")?.addEventListener("click", () =>
+      _addLinkRow("wiz-social-rows", "social", "https://discord.gg/…"));
+    modal.querySelector("#wiz-add-donation-btn")?.addEventListener("click", () =>
+      _addLinkRow("wiz-donation-rows", "donation", "https://paypal.me/…"));
+    modal.querySelectorAll(".trn-wiz-link-del").forEach(btn =>
+      btn.addEventListener("click", () => btn.closest(".trn-wizard-link-row")?.remove()));
+  }
+
+  function _wireWizardStep2(tid, t, modal) {
+    modal.querySelector("#wiz-add-role-btn")?.addEventListener("click", async () => {
+      const uname = modal.querySelector("#wiz-new-role-user")?.value.trim().toLowerCase();
+      if (!uname) return;
+      try {
+        await _tRolesRef(tid).child(uname).set({ role:"sub_admin", grantedAt: Date.now(), grantedBy: _currentUsername });
+        if (!_tournaments[tid].roles) _tournaments[tid].roles = {};
+        _tournaments[tid].roles[uname] = { role:"sub_admin", grantedAt: Date.now() };
+        t.roles = _tournaments[tid].roles;
+        showToast(`@${uname} added as sub-admin ✓`);
+        // Re-render roles list
+        const list = modal.querySelector("#wiz-roles-list");
+        if (list) {
+          const body = modal.querySelector(".trn-wizard-body");
+          if (body) { body.innerHTML = _buildStep2BodyFromT(t); _wireWizardStep2(tid, t, modal); }
+        }
+      } catch(e) { showToast("Failed to add role", "error"); }
+    });
+    modal.querySelectorAll("[data-remove-role]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const uname = btn.dataset.removeRole;
+        if (!confirm(`Remove @${uname} from sub-admins?`)) return;
+        try {
+          await _tRolesRef(tid).child(uname).remove();
+          delete _tournaments[tid].roles[uname];
+          t.roles = _tournaments[tid].roles;
+          const body = modal.querySelector(".trn-wizard-body");
+          if (body) { body.innerHTML = _buildStep2BodyFromT(t); _wireWizardStep2(tid, t, modal); }
+          showToast(`@${uname} removed ✓`);
+        } catch(e) { showToast("Failed to remove", "error"); }
+      });
+    });
+  }
+
+  function _buildStep2BodyFromT(t) {
+    const roles = t.roles || {};
+    const rows = Object.entries(roles).map(([uname, r]) => `
+      <div class="trn-role-row">
+        <div class="trn-role-user">
+          <div class="trn-role-avatar">${uname.charAt(0).toUpperCase()}</div>
+          <div><div class="trn-role-name">@${_esc(uname)}</div></div>
+        </div>
+        <div class="trn-role-right">
+          <span class="trn-role-badge trn-role-${r.role}">${r.role==="admin"?"Admin":"Sub-Admin"}</span>
+          ${r.role!=="admin"?`<button class="btn-ghost btn-sm" data-remove-role="${_esc(uname)}">✕</button>`:""}
+        </div>
+      </div>`).join("");
+    return `
+      <div class="trn-roles-list" id="wiz-roles-list">${rows||'<div class="trn-empty-inline">No roles set yet.</div>'}</div>
+      <div class="form-group" style="margin-top:var(--space-4)">
+        <label>Add Sub-Admin</label>
+        <div style="display:flex;gap:var(--space-2)">
+          <input type="text" id="wiz-new-role-user" placeholder="DLR username" style="flex:1" />
+          <button class="btn-secondary btn-sm" id="wiz-add-role-btn">Add</button>
+        </div>
+      </div>`;
+  }
+
+  function _wireWizardStep3(tid, t, modal) {
+    modal.querySelector("#wiz-skip-history-btn")?.addEventListener("click", async () => {
+      _wizardStep = 4;
+      _rerenderWizard(tid, t, modal);
+    });
+    modal.querySelector("#wiz-import-participants-file")?.addEventListener("change", async function() {
+      const file = this.files?.[0];
+      if (!file) return;
+      const status = modal.querySelector("#wiz-import-status");
+      if (status) status.textContent = "Importing participants…";
+      try {
+        await _importParticipantsCSV(tid, file);
+        if (status) status.textContent = "Participants imported ✓";
+      } catch(e) { if (status) status.textContent = "Import failed: " + e.message; }
+    });
+    modal.querySelector("#wiz-import-regs-file")?.addEventListener("change", async function() {
+      const file = this.files?.[0];
+      if (!file) return;
+      const status = modal.querySelector("#wiz-import-status");
+      if (status) status.textContent = "Importing registrations…";
+      try {
+        await _importRegistrantsCSV(tid, file);
+        if (status) status.textContent = "Registrations imported ✓";
+      } catch(e) { if (status) status.textContent = "Import failed: " + e.message; }
+    });
+  }
+
+  function _wireWizardStep4(tid, t, modal) {
+    // Email past participants button
+    modal.querySelector("#wiz-email-past-btn")?.addEventListener("click", () => {
+      const participants = Object.values(t.participants || {});
+      const emails = participants
+        .filter(p => p.email && !t.playoffs?.[_wizardYear]?.registrationOpen)
+        .map(p => p.email)
+        .filter(Boolean);
+      if (!emails.length) { showToast("No participant emails found", "error"); return; }
+      const meta   = t.meta || {};
+      const regUrl = `https://dynastylockerroom.com/tournaments/?t=${tid}`;
+      const subj   = encodeURIComponent(`[${meta.name||"Tournament"}] Register for ${_wizardYear}`);
+      const body   = encodeURIComponent(
+        `Hi!\n\nRegistration for ${meta.name||"our tournament"} ${_wizardYear} is now open.\n\n` +
+        `Please click here to register:\n${regUrl}\n\n` +
+        `We hope to see you again this year!\n\n— ${meta.name||"Tournament"} Commissioner`
+      );
+      const adminTo = meta.adminEmail || "";
+      const BCC_LIMIT = 50;
+      const chunks = [];
+      for (let i = 0; i < emails.length; i += BCC_LIMIT) chunks.push(emails.slice(i, i+BCC_LIMIT));
+      chunks.forEach((chunk, idx) => {
+        const bcc = encodeURIComponent(chunk.join(","));
+        const href = `mailto:${adminTo}?bcc=${bcc}&subject=${subj}${idx===0?`&body=${body}`:""}`;
+        window.open(href, "_blank");
+      });
+      showToast(`${chunks.length > 1 ? chunks.length + " email drafts" : "Email"} opened ✓`);
+    });
+
+    // Inline registration form builder
+    const regFormContainer = modal.querySelector("#wiz-reg-form-container");
+    if (regFormContainer) _renderRegistrationFormTab(tid, t, regFormContainer);
+  }
+
+  function _wireWizardStep5(tid, t, modal) {
+    const container = modal.querySelector("#wiz-leagues-container");
+    if (container) _renderLeaguesTab(tid, t, container);
+  }
+
+  function _wireWizardStep6(tid, t, modal) {
+    _wirePlayoffConfigListeners(tid, t, String(_wizardYear));
+  }
+
+  function _wireWizardStep7(tid, t, modal) {
+    // Nothing extra — handled by save
+  }
+
   // ── Tab router ─────────────────────────────────────────
   // showAdminNav: true = admin manage mode, false = participant view mode
+
+  // Helper: find the live content container regardless of which nav mode is active.
+  // New nav uses trn-history-content (history section) or trn-admin-year-content (admin section).
+  // Legacy _renderTab uses trn-tab-body.
+  // Internal re-render callers (after saves) should use this instead of getElementById("trn-tab-body").
+  function _getTabBody() {
+    return document.getElementById("trn-history-content")
+        || document.getElementById("trn-admin-year-content")
+        || document.getElementById("trn-section-body")
+        || document.getElementById("trn-tab-body");
+  }
+
   function _renderTab(tid, tab, t, showAdminNav) {
-    const body = document.getElementById("trn-tab-body");
+    const body = (_getTabBody());
     if (!body) return;
 
     // Stop live draft polling whenever we navigate away from the draft tab
@@ -1021,9 +2160,15 @@ const DLRTournament = (() => {
         </div>
         <div class="form-group">
           <label>Donation / Entry Fee Link</label>
-          <input type="url" id="trn-donation-input" value="${_esc(meta.donationLink || "")}"
+          <input type="url" id="trn-donation-input" value="${_esc(meta.donationLink || (Array.isArray(meta.donationLinks) && meta.donationLinks[0]?.url) || "")}"
             placeholder="https://paypal.me/…" />
-          <span class="field-hint">Shown as a button on the Info tab.</span>
+          <span class="field-hint">Shown as a button on the Overview tab.</span>
+        </div>
+        <div class="form-group">
+          <label>Commissioner / Admin Email</label>
+          <input type="email" id="trn-admin-email-input" value="${_esc(meta.adminEmail || "")}"
+            placeholder="commissioner@example.com" />
+          <span class="field-hint">Used for "Contact Commissioner" button and league invite emails.</span>
         </div>
         <div class="form-group" style="margin-top:var(--space-2)">
           <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;text-transform:none;letter-spacing:0;font-size:.88rem;font-weight:600">
@@ -1066,27 +2211,36 @@ const DLRTournament = (() => {
     document.getElementById("trn-save-info-btn")?.addEventListener("click", async () => {
       const bio      = document.getElementById("trn-bio-input")?.value || "";
       const donation = document.getElementById("trn-donation-input")?.value.trim() || "";
-      const newSocial = {};
+      const adminEmail = document.getElementById("trn-admin-email-input")?.value.trim() || "";
+      // Build socialLinks array from input fields
+      const newSocial = [];
       body.querySelectorAll(".trn-social-input").forEach(inp => {
         const val = inp.value.trim();
-        if (val) newSocial[inp.dataset.socialKey] = val;
+        if (val) {
+          const key   = inp.dataset.socialKey;
+          const label = key.charAt(0).toUpperCase() + key.slice(1);
+          newSocial.push({ label, url: val });
+        }
       });
       try {
         const isPrivate = document.getElementById("trn-private-toggle")?.checked || false;
         await _tMetaRef(tid).update({
           bio,
-          donationLink: donation || null,
-          socialLinks:  newSocial,
-          isPrivate:    isPrivate || null
+          donationLinks: donation ? [{label:"Donate / Entry Fee", url: donation}] : null,
+          donationLink:  donation || null, // legacy compat
+          socialLinks:   newSocial,
+          adminEmail:    adminEmail || null,
+          isPrivate:     isPrivate || null
         });
         if (_tournaments[tid]?.meta) {
           _tournaments[tid].meta.bio          = bio;
-          _tournaments[tid].meta.donationLink = donation || null;
-          _tournaments[tid].meta.socialLinks  = newSocial;
-          _tournaments[tid].meta.isPrivate    = isPrivate || null;
+          _tournaments[tid].meta.donationLinks = donation ? [{label:"Donate / Entry Fee", url: donation}] : null;
+          _tournaments[tid].meta.donationLink  = donation || null;
+          _tournaments[tid].meta.socialLinks   = newSocial;
+          _tournaments[tid].meta.adminEmail    = adminEmail || null;
+          _tournaments[tid].meta.isPrivate     = isPrivate || null;
         }
         if (isPrivate) {
-          // Remove from public listing
           await GMD.child("publicTournaments/" + tid).remove();
         } else {
           _writePublicSummary(tid, _tournaments[tid]);
@@ -1256,7 +2410,9 @@ const DLRTournament = (() => {
       _changeStatus(tid, STATUSES[statusIdx - 1])
     );
     document.getElementById("trn-goto-regs-btn")?.addEventListener("click", () => {
-      document.querySelector('.trn-tab[data-tab="registrations"]')?.click();
+      _activeTopNav = "admin";
+      _activeAdminMgmtTab = "registrants";
+      _openTournamentView(_activeTournamentId, "admin");
     });
 
     // Median wins Yes/No
@@ -4493,7 +5649,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         _closeModal();
         const snap = await _tRef(tid).once("value");
         _tournaments[tid] = snap.val();
-        const body = document.getElementById("trn-tab-body");
+        const body = (_getTabBody());
         if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
       } catch(err) { showToast("Failed to save", "error"); }
     });
@@ -4506,7 +5662,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       showToast(newVal ? "Auto-register enabled" : "Auto-register disabled");
       const snap = await _tRef(tid).once("value");
       _tournaments[tid] = snap.val();
-      const body = document.getElementById("trn-tab-body");
+      const body = (_getTabBody());
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
     } catch(err) { showToast("Failed to update", "error"); }
   }
@@ -4583,8 +5739,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Refresh local cache immediately so the tab re-renders with saved data
       const freshSnap = await _tRef(tid).once("value");
       _tournaments[tid] = freshSnap.val();
-      const tabBody = document.getElementById("trn-tab-body");
-      if (tabBody && _activeAdminTab === "participants") {
+      const tabBody = (_getTabBody());
+      if (tabBody && (_activeAdminMgmtTab === "participants" || _activeAdminTab === "participants")) {
         _renderParticipantsTab(tid, _tournaments[tid], tabBody);
       }
 
@@ -4952,7 +6108,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Single authoritative reload + re-render
       const freshSnap = await _tRef(tid).once("value");
       _tournaments[tid] = freshSnap.val();
-      const body = document.getElementById("trn-tab-body");
+      const body = (_getTabBody());
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
 
     } catch(err) {
@@ -5655,7 +6811,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (syncWarnings.length || scoringDiffs.length) {
         _showSyncWarningBanner(syncWarnings, scoringDiffs);
       }
-      const body = document.getElementById("trn-tab-body");
+      const body = (_getTabBody());
       if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
     } catch(err) {
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
@@ -5702,7 +6858,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>
       <button class="trn-xplat-banner-dismiss" id="trn-xplat-dismiss" title="Dismiss">✕</button>`;
 
-    const tabBody = document.getElementById("trn-tab-body");
+    const tabBody = (_getTabBody());
     tabBody?.parentNode?.insertBefore(banner, tabBody);
     document.getElementById("trn-xplat-dismiss")?.addEventListener("click", () => banner.remove());
   }
@@ -6450,12 +7606,23 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       body.innerHTML = `
         <div class="trn-reg-toolbar">
           <span class="trn-reg-count">${regList.length} total · <span class="trn-pending-count">${pending.length} pending</span></span>
-          <div style="display:flex;gap:var(--space-2)">
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <button class="btn-secondary btn-sm" id="trn-export-csv-btn">⬇ Export CSV</button>
             <button class="btn-secondary btn-sm" id="trn-import-csv-btn">⬆ Import CSV</button>
             <button class="btn-ghost btn-sm" id="trn-template-reg-btn" title="Download a blank CSV template matching this tournament's registration form">⬇ Template</button>
           </div>
         </div>
+
+        <!-- Admin action bar: invite email + division builder -->
+        <div class="trn-admin-action-bar">
+          <button class="btn-secondary btn-sm" id="trn-send-invite-btn" title="Email league invites to approved registrants">
+            ✉ Send League Invites
+          </button>
+          <button class="btn-secondary btn-sm" id="trn-division-builder-btn">
+            🗂 Assign Divisions / Conferences
+          </button>
+        </div>
+
         <input type="file" id="trn-csv-import-input" accept=".csv" style="display:none" />
 
         ${pending.length ? `
@@ -6588,6 +7755,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     body.querySelectorAll("[data-view-reg]").forEach(btn =>
       btn.addEventListener("click", () => _openRegistrantDetail(tid, btn.dataset.viewReg, regs[btn.dataset.viewReg]))
     );
+
+    // ── League invite email launcher ──────────────────────
+    document.getElementById("trn-send-invite-btn")?.addEventListener("click", () => {
+      _openLeagueInviteModal(tid, t, approved.map(([, r]) => r));
+    });
+
+    // ── Divisions / Conferences builder ───────────────────
+    document.getElementById("trn-division-builder-btn")?.addEventListener("click", () => {
+      _openDivisionBuilderModal(tid, t, approved.map(([rid, r]) => ({ rid, ...r })));
+    });
   }).catch(err => {
     body.innerHTML = `<div class="trn-empty">Failed to load registrations: ${_esc(err.message)}</div>`;
   });
@@ -6698,7 +7875,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         showToast("Registration deleted ✓");
         _closeModal();
         // _renderRegistrantsTab fetches fresh from _tRegsRef — no need for full snapshot
-        const body = document.getElementById("trn-tab-body");
+        const body = (_getTabBody());
         if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
       } catch(err) {
         showToast("Failed to delete registration", "error");
@@ -6715,14 +7892,351 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       });
       showToast(`Registration ${status} ✓`);
       // Re-render registrants tab — it will fetch fresh from _tRegsRef directly
-      const body = document.getElementById("trn-tab-body");
+      const body = (_getTabBody());
       if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
     } catch(err) {
       showToast("Failed to update status", "error");
     }
   }
 
-  // ── CSV Export ─────────────────────────────────────────
+  // ── League Invite Email Modal ──────────────────────────
+  // Opens the user's email client with approved registrants in BCC.
+  // Splits into batches of 50 to avoid URL length limits.
+  function _openLeagueInviteModal(tid, t, approvedRegs) {
+    const meta = t.meta || {};
+    const adminEmail = meta.adminEmail || "";
+    const regYear    = _tournamentYear || new Date().getFullYear();
+    const tourName   = meta.name || "Tournament";
+
+    // Filter to registrants with email addresses
+    const withEmail  = approvedRegs.filter(r => r.email);
+    const noEmail    = approvedRegs.filter(r => !r.email);
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>Send League Invites</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body">
+        <div class="trn-detail-rows" style="margin-bottom:var(--space-4)">
+          <div class="trn-detail-row"><span>Approved registrants</span><span>${approvedRegs.length}</span></div>
+          <div class="trn-detail-row"><span>With email address</span><span>${withEmail.length}</span></div>
+          ${noEmail.length ? `<div class="trn-detail-row" style="color:var(--color-orange)"><span>Missing email</span><span>${noEmail.length}</span></div>` : ""}
+        </div>
+
+        <div class="form-group">
+          <label>From (Your Email)</label>
+          <input type="email" id="trn-invite-from-email" value="${_esc(adminEmail)}" placeholder="commissioner@example.com" />
+          <span class="field-hint">This will be the "To:" address — all registrants go in BCC.</span>
+        </div>
+
+        <div class="form-group">
+          <label>League Invite Link</label>
+          <input type="url" id="trn-invite-link-url" placeholder="https://sleeper.app/leagues/join/…" />
+          <span class="field-hint">The platform league invite link for this year's leagues.</span>
+        </div>
+
+        <div class="form-group">
+          <label>Email Subject</label>
+          <input type="text" id="trn-invite-subject" value="${_esc(`[${tourName}] Welcome to ${regYear} — Your League Invite`)}" />
+        </div>
+
+        <div class="form-group">
+          <label>Message Body</label>
+          <textarea id="trn-invite-body" rows="8" style="width:100%;resize:vertical;font-size:.875rem">${_esc(
+`Welcome to ${tourName} ${regYear}!
+
+Your league invite link:
+[INVITE_LINK]
+
+Please click the link above to accept your spot. If you have any questions, reply to this email.
+
+Good luck this season!
+
+— ${tourName} Commissioner`
+          )}</textarea>
+          <span class="field-hint">Use [INVITE_LINK] as a placeholder — it will be replaced with the actual link.</span>
+        </div>
+
+        ${withEmail.length > 50 ? `
+          <div class="trn-alert" style="margin-bottom:0">
+            ⚠️ ${withEmail.length} addresses will be split across ${Math.ceil(withEmail.length/50)} email drafts (50 per BCC batch).
+          </div>` : ""}
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="trn-open-invite-emails-btn">
+          ✉ Open Email Draft${withEmail.length > 50 ? "s" : ""}
+        </button>
+      </div>
+    `);
+
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+
+    document.getElementById("trn-open-invite-emails-btn")?.addEventListener("click", () => {
+      const fromEmail   = document.getElementById("trn-invite-from-email")?.value.trim() || "";
+      const inviteLink  = document.getElementById("trn-invite-link-url")?.value.trim() || "";
+      const subject     = document.getElementById("trn-invite-subject")?.value.trim() || "";
+      const bodyText    = (document.getElementById("trn-invite-body")?.value || "")
+                            .replace(/\[INVITE_LINK\]/g, inviteLink || "[league invite link]");
+
+      if (!withEmail.length) { showToast("No approved registrants with email addresses", "error"); return; }
+
+      const emails = withEmail.map(r => r.email);
+      const BCC_LIMIT = 50;
+      const chunks = [];
+      for (let i = 0; i < emails.length; i += BCC_LIMIT) {
+        chunks.push(emails.slice(i, i + BCC_LIMIT));
+      }
+
+      chunks.forEach((chunk, idx) => {
+        const bcc    = encodeURIComponent(chunk.join(","));
+        const subj   = encodeURIComponent(subject + (chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ""));
+        const body   = idx === 0 ? encodeURIComponent(bodyText) : "";
+        const href   = `mailto:${encodeURIComponent(fromEmail)}?bcc=${bcc}&subject=${subj}${body ? `&body=${body}` : ""}`;
+        window.open(href, "_blank");
+      });
+
+      showToast(`${chunks.length} email draft${chunks.length>1?"s":""} opened ✓`);
+      _closeModal();
+    });
+  }
+
+  // ── Divisions / Conferences Builder Modal ──────────────
+  // Lets admin assign approved registrants to divisions/conferences.
+  // Two modes: Randomize or Manual assignment.
+  // Writes assignments to leagues batch conference assignments (existing structure).
+  function _openDivisionBuilderModal(tid, t, approvedRegs) {
+    const meta = t.meta || {};
+    const tourName = meta.name || "Tournament";
+    const year = _tournamentYear || new Date().getFullYear();
+
+    // Load existing assignments from participants
+    const participants = Object.values(t.participants || {});
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>Divisions &amp; Conferences</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body" style="max-height:70vh;overflow-y:auto">
+        <p style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
+          Assign ${approvedRegs.length} approved registrants to divisions or conferences for ${year}.
+        </p>
+
+        <div class="form-group">
+          <label>Number of Groups</label>
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <input type="number" id="trn-div-count" min="2" max="32" value="4"
+              style="width:80px" />
+            <span style="font-size:.85rem;color:var(--color-text-dim)">
+              = ~${Math.ceil(approvedRegs.length / 4)} per group
+            </span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Group Name Prefix</label>
+          <input type="text" id="trn-div-prefix" value="Division" placeholder="Division, Conference, Group…" style="max-width:200px" />
+          <span class="field-hint">Groups will be named "Division A", "Division B", etc.</span>
+        </div>
+
+        <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-4)">
+          <button class="btn-primary btn-sm" id="trn-div-randomize-btn">🎲 Randomize</button>
+          <button class="btn-secondary btn-sm" id="trn-div-clear-btn">✕ Clear All</button>
+        </div>
+
+        <div id="trn-div-groups-container"></div>
+
+        <div id="trn-div-unassigned-section" style="margin-top:var(--space-4)">
+          <div class="trn-section-card-title">Unassigned (${approvedRegs.length})</div>
+          <div id="trn-div-unassigned-list" class="trn-div-pool">
+            ${approvedRegs.map(r => `
+              <div class="trn-div-person" draggable="true" data-rid="${_esc(r.rid)}" data-name="${_esc(r.displayName||r.teamName||r.rid)}">
+                ${_esc(r.displayName || r.teamName || r.rid)}
+                ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}">${(r.gender||"").charAt(0)}</span>` : ""}
+              </div>`).join("")}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="trn-div-save-btn">💾 Save Assignments</button>
+      </div>
+    `);
+
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+
+    // In-memory group state: { [groupKey]: [rid, rid, …] }
+    let _groups = {};
+    let _groupCount = 4;
+    let _prefix = "Division";
+
+    function _groupLetter(i) {
+      return String.fromCharCode(65 + i); // A, B, C, …
+    }
+
+    function _rebuildGroups() {
+      _groupCount = Math.max(2, Math.min(32, parseInt(document.getElementById("trn-div-count")?.value) || 4));
+      _prefix = document.getElementById("trn-div-prefix")?.value.trim() || "Division";
+      const container = document.getElementById("trn-div-groups-container");
+      if (!container) return;
+      container.innerHTML = Array.from({length: _groupCount}, (_, i) => {
+        const key   = _groupLetter(i);
+        const label = `${_prefix} ${key}`;
+        const members = _groups[key] || [];
+        return `
+          <div class="trn-div-group" data-group="${key}">
+            <div class="trn-div-group-header">
+              <strong>${_esc(label)}</strong>
+              <span class="trn-div-group-count">${members.length}</span>
+            </div>
+            <div class="trn-div-pool trn-div-drop-zone" data-group="${key}">
+              ${members.map(rid => {
+                const reg = approvedRegs.find(r => r.rid === rid);
+                const name = reg ? (reg.displayName || reg.teamName || rid) : rid;
+                const gender = reg?.gender || "";
+                return `<div class="trn-div-person" draggable="true" data-rid="${_esc(rid)}" data-name="${_esc(name)}">
+                  ${_esc(name)}
+                  ${gender ? `<span class="trn-gender-${gender.charAt(0).toLowerCase()}">${gender.charAt(0)}</span>` : ""}
+                </div>`;
+              }).join("")}
+            </div>
+          </div>`;
+      }).join("");
+      _wireDivDragDrop(container);
+    }
+
+    function _wireDivDragDrop(root) {
+      let dragRid = null, dragSrc = null;
+      root.querySelectorAll(".trn-div-person").forEach(el => {
+        el.addEventListener("dragstart", e => {
+          dragRid = el.dataset.rid;
+          dragSrc = el.closest(".trn-div-pool");
+          e.dataTransfer.effectAllowed = "move";
+        });
+      });
+      // Also wire the unassigned pool
+      const unassigned = document.getElementById("trn-div-unassigned-list");
+      if (unassigned) {
+        unassigned.querySelectorAll(".trn-div-person").forEach(el => {
+          el.addEventListener("dragstart", e => {
+            dragRid = el.dataset.rid;
+            dragSrc = unassigned;
+            e.dataTransfer.effectAllowed = "move";
+          });
+        });
+        _makeDropZone(unassigned, null);
+      }
+      root.querySelectorAll(".trn-div-drop-zone").forEach(zone => {
+        _makeDropZone(zone, zone.dataset.group);
+      });
+
+      function _makeDropZone(zone, groupKey) {
+        zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("trn-div-drop-over"); });
+        zone.addEventListener("dragleave", () => zone.classList.remove("trn-div-drop-over"));
+        zone.addEventListener("drop", e => {
+          e.preventDefault();
+          zone.classList.remove("trn-div-drop-over");
+          if (!dragRid) return;
+          // Remove from current group
+          Object.keys(_groups).forEach(k => {
+            _groups[k] = (_groups[k] || []).filter(r => r !== dragRid);
+          });
+          // Add to new group (or back to unassigned if groupKey is null)
+          if (groupKey) {
+            if (!_groups[groupKey]) _groups[groupKey] = [];
+            _groups[groupKey].push(dragRid);
+          }
+          // Rebuild unassigned list
+          const allAssigned = new Set(Object.values(_groups).flat());
+          const unassignedList = approvedRegs.filter(r => !allAssigned.has(r.rid));
+          const ul = document.getElementById("trn-div-unassigned-list");
+          if (ul) {
+            ul.innerHTML = unassignedList.map(r => `
+              <div class="trn-div-person" draggable="true" data-rid="${_esc(r.rid)}" data-name="${_esc(r.displayName||r.teamName||r.rid)}">
+                ${_esc(r.displayName || r.teamName || r.rid)}
+                ${r.gender ? `<span class="trn-gender-${r.gender.charAt(0).toLowerCase()}">${r.gender.charAt(0)}</span>` : ""}
+              </div>`).join("");
+            document.getElementById("trn-div-unassigned-section")?.querySelector(".trn-section-card-title")
+              ?.replaceChildren?.();
+          }
+          _rebuildGroups();
+        });
+      }
+    }
+
+    // Randomize button
+    document.getElementById("trn-div-randomize-btn")?.addEventListener("click", () => {
+      _groupCount = Math.max(2, parseInt(document.getElementById("trn-div-count")?.value) || 4);
+      const shuffled = [...approvedRegs].sort(() => Math.random() - 0.5);
+      _groups = {};
+      for (let i = 0; i < _groupCount; i++) _groups[_groupLetter(i)] = [];
+      shuffled.forEach((r, i) => {
+        const key = _groupLetter(i % _groupCount);
+        _groups[key].push(r.rid);
+      });
+      // Clear unassigned
+      const ul = document.getElementById("trn-div-unassigned-list");
+      if (ul) ul.innerHTML = '<em style="font-size:.8rem;color:var(--color-text-dim)">All assigned</em>';
+      _rebuildGroups();
+      showToast(`Randomized into ${_groupCount} groups ✓`);
+    });
+
+    // Clear button
+    document.getElementById("trn-div-clear-btn")?.addEventListener("click", () => {
+      _groups = {};
+      const ul = document.getElementById("trn-div-unassigned-list");
+      if (ul) ul.innerHTML = approvedRegs.map(r => `
+        <div class="trn-div-person" draggable="true" data-rid="${_esc(r.rid)}" data-name="${_esc(r.displayName||r.teamName||r.rid)}">
+          ${_esc(r.displayName || r.teamName || r.rid)}
+          ${r.gender ? `<span class="trn-gender-${r.gender.charAt(0).toLowerCase()}">${r.gender.charAt(0)}</span>` : ""}
+        </div>`).join("");
+      _rebuildGroups();
+    });
+
+    // Count/prefix change updates per-group count display
+    document.getElementById("trn-div-count")?.addEventListener("input", function() {
+      const n = parseInt(this.value) || 4;
+      this.nextElementSibling && (this.nextElementSibling.textContent = `= ~${Math.ceil(approvedRegs.length / n)} per group`);
+    });
+
+    // Save button — writes group assignments to participants in Firebase
+    document.getElementById("trn-div-save-btn")?.addEventListener("click", async () => {
+      const prefix = document.getElementById("trn-div-prefix")?.value.trim() || "Division";
+      const updates = {};
+      let count = 0;
+      Object.entries(_groups).forEach(([key, rids]) => {
+        const label = `${prefix} ${key}`;
+        rids.forEach(rid => {
+          // Find participant matching this registrant
+          const reg = approvedRegs.find(r => r.rid === rid);
+          if (!reg) return;
+          // Find matching participant by email or displayName
+          const pEntry = Object.entries(t.participants || {}).find(([, p]) =>
+            (p.email && p.email === reg.email) ||
+            (p.displayName && p.displayName === reg.displayName)
+          );
+          if (pEntry) {
+            updates[`participants/${pEntry[0]}/division`] = label;
+            updates[`participants/${pEntry[0]}/conference`] = label;
+            count++;
+          }
+        });
+      });
+      if (!count) { showToast("No matching participants found to update", "error"); return; }
+      try {
+        await _tRef(tid).update(updates);
+        showToast(`${count} participant${count!==1?"s":""} assigned ✓`);
+        _closeModal();
+      } catch(e) { showToast("Failed to save assignments: " + e.message, "error"); }
+    });
+
+    // Initial render
+    _rebuildGroups();
+  }
   function _exportRegistrantsCSV(tid, t, preloadedRegs) {
     const regs = Object.entries(preloadedRegs || _tournaments[tid]?.registrations || t.registrations || {});
     if (!regs.length) { showToast("No registrants to export", "info"); return; }
@@ -9515,7 +11029,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         _recapCache[ck] = payload;
         showToast("Recap saved ✓");
         // Re-render the matchups tab to show the saved recap
-        const body = document.getElementById("trn-tab-body");
+        const body = (_getTabBody());
         if (body) _renderAnalyticsMatchups(tid, t, body);
       } catch(e) { showToast("Failed to save: " + e.message, "error"); }
     });
@@ -14436,8 +15950,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     `;
 
     document.getElementById("trn-view-rules-btn")?.addEventListener("click", () => {
-      const rulesTab = document.querySelector('.trn-tab[data-tab="rules"]');
-      if (rulesTab) { rulesTab.click(); } else { _renderRulesTab(t, body); }
+      // In new nav, rules are shown in Overview expanded; try expanding inline
+      const preview = document.getElementById("trn-overview-rules-card");
+      if (preview) {
+        preview.scrollIntoView({ behavior:"smooth" });
+        document.getElementById("trn-expand-rules-btn")?.click();
+      }
     });
 
     // ── Summary edit/save/reset (admin only) ────────────
@@ -14838,7 +16356,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // Show success inside the overlay (not trn-tab-body) so the form
       // is fully replaced and can't be resubmitted or appear sticky on reopen.
       const overlayBody = document.getElementById("trn-register-page-body");
-      const fallbackBody = document.getElementById("trn-tab-body");
+      const fallbackBody = (_getTabBody());
       const successTarget = overlayBody || fallbackBody;
       if (successTarget) {
         successTarget.innerHTML = `
@@ -14997,8 +16515,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         regType:           meta.regType      || "open",
         rankBy:            meta.rankBy       || "record",
         bio:               meta.bio          || "",
+        adminEmail:        meta.adminEmail   || null,
         donationLink:      meta.donationLink || "",
-        socialLinks:       meta.socialLinks  || {},
+        donationLinks:     Array.isArray(meta.donationLinks) ? meta.donationLinks : [],
+        socialLinks:       Array.isArray(meta.socialLinks) ? meta.socialLinks : _legacySocialLinks(meta.socialLinks),
         createdAt:         meta.createdAt        || 0,
         createdBy:         meta.createdBy        || "",
         registrationYear:  meta.registrationYear || null,
@@ -15015,8 +16535,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           Object.entries(t.playoffs || {}).forEach(([yr, config]) => {
             if (!/^\d{4}$/.test(yr)) return; // skip legacy flat node
             const wc = config || {};
+            // Always include registrationOpen flag for each year
+            const entry = { registrationOpen: wc.registrationOpen || false };
             if (wc.mode === "worldcup") {
-              poData[yr] = {
+              Object.assign(entry, {
                 mode:                  "worldcup",
                 startWeek:             wc.startWeek             || null,
                 worldcupGroups:        wc.worldcupGroups        || [],
@@ -15027,8 +16549,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 worldcupAdvanceCount:  wc.worldcupAdvanceCount  ?? 2,
                 worldcupWeeksPerRound: wc.worldcupWeeksPerRound || 2,
                 worldcupTiebreakers:   wc.worldcupTiebreakers   || null,
-              };
+              });
             }
+            poData[yr] = entry;
           });
           return Object.keys(poData).length ? poData : null;
         })()
