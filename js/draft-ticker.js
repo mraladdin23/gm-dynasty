@@ -302,10 +302,32 @@ const DraftTicker = (() => {
 
     const ref     = GMD.child(`${FB_STATUS_PATH}/${leagueId}`);
     const handler = ref.on("value", async snap => {
-      const status = snap.val();
-      if (!status) return;
-      _statusCache.set(leagueId, status);
-      if (status.status === "complete") {
+      const fbStatus = snap.val();
+      if (!fbStatus) return;
+      // CRITICAL: merge Firebase data INTO the existing cached status rather than
+      // replacing it. Firebase only writes thin data (picksMade, traded_picks, etc.)
+      // The rich Sleeper data (slot_to_roster_id, draft_order, settingsTeams,
+      // totalPicks, draftType) only comes from _checkSleeperDirect and MUST be
+      // preserved — without it _computeMyNextPick returns null immediately.
+      const existing = _statusCache.get(leagueId) || {};
+      const merged = {
+        ...existing,           // keep slot_to_roster_id, draft_order, settingsTeams, etc.
+        ...fbStatus,           // overlay Firebase fields (picksMade, traded_picks, status)
+        // Always prefer the richer source for critical fields
+        draft_order:       existing.draft_order       || fbStatus.draft_order       || {},
+        slot_to_roster_id: existing.slot_to_roster_id || fbStatus.slot_to_roster_id || {},
+        settingsTeams:     existing.settingsTeams      || fbStatus.settingsTeams     || null,
+        totalPicks:        existing.totalPicks         || fbStatus.totalPicks        || null,
+        draftType:         existing.draftType          || fbStatus.draftType         || "snake",
+      };
+      // Recompute nextPick with the merged data so it stays current
+      const teams = merged.settingsTeams || Object.keys(merged.draft_order).length || 12;
+      const next  = (merged.picksMade || 0) + 1;
+      merged.nextPick = merged.totalPicks && (merged.picksMade || 0) < merged.totalPicks
+        ? { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 }
+        : null;
+      _statusCache.set(leagueId, merged);
+      if (merged.status === "complete") {
         _detachLeague(leagueId);
       }
       await _redraw();
