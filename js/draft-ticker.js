@@ -235,6 +235,14 @@ const DraftTicker = (() => {
       if (status.status === "drafting" || status.status === "paused") {
         const myNext     = _computeMyNextPick(status, mySleeperUid);
         const onTheClock = myNext?.picksAway === 0;
+        // When on the clock, myNext points at the CURRENT pick (picksAway=0).
+        // Also compute the pick after this one so the detail line can show
+        // "My Next: Rd Z Pk W" — useful info rather than repeating the current pick.
+        let myNextAfter = null;
+        if (onTheClock) {
+          const statusShifted = { ...status, picksMade: (status.picksMade || 0) + 1 };
+          myNextAfter = _computeMyNextPick(statusShifted, mySleeperUid);
+        }
         live.push({
           leagueId,
           leagueName:     status.leagueName || meta.leagueName || leagueId,
@@ -246,8 +254,8 @@ const DraftTicker = (() => {
           picksMade:      status.picksMade || 0,
           totalPicks:     status.totalPicks || null,
           nextPick:       status.nextPick   || null,
-          myNextPick:     myNext,
-          picksUntilMe:   myNext?.picksAway ?? null,
+          myNextPick:     onTheClock ? myNextAfter : myNext,
+          picksUntilMe:   onTheClock ? 0 : (myNext?.picksAway ?? null),
           onTheClock
         });
       } else if (status.status === "pre_draft" && status.startTime && status.startTime > now) {
@@ -546,13 +554,17 @@ const DraftTicker = (() => {
         let detail = "";
         if (item.nextPick) {
           const pauseNote = isPaused ? " · <span style='color:var(--color-text-dim)'>⏸ Paused</span>" : "";
-          const nextStr   = `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
-          const myLabel   = item.myNextPick
-            ? (item.onTheClock
-                ? `<strong style="color:#f87171">My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}</strong>`
-                : `My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`)
-            : "";
-          detail = `<div class="draft-ticker-row-detail">${nextStr}${myLabel ? " · " + myLabel : ""}</div>`;
+          // On the clock: current pick IS the user's pick — label it clearly
+          // myNextPick now holds the pick AFTER the current one (or null if last pick)
+          const nextStr = item.onTheClock
+            ? `<strong style="color:#f87171">🔴 On the clock: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}</strong>`
+            : `Current: Rd ${item.nextPick.round} Pk ${item.nextPick.pick}`;
+          const myLabel = (!item.onTheClock && item.myNextPick)
+            ? `My Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`
+            : (item.onTheClock && item.myNextPick)
+              ? `Next: Rd ${item.myNextPick.round} Pk ${item.myNextPick.pick}`
+              : "";
+          detail = `<div class="draft-ticker-row-detail">${nextStr}${myLabel ? " · " + myLabel : ""}${pauseNote}</div>`;
         }
 
         const nav = item.tid
@@ -729,6 +741,7 @@ const DraftTicker = (() => {
   // ── Public: init ──────────────────────────────────────
   async function init(username) {
     _username = (username || "").toLowerCase().trim();
+    _mySleeperUserId = null; // always reset on re-init so view-as gets the correct user's Sleeper ID
 
     // Guard against duplicate listeners if init() is called more than once
     const btn   = document.getElementById("draft-ticker-btn");
