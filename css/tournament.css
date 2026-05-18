@@ -4837,3 +4837,395 @@
   text-align: center;
   padding: var(--space-2);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   T-REDESIGN — New Top-Level Nav + History Sub-Nav + Wizard
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Top-level nav ────────────────────────────────────────── */
+.trn-top-nav {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.trn-top-nav-pills {
+  display: flex;
+  gap: 3px;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.trn-top-nav-pills::-webkit-scrollbar { display: none; }
+
+.trn-top-nav-pill {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: .875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.trn-top-nav-pill:hover { color: var(--color-text); }
+.trn-top-nav-pill--active {
+  color: var(--color-gold);
+  border-bottom-color: var(--color-gold);
+  font-weight: 600;
+}
+
+/* Mobile: hide pills, show select */
+.trn-top-nav-select { display: none; }
+
+@media (max-width: 640px) {
+  .trn-top-nav-pills  { display: none !important; }
+  .trn-top-nav-select {
+    display: block;
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: .9rem;
+    font-weight: 500;
+    margin-bottom: var(--space-3);
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+  .trn-top-nav-select:focus { outline: none; border-color: var(--color-gold); }
+}
+
+/* ── Year pill bar (in History + Admin sections) ──────────── */
+.trn-year-pill-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.trn-year-single-label {
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  margin-bottom: var(--space-3);
+}
+
+/* ── Tournament History sub-nav ───────────────────────────── */
+.trn-history-subnav {
+  margin-bottom: var(--space-4);
+}
+
+.trn-history-tabs {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-history-tabs::-webkit-scrollbar { display: none; }
+
+.trn-history-tab {
+  padding: 6px var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: .82rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.trn-history-tab:hover { color: var(--color-text); }
+.trn-history-tab--active {
+  color: var(--color-gold);
+  border-bottom-color: var(--color-gold);
+  font-weight: 600;
+}
+
+.trn-history-select { display: none; }
+
+@media (max-width: 640px) {
+  .trn-history-tabs   { display: none !important; }
+  .trn-history-select {
+    display: block;
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: .875rem;
+    margin-bottom: var(--space-3);
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+  .trn-history-select:focus { outline: none; border-color: var(--color-gold); }
+}
+
+/* ── Admin management tabs ────────────────────────────────── */
+.trn-admin-mgmt-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0;
+}
+
+.trn-admin-mgmt-tab {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: .85rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.trn-admin-mgmt-tab:hover { color: var(--color-text); }
+.trn-admin-mgmt-tab--active {
+  color: var(--color-gold);
+  border-bottom-color: var(--color-gold);
+  font-weight: 600;
+}
+
+/* ── Registration open banner ─────────────────────────────── */
+.trn-reg-open-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(59,130,246,.12);
+  border: 1px solid rgba(59,130,246,.3);
+  border-radius: var(--radius-lg);
+  font-size: .88rem;
+  color: #60a5fa;
+  font-weight: 500;
+  margin-bottom: var(--space-4);
+}
+
+/* ── Contact commissioner button ─────────────────────────── */
+.trn-contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ══════════════════════════════════════════════════════════
+   SETUP WIZARD
+   ══════════════════════════════════════════════════════════ */
+
+.trn-wizard-modal-body {
+  padding: var(--space-4);
+}
+
+/* Step progress bar */
+.trn-wizard-steps {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-5);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.trn-wizard-steps::-webkit-scrollbar { display: none; }
+
+.trn-wizard-step-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 4px;
+  flex-shrink: 0;
+  min-width: 56px;
+  opacity: .55;
+  transition: opacity .15s;
+}
+.trn-wizard-step-btn:hover { opacity: .85; }
+.trn-wizard-step-btn--active { opacity: 1; }
+
+.trn-wizard-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-border);
+  color: var(--color-text-dim);
+  font-size: .72rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s, color .15s;
+}
+.trn-wizard-step-btn--active .trn-wizard-step-num {
+  background: var(--color-gold);
+  color: #fff;
+}
+
+.trn-wizard-step-label {
+  font-size: .65rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-align: center;
+  white-space: nowrap;
+}
+.trn-wizard-step-btn--active .trn-wizard-step-label { color: var(--color-gold); }
+
+.trn-wizard-step-connector {
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  background: var(--color-border);
+  margin-bottom: 14px; /* align with center of step dots */
+}
+
+/* Wizard year bar */
+.trn-wizard-year-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Wizard body content area */
+.trn-wizard-body {
+  animation: fadeIn .1s ease;
+}
+
+/* Wizard link rows (social / donation) */
+.trn-wizard-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.trn-wizard-link-row input {
+  font-family: var(--font-body);
+  font-size: .85rem;
+  padding: 5px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  outline: none;
+  box-sizing: border-box;
+}
+.trn-wizard-link-row input:focus { border-color: var(--color-gold); }
+
+@media (max-width: 640px) {
+  .trn-wizard-steps { gap: 0; }
+  .trn-wizard-step-btn { min-width: 44px; }
+  .trn-wizard-step-label { display: none; }
+  .trn-wizard-step-num { width: 22px; height: 22px; font-size: .68rem; }
+}
+
+/* ── Admin action bar (invite + division builder) ─────────── */
+.trn-admin-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ── Division / Conference builder ───────────────────────── */
+.trn-div-group {
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.trn-div-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  font-size: .85rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.trn-div-group-count {
+  font-size: .75rem;
+  font-weight: 700;
+  background: var(--color-border);
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--color-text-dim);
+}
+
+.trn-div-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  min-height: 48px;
+  background: var(--color-bg);
+  transition: background .1s;
+}
+
+.trn-div-drop-over {
+  background: color-mix(in srgb, var(--color-gold) 8%, var(--color-bg)) !important;
+  border-color: var(--color-gold) !important;
+}
+
+.trn-div-drop-zone {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.trn-div-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: .8rem;
+  font-weight: 500;
+  cursor: grab;
+  user-select: none;
+  transition: border-color .1s, box-shadow .1s;
+}
+.trn-div-person:hover {
+  border-color: var(--color-gold);
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+}
+.trn-div-person:active { cursor: grabbing; }
+
+/* ── Wizard: year label ───────────────────────────────────── */
+.trn-wizard-year-label {
+  font-size: .78rem;
+  color: var(--color-text-dim);
+  font-weight: 500;
+}

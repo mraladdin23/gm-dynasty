@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>" />
   <link rel="stylesheet" href="../css/base.css?v=19" />
   <link rel="stylesheet" href="../css/locker.css?v=21" />
-  <link rel="stylesheet" href="../css/tournament.css?v=5" />
+  <link rel="stylesheet" href="../css/tournament.css?v=7" />
   <style>
     /* ── Public tournament page overrides ── */
     body { background: var(--color-bg); }
@@ -388,11 +388,26 @@
     // ── Single tournament view ───────────────────────────────
     let _currentTid      = null;
     let _currentT        = null;
-    let _activeTab       = "info";
+    let _activePubNav    = "overview";  // overview | history | players | chat
+    let _activeHistTab   = "standings"; // sub-tab within history
     let _selectedYear    = null;   // null = all years / most recent
     let _adpRefreshTimer = null;   // setInterval handle for ADP auto-refresh
     let _pubBoardUnsub   = null;
     let _pubBoardMsgs    = [];
+
+    // Resolve default year: active season > latest completed > reg-open
+    function resolveDefaultYear(t) {
+      const scVals = Object.values(t.standingsCache || {});
+      const poKeys = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).map(Number).sort((a,b)=>b-a);
+      const scYears = [...new Set(scVals.map(e=>e.year).filter(Boolean).map(Number))].sort((a,b)=>b-a);
+      const allYrs = [...new Set([...scYears, ...poKeys])].sort((a,b)=>b-a);
+      // Active: has standings + not published
+      const active = allYrs.find(y => scVals.some(e=>String(e.year)===String(y)) && !t.playoffs?.[y]?.published);
+      if (active) return active;
+      const completed = allYrs.find(y => scVals.some(e=>String(e.year)===String(y)));
+      if (completed) return completed;
+      return allYrs.find(y => t.playoffs?.[y]?.registrationOpen) || allYrs[0] || null;
+    }
 
     async function loadTournament(tid) {
       const loading = document.getElementById("pub-loading");
@@ -411,77 +426,89 @@
 
       const isDraft      = (t.status || "draft") === "draft";
       const hasStandings = t.standingsCache && Object.keys(t.standingsCache).length > 0;
-      // playoffs is now year-keyed: {2025: {...}, 2024: {...}}
-      // Fall back to flat .mode for legacy snapshots
       const hasPlayoffs = !!(t.playoffs && (
         t.playoffs.mode ||
         Object.keys(t.playoffs).some(k => /^\d{4}$/.test(k) && t.playoffs[k]?.mode)
       ));
-      const regOpen      = ["registration_open", "active"].includes(t.status);
 
-      // Build sorted year list from standingsCache
-      const years = hasStandings
-        ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b) => b-a)
+      // Check registration open
+      const regOpenYear = Object.keys(t.playoffs || {})
+        .filter(k => /^\d{4}$/.test(k))
+        .find(y => t.playoffs[y]?.registrationOpen);
+      const anyRegOpen = !!regOpenYear;
+
+      // Build sorted year list
+      const scYears = hasStandings
+        ? [...new Set(Object.values(t.standingsCache).map(lc => lc.year).filter(Boolean))].sort((a,b)=>b-a)
         : [];
-      // Default to most recent year
-      if (years.length && (_selectedYear === null || !years.includes(_selectedYear))) {
-        _selectedYear = years[0];
+      const poYears = Object.keys(t.playoffs||{}).filter(k=>/^\d{4}$/.test(k)).map(Number).sort((a,b)=>b-a);
+      const allYears = [...new Set([...scYears.map(Number), ...poYears])].sort((a,b)=>b-a);
+
+      // Set default year using smart resolution
+      const defaultYear = resolveDefaultYear(t);
+      if (_selectedYear === null || !allYears.includes(_selectedYear)) {
+        _selectedYear = defaultYear;
       }
 
-      // For draft tournaments showing history, default to Standings tab
-      if (isDraft && hasStandings && _activeTab === "info") _activeTab = "standings";
+      // Default nav: if no standings yet default to overview, else history
+      if (!["overview","history","players","chat"].includes(_activePubNav)) _activePubNav = "overview";
+      if (isDraft && hasStandings && _activePubNav === "overview") _activePubNav = "history";
+
+      // Nav pills
+      const _pill = (id, label) =>
+        `<button class="trn-top-nav-pill${_activePubNav===id?" trn-top-nav-pill--active":""}" data-pubnav="${id}">${label}</button>`;
+
+      const hasHistory = hasStandings || hasPlayoffs;
+      const hasPlayers = hasStandings;
+      const navPills = [
+        _pill("overview", "Overview"),
+        hasHistory ? _pill("history", "Tournament History") : "",
+        hasPlayers ? _pill("players", "Player Records") : "",
+        _pill("chat", "Chat"),
+      ].join("");
+
+      const navOpts = [
+        `<option value="overview" ${_activePubNav==="overview"?"selected":""}>Overview</option>`,
+        hasHistory ? `<option value="history" ${_activePubNav==="history"?"selected":""}>Tournament History</option>` : "",
+        hasPlayers ? `<option value="players" ${_activePubNav==="players"?"selected":""}>Player Records</option>` : "",
+        `<option value="chat" ${_activePubNav==="chat"?"selected":""}>Chat</option>`,
+      ].join("");
 
       content.innerHTML = `
         <div style="margin-bottom:var(--space-4)">
           <button id="pub-back-btn" class="btn-ghost btn-sm">← All Tournaments</button>
         </div>
 
-        <div class="trn-detail-title-row" style="margin-bottom:var(--space-4)">
+        <div class="trn-detail-title-row" style="margin-bottom:var(--space-3)">
           <div>
             <h1 class="trn-detail-name">${esc(t.name || "Tournament")}</h1>
             ${t.tagline ? `<p class="trn-detail-tagline">${esc(t.tagline)}</p>` : ""}
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
-            ${regOpen ? `<button class="btn-primary btn-sm trn-reg-pill" id="pub-register-pill">📬 Register</button>` : ""}
-            ${isDraft && hasStandings
-              ? `<span class="trn-status-badge" style="background:rgba(99,102,241,.18);color:#a78bfa">📚 History</span>`
-              : `<span class="trn-status-badge trn-status-${t.status || "draft"}">${STATUS_ICONS[t.status] || ""} ${STATUS_LABELS[t.status] || ""}</span>`
-            }
+            ${anyRegOpen ? `<button class="btn-primary btn-sm" id="pub-register-pill">📬 Register</button>` : ""}
           </div>
         </div>
 
-        <div class="trn-nav-row">
-          ${years.length > 1 ? `
-            <div class="trn-year-selector">
-              <select id="pub-year-sel" class="trn-filter-select">
-                ${years.map(y => `<option value="${y}" ${y === _selectedYear ? "selected" : ""}>${y}</option>`).join("")}
-              </select>
-            </div>` : years.length === 1 ? `<div class="trn-year-selector"><span class="trn-year-label">${years[0]}</span></div>` : ""}
-          <select class="trn-tab-select trn-tab-select--main" id="pub-tab-select">
-            ${!isDraft ? `<option value="info" ${_activeTab === "info" ? "selected" : ""}>ℹ Info</option>` : ""}
-            ${hasStandings ? `<option value="standings" ${_activeTab === "standings" ? "selected" : ""}>🏆 Standings</option>` : ""}
-            ${hasPlayoffs  ? `<option value="playoffs"  ${_activeTab === "playoffs"  ? "selected" : ""}>🥇 Playoffs</option>`  : ""}
-            ${(t.adp?.length || Object.keys(t.adpByYear || {}).length) ? `<option value="adp" ${_activeTab === "adp" ? "selected" : ""}>📊 ADP</option>` : ""}
-            ${Object.keys(t.rulesByYear || {}).length ? `<option value="rules" ${_activeTab === "rules" ? "selected" : ""}>📋 Rules</option>` : ""}
-            ${hasStandings ? `<option value="players" ${_activeTab === "players" ? "selected" : ""}>👥 Players</option>` : ""}
-            <option value="board" ${_activeTab === "board" ? "selected" : ""}>💬 Board</option>
-          </select>
-        </div>
+        <!-- Top nav: pills desktop, select mobile -->
+        <nav class="trn-top-nav">
+          <div class="trn-top-nav-pills">${navPills}</div>
+          <select class="trn-tab-select trn-top-nav-select" id="pub-top-nav-select">${navOpts}</select>
+        </nav>
 
-        <div id="pub-tab-body" class="trn-tab-body"></div>
+        <div id="pub-section-body"></div>
       `;
 
+      // Back button
       document.getElementById("pub-back-btn")?.addEventListener("click", () => {
         _clearAdpRefresh();
         window.history.pushState({}, "", window.location.pathname);
         _selectedYear = null;
-        _activeTab    = "info";
+        _activePubNav = "overview";
         loadDirectory();
       });
 
-      // Register pill — opens inline register form overlay
+      // Register pill
       document.getElementById("pub-register-pill")?.addEventListener("click", () => {
-        const content = document.getElementById("pub-content");
         const existing = document.getElementById("pub-register-overlay");
         if (existing) { existing.remove(); return; }
         const overlay = document.createElement("div");
@@ -491,63 +518,270 @@
           <div class="trn-register-page">
             <div class="trn-register-page-header">
               <button class="btn-ghost btn-sm" id="pub-reg-back">← Back to ${esc(t.name || "Tournament")}</button>
-              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")} ${t.registrationYear || new Date().getFullYear()}</h2>
+              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")} ${regOpenYear || new Date().getFullYear()}</h2>
             </div>
             <div id="pub-register-page-body"></div>
           </div>`;
-        content.appendChild(overlay);
+        document.getElementById("pub-content").appendChild(overlay);
         document.getElementById("pub-reg-back")?.addEventListener("click", () => overlay.remove());
-        const body = document.getElementById("pub-register-page-body");
-        if (body) renderRegisterTab(body);
+        const regBody = document.getElementById("pub-register-page-body");
+        if (regBody) renderRegisterTab(regBody);
       });
 
-      // Year selector (global — controls all tabs)
-      document.getElementById("pub-year-sel")?.addEventListener("change", async function() {
-        _selectedYear = parseInt(this.value);
-        // Fetch year-specific ADP from Firebase if not already loaded
-        if (!_currentT.adpByYear?.[_selectedYear]) {
-          try {
-            const snap = await tRef(_currentTid).child(`adpByYear/${_selectedYear}`).once("value");
-            const data = snap.val();
-            if (Array.isArray(data) && data.length) {
-              if (!_currentT.adpByYear) _currentT.adpByYear = {};
-              _currentT.adpByYear[_selectedYear] = data;
-              _ensureAdpTabOption();
-            }
-          } catch(e) { /* non-fatal */ }
-        }
-        renderTab(_activeTab);
+      // Top nav pills
+      document.querySelectorAll(".trn-top-nav-pill[data-pubnav]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          _activePubNav = btn.dataset.pubnav;
+          document.querySelectorAll(".trn-top-nav-pill[data-pubnav]").forEach(b =>
+            b.classList.toggle("trn-top-nav-pill--active", b.dataset.pubnav === _activePubNav));
+          const sel = document.getElementById("pub-top-nav-select");
+          if (sel) sel.value = _activePubNav;
+          renderPubSection(allYears);
+        });
       });
 
-      // Tab select
-      document.getElementById("pub-tab-select")?.addEventListener("change", function() {
-        _activeTab = this.value;
-        if (_activeTab !== "adp") _clearAdpRefresh();
-        renderTab(_activeTab);
+      // Top nav select (mobile)
+      document.getElementById("pub-top-nav-select")?.addEventListener("change", function() {
+        _activePubNav = this.value;
+        document.querySelectorAll(".trn-top-nav-pill[data-pubnav]").forEach(b =>
+          b.classList.toggle("trn-top-nav-pill--active", b.dataset.pubnav === _activePubNav));
+        renderPubSection(allYears);
       });
 
-      // If ADP data already exists on this tournament, inject the tab option immediately
+      // If ADP data exists, may be needed in history
       if (t.adp?.length || Object.keys(t.adpByYear || {}).length) _ensureAdpTabOption();
 
-      renderTab(_activeTab);
+      renderPubSection(allYears);
     }
 
+    // ── Public section renderer ────────────────────────────
+    function renderPubSection(allYears) {
+      const body = document.getElementById("pub-section-body");
+      if (!body) return;
+      body.innerHTML = "";
+      switch (_activePubNav) {
+        case "overview": return renderPubOverview(body, allYears);
+        case "history":  return renderPubHistory(body, allYears);
+        case "players":  return renderPlayersTab(body);
+        case "chat":     return renderBoardTab(body);
+        default:         return renderPubOverview(body, allYears);
+      }
+    }
+
+    // ── Public Overview ────────────────────────────────────
+    function renderPubOverview(body, allYears) {
+      const t = _currentT;
+      const meta = t; // public node is flat
+      const rawBio = t.bio || "";
+      const linkedBio = rawBio
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+        .replace(/\n/g,"<br>")
+        .replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener" style="color:var(--color-accent)">$1</a>');
+
+      // Social links — support both array and legacy object
+      const socialArr = Array.isArray(t.socialLinks) ? t.socialLinks
+        : Object.entries(t.socialLinks||{}).filter(([,u])=>u).map(([k,u])=>({label:k.charAt(0).toUpperCase()+k.slice(1),url:u}));
+      const donationArr = Array.isArray(t.donationLinks) ? t.donationLinks
+        : (t.donationLink ? [{label:"Donate / Entry Fee", url:t.donationLink}] : []);
+      const socialIcons = {twitter:"𝕏",discord:"💬",reddit:"🤖",website:"🌐",instagram:"📸",youtube:"▶",facebook:"👥",twitch:"🎮"};
+      const socialHtml = socialArr.filter(l=>l.url).map(l=>{
+        const icon = socialIcons[(l.label||"").toLowerCase()]||"🔗";
+        return `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="trn-social-link">${icon} ${esc(l.label||l.url)}</a>`;
+      }).join("");
+      const donationHtml = donationArr.filter(l=>l.url).map(l=>
+        `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">💰 ${esc(l.label||"Donate")}</a>`
+      ).join("");
+
+      const rby  = t.rulesByYear || {};
+      const latestY = Object.keys(rby).map(Number).sort((a,b)=>b-a)[0]||null;
+      const rules = latestY ? rby[latestY] : null;
+
+      const contactBtn = t.adminEmail
+        ? `<a href="mailto:${esc(t.adminEmail)}?subject=${encodeURIComponent("[" + (t.name||"Tournament") + "] Question")}"
+             class="btn-secondary btn-sm trn-contact-btn">✉ Contact Commissioner</a>`
+        : "";
+
+      const distinctYears = [...new Set(Object.values(t.standingsCache||{}).map(lc=>lc.year).filter(Boolean))].length||null;
+      const regOpenYear = Object.keys(t.playoffs||{}).filter(k=>/^\d{4}$/.test(k)).find(y=>t.playoffs[y]?.registrationOpen);
+
+      body.innerHTML = `
+        ${regOpenYear ? `
+          <div class="trn-reg-open-banner">
+            📬 Registration open for ${regOpenYear}
+            <button class="btn-primary btn-sm" id="pub-ov-register-btn">Register Now</button>
+          </div>` : ""}
+
+        <div class="trn-overview-grid" style="margin-top:var(--space-4)">
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${distinctYears||t.leagueCount||0}</div>
+            <div class="trn-stat-label">${distinctYears?"Seasons":"Leagues"}</div>
+          </div>
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${t.registrationCount||0}</div>
+            <div class="trn-stat-label">Registered</div>
+          </div>
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${t.leagueCount||0}</div>
+            <div class="trn-stat-label">Leagues</div>
+          </div>
+          <div class="trn-stat-card">
+            <div class="trn-stat-value">${t.regType==="invite"?"Invite":"Open"}</div>
+            <div class="trn-stat-label">Registration</div>
+          </div>
+        </div>
+
+        ${rawBio ? `<div class="trn-section-card"><div class="trn-section-card-title">About</div><div class="trn-info-bio">${linkedBio}</div></div>` : ""}
+
+        ${rules?.content ? `
+          <div class="trn-section-card">
+            <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>Rules</span>
+              ${rules.version?`<span style="font-size:.75rem;color:var(--color-text-dim)">v${esc(String(rules.version))}</span>`:""}
+            </div>
+            <div class="trn-info-bio trn-rules-preview" id="pub-rules-preview">
+              ${rules.content.split("\n").slice(0,4).map(l=>esc(l)).join("<br>")}
+              ${rules.content.split("\n").length>4?"<br><em>…</em>":""}
+            </div>
+            <button class="btn-secondary btn-sm" id="pub-expand-rules-btn" style="margin-top:var(--space-3)">Show Full Rules</button>
+          </div>` : ""}
+
+        ${socialHtml||donationHtml||contactBtn ? `
+          <div class="trn-section-card">
+            <div class="trn-section-card-title">Connect</div>
+            ${socialHtml?`<div class="trn-social-links">${socialHtml}</div>`:""}
+            ${donationHtml?`<div style="margin-top:var(--space-3)">${donationHtml}</div>`:""}
+            ${contactBtn?`<div style="margin-top:var(--space-3)">${contactBtn}</div>`:""}
+          </div>` : ""}
+      `;
+
+      document.getElementById("pub-ov-register-btn")?.addEventListener("click", () =>
+        document.getElementById("pub-register-pill")?.click());
+
+      document.getElementById("pub-expand-rules-btn")?.addEventListener("click", function() {
+        const el = document.getElementById("pub-rules-preview");
+        if (!el) return;
+        const exp = el.classList.contains("trn-rules-full");
+        if (exp) {
+          el.classList.remove("trn-rules-full");
+          el.innerHTML = rules.content.split("\n").slice(0,4).map(l=>esc(l)).join("<br>")+"<br><em>…</em>";
+          this.textContent = "Show Full Rules";
+        } else {
+          el.classList.add("trn-rules-full");
+          el.innerHTML = rules.content.split("\n").map(l=>esc(l)).join("<br>");
+          this.textContent = "Collapse Rules";
+        }
+      });
+    }
+
+    // ── Public History ─────────────────────────────────────
+    function renderPubHistory(body, allYears) {
+      const t = _currentT;
+      const hasPlayoffs = !!(t.playoffs && (
+        t.playoffs.mode ||
+        Object.keys(t.playoffs).some(k => /^\d{4}$/.test(k) && t.playoffs[k]?.mode)
+      ));
+      const hasAdp = !!(t.adp?.length || Object.keys(t.adpByYear||{}).length);
+
+      const histTabs = [
+        { id:"standings", label:"Standings", show: true },
+        { id:"playoffs",  label:"Playoffs",  show: hasPlayoffs },
+        { id:"adp",       label:"ADP",       show: hasAdp },
+      ].filter(h => h.show);
+
+      if (!histTabs.find(h => h.id === _activeHistTab)) _activeHistTab = "standings";
+
+      const tabOpts = histTabs.map(h =>
+        `<option value="${h.id}" ${_activeHistTab===h.id?"selected":""}>${h.label}</option>`
+      ).join("");
+
+      body.innerHTML = `
+        ${allYears.length > 1 ? `
+          <div class="trn-year-pill-bar">
+            ${allYears.map(y=>`<button class="trn-year-pill${y===_selectedYear?" trn-year-pill--active":""}" data-pyr="${y}">${y}</button>`).join("")}
+          </div>` : allYears.length===1 ? `<div class="trn-year-single-label">${allYears[0]}</div>` : ""}
+
+        <div class="trn-history-subnav">
+          <div class="trn-history-tabs">
+            ${histTabs.map(h=>`<button class="trn-history-tab${_activeHistTab===h.id?" trn-history-tab--active":""}" data-phist="${h.id}">${h.label}</button>`).join("")}
+          </div>
+          <select class="trn-tab-select trn-history-select" id="pub-hist-select">${tabOpts}</select>
+        </div>
+
+        <div id="pub-hist-content"></div>
+      `;
+
+      // Wire year pills
+      body.querySelectorAll(".trn-year-pill[data-pyr]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          _selectedYear = Number(btn.dataset.pyr);
+          body.querySelectorAll(".trn-year-pill[data-pyr]").forEach(b =>
+            b.classList.toggle("trn-year-pill--active", Number(b.dataset.pyr) === _selectedYear));
+          // Fetch year ADP if needed
+          if (!_currentT.adpByYear?.[_selectedYear]) {
+            try {
+              const s = await tRef(_currentTid).child(`adpByYear/${_selectedYear}`).once("value");
+              const d = s.val();
+              if (Array.isArray(d) && d.length) {
+                if (!_currentT.adpByYear) _currentT.adpByYear = {};
+                _currentT.adpByYear[_selectedYear] = d;
+              }
+            } catch(e) {}
+          }
+          renderPubHistContent();
+        });
+      });
+
+      // Wire history sub-tabs
+      body.querySelectorAll(".trn-history-tab[data-phist]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          _activeHistTab = btn.dataset.phist;
+          body.querySelectorAll(".trn-history-tab[data-phist]").forEach(b =>
+            b.classList.toggle("trn-history-tab--active", b.dataset.phist === _activeHistTab));
+          const sel = document.getElementById("pub-hist-select");
+          if (sel) sel.value = _activeHistTab;
+          renderPubHistContent();
+        });
+      });
+
+      document.getElementById("pub-hist-select")?.addEventListener("change", function() {
+        _activeHistTab = this.value;
+        body.querySelectorAll(".trn-history-tab[data-phist]").forEach(b =>
+          b.classList.toggle("trn-history-tab--active", b.dataset.phist === _activeHistTab));
+        renderPubHistContent();
+      });
+
+      renderPubHistContent();
+    }
+
+    function renderPubHistContent() {
+      const content = document.getElementById("pub-hist-content");
+      if (!content) return;
+      content.innerHTML = "";
+      switch (_activeHistTab) {
+        case "standings": return renderStandingsTab(content);
+        case "playoffs":  return renderPlayoffsTab(content);
+        case "adp":       return renderAdpTab(content);
+        default:          return renderStandingsTab(content);
+      }
+    }
+
+    // Legacy alias so existing renderTab calls still work when called from other places
     async function renderTab(tab) {
-      const body = document.getElementById("pub-tab-body");
+      const body = document.getElementById("pub-section-body") || document.getElementById("pub-tab-body");
       if (!body) return;
       if (tab !== "board" && _pubBoardUnsub) { _pubBoardUnsub(); _pubBoardUnsub = null; }
-      if (tab === "info")           renderInfoTab(body);
-      else if (tab === "standings") renderStandingsTab(body);
-      else if (tab === "playoffs")  await renderPlayoffsTab(body);
-      else if (tab === "register")  renderRegisterTab(body);
-      else if (tab === "adp")       renderAdpTab(body);
-      else if (tab === "rules")     renderRulesTab(body);
-      else if (tab === "players")   renderPlayersTab(body);
-      else if (tab === "board")     renderBoardTab(body);
+      // Map legacy tab names to new sections
+      if (["standings","playoffs","adp"].includes(tab)) { _activePubNav="history"; _activeHistTab=tab; }
+      else if (tab === "players") { _activePubNav="players"; }
+      else if (tab === "board")   { _activePubNav="chat"; }
+      else                        { _activePubNav="overview"; }
+      const scYears = [...new Set(Object.values((_currentT?.standingsCache||{})).map(lc=>lc.year).filter(Boolean).map(Number))];
+      const poYears = Object.keys(_currentT?.playoffs||{}).filter(k=>/^\d{4}$/.test(k)).map(Number);
+      const allYears = [...new Set([...scYears,...poYears])].sort((a,b)=>b-a);
+      renderPubSection(allYears);
     }
 
-    // ── Info tab ────────────────────────────────────────────
-    function renderInfoTab(body) {
+    // ── Info tab (legacy — kept for internal use) ──────────
       const t      = _currentT;
       const social = t.socialLinks || {};
       const rawBio = t.bio || "";
@@ -1600,16 +1834,8 @@
     const ADP_PAGE_SIZE = 25;
 
     function _ensureAdpTabOption() {
-      const sel = document.getElementById("pub-tab-select");
-      if (!sel) return;
-      if (sel.querySelector('option[value="adp"]')) return; // already there
-      const opt = document.createElement("option");
-      opt.value = "adp";
-      opt.textContent = "📊 ADP";
-      // Insert before Rules if it exists, otherwise append
-      const rulesOpt = sel.querySelector('option[value="rules"]');
-      if (rulesOpt) sel.insertBefore(opt, rulesOpt);
-      else sel.appendChild(opt);
+      // ADP is now a sub-tab within Tournament History — no dynamic injection needed
+      // This function is kept for backwards compat with any callers
     }
 
     function _clearAdpRefresh() {
