@@ -568,6 +568,65 @@
       }
     }
 
+    // ── Public Season Summary (shown on Overview) ─────────
+    // Lightweight port of _renderTournamentSummary — reads from publicTournaments node.
+    function renderPubSeasonSummary(t, year) {
+      const poData = t.playoffs || {};
+      const poYears = Object.keys(poData).filter(k => /^\d{4}$/.test(k)).map(Number).sort((a,b)=>b-a);
+      const dispYear = year || poYears[0] || null;
+      if (!dispYear) return "";
+      const po = poData[String(dispYear)] || {};
+      if (!po.mode) return "";
+      const scoring = (t.scoringSettings || {})[String(dispYear)] || {};
+      const modeLabels = {
+        total_points:"Total Points", points_rounds:"Points Rounds",
+        h2h_bracket:"H2H Bracket", custom_rounds:"Custom Rounds",
+        worldcup:"World Cup", custom_playoffs:"Custom Playoffs"
+      };
+      const modeIcons = {
+        total_points:"📊", points_rounds:"📈", h2h_bracket:"🥊",
+        custom_rounds:"⚙️", worldcup:"🌍", custom_playoffs:"🏆"
+      };
+      const mode = po.mode || "total_points";
+      const sw = po.startWeek, ew = po.endWeek;
+      const weeksLine = [(sw?`Wk ${sw}`:""), (ew?`\u2013${ew}`:"")].filter(Boolean).join("") || "";
+      const overrideText = t.meta?.summaryOverride?.[String(dispYear)] || null;
+      const platforms = Object.keys(scoring).filter(k => !k.startsWith("_"));
+      const DISPLAY_FIELDS = [
+        {key:"pass_yd",label:"Pass Yds/pt"},{key:"pass_td",label:"Pass TD"},
+        {key:"rush_yd",label:"Rush Yds/pt"},{key:"rush_td",label:"Rush TD"},
+        {key:"rec",label:"Reception"},{key:"rec_yd",label:"Rec Yds/pt"},
+        {key:"rec_td",label:"Rec TD"},{key:"bonus_rec_te",label:"TE Bonus"},
+        {key:"fum_lost",label:"Fumble Lost"},{key:"_format",label:"Format"},
+      ];
+      const scoringTableHtml = platforms.length ? `
+        <table class="trn-scoring-table" style="margin-top:var(--space-2)">
+          <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+          <tbody>
+            ${DISPLAY_FIELDS.map(f => {
+              const val = scoring[platforms[0]]?.[f.key];
+              return val !== undefined ? `<tr><td class="trn-scoring-label">${esc(f.label)}</td><td class="trn-scoring-val">${esc(String(val))}</td></tr>` : "";
+            }).filter(Boolean).join("")}
+          </tbody>
+        </table>` : "";
+      const yearPillsHtml = poYears.length > 1 ? `
+        <div class="trn-summary-year-bar" style="margin-bottom:var(--space-3)">
+          ${poYears.map(y => `<button class="trn-summary-year-pill${y===dispYear?" trn-summary-year-pill--active":""}" data-pub-sum-year="${y}">${y}</button>`).join("")}
+        </div>` : "";
+      return `
+        <div class="trn-section-card trn-summary-card" id="pub-season-summary">
+          <div class="trn-section-card-title">📋 Season Summary</div>
+          ${yearPillsHtml}
+          ${overrideText ? `<div class="trn-summary-override-text">${overrideText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>")}</div>`
+            : `<div class="trn-summary-po-mode" style="margin-bottom:var(--space-2)">
+                <span class="trn-summary-mode-icon">${modeIcons[mode]||"🏆"}</span>
+                <span class="trn-summary-mode-label">${modeLabels[mode]||mode}</span>
+                ${weeksLine ? `<span class="trn-summary-weeks">${esc(weeksLine)}</span>` : ""}
+              </div>`}
+          ${scoringTableHtml}
+        </div>`;
+    }
+
     // ── Public Overview ────────────────────────────────────
     function renderPubOverview(body, allYears) {
       const t = _currentT;
@@ -632,6 +691,8 @@
 
         ${rawBio ? `<div class="trn-section-card"><div class="trn-section-card-title">About</div><div class="trn-info-bio">${linkedBio}</div></div>` : ""}
 
+        ${renderPubSeasonSummary(t, _selectedYear)}
+
         ${rules?.content ? `
           <div class="trn-section-card">
             <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
@@ -656,6 +717,22 @@
 
       document.getElementById("pub-ov-register-btn")?.addEventListener("click", () =>
         document.getElementById("pub-register-pill")?.click());
+
+      // Wire season summary year pills
+      body.querySelectorAll("[data-pub-sum-year]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          _selectedYear = Number(btn.dataset.pubSumYear);
+          const newSummary = renderPubSeasonSummary(_currentT, _selectedYear);
+          const el = document.getElementById("pub-season-summary");
+          if (el && newSummary) {
+            const tmp = document.createElement("div");
+            tmp.innerHTML = newSummary;
+            el.replaceWith(tmp.firstElementChild);
+            body.querySelectorAll("[data-pub-sum-year]").forEach(b =>
+              b.classList.toggle("trn-summary-year-pill--active", Number(b.dataset.pubSumYear) === _selectedYear));
+          }
+        });
+      });
 
       document.getElementById("pub-expand-rules-btn")?.addEventListener("click", function() {
         const el = document.getElementById("pub-rules-preview");
@@ -1754,10 +1831,11 @@
 
       const thStyle = "cursor:pointer;user-select:none";
 
-      // Build unique conferences for filter (needs allRows, available in closure)
-      const _confOpts = hasConf
+      // Build unique conferences + leagues for filters
+      const _confOpts  = hasConf
         ? [...new Set(allRows.map(r => r.conference).filter(Boolean))].sort()
         : [];
+      const leagueOpts = [...new Set(allRows.map(r => r.leagueName).filter(Boolean))].sort();
 
       body.innerHTML = `
         <div class="trn-standings-toolbar">
@@ -1765,6 +1843,12 @@
             <select id="pub-st-conf" class="trn-filter-select" style="min-width:0">
               <option value="">All Conferences</option>
               ${_confOpts.map(c => `<option value="${c.toLowerCase()}" ${_stConf === c.toLowerCase() ? "selected" : ""}>${esc(c)}</option>`).join("")}
+            </select>
+          </div>` : ""}
+          ${leagueOpts.length > 1 ? `<div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
+            <select id="pub-st-league" class="trn-filter-select" style="min-width:0">
+              <option value="">All Leagues</option>
+              ${leagueOpts.map(l => `<option value="${l.toLowerCase()}">${esc(l)}</option>`).join("")}
             </select>
           </div>` : ""}
           <input type="text" id="pub-st-search" placeholder="Search team or league…" class="trn-st-search" />
@@ -1804,18 +1888,21 @@
           </table>
         </div>`;
 
-      // Combined filter — search + conference dropdown work together
+      // Combined filter — search + conference + league dropdowns work together
       function _applyStFilter() {
-        const q    = (document.getElementById("pub-st-search")?.value || "").toLowerCase();
-        const conf = (document.getElementById("pub-st-conf")?.value   || "").toLowerCase();
+        const q      = (document.getElementById("pub-st-search")?.value  || "").toLowerCase();
+        const conf   = (document.getElementById("pub-st-conf")?.value    || "").toLowerCase();
+        const league = (document.getElementById("pub-st-league")?.value  || "").toLowerCase();
         document.querySelectorAll("#pub-st-tbody tr").forEach(row => {
-          const matchQ    = !q    || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q) || row.dataset.conf?.includes(q);
-          const matchConf = !conf || row.dataset.conf === conf;
-          row.style.display = (matchQ && matchConf) ? "" : "none";
+          const matchQ      = !q      || row.dataset.name?.includes(q) || row.dataset.raw?.includes(q) || row.dataset.league?.includes(q) || row.dataset.conf?.includes(q);
+          const matchConf   = !conf   || row.dataset.conf   === conf;
+          const matchLeague = !league || row.dataset.league === league;
+          row.style.display = (matchQ && matchConf && matchLeague) ? "" : "none";
         });
       }
       document.getElementById("pub-st-search")?.addEventListener("input", _applyStFilter);
       document.getElementById("pub-st-conf")?.addEventListener("change", function() { _stConf = this.value; _applyStFilter(); });
+      document.getElementById("pub-st-league")?.addEventListener("change", _applyStFilter);
 
       // Sort headers
       document.querySelectorAll("[data-col]").forEach(th => {

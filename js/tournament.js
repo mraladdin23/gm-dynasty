@@ -1649,7 +1649,7 @@ const DLRTournament = (() => {
     function _renderWizardModal() {
       const isFirst = _wizardStep === 1;
       const isLast  = _wizardStep === 7;
-      const modal   = document.querySelector(".modal-overlay");
+      const modal   = document.getElementById("trn-modal-overlay");
       if (!modal) return;
       const body    = modal.querySelector(".modal-body");
       const title   = modal.querySelector(".modal-header h3");
@@ -1686,7 +1686,7 @@ const DLRTournament = (() => {
       _wizardStep = 1; // reset for next open
     });
 
-    _wireWizardStep(tid, t, document.querySelector(".modal-overlay"));
+    _wireWizardStep(tid, t, document.getElementById("trn-modal-overlay"));
   }
 
   // Wire all interactive elements for the current wizard step
