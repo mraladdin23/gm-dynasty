@@ -431,6 +431,15 @@ const DraftTicker = (() => {
           status.traded_picks = await tpr.json();
         }
       } catch(e) {}
+
+      // Compute nextPick so the ticker detail line renders without requiring
+      // the panel to be opened first. _refreshLiveDrafts recalculates this on
+      // panel open — this just ensures the initial ticker state is correct.
+      const teams = status.settingsTeams || Object.keys(status.draft_order).length || 12;
+      const next  = status.picksMade + 1;
+      status.nextPick = status.picksMade < status.totalPicks
+        ? { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 }
+        : null;
     }
 
     return status;
