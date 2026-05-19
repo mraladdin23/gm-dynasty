@@ -596,11 +596,12 @@
     // ── Public Season Summary (shown on Overview) ─────────
     // Lightweight port of _renderTournamentSummary — reads from publicTournaments node.
     function renderPubSeasonSummary(t, year) {
-      const poData = t.playoffs || {};
-      const poYears = Object.keys(poData).filter(k => /^\d{4}$/.test(k)).map(Number).sort((a,b)=>b-a);
+      // Read from seasonConfig (thin config) not playoffs (owned by publish button)
+      const cfgData = t.seasonConfig || t.playoffs || {};
+      const poYears = Object.keys(cfgData).filter(k => /^\d{4}$/.test(k)).map(Number).sort((a,b)=>b-a);
       const dispYear = year || poYears[0] || null;
       if (!dispYear) return "";
-      const po = poData[String(dispYear)] || {};
+      const po = cfgData[String(dispYear)] || {};
       if (!po.mode) return "";
       const scoring = (t.scoringSettings || {})[String(dispYear)] || {};
       const modeLabels = {

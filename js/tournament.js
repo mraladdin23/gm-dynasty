@@ -16548,6 +16548,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         });
       });
 
+      // IMPORTANT: The `playoffs` node in publicTournaments is owned exclusively by the
+      // publish button (_buildPlayoffSnapshot). _writePublicSummary must NEVER write to
+      // `playoffs` directly — doing so with .update() overwrites the rich published
+      // snapshot (standings, rounds, computedRounds, weeklyScores, etc.) with just the
+      // thin config fields.
+      //
+      // Instead we write season config to a separate `seasonConfig` node, and write
+      // per-year registrationOpen flags via individual child .update() calls that only
+      // touch the specific sub-keys we own.
+
       const summary = {
         name:              meta.name         || "",
         tagline:           meta.tagline      || "",
@@ -16569,52 +16579,33 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         standingsCache:    t.standingsCache  || {},
         rulesByYear:       t.rulesByYear      || {},
         participantMap,
-        // Publish full playoff config for all modes so the public site can render
-        // season summary, standings, and bracket without needing extra fetches.
-        playoffs: (() => {
-          const poData = {};
+        // Season config for Overview summary card — stored separately from playoffs publish node
+        seasonConfig: (() => {
+          const cfg = {};
           Object.entries(t.playoffs || {}).forEach(([yr, config]) => {
-            if (!/^\d{4}$/.test(yr)) return; // skip legacy flat node
+            if (!/^\d{4}$/.test(yr)) return;
             const wc = config || {};
-            // Always publish the full config — public site needs mode/weeks/qualification
-            const entry = {
-              registrationOpen:    wc.registrationOpen    || false,
-              mode:                wc.mode                || null,
-              startWeek:           wc.startWeek           || null,
-              endWeek:             wc.endWeek             || null,
-              published:           wc.published           || false,
-              finalRankings:       wc.finalRankings       || null,
-              // H2H bracket fields
-              bracketSize:         wc.bracketSize         || null,
-              byes:                wc.byes                || null,
-              seeding:             wc.seeding             || null,
-              // Qualification
-              qualification:       wc.qualification       || null,
-              // Points rounds / custom rounds
-              pointsRounds:        wc.pointsRounds        || null,
-              customRounds:        wc.customRounds        || null,
-              // World cup specific
-              worldcupGroups:        wc.worldcupGroups        || null,
-              worldcupSchedule:      wc.worldcupSchedule      || null,
-              worldcupBracket:       wc.worldcupBracket        || null,
-              worldcupBracketMode:   wc.worldcupBracketMode    || null,
-              worldcupRegWeeks:      wc.worldcupRegWeeks       || null,
-              worldcupAdvanceCount:  wc.worldcupAdvanceCount   ?? null,
-              worldcupWeeksPerRound: wc.worldcupWeeksPerRound  || null,
-              worldcupTiebreakers:   wc.worldcupTiebreakers    || null,
-              // Summary override text
-              summaryOverride:       null, // stored on meta, handled below
+            cfg[yr] = {
+              mode:          wc.mode          || null,
+              startWeek:     wc.startWeek     || null,
+              endWeek:       wc.endWeek       || null,
+              qualification: wc.qualification || null,
+              pointsRounds:  wc.pointsRounds  || null,
+              customRounds:  wc.customRounds  || null,
+              bracketSize:   wc.bracketSize   || null,
+              byes:          wc.byes          || null,
+              seeding:       wc.seeding       || null,
+              worldcupRegWeeks:      wc.worldcupRegWeeks      || null,
+              worldcupAdvanceCount:  wc.worldcupAdvanceCount  ?? null,
+              worldcupWeeksPerRound: wc.worldcupWeeksPerRound || null,
             };
-            // Clean nulls to keep node compact
-            Object.keys(entry).forEach(k => { if (entry[k] === null) delete entry[k]; });
-            poData[yr] = entry;
+            Object.keys(cfg[yr]).forEach(k => { if (cfg[yr][k] === null) delete cfg[yr][k]; });
           });
-          return Object.keys(poData).length ? poData : null;
+          return Object.keys(cfg).length ? cfg : null;
         })(),
-        // Publish scoring settings so public site can show scoring summary
+        // Scoring settings for Overview summary card
         scoringSettings: (() => {
           const ss = t.scoringSettings || {};
-          // Only publish years that have playoff config (active/past seasons)
           const activeYears = new Set(
             Object.keys(t.playoffs || {}).filter(yr => /^\d{4}$/.test(yr))
           );
@@ -16625,11 +16616,21 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           });
           return Object.keys(pub).length ? pub : null;
         })(),
-        // Summary override text from meta
         summaryOverride: meta.summaryOverride || null,
       };
 
+      // Write the top-level summary fields (never touches the playoffs node)
       await GMD.child("publicTournaments/" + tid).update(summary);
+
+      // Write per-year registrationOpen flags as surgical child updates so we
+      // don't disturb the rest of each year's published playoffs snapshot.
+      const poYrs = Object.keys(t.playoffs || {}).filter(yr => /^\d{4}$/.test(yr));
+      await Promise.all(poYrs.map(yr =>
+        GMD.child(`publicTournaments/${tid}/playoffs/${yr}`).update({
+          registrationOpen: !!(t.playoffs[yr]?.registrationOpen),
+          published:        !!(t.playoffs[yr]?.published),
+        })
+      ));
     } catch(err) {
       console.warn("[Tournament] _writePublicSummary failed:", err.message);
     }
