@@ -183,11 +183,16 @@ const DraftTicker = (() => {
     if (mySlot == null) return null;
 
     // Step 2: find my rosterId via slot_to_roster_id
-    // Bug fix: if slot_to_roster_id is missing/empty, we cannot reliably compute picks.
-    // The fallback to slot number is wrong for leagues where slot ≠ rosterId.
-    // Return null rather than show a confidently wrong pick number.
-    if (!slot_to_roster_id || Object.keys(slot_to_roster_id).length === 0) return null;
-    const myRosterId = Number(slot_to_roster_id[String(mySlot)] ?? mySlot);
+    // For LINEAR drafts: slot === rosterId by Sleeper's convention, so slot_to_roster_id
+    // is often absent — fall back to slot number directly. This is always correct for
+    // linear drafts and the trade map uses origRoster (also derived from slot) consistently.
+    // For SNAKE drafts: slot ≠ rosterId; if slot_to_roster_id is missing we cannot
+    // reliably resolve rosters so return null to avoid a confidently wrong pick number.
+    const hasS2R = slot_to_roster_id && Object.keys(slot_to_roster_id).length > 0;
+    if (!hasS2R && !isLinear) return null;
+    const myRosterId = hasS2R
+      ? Number(slot_to_roster_id[String(mySlot)] ?? mySlot)
+      : mySlot; // linear: slot === rosterId
 
     // Step 3: build trade lookup — key: "round-originalRosterId" → currentOwnerRosterId
     // traded_picks.roster_id = the original roster that owned this pick
@@ -209,7 +214,10 @@ const DraftTicker = (() => {
         : (round % 2 === 1 ? inRound : totalTeams + 1 - inRound);
 
       // Who originally owns this slot?
-      const originalRosterId = Number(slot_to_roster_id[String(slotAtPos)] ?? slotAtPos);
+      // Linear: slot === rosterId, so slotAtPos is correct even without slot_to_roster_id.
+      const originalRosterId = hasS2R
+        ? Number(slot_to_roster_id[String(slotAtPos)] ?? slotAtPos)
+        : slotAtPos; // linear fallback: slot === rosterId
 
       // Has it been traded? Check by originalRosterId (not slot)
       const tradeKey     = `${round}-${originalRosterId}`;
@@ -923,8 +931,9 @@ const DraftTicker = (() => {
       for (const [uid, slot] of Object.entries(draftOrder)) {
         if (String(uid) === String(mySleeperUid)) { mySlot = Number(slot); break; }
       }
+      const hasS2R_d = Object.keys(s2r).length > 0;
       const myRosterId = mySlot != null
-        ? Number(s2r[String(mySlot)] ?? mySlot)
+        ? (hasS2R_d ? Number(s2r[String(mySlot)] ?? mySlot) : mySlot)
         : null;
 
       // Trade map
@@ -941,7 +950,7 @@ const DraftTicker = (() => {
         const round      = Math.ceil(overall / totalTeams);
         const inRound    = ((overall - 1) % totalTeams) + 1;
         const slotAtPos  = isLinear ? inRound : (round % 2 === 1 ? inRound : totalTeams + 1 - inRound);
-        const origRoster = Number(s2r[String(slotAtPos)] ?? slotAtPos);
+        const origRoster = hasS2R_d ? Number(s2r[String(slotAtPos)] ?? slotAtPos) : slotAtPos;
         const tradeKey   = `${round}-${origRoster}`;
         const curOwner   = tradeMap[tradeKey] !== undefined ? tradeMap[tradeKey] : origRoster;
         const isMe       = curOwner === myRosterId;
@@ -953,17 +962,6 @@ const DraftTicker = (() => {
         if (isMe) break; // stop at my first pick
       }
 
-      // Determine why myNextPick would be null
-      const diagnoseNull = [];
-      if (!mySleeperUid)                               diagnoseNull.push("NO_SLEEPER_UID");
-      if (!Object.keys(draftOrder).length)             diagnoseNull.push("EMPTY_DRAFT_ORDER");
-      if (mySlot == null)                              diagnoseNull.push("MY_SLOT_NOT_FOUND_IN_DRAFT_ORDER");
-      if (!Object.keys(s2r).length)                    diagnoseNull.push("EMPTY_SLOT_TO_ROSTER_ID");
-      if (mySlot != null && !s2r[String(mySlot)])      diagnoseNull.push(`SLOT_${mySlot}_NOT_IN_S2R`);
-      if (status.picksMade >= totalPicks)              diagnoseNull.push("DRAFT_COMPLETE_NO_PICKS_LEFT");
-      const myPickFound = picksDetail.some(p => p.isMe);
-      if (!myPickFound && !diagnoseNull.length)        diagnoseNull.push("NO_REMAINING_PICKS_MATCH_MY_ROSTER_ID");
-
       results.push({
         leagueName:   meta.leagueName || lid,
         leagueId:     lid,
@@ -972,16 +970,13 @@ const DraftTicker = (() => {
         mySlot,
         myRosterId,
         totalTeams,
-        settingsTeams: status.settingsTeams,
-        totalPicks:   status.totalPicks,
+        totalPicks,
         picksMade:    status.picksMade,
         isLinear,
-        has_draft_order:       Object.keys(draftOrder).length > 0,
-        has_slot_to_roster_id: Object.keys(s2r).length > 0,
-        diagnoseNull: diagnoseNull.length ? diagnoseNull : ["OK_SHOULD_SHOW"],
         tradedPicksCount: (status.traded_picks || []).length,
+        tradedPicks:  (status.traded_picks || []).slice(0, 20), // first 20 for brevity
+        tradeMapKeys: Object.keys(tradeMap),
         slot_to_roster_id: s2r,
-        draft_order_keys: Object.keys(draftOrder),
         next30picks:  picksDetail
       });
     }
