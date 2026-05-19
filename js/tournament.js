@@ -1605,7 +1605,7 @@ const DLRTournament = (() => {
         </div>
 
         <div class="trn-section-card-title" style="margin-top:var(--space-4)">Registration Form for ${_wizardYear}</div>
-        <div id="wiz-reg-form-container"></div>
+        <div id="wiz-reg-form-container" style="max-height:40vh;overflow-y:auto;overflow-x:hidden;padding-right:2px"></div>
 
         <div class="trn-section-card" style="margin-top:var(--space-4)">
           <div class="trn-section-card-title">Email Past Participants</div>
@@ -1621,7 +1621,7 @@ const DLRTournament = (() => {
     function _buildStep5Body() {
       return `
         ${_yearPillsForWizard()}
-        <div style="margin-top:var(--space-4)" id="wiz-leagues-container"></div>
+        <div style="margin-top:var(--space-4);max-height:52vh;overflow-y:auto;overflow-x:hidden;padding-right:2px" id="wiz-leagues-container"></div>
       `;
     }
 
@@ -1699,9 +1699,6 @@ const DLRTournament = (() => {
     }
 
     // Open modal shell first
-    // Use a wider modal box for the wizard
-    const existingBox = document.getElementById("trn-modal-box");
-    if (existingBox) existingBox.className = "modal-box modal-box--lg";
     _showModal(`
       <div class="modal-header">
         <h3>${_buildStep1Label()}</h3>
@@ -1711,11 +1708,18 @@ const DLRTournament = (() => {
         ${_wizardStepBar()}
         <div class="trn-wizard-body">${_buildStepBody(_wizardStep)}</div>
       </div>
-      <div class="modal-footer" style="display:flex;justify-content:space-between">
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
         <button class="btn-secondary" id="trn-wiz-back-btn" ${_wizardStep===1?"style='visibility:hidden'":""}>← Back</button>
-        <button class="btn-primary"   id="trn-wiz-next-btn">${_wizardStep===7?"✓ Save & Close":"Next →"}</button>
+        <div style="display:flex;gap:var(--space-2)">
+          ${_wizardStep < 7 ? `<button class="btn-ghost btn-sm" id="trn-wiz-saveclose-btn">💾 Save & Close</button>` : ""}
+          <button class="btn-primary" id="trn-wiz-next-btn">${_wizardStep===7?"✓ Save & Close":"Next →"}</button>
+        </div>
       </div>
     `);
+
+    // Apply wider modal box AFTER _showModal creates the element
+    const wizBox = document.getElementById("trn-modal-box");
+    if (wizBox) wizBox.className = "modal-box modal-box--lg";
 
     document.getElementById("trn-modal-close")?.addEventListener("click", () => {
       _closeModal();
@@ -1723,6 +1727,16 @@ const DLRTournament = (() => {
     });
 
     _wireWizardStep(tid, t, document.getElementById("trn-modal-overlay"));
+  }
+
+  async function _wizardSaveAndClose(tid) {
+    _closeModal();
+    _wizardStep = 1;
+    showToast("Tournament settings saved ✓");
+    const snap = await _tRef(tid).once("value");
+    _tournaments[tid] = snap.val();
+    _writePublicSummary(tid, _tournaments[tid]);
+    _openTournamentView(tid, _activeTopNav);
   }
 
   // Wire all interactive elements for the current wizard step
@@ -1736,19 +1750,17 @@ const DLRTournament = (() => {
 
     modal.querySelector("#trn-wiz-next-btn")?.addEventListener("click", async () => {
       // Save best-effort — never block navigation on validation failure.
-      // The user can always come back to complete a step later.
-      await _saveWizardStep(tid, t, _wizardStep, modal);
-      if (_wizardStep < 7) { _wizardStep++; _rerenderWizard(tid, t, modal); }
+      await _saveWizardStep(tid, _tournaments[tid]||t, _wizardStep, modal);
+      if (_wizardStep < 7) { _wizardStep++; _rerenderWizard(tid, _tournaments[tid]||t, modal); }
       else {
-        _closeModal();
-        _wizardStep = 1;
-        showToast("Tournament settings saved ✓");
-        // Reload tournament data and re-render
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
-        _writePublicSummary(tid, _tournaments[tid]);
-        _openTournamentView(tid, _activeTopNav);
+        await _wizardSaveAndClose(tid);
       }
+    });
+
+    // Save & Close on any step
+    modal.querySelector("#trn-wiz-saveclose-btn")?.addEventListener("click", async () => {
+      await _saveWizardStep(tid, _tournaments[tid]||t, _wizardStep, modal);
+      await _wizardSaveAndClose(tid);
     });
 
     // Step pill clicks — allow jumping to any step (best-effort save of current step)
@@ -1771,15 +1783,14 @@ const DLRTournament = (() => {
     if (_wizardStep === 6) _wireWizardStep6(tid, t, modal);
     if (_wizardStep === 7) _wireWizardStep7(tid, t, modal);
 
-    // Year pill switching (steps 4-7)
+    // Year pill switching (steps 4-7) — full rerender with the new year
     modal.querySelectorAll(".trn-wiz-yr-pill").forEach(btn => {
-      btn.addEventListener("click", () => {
-        _wizardYear = Number(btn.dataset.wyr);
-        modal.querySelectorAll(".trn-wiz-yr-pill").forEach(b =>
-          b.classList.toggle("trn-year-pill--active", Number(b.dataset.wyr) === _wizardYear));
-        const body = modal.querySelector(".trn-wizard-body");
-        if (body) body.innerHTML = _buildStepBodyForWizard(_wizardStep);
-        _wireWizardStep(tid, t, modal);
+      btn.addEventListener("click", async () => {
+        const newYear = Number(btn.dataset.wyr);
+        if (newYear === _wizardYear) return;
+        await _saveWizardStep(tid, _tournaments[tid]||t, _wizardStep, modal); // best-effort save
+        _wizardYear = newYear;
+        _rerenderWizard(tid, _tournaments[tid]||t, modal);
       });
     });
 
@@ -1799,13 +1810,9 @@ const DLRTournament = (() => {
     });
   }
 
-  function _buildStepBodyForWizard(step) {
-    // Re-use the inner build functions via the closure — they read _wizardYear
-    switch(step) {
-      case 4: return document.querySelector(".trn-wizard-body")?.innerHTML || ""; // refreshed below
-      default: return "";
-    }
-  }
+  // This is intentionally empty — year pill clicks now call _rerenderWizard
+  // which fully re-opens the modal with the correct _wizardYear context.
+  function _buildStepBodyForWizard(step) { return ""; }
 
   function _rerenderWizard(tid, t, modal) {
     const poYears  = _playoffYears(t).map(Number).sort((a,b)=>b-a);
@@ -1996,33 +2003,86 @@ const DLRTournament = (() => {
     });
   }
 
+  // Fallback when clipboard API isn't available — show remaining emails in a modal
+  function _showRemainingEmailsModal(emails, tournamentName) {
+    _showModal(`
+      <div class="modal-header">
+        <h3>Remaining BCC Addresses</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+          Copy these ${emails.length} addresses and paste them into the BCC field of your email client
+          for additional drafts.
+        </p>
+        <textarea id="trn-remaining-emails-txt" rows="8"
+          style="width:100%;font-size:.78rem;font-family:monospace;resize:vertical;box-sizing:border-box"
+          readonly>${emails.join(";\n")}</textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="trn-copy-remaining-btn">📋 Copy All</button>
+        <button class="btn-secondary" id="trn-modal-cancel">Close</button>
+      </div>
+    `);
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-copy-remaining-btn")?.addEventListener("click", () => {
+      const ta = document.getElementById("trn-remaining-emails-txt");
+      if (ta) { ta.select(); document.execCommand("copy"); showToast("Copied ✓"); }
+    });
+  }
+
   function _wireWizardStep4(tid, t, modal) {
     // Email past participants button
     modal.querySelector("#wiz-email-past-btn")?.addEventListener("click", () => {
-      const participants = Object.values(t.participants || {});
-      const emails = participants
-        .filter(p => p.email && !t.playoffs?.[_wizardYear]?.registrationOpen)
-        .map(p => p.email)
-        .filter(Boolean);
+      const tCurrent = _tournaments[tid] || t;
+      const participants = Object.values(tCurrent.participants || {});
+      const emails = participants.map(p => p.email).filter(Boolean);
       if (!emails.length) { showToast("No participant emails found", "error"); return; }
-      const meta   = t.meta || {};
-      const regUrl = `https://dynastylockerroom.com/tournaments/?t=${tid}`;
-      const subj   = encodeURIComponent(`[${meta.name||"Tournament"}] Register for ${_wizardYear}`);
-      const body   = encodeURIComponent(
+      const meta    = tCurrent.meta || {};
+      const regUrl  = `https://dynastylockerroom.com/tournaments/?t=${tid}`;
+      const subject = `[${meta.name||"Tournament"}] Register for ${_wizardYear}`;
+      const bodyTxt =
         `Hi!\n\nRegistration for ${meta.name||"our tournament"} ${_wizardYear} is now open.\n\n` +
         `Please click here to register:\n${regUrl}\n\n` +
-        `We hope to see you again this year!\n\n— ${meta.name||"Tournament"} Commissioner`
-      );
+        `We hope to see you again this year!\n\n— ${meta.name||"Tournament"} Commissioner`;
       const adminTo = meta.adminEmail || "";
+
+      // mailto: BCC has a practical limit of ~50 addresses before the URL gets
+      // too long for most clients. For larger lists we open the first batch as a
+      // draft and copy the remaining addresses to the clipboard so the admin can
+      // paste them into additional BCC fields manually.
       const BCC_LIMIT = 50;
-      const chunks = [];
-      for (let i = 0; i < emails.length; i += BCC_LIMIT) chunks.push(emails.slice(i, i+BCC_LIMIT));
-      chunks.forEach((chunk, idx) => {
-        const bcc = encodeURIComponent(chunk.join(","));
-        const href = `mailto:${adminTo}?bcc=${bcc}&subject=${subj}${idx===0?`&body=${body}`:""}`;
-        window.open(href, "_blank");
-      });
-      showToast(`${chunks.length > 1 ? chunks.length + " email drafts" : "Email"} opened ✓`);
+      if (emails.length <= BCC_LIMIT) {
+        // All fit in one mailto — use semicolons (Outlook) with comma fallback
+        const bcc  = encodeURIComponent(emails.join(";"));
+        const subj = encodeURIComponent(subject);
+        const body = encodeURIComponent(bodyTxt);
+        window.open(`mailto:${encodeURIComponent(adminTo)}?bcc=${bcc}&subject=${subj}&body=${body}`, "_blank");
+        showToast("Email draft opened ✓");
+      } else {
+        // First 50: open as mailto draft
+        const first = emails.slice(0, BCC_LIMIT);
+        const bcc   = encodeURIComponent(first.join(";"));
+        const subj  = encodeURIComponent(subject + ` (1/${Math.ceil(emails.length/BCC_LIMIT)})`);
+        const body  = encodeURIComponent(bodyTxt);
+        window.open(`mailto:${encodeURIComponent(adminTo)}?bcc=${bcc}&subject=${subj}&body=${body}`, "_blank");
+
+        // Remaining: copy to clipboard as semicolon-separated
+        const remaining = emails.slice(BCC_LIMIT);
+        const remainText = remaining.join(";\n");
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(remainText).then(() => {
+            showToast(
+              `Email draft opened for first ${BCC_LIMIT}. ` +
+              `Remaining ${remaining.length} addresses copied to clipboard — paste into BCC for additional drafts.`,
+              "info", 8000
+            );
+          }).catch(() => _showRemainingEmailsModal(remaining, meta.name));
+        } else {
+          _showRemainingEmailsModal(remaining, meta.name);
+        }
+      }
     });
 
     // Inline registration form builder
@@ -2032,7 +2092,7 @@ const DLRTournament = (() => {
 
   function _wireWizardStep5(tid, t, modal) {
     const container = modal.querySelector("#wiz-leagues-container");
-    if (container) _renderLeaguesTab(tid, t, container);
+    if (container) _renderLeaguesTab(tid, _tournaments[tid]||t, container, _wizardYear);
   }
 
   function _wireWizardStep6(tid, t, modal) {
@@ -5198,7 +5258,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
     document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
     document.getElementById("trn-leagues-show-all-btn")?.addEventListener("click", () => {
-      const b = _getTabBody();
+      // Could be called from wizard (#wiz-leagues-container) or admin panel (_getTabBody())
+      const b = document.getElementById("wiz-leagues-container") || _getTabBody();
       if (b) _renderLeaguesTab(tid, _tournaments[tid]||t, b, null); // null = show all years
     });
     body.querySelectorAll("[data-edit-batch]").forEach(btn =>
@@ -5244,6 +5305,23 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             This batch uses conferences
           </label>
         </div>
+        <!-- MFL: option to auto-fetch all leagues for a user -->
+        <div id="trn-mfl-fetch-section" style="display:none">
+          <div class="trn-section-card" style="margin-bottom:var(--space-3);background:rgba(240,180,41,.04);border-color:var(--color-gold)">
+            <div class="trn-section-card-title">🔄 Fetch All MFL Leagues for a User</div>
+            <div class="form-group" style="margin-bottom:var(--space-2)">
+              <label>MFL Email Address</label>
+              <input type="email" id="trn-mfl-fetch-email" placeholder="user@example.com"
+                style="max-width:280px" />
+              <span class="field-hint">Uses the MFL public API — fetches all leagues this email is in for the selected year.</span>
+            </div>
+            <div style="display:flex;gap:var(--space-2);align-items:center">
+              <button class="btn-secondary btn-sm" id="trn-mfl-fetch-btn">Fetch Leagues</button>
+              <span id="trn-mfl-fetch-status" style="font-size:.8rem;color:var(--color-text-dim)"></span>
+            </div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label>League IDs <span class="required">*</span></label>
           <textarea id="trn-batch-ids" rows="8"
@@ -5334,67 +5412,48 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     btn.textContent = `Fetching names… (0/${parsed.length})`;
     errEl.classList.add("hidden");
 
-    // Fetch league names from platform APIs
+    // Fetch league names in parallel — much faster for large MFL batches
     const leaguesData = {};
     let done = 0;
 
-    for (const { leagueId, conference } of parsed) {
-      let name = leagueId; // fallback
-      try {
-        if (platform === "sleeper") {
-          const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`);
-          if (r.ok) {
-            const d = await r.json();
-            name = d?.name || leagueId;
-          }
-        } else if (platform === "mfl") {
-          const r = await fetch(
-            `https://mfl-proxy.mraladdin23.workers.dev/mfl/leagueName`,
-            { method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ leagueId, year }) }
-          ).catch(() => null);
-          // Worker endpoint we'll add — fallback to direct MFL public API
-          if (!r || !r.ok) {
-            const mflR = await fetch(
+    // MFL: batch all IDs in parallel (public API, no auth needed)
+    // Sleeper: parallel too, but Sleeper rate-limits ~100 req/min so chunk at 50
+    const PARALLEL_CHUNK = platform === "sleeper" ? 50 : parsed.length;
+
+    for (let ci = 0; ci < parsed.length; ci += PARALLEL_CHUNK) {
+      const chunk = parsed.slice(ci, ci + PARALLEL_CHUNK);
+      await Promise.allSettled(chunk.map(async ({ leagueId, conference }) => {
+        let name = leagueId;
+        try {
+          if (platform === "sleeper") {
+            const r = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`);
+            if (r.ok) { const d = await r.json(); name = d?.name || leagueId; }
+          } else if (platform === "mfl") {
+            // MFL public API requires no auth — works for all public leagues
+            const r = await fetch(
               `https://api.myfantasyleague.com/${year}/export?TYPE=league&L=${leagueId}&JSON=1`
             ).catch(() => null);
-            if (mflR?.ok) {
-              const d = await mflR.json().catch(() => null);
-              name = d?.league?.name || leagueId;
-            }
-          } else {
-            const d = await r.json().catch(() => null);
-            name = d?.name || leagueId;
-          }
-        } else if (platform === "yahoo") {
-          // Yahoo needs an OAuth token — use stored token if available
-          const token = localStorage.getItem("dlr_yahoo_access_token");
-          if (token) {
-            // Yahoo league key format: {gameId}.l.{leagueId}
-            // gameId for NFL varies by year — use stored leagueKey if available
-            // For batch import we use leagueId directly as the key fallback
-            const leagueKey = leagueId.includes(".l.") ? leagueId : `${leagueId}`;
-            const r = await fetch(
-              `https://mfl-proxy.mraladdin23.workers.dev/yahoo/leagueName`,
-              { method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ access_token: token, league_key: leagueKey }) }
-            ).catch(() => null);
-            if (r?.ok) {
-              const d = await r.json().catch(() => null);
-              name = d?.name || leagueId;
+            if (r?.ok) { const d = await r.json().catch(() => null); name = d?.league?.name || leagueId; }
+          } else if (platform === "yahoo") {
+            const token = localStorage.getItem("dlr_yahoo_access_token");
+            if (token) {
+              const leagueKey = leagueId.includes(".l.") ? leagueId : `${leagueId}`;
+              const r = await fetch(
+                `https://mfl-proxy.mraladdin23.workers.dev/yahoo/leagueName`,
+                { method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ access_token: token, league_key: leagueKey }) }
+              ).catch(() => null);
+              if (r?.ok) { const d = await r.json().catch(() => null); name = d?.name || leagueId; }
             }
           }
-        }
-      } catch(e) {
-        // Name fetch failed — use ID as name, still import
-      }
+        } catch(e) { /* use ID as name */ }
 
-      const entry = { name };
-      if (conference) entry.conference = conference;
-      leaguesData[leagueId] = entry;
-
-      done++;
-      if (btn) btn.textContent = `Fetching names… (${done}/${parsed.length})`;
+        const entry = { name };
+        if (conference) entry.conference = conference;
+        leaguesData[leagueId] = entry;
+        done++;
+        if (btn) btn.textContent = `Fetching names… (${done}/${parsed.length})`;
+      }));
     }
 
     // Write batch to Firebase
@@ -8064,7 +8123,7 @@ Good luck this season!
       }
 
       chunks.forEach((chunk, idx) => {
-        const bcc    = encodeURIComponent(chunk.join(","));
+        const bcc    = encodeURIComponent(chunk.join(";"));
         const subj   = encodeURIComponent(subject + (chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ""));
         const body   = idx === 0 ? encodeURIComponent(bodyText) : "";
         const href   = `mailto:${encodeURIComponent(fromEmail)}?bcc=${bcc}&subject=${subj}${body ? `&body=${body}` : ""}`;
