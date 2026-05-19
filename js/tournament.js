@@ -1292,6 +1292,21 @@ const DLRTournament = (() => {
         </div>
       </div>
 
+      <!-- Danger zone -->
+      <div class="trn-danger-zone" style="margin-bottom:var(--space-4)">
+        <details>
+          <summary style="font-size:.78rem;font-weight:700;color:var(--color-red);text-transform:uppercase;letter-spacing:.05em;cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:var(--space-2)">
+            ⚠ Danger Zone
+          </summary>
+          <div style="margin-top:var(--space-3);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-3)">
+            <div style="font-size:.82rem;color:var(--color-text-dim)">
+              Permanently delete this tournament and all its data. This cannot be undone.
+            </div>
+            <button class="btn-secondary btn-sm trn-danger-btn" id="trn-admin-delete-btn">🗑 Delete Tournament</button>
+          </div>
+        </details>
+      </div>
+
       <!-- Year pills for registrants/participants -->
       ${allYears.length > 1 ? `
         <div style="margin-bottom:var(--space-3)">
@@ -1357,6 +1372,24 @@ const DLRTournament = (() => {
       _viewingAsUser = true;
       _activeTopNav  = "overview";
       _openTournamentView(tid);
+    });
+
+    document.getElementById("trn-admin-delete-btn")?.addEventListener("click", async () => {
+      const meta = t.meta || {};
+      const name = meta.name || "this tournament";
+      // Two-step confirm for a destructive action
+      if (!confirm(`Delete "${name}"?\n\nThis will permanently remove all data including leagues, standings, playoff history, and registrations. This cannot be undone.`)) return;
+      if (!confirm(`Are you sure? Type OK to confirm deletion of "${name}".`)) return;
+      try {
+        await _tRef(tid).remove();
+        await GMD.child("publicTournaments/" + tid).remove();
+        showToast("Tournament deleted");
+        delete _tournaments[tid];
+        _activeTournamentId = null;
+        _renderView();
+      } catch(err) {
+        showToast("Delete failed: " + err.message, "error");
+      }
     });
 
     // Render initial year content
