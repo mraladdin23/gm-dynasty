@@ -5229,3 +5229,22 @@
   color: var(--color-text-dim);
   font-weight: 500;
 }
+
+/* ── Wizard modal size fix ───────────────────────────── */
+.modal-box--lg {
+  max-width: min(860px, 95vw) !important;
+  width: min(860px, 95vw) !important;
+}
+
+@media (max-width: 640px) {
+  .modal-box--lg {
+    max-width: 100vw !important;
+    width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    max-height: 100vh !important;
+  }
+  .trn-wizard-modal-body {
+    max-height: calc(100vh - 120px) !important;
+  }
+}

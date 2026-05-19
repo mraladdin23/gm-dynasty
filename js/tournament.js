@@ -1666,12 +1666,15 @@ const DLRTournament = (() => {
     }
 
     // Open modal shell first
+    // Use a wider modal box for the wizard
+    const existingBox = document.getElementById("trn-modal-box");
+    if (existingBox) existingBox.className = "modal-box modal-box--lg";
     _showModal(`
       <div class="modal-header">
         <h3>${_buildStep1Label()}</h3>
         <button class="modal-close" id="trn-modal-close">✕</button>
       </div>
-      <div class="modal-body trn-wizard-modal-body" style="max-height:65vh;overflow-y:auto;overflow-x:hidden;box-sizing:border-box">
+      <div class="modal-body trn-wizard-modal-body" style="max-height:70vh;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;padding:var(--space-4)">
         ${_wizardStepBar()}
         <div class="trn-wizard-body">${_buildStepBody(_wizardStep)}</div>
       </div>
@@ -3603,8 +3606,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _showPCSection(this.value);
     });
 
-    // ── Year pills ──────────────────────────────────────
-    document.querySelectorAll(".trn-year-pill").forEach(btn => {
+    // ── Year pills — scoped to playoff config pills only (data-year, not data-yr nav pills) ──
+    document.querySelectorAll(".trn-year-pill[data-year]").forEach(btn => {
       btn.addEventListener("click", async () => {
         _activePoYear = btn.dataset.year;
         await _rerender(_activePoYear);
@@ -5067,14 +5070,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // Leagues are stored as batches: gmd/tournaments/{tid}/leagues/{batchId}
   // Each batch = { platform, year, conferences: bool, leagues: { [leagueId]: {name, conference?} } }
 
-  function _renderLeaguesTab(tid, t, body) {
+  function _renderLeaguesTab(tid, t, body, filterYear) {
     const batches = t.leagues || {};
     const batchEntries = Object.entries(batches);
+    // filterYear: if provided, only show batches for that year
+    const yearFilter = filterYear || _tournamentYear || null;
 
     // Group individual leagues (legacy flat structure) vs batches
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
-    const realBatches = batchEntries.filter(([, v]) => isBatch(v));
-    const legacyLeagues = batchEntries.filter(([, v]) => !isBatch(v));
+    const allRealBatches = batchEntries.filter(([, v]) => isBatch(v));
+    // Apply year filter when a specific year is active
+    const realBatches = yearFilter
+      ? allRealBatches.filter(([, b]) => String(b.year||"") === String(yearFilter))
+      : allRealBatches;
+    const legacyLeagues = yearFilter ? [] : batchEntries.filter(([, v]) => !isBatch(v));
 
     // Total league count across all batches
     const totalLeagues = realBatches.reduce((s, [, b]) => s + Object.keys(b.leagues || {}).length, 0)
@@ -5089,9 +5098,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     body.innerHTML = `
       <div class="trn-section-card">
-        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center">
-          <span>League Batches (${totalLeagues} total leagues)</span>
-          <div style="display:flex;gap:var(--space-2)">
+        <div class="trn-section-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2)">
+          <span>League Batches (${totalLeagues} leagues${yearFilter ? ` · ${yearFilter}` : " · all years"})</span>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            ${yearFilter ? `<button class="btn-ghost btn-sm" id="trn-leagues-show-all-btn">Show All Years</button>` : ""}
             <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
             <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
           </div>
@@ -5154,6 +5164,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
     document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
+    document.getElementById("trn-leagues-show-all-btn")?.addEventListener("click", () => {
+      const b = _getTabBody();
+      if (b) _renderLeaguesTab(tid, _tournaments[tid]||t, b, null); // null = show all years
+    });
     body.querySelectorAll("[data-edit-batch]").forEach(btn =>
       btn.addEventListener("click", () => _openEditConferencesModal(tid, btn.dataset.editBatch, batches[btn.dataset.editBatch]))
     );
@@ -16555,32 +16569,64 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         standingsCache:    t.standingsCache  || {},
         rulesByYear:       t.rulesByYear      || {},
         participantMap,
-        // Include worldcup playoff config for public bracket/standings display
-        playoffs:          (() => {
+        // Publish full playoff config for all modes so the public site can render
+        // season summary, standings, and bracket without needing extra fetches.
+        playoffs: (() => {
           const poData = {};
           Object.entries(t.playoffs || {}).forEach(([yr, config]) => {
             if (!/^\d{4}$/.test(yr)) return; // skip legacy flat node
             const wc = config || {};
-            // Always include registrationOpen flag for each year
-            const entry = { registrationOpen: wc.registrationOpen || false };
-            if (wc.mode === "worldcup") {
-              Object.assign(entry, {
-                mode:                  "worldcup",
-                startWeek:             wc.startWeek             || null,
-                worldcupGroups:        wc.worldcupGroups        || [],
-                worldcupSchedule:      wc.worldcupSchedule      || {},
-                worldcupBracket:       wc.worldcupBracket       || [],
-                worldcupBracketMode:   wc.worldcupBracketMode   || "manual",
-                worldcupRegWeeks:      wc.worldcupRegWeeks      || 6,
-                worldcupAdvanceCount:  wc.worldcupAdvanceCount  ?? 2,
-                worldcupWeeksPerRound: wc.worldcupWeeksPerRound || 2,
-                worldcupTiebreakers:   wc.worldcupTiebreakers   || null,
-              });
-            }
+            // Always publish the full config — public site needs mode/weeks/qualification
+            const entry = {
+              registrationOpen:    wc.registrationOpen    || false,
+              mode:                wc.mode                || null,
+              startWeek:           wc.startWeek           || null,
+              endWeek:             wc.endWeek             || null,
+              published:           wc.published           || false,
+              finalRankings:       wc.finalRankings       || null,
+              // H2H bracket fields
+              bracketSize:         wc.bracketSize         || null,
+              byes:                wc.byes                || null,
+              seeding:             wc.seeding             || null,
+              // Qualification
+              qualification:       wc.qualification       || null,
+              // Points rounds / custom rounds
+              pointsRounds:        wc.pointsRounds        || null,
+              customRounds:        wc.customRounds        || null,
+              // World cup specific
+              worldcupGroups:        wc.worldcupGroups        || null,
+              worldcupSchedule:      wc.worldcupSchedule      || null,
+              worldcupBracket:       wc.worldcupBracket        || null,
+              worldcupBracketMode:   wc.worldcupBracketMode    || null,
+              worldcupRegWeeks:      wc.worldcupRegWeeks       || null,
+              worldcupAdvanceCount:  wc.worldcupAdvanceCount   ?? null,
+              worldcupWeeksPerRound: wc.worldcupWeeksPerRound  || null,
+              worldcupTiebreakers:   wc.worldcupTiebreakers    || null,
+              // Summary override text
+              summaryOverride:       null, // stored on meta, handled below
+            };
+            // Clean nulls to keep node compact
+            Object.keys(entry).forEach(k => { if (entry[k] === null) delete entry[k]; });
             poData[yr] = entry;
           });
           return Object.keys(poData).length ? poData : null;
-        })()
+        })(),
+        // Publish scoring settings so public site can show scoring summary
+        scoringSettings: (() => {
+          const ss = t.scoringSettings || {};
+          // Only publish years that have playoff config (active/past seasons)
+          const activeYears = new Set(
+            Object.keys(t.playoffs || {}).filter(yr => /^\d{4}$/.test(yr))
+          );
+          const pub = {};
+          Object.entries(ss).forEach(([yr, data]) => {
+            if (!activeYears.has(yr) && activeYears.size) return;
+            pub[yr] = data;
+          });
+          return Object.keys(pub).length ? pub : null;
+        })(),
+        // Summary override text from meta
+        summaryOverride: meta.summaryOverride || null,
       };
 
       await GMD.child("publicTournaments/" + tid).update(summary);
