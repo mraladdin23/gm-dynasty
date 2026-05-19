@@ -15327,7 +15327,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             })), ...compSec2_];
 
             return {
-              roundIdx, weekNum: weekNum_, weeksPerRound: wpr_ > 1 ? wpr_ : undefined,
+              roundIdx, weekNum: weekNum_, ...(wpr_ > 1 ? { weeksPerRound: wpr_ } : {}),
               blendEnabled: blendEn_, blendWeight: blendWt_, blendMode: blendMd_,
               poolByes: poolByes_, advCount: advCount_,
               results: sorted2_.map((tm, i) => ({
@@ -15859,8 +15859,21 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const finalRankings = _buildFinalRankings();
         snapshot.finalRankings = finalRankings; // include in public snapshot too
 
+        // Scrub any undefined values from the snapshot before writing —
+        // Firebase rejects undefined anywhere in the payload.
+        const _scrub = (obj) => {
+          if (Array.isArray(obj)) return obj.map(_scrub);
+          if (obj !== null && typeof obj === "object") {
+            const out = {};
+            for (const [k, v] of Object.entries(obj)) {
+              if (v !== undefined) out[k] = _scrub(v);
+            }
+            return out;
+          }
+          return obj;
+        };
         // Write to public site
-        await GMD.child(`publicTournaments/${tid}/playoffs/${activeY}`).set(snapshot);
+        await GMD.child(`publicTournaments/${tid}/playoffs/${activeY}`).set(_scrub(snapshot));
 
         // Write finalRankings to private tournaments path so analytics tabs can read
         // from t.playoffs[year].finalRankings without re-simulation or pub fetches
@@ -16548,16 +16561,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         });
       });
 
-      // IMPORTANT: The `playoffs` node in publicTournaments is owned exclusively by the
-      // publish button (_buildPlayoffSnapshot). _writePublicSummary must NEVER write to
-      // `playoffs` directly — doing so with .update() overwrites the rich published
-      // snapshot (standings, rounds, computedRounds, weeklyScores, etc.) with just the
-      // thin config fields.
-      //
-      // Instead we write season config to a separate `seasonConfig` node, and write
-      // per-year registrationOpen flags via individual child .update() calls that only
-      // touch the specific sub-keys we own.
-
       const summary = {
         name:              meta.name         || "",
         tagline:           meta.tagline      || "",
@@ -16579,33 +16582,52 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         standingsCache:    t.standingsCache  || {},
         rulesByYear:       t.rulesByYear      || {},
         participantMap,
-        // Season config for Overview summary card — stored separately from playoffs publish node
-        seasonConfig: (() => {
-          const cfg = {};
+        // Publish full playoff config for all modes so the public site can render
+        // season summary, standings, and bracket without needing extra fetches.
+        playoffs: (() => {
+          const poData = {};
           Object.entries(t.playoffs || {}).forEach(([yr, config]) => {
-            if (!/^\d{4}$/.test(yr)) return;
+            if (!/^\d{4}$/.test(yr)) return; // skip legacy flat node
             const wc = config || {};
-            cfg[yr] = {
-              mode:          wc.mode          || null,
-              startWeek:     wc.startWeek     || null,
-              endWeek:       wc.endWeek       || null,
-              qualification: wc.qualification || null,
-              pointsRounds:  wc.pointsRounds  || null,
-              customRounds:  wc.customRounds  || null,
-              bracketSize:   wc.bracketSize   || null,
-              byes:          wc.byes          || null,
-              seeding:       wc.seeding       || null,
-              worldcupRegWeeks:      wc.worldcupRegWeeks      || null,
-              worldcupAdvanceCount:  wc.worldcupAdvanceCount  ?? null,
-              worldcupWeeksPerRound: wc.worldcupWeeksPerRound || null,
+            // Always publish the full config — public site needs mode/weeks/qualification
+            const entry = {
+              registrationOpen:    wc.registrationOpen    || false,
+              mode:                wc.mode                || null,
+              startWeek:           wc.startWeek           || null,
+              endWeek:             wc.endWeek             || null,
+              published:           wc.published           || false,
+              finalRankings:       wc.finalRankings       || null,
+              // H2H bracket fields
+              bracketSize:         wc.bracketSize         || null,
+              byes:                wc.byes                || null,
+              seeding:             wc.seeding             || null,
+              // Qualification
+              qualification:       wc.qualification       || null,
+              // Points rounds / custom rounds
+              pointsRounds:        wc.pointsRounds        || null,
+              customRounds:        wc.customRounds        || null,
+              // World cup specific
+              worldcupGroups:        wc.worldcupGroups        || null,
+              worldcupSchedule:      wc.worldcupSchedule      || null,
+              worldcupBracket:       wc.worldcupBracket        || null,
+              worldcupBracketMode:   wc.worldcupBracketMode    || null,
+              worldcupRegWeeks:      wc.worldcupRegWeeks       || null,
+              worldcupAdvanceCount:  wc.worldcupAdvanceCount   ?? null,
+              worldcupWeeksPerRound: wc.worldcupWeeksPerRound  || null,
+              worldcupTiebreakers:   wc.worldcupTiebreakers    || null,
+              // Summary override text
+              summaryOverride:       null, // stored on meta, handled below
             };
-            Object.keys(cfg[yr]).forEach(k => { if (cfg[yr][k] === null) delete cfg[yr][k]; });
+            // Clean nulls to keep node compact
+            Object.keys(entry).forEach(k => { if (entry[k] === null) delete entry[k]; });
+            poData[yr] = entry;
           });
-          return Object.keys(cfg).length ? cfg : null;
+          return Object.keys(poData).length ? poData : null;
         })(),
-        // Scoring settings for Overview summary card
+        // Publish scoring settings so public site can show scoring summary
         scoringSettings: (() => {
           const ss = t.scoringSettings || {};
+          // Only publish years that have playoff config (active/past seasons)
           const activeYears = new Set(
             Object.keys(t.playoffs || {}).filter(yr => /^\d{4}$/.test(yr))
           );
@@ -16616,21 +16638,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           });
           return Object.keys(pub).length ? pub : null;
         })(),
+        // Summary override text from meta
         summaryOverride: meta.summaryOverride || null,
       };
 
-      // Write the top-level summary fields (never touches the playoffs node)
       await GMD.child("publicTournaments/" + tid).update(summary);
-
-      // Write per-year registrationOpen flags as surgical child updates so we
-      // don't disturb the rest of each year's published playoffs snapshot.
-      const poYrs = Object.keys(t.playoffs || {}).filter(yr => /^\d{4}$/.test(yr));
-      await Promise.all(poYrs.map(yr =>
-        GMD.child(`publicTournaments/${tid}/playoffs/${yr}`).update({
-          registrationOpen: !!(t.playoffs[yr]?.registrationOpen),
-          published:        !!(t.playoffs[yr]?.published),
-        })
-      ));
     } catch(err) {
       console.warn("[Tournament] _writePublicSummary failed:", err.message);
     }
