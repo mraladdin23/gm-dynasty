@@ -456,9 +456,17 @@ const DraftTicker = (() => {
 
     if (draft.status === "drafting" || draft.status === "paused") {
       try {
-        const [pr, tpr] = await Promise.all([
+        // For snake drafts, /league/{id}/drafts doesn't return slot_to_roster_id.
+        // We must hit /draft/{id} directly to get the full mapping.
+        // For linear drafts slot === rosterId so we skip this extra call.
+        const needS2R = !status.slot_to_roster_id || Object.keys(status.slot_to_roster_id).length === 0;
+        const isSnake = (draft.type || "snake") !== "linear";
+        const [pr, tpr, draftDetailR] = await Promise.all([
           fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`),
-          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`)
+          fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/traded_picks`),
+          (needS2R && isSnake)
+            ? fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}`)
+            : Promise.resolve(null)
         ]);
         if (pr.ok) {
           const picks = await pr.json();
@@ -467,6 +475,13 @@ const DraftTicker = (() => {
         }
         if (tpr.ok) {
           status.traded_picks = await tpr.json();
+        }
+        // Populate slot_to_roster_id from the full draft detail endpoint
+        if (draftDetailR?.ok) {
+          const draftDetail = await draftDetailR.json();
+          if (draftDetail.slot_to_roster_id && Object.keys(draftDetail.slot_to_roster_id).length) {
+            status.slot_to_roster_id = draftDetail.slot_to_roster_id;
+          }
         }
       } catch(e) {}
 
@@ -730,9 +745,16 @@ const DraftTicker = (() => {
 
     await Promise.allSettled(live.map(async item => {
       try {
-        const [pr, tpr] = await Promise.all([
+        const cached  = _statusCache.get(item.leagueId) || {};
+        const isSnake = (cached.draftType || "snake") !== "linear";
+        const needS2R = isSnake && (!cached.slot_to_roster_id || Object.keys(cached.slot_to_roster_id).length === 0);
+
+        const [pr, tpr, draftDetailR] = await Promise.all([
           fetch(`https://api.sleeper.app/v1/draft/${item.draftId}/picks`),
-          item.draftId ? fetch(`https://api.sleeper.app/v1/draft/${item.draftId}/traded_picks`) : Promise.resolve(null)
+          item.draftId ? fetch(`https://api.sleeper.app/v1/draft/${item.draftId}/traded_picks`) : Promise.resolve(null),
+          (needS2R && item.draftId)
+            ? fetch(`https://api.sleeper.app/v1/draft/${item.draftId}`)
+            : Promise.resolve(null)
         ]);
         if (!pr.ok) return;
 
@@ -740,16 +762,24 @@ const DraftTicker = (() => {
         const tradedPicks = tpr?.ok ? await tpr.json() : [];
         const picksMade   = Array.isArray(arr) ? arr.length : 0;
         const last        = Array.isArray(arr) ? arr[arr.length - 1] : null;
-        const cached      = _statusCache.get(item.leagueId) || {};
         const teams       = cached.settingsTeams || Object.keys(cached.draft_order || {}).length || 12;
         const totalPicks  = cached.totalPicks || item.totalPicks || teams;
         const next        = picksMade + 1;
 
-        // Update status cache with fresh data
+        // Pull slot_to_roster_id from full draft detail if still missing
+        let s2r = cached.slot_to_roster_id || {};
+        if (draftDetailR?.ok) {
+          const dd = await draftDetailR.json();
+          if (dd.slot_to_roster_id && Object.keys(dd.slot_to_roster_id).length) {
+            s2r = dd.slot_to_roster_id;
+          }
+        }
+
         const updated = {
           ...cached,
           picksMade,
-          traded_picks: tradedPicks,
+          traded_picks:      tradedPicks,
+          slot_to_roster_id: s2r,
           nextPick: picksMade < totalPicks
             ? { overall: next, round: Math.ceil(next / teams), pick: ((next - 1) % teams) + 1 }
             : null,
