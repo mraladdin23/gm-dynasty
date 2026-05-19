@@ -451,26 +451,31 @@
       }
 
       // Default nav: if no standings yet default to overview, else history
-      if (!["overview","history","players","chat"].includes(_activePubNav)) _activePubNav = "overview";
+      if (!["overview","history","players","chat","register"].includes(_activePubNav)) _activePubNav = "overview";
       if (isDraft && hasStandings && _activePubNav === "overview") _activePubNav = "history";
 
       // Nav pills
       const _pill = (id, label) =>
         `<button class="trn-top-nav-pill${_activePubNav===id?" trn-top-nav-pill--active":""}" data-pubnav="${id}">${label}</button>`;
 
-      const hasHistory = hasStandings || hasPlayoffs;
-      const hasPlayers = hasStandings;
+      const hasHistory  = hasStandings || hasPlayoffs;
+      const hasPlayers  = hasStandings;
+      // Show Register tab if form exists OR registration is open — always surfaced
+      const hasRegForm  = !!(t.registrationForm?.fields?.length || t.registrationForm?.optionalFields?.length || t.registrationForm?.customQuestions?.length || anyRegOpen);
+
       const navPills = [
-        _pill("overview", "Overview"),
-        hasHistory ? _pill("history", "Tournament History") : "",
-        hasPlayers ? _pill("players", "Player Records") : "",
+        _pill("overview",  "Overview"),
+        hasHistory  ? _pill("history",  "Tournament History") : "",
+        hasPlayers  ? _pill("players",  "Player Records")     : "",
+        hasRegForm  ? _pill("register", anyRegOpen ? "📬 Register" : "Register") : "",
         _pill("chat", "Chat"),
       ].join("");
 
       const navOpts = [
-        `<option value="overview" ${_activePubNav==="overview"?"selected":""}>Overview</option>`,
-        hasHistory ? `<option value="history" ${_activePubNav==="history"?"selected":""}>Tournament History</option>` : "",
-        hasPlayers ? `<option value="players" ${_activePubNav==="players"?"selected":""}>Player Records</option>` : "",
+        `<option value="overview"  ${_activePubNav==="overview" ?"selected":""}>Overview</option>`,
+        hasHistory  ? `<option value="history"  ${_activePubNav==="history" ?"selected":""}>Tournament History</option>`  : "",
+        hasPlayers  ? `<option value="players"  ${_activePubNav==="players" ?"selected":""}>Player Records</option>`      : "",
+        hasRegForm  ? `<option value="register" ${_activePubNav==="register"?"selected":""}>Register</option>`            : "",
         `<option value="chat" ${_activePubNav==="chat"?"selected":""}>Chat</option>`,
       ].join("");
 
@@ -507,25 +512,15 @@
         loadDirectory();
       });
 
-      // Register pill
+      // Register pill in topbar — navigate to Register tab
       document.getElementById("pub-register-pill")?.addEventListener("click", () => {
-        const existing = document.getElementById("pub-register-overlay");
-        if (existing) { existing.remove(); return; }
-        const overlay = document.createElement("div");
-        overlay.id = "pub-register-overlay";
-        overlay.className = "trn-register-overlay";
-        overlay.innerHTML = `
-          <div class="trn-register-page">
-            <div class="trn-register-page-header">
-              <button class="btn-ghost btn-sm" id="pub-reg-back">← Back to ${esc(t.name || "Tournament")}</button>
-              <h2 style="margin:var(--space-3) 0 0;font-size:1.1rem;font-weight:700">Register for ${esc(t.name || "Tournament")} ${regOpenYear || new Date().getFullYear()}</h2>
-            </div>
-            <div id="pub-register-page-body"></div>
-          </div>`;
-        document.getElementById("pub-content").appendChild(overlay);
-        document.getElementById("pub-reg-back")?.addEventListener("click", () => overlay.remove());
-        const regBody = document.getElementById("pub-register-page-body");
-        if (regBody) renderRegisterTab(regBody);
+        _activePubNav = "register";
+        document.querySelectorAll(".trn-top-nav-pill[data-pubnav]").forEach(b =>
+          b.classList.toggle("trn-top-nav-pill--active", b.dataset.pubnav === "register"));
+        const sel = document.getElementById("pub-top-nav-select");
+        if (sel) sel.value = "register";
+        renderPubSection(allYears);
+        window.scrollTo({ top: 0, behavior: "smooth" });
       });
 
       // Top nav pills
@@ -560,12 +555,42 @@
       if (!body) return;
       body.innerHTML = "";
       switch (_activePubNav) {
-        case "overview": return renderPubOverview(body, allYears);
-        case "history":  return renderPubHistory(body, allYears);
-        case "players":  return renderPlayersTab(body);
-        case "chat":     return renderBoardTab(body);
-        default:         return renderPubOverview(body, allYears);
+        case "overview":  return renderPubOverview(body, allYears);
+        case "history":   return renderPubHistory(body, allYears);
+        case "players":   return renderPlayersTab(body);
+        case "register":  return renderPubRegisterSection(body);
+        case "chat":      return renderBoardTab(body);
+        default:          return renderPubOverview(body, allYears);
       }
+    }
+
+    // ── Register section ────────────────────────────────────
+    function renderPubRegisterSection(body) {
+      const t         = _currentT;
+      const poYears   = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k));
+      const regOpenYr = poYears.find(y => t.playoffs[y]?.registrationOpen);
+
+      if (!regOpenYr) {
+        // Registration exists but is currently closed
+        body.innerHTML = `
+          <div class="trn-section-card" style="text-align:center;padding:var(--space-6) var(--space-4)">
+            <div style="font-size:2rem;margin-bottom:var(--space-3)">🔒</div>
+            <div style="font-size:1rem;font-weight:600;margin-bottom:var(--space-2)">Registration Not Open</div>
+            <div style="font-size:.85rem;color:var(--color-text-dim);max-width:320px;margin:0 auto">
+              Registration for this tournament is not currently open.
+              Check back later or contact the commissioner.
+            </div>
+            ${t.adminEmail ? `
+              <div style="margin-top:var(--space-4)">
+                <a href="mailto:${esc(t.adminEmail)}?subject=${encodeURIComponent('[' + (t.name||'Tournament') + '] Registration Question')}"
+                   class="btn-secondary btn-sm">✉ Contact Commissioner</a>
+              </div>` : ""}
+          </div>`;
+        return;
+      }
+
+      // Registration is open — render the form inline
+      renderRegisterTab(body);
     }
 
     // ── Public Season Summary (shown on Overview) ─────────
@@ -715,8 +740,17 @@
           </div>` : ""}
       `;
 
-      document.getElementById("pub-ov-register-btn")?.addEventListener("click", () =>
-        document.getElementById("pub-register-pill")?.click());
+      document.getElementById("pub-ov-register-btn")?.addEventListener("click", () => {
+        _activePubNav = "register";
+        document.querySelectorAll(".trn-top-nav-pill[data-pubnav]").forEach(b =>
+          b.classList.toggle("trn-top-nav-pill--active", b.dataset.pubnav === "register"));
+        const sel = document.getElementById("pub-top-nav-select");
+        if (sel) sel.value = "register";
+        const scY = [...new Set(Object.values(_currentT.standingsCache||{}).map(lc=>lc.year).filter(Boolean).map(Number))];
+        const poY = Object.keys(_currentT.playoffs||{}).filter(k=>/^\d{4}$/.test(k)).map(Number);
+        renderPubSection([...new Set([...scY,...poY])].sort((a,b)=>b-a));
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
 
       // Wire season summary year pills
       body.querySelectorAll("[data-pub-sum-year]").forEach(btn => {
@@ -2656,10 +2690,14 @@
 
 
     function renderRegisterTab(body) {
-      const t    = _currentT;
-      const form = t.registrationForm || {};
-      const opts = form.optionalFields || [];
+      const t      = _currentT;
+      const form   = t.registrationForm || {};
+      const opts   = form.optionalFields || [];
       const custom = form.customQuestions || [];
+      // Resolve which year registration is open for
+      const _regYear = Object.keys(t.playoffs || {})
+        .filter(k => /^\d{4}$/.test(k))
+        .find(y => t.playoffs[y]?.registrationOpen) || t.registrationYear || new Date().getFullYear();
 
       const STD_LABELS = { displayName: "Display Name", email: "Email Address" };
       const OPT_LABELS = {
@@ -2675,7 +2713,7 @@
 
       body.innerHTML = `
         <div class="trn-section-card">
-          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")} ${t.registrationYear || new Date().getFullYear()}</div>
+          <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")} ${_regYear}</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
             Fill in the form below. Your registration will be reviewed by the tournament admin.
           </p>

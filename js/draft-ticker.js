@@ -953,6 +953,17 @@ const DraftTicker = (() => {
         if (isMe) break; // stop at my first pick
       }
 
+      // Determine why myNextPick would be null
+      const diagnoseNull = [];
+      if (!mySleeperUid)                               diagnoseNull.push("NO_SLEEPER_UID");
+      if (!Object.keys(draftOrder).length)             diagnoseNull.push("EMPTY_DRAFT_ORDER");
+      if (mySlot == null)                              diagnoseNull.push("MY_SLOT_NOT_FOUND_IN_DRAFT_ORDER");
+      if (!Object.keys(s2r).length)                    diagnoseNull.push("EMPTY_SLOT_TO_ROSTER_ID");
+      if (mySlot != null && !s2r[String(mySlot)])      diagnoseNull.push(`SLOT_${mySlot}_NOT_IN_S2R`);
+      if (status.picksMade >= totalPicks)              diagnoseNull.push("DRAFT_COMPLETE_NO_PICKS_LEFT");
+      const myPickFound = picksDetail.some(p => p.isMe);
+      if (!myPickFound && !diagnoseNull.length)        diagnoseNull.push("NO_REMAINING_PICKS_MATCH_MY_ROSTER_ID");
+
       results.push({
         leagueName:   meta.leagueName || lid,
         leagueId:     lid,
@@ -961,13 +972,16 @@ const DraftTicker = (() => {
         mySlot,
         myRosterId,
         totalTeams,
-        totalPicks,
+        settingsTeams: status.settingsTeams,
+        totalPicks:   status.totalPicks,
         picksMade:    status.picksMade,
         isLinear,
+        has_draft_order:       Object.keys(draftOrder).length > 0,
+        has_slot_to_roster_id: Object.keys(s2r).length > 0,
+        diagnoseNull: diagnoseNull.length ? diagnoseNull : ["OK_SHOULD_SHOW"],
         tradedPicksCount: (status.traded_picks || []).length,
-        tradedPicks:  (status.traded_picks || []).slice(0, 20), // first 20 for brevity
-        tradeMapKeys: Object.keys(tradeMap),
         slot_to_roster_id: s2r,
+        draft_order_keys: Object.keys(draftOrder),
         next30picks:  picksDetail
       });
     }
