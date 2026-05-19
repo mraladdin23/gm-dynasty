@@ -2751,9 +2751,12 @@
       const errEl = document.getElementById("pub-reg-error");
       const btn   = document.getElementById("pub-reg-submit");
 
-      // Helper: find the right success container — overlay path or tab path
+      // Helper: find the right success container.
+      // New nav: register section renders into pub-section-body.
+      // Legacy paths kept as fallback.
       const _successContainer = () =>
-        document.getElementById("pub-register-page-body") ||
+        document.getElementById("pub-section-body")      ||
+        document.getElementById("pub-register-page-body")||
         document.getElementById("pub-tab-body");
 
       const _showError = (msg) => {
