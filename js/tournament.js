@@ -14159,7 +14159,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const _weekMatchupCache = {}; // { leagueId+"|"+week: [{roster_id, matchup_id, points}] }
     const _fetchWeekScores = async (leagueId, week) => {
       const key = leagueId + "|" + week;
-      if (_weekScoreCache[key]) return _weekScoreCache[key];
+      // Only use cache if BOTH score and matchup data are already stored.
+      // If _weekScoreCache exists but _weekMatchupCache doesn't (e.g. populated
+      // by an older code path), re-fetch so wlMap computation has matchup pairs.
+      if (_weekScoreCache[key] && _weekMatchupCache[key]) return _weekScoreCache[key];
       try {
         const r = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week);
         if (!r.ok) return {};
@@ -14167,7 +14170,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const map = {};
         (data || []).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
         _weekScoreCache[key]   = map;
-        _weekMatchupCache[key] = data || []; // preserve full matchup data for H2H record computation
+        _weekMatchupCache[key] = data || []; // full matchup rows needed for H2H W/L computation
         return map;
       } catch(e) { return {}; }
     };
@@ -15746,7 +15749,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // ── Decathlon: By League breakdown ───────────────────────────────────────────
     const _renderDecathlonByLeague = async () => {
       const weekMap = await _buildDecWeekScoreMap();
-      const { players, method, leagueNames, leagueConfig } = _buildDecathlonLeaderboard(t, activeY, po, weekMap);
+      const { players, method, leagueNames, leagueConfig, hasWeekRange, startWk, endWk } = _buildDecathlonLeaderboard(t, activeY, po, weekMap);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet.</div>`;
 
       // Group players by their result in each league — show each league's standings
@@ -17948,6 +17951,38 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       console.log("Total pfMap keys:", Object.keys(pfMapTest).length);
       if (!Object.keys(pfMapTest).length) {
         console.warn("⚠️  pfMap is EMPTY — week score fetch returned no data. Check league IDs and that weeks " + sw + "–" + ew + " have played.");
+      }
+
+      // Also test wlMap — this requires matchup pairs (roster_id + matchup_id)
+      const wlMapTest2 = {};
+      await Promise.allSettled([...lgIds].flatMap(lid => weeks.map(async wk => {
+        try {
+          const r2 = await fetch("https://api.sleeper.app/v1/league/" + lid + "/matchups/" + wk);
+          if (!r2.ok) return;
+          const d2 = await r2.json();
+          const byMu = {};
+          (d2||[]).forEach(m => {
+            if (!m.roster_id || !m.matchup_id) return;
+            if (!byMu[m.matchup_id]) byMu[m.matchup_id] = [];
+            byMu[m.matchup_id].push(m);
+          });
+          Object.values(byMu).forEach(pair => {
+            if (pair.length !== 2) return;
+            const [a,b] = pair;
+            const ka = lid+"|"+a.roster_id, kb = lid+"|"+b.roster_id;
+            if (!wlMapTest2[ka]) wlMapTest2[ka] = {wins:0,losses:0};
+            if (!wlMapTest2[kb]) wlMapTest2[kb] = {wins:0,losses:0};
+            if ((a.points||0) > (b.points||0)) { wlMapTest2[ka].wins++; wlMapTest2[kb].losses++; }
+            else if ((b.points||0) > (a.points||0)) { wlMapTest2[kb].wins++; wlMapTest2[ka].losses++; }
+          });
+        } catch(e) {}
+      })));
+      console.log("wlMap keys:", Object.keys(wlMapTest2).length);
+      console.log("wlMap sample:", Object.entries(wlMapTest2).slice(0, 3));
+      if (!Object.keys(wlMapTest2).length) {
+        console.warn("⚠️  wlMap is EMPTY — matchup_id grouping produced no pairs. H2H record sorting will fall back to full-season standingsCache wins/losses.");
+      } else {
+        console.log("✓ wlMap has data — record-basis leagues will use week-range H2H records.");
       }
     } else {
       console.warn("⚠️  po.startWeek or po.endWeek is missing — week range NOT applied.");
