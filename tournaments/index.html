@@ -893,6 +893,7 @@
       const po   = (t.playoffs || {})[year] || {};
       const dec  = po.decathlon || {};
       const method      = dec.scoringMethod || "combined_pf";
+      const finishBasis = dec.finishBasis   || "record"; // record | pf | playoffs
       const identityKey = dec.identityKey   || "sleeperUsername";
       const ptsTable    = Array.isArray(dec.pointsTable) ? dec.pointsTable : [10,8,6,5,4,3,2,1];
 
@@ -912,9 +913,18 @@
         (lc.teams||[]).forEach(tm => leagueMap[lgId].teams.push({ ...tm, leagueName: lgName }));
       });
 
-      // Sort each league by record then PF
+      // Sort each league by finishBasis to determine finish rank
       Object.values(leagueMap).forEach(lg => {
-        lg.teams.sort((a,b) => ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0));
+        if (finishBasis === "pf") {
+          lg.teams.sort((a,b) => (b.pf||0) - (a.pf||0));
+        } else if (finishBasis === "playoffs") {
+          lg.teams.sort((a,b) =>
+            ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) ||
+            (b.wins||0) - (a.wins||0) || (b.pf||0) - (a.pf||0));
+        } else {
+          lg.teams.sort((a,b) =>
+            ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0));
+        }
         lg.teams.forEach((tm, i) => { tm._rank = i + 1; });
       });
 
@@ -957,8 +967,11 @@
       const medal = i => i===0?"🥇":i===1?"🥈":i===2?"🥉":"";
       const valueFn = p => method==="finish_points" ? `${p.totalPoints} pts` : p.totalPF.toFixed(2);
       const ordinal = n => n+(["th","st","nd","rd"][(n>3&&n<21)?0:(n%10<4?n%10:0)]||"th");
+      const basisLabel = finishBasis==="pf"       ? "by Points Scored"
+                       : finishBasis==="playoffs" ? "by League Playoffs (H2H tiebreak)"
+                       :                             "by H2H Record";
       const methodNote = method==="finish_points"
-        ? `Finish Points — ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
+        ? `Finish Points (${basisLabel}) — ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
         : "Combined PF across all leagues";
 
       const podium = sorted.slice(0,3).map((p,i) => `

@@ -5335,3 +5335,21 @@
   .trn-dec-podium-medal { font-size: 1.4rem; }
   .trn-dec-podium-2, .trn-dec-podium-3 { margin-top: var(--space-2); }
 }
+
+/* ── Decathlon method + basis cards ────────────────────────── */
+.trn-dec-method-card,
+.trn-dec-basis-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  transition: border-color .15s;
+}
+.trn-dec-method-card { flex: 1; min-width: 180px; }
+.trn-dec-basis-card  { flex: 1; min-width: 140px; }
+.trn-dec-method-card:hover,
+.trn-dec-basis-card:hover { border-color: var(--color-gold); }
