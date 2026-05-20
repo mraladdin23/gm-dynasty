@@ -3674,53 +3674,32 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span class="field-hint">How to match the same player across different leagues.</span>
         </div>
 
-        <!-- Scoring method -->
+        <!-- Overall scoring method: combined PF vs finish points -->
         <div class="form-group" style="margin-bottom:var(--space-4)">
-          <label>Scoring Method</label>
+          <label>Overall Scoring Method</label>
           <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-2)">
             <label class="trn-dec-method-card" style="border-color:${decScoringMethod==="combined_pf"?"var(--color-gold)":"var(--color-border)"}">
               <input type="radio" name="dec-method" value="combined_pf" ${decScoringMethod==="combined_pf"?"checked":""} style="margin-top:2px;accent-color:var(--color-gold)" />
               <div>
                 <div style="font-weight:600;font-size:.88rem">📊 Combined PF</div>
-                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Sum of each player's points scored across all leagues. Updates live each week.</div>
+                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Sum of each player's actual points scored across all leagues within the week range.</div>
               </div>
             </label>
             <label class="trn-dec-method-card" style="border-color:${decScoringMethod==="finish_points"?"var(--color-gold)":"var(--color-border)"}">
               <input type="radio" name="dec-method" value="finish_points" ${decScoringMethod==="finish_points"?"checked":""} style="margin-top:2px;accent-color:var(--color-gold)" />
               <div>
                 <div style="font-weight:600;font-size:.88rem">🏅 Finish Points</div>
-                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Each league finish earns points per the table below. Configure how finish is determined.</div>
+                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Each league finish earns points per the shared table. How finish is determined is configured per league below.</div>
               </div>
             </label>
           </div>
         </div>
 
-        <!-- Finish points table + basis (shown when method = finish_points) -->
+        <!-- Shared finish points table (applies to all leagues when method = finish_points) -->
         <div id="trn-dec-pts-section" style="display:${decScoringMethod==="finish_points"?"":"none"}">
-          <!-- How finish rank is determined within each league -->
-          <div class="form-group" style="margin-bottom:var(--space-3)">
-            <label>How is finish determined in each league?</label>
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)">
-              ${[
-                { val:"record",   label:"📋 H2H Record",     sub:"Wins/losses, PF as tiebreaker" },
-                { val:"pf",       label:"📊 Points Scored",  sub:"Highest PF in league = 1st" },
-                { val:"playoffs", label:"🏆 League Playoffs",sub:"Uses post-playoff standings if available, falls back to record" }
-              ].map(opt => `
-                <label class="trn-dec-basis-card" style="border-color:${(decConfig.finishBasis||"record")===opt.val?"var(--color-gold)":"var(--color-border)"}">
-                  <input type="radio" name="dec-basis" value="${opt.val}"
-                    ${(decConfig.finishBasis||"record")===opt.val?"checked":""}
-                    style="margin-top:2px;accent-color:var(--color-gold)" />
-                  <div>
-                    <div style="font-weight:600;font-size:.85rem">${opt.label}</div>
-                    <div style="font-size:.75rem;color:var(--color-text-dim);margin-top:1px">${opt.sub}</div>
-                  </div>
-                </label>`).join("")}
-            </div>
-          </div>
-          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Finish Points Table</div>
+          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Finish Points Table <span style="font-weight:400;font-size:.78rem;color:var(--color-text-dim)">(shared across all leagues)</span></div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-            Points awarded per finish position in each league. Row N = Nth place finish.
-            Players finishing beyond the last row each receive 0 points.
+            Points for each finish position. Row N = Nth place. Teams beyond the last row earn 0 pts.
           </p>
           <div id="trn-dec-pts-table" style="display:grid;grid-template-columns:auto 1fr auto;gap:var(--space-2);max-width:320px;align-items:center">
             ${decPointsTable.map((pts, i) => `
@@ -3739,9 +3718,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
         <!-- Season week range -->
         <div style="margin-top:var(--space-4)">
-          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Season Week Range</div>
+          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Regular Season Week Range</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-            Which weeks count toward standings. Leave blank to use all regular season weeks.
+            Weeks that count toward Combined PF and PF-basis league rankings.
+            H2H record and playoff-basis leagues use their full win/loss record regardless.
           </p>
           <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
             <div class="form-group" style="margin-bottom:0">
@@ -3750,45 +3730,95 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             </div>
             <div class="form-group" style="margin-bottom:0">
               <label>End Week</label>
-              <input type="number" id="trn-dec-end-week"   min="1" max="18" value="${po.endWeek||""}"   placeholder="14" style="width:70px" />
+              <input type="number" id="trn-dec-end-week" min="1" max="18" value="${po.endWeek||""}" placeholder="14" style="width:70px" />
             </div>
           </div>
         </div>
 
-        <!-- Per-league scoring settings info -->
-        <div style="margin-top:var(--space-4)">
-          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Scoring Settings by League</div>
+        <!-- Per-league finish method config -->
+        <div style="margin-top:var(--space-5)">
+          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Per-League Finish Method</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-            Each league in a Decathlon may use different scoring rules (PPR, half-PPR, standard).
-            Scoring settings are synced per-league when you run Sync Standings. The Combined PF
-            leaderboard uses each league's actual point totals — no normalization needed since
-            players are being compared by accumulated score, not head-to-head.
-            If you're using Finish Points, only rank matters so scoring differences don't affect results.
+            Configure how finish rank is determined in each league individually.
+            This controls which position earns which points from the table above.
           </p>
           ${(() => {
-            // Show per-league scoring summaries from standingsCache + scoringSettings
-            const leagueSummaries = [];
+            const BASIS_OPTS = [
+              { val:"record",      label:"H2H Record",      icon:"📋", hint:"Wins/losses, PF tiebreak" },
+              { val:"pf",          label:"Total Points",     icon:"📊", hint:"Highest PF = 1st" },
+              { val:"playoffs",    label:"League Playoffs",  icon:"🏆", hint:"Post-playoff record; sync after playoffs" },
+              { val:"elimination", label:"Elimination",      icon:"☠️", hint:"Weekly knockout; set elimination week below" },
+            ];
+            // Collect known leagues for this year from standingsCache
+            const knownLeagues = [];
+            const seen = new Set();
             Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
               if (String(lc.year) !== String(activeYear)) return;
-              const lgName   = lc.leagueName || ck;
-              const lgId     = String(lc.leagueId || lc.league_id || ck);
-              const ss       = (t.scoringSettings || {})[activeYear] || {};
-              // Try leagueId-specific entry first, then platform-level
+              const lgId   = String(lc.leagueId || lc.league_id || ck);
+              if (seen.has(lgId)) return; seen.add(lgId);
+              const lgName = lc.leagueName || ck;
+              const ss     = (t.scoringSettings || {})[activeYear] || {};
               const platform = lc.platform || "sleeper";
-              const lgSS     = ss[lgId] || ss[platform] || null;
-              const format   = lgSS?._format || lgSS?.format || null;
-              const ppr      = lgSS?.rec !== undefined ? (+lgSS.rec === 1 ? "PPR" : +lgSS.rec === 0.5 ? "Half-PPR" : +lgSS.rec === 0 ? "Standard" : `${lgSS.rec} rec`) : null;
-              leagueSummaries.push({ lgName, lgId, format, ppr });
+              const lgSS   = ss[lgId] || ss[platform] || null;
+              const ppr    = lgSS?.rec !== undefined ? (+lgSS.rec===1?"PPR":+lgSS.rec===0.5?"Half-PPR":"Standard") : null;
+              const lgCfg  = (decConfig.leagueConfig || {})[lgId] || {};
+              knownLeagues.push({ lgId, lgName, ppr, lgCfg });
             });
-            if (!leagueSummaries.length) return '<div style="font-size:.82rem;color:var(--color-text-dim)">Add leagues and sync standings to see per-league scoring.</div>';
-            return leagueSummaries.map(ls => `
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);margin-bottom:6px;font-size:.82rem">
-                <span style="font-weight:500">${_esc(ls.lgName)}</span>
-                <span style="color:var(--color-text-dim)">
-                  ${ls.ppr || "—"}${ls.format ? " · " + _esc(ls.format) : ""}
-                  ${(!ls.ppr && !ls.format) ? "Sync standings to load" : ""}
-                </span>
-              </div>`).join("");
+            if (!knownLeagues.length) {
+              return '<div style="font-size:.82rem;color:var(--color-text-dim);padding:var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md)">Add leagues and sync standings first — leagues will appear here once standingsCache is populated.</div>';
+            }
+            return knownLeagues.map(({ lgId, lgName, ppr, lgCfg }) => {
+              const curBasis = lgCfg.finishBasis || "record";
+              const curElimWk = lgCfg.eliminationStartWeek || "";
+              return `
+                <div class="trn-dec-league-cfg-card" data-lg-id="${_esc(lgId)}">
+                  <div class="trn-dec-league-cfg-header">
+                    <div>
+                      <span class="trn-dec-league-cfg-name">${_esc(lgName)}</span>
+                      ${ppr ? `<span class="trn-dec-league-cfg-badge">${_esc(ppr)}</span>` : ""}
+                    </div>
+                    <span class="trn-dec-league-cfg-basis-label" id="trn-dec-basis-label-${_esc(lgId)}">
+                      ${BASIS_OPTS.find(b=>b.val===curBasis)?.icon||"📋"} ${BASIS_OPTS.find(b=>b.val===curBasis)?.label||curBasis}
+                    </span>
+                  </div>
+                  <div class="trn-dec-league-cfg-body">
+                    <div class="trn-dec-basis-btn-row">
+                      ${BASIS_OPTS.map(opt => `
+                        <button class="trn-dec-basis-btn${curBasis===opt.val?" trn-dec-basis-btn--active":""}"
+                          data-lg="${_esc(lgId)}" data-basis="${opt.val}" title="${opt.hint}">
+                          ${opt.icon} ${opt.label}
+                        </button>`).join("")}
+                    </div>
+                    <div class="trn-dec-elim-row" id="trn-dec-elim-row-${_esc(lgId)}"
+                      style="display:${curBasis==="elimination"?"":"none"};margin-top:var(--space-3)">
+                      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);margin-bottom:var(--space-2)">
+                        <div class="form-group" style="margin-bottom:0">
+                          <label style="font-size:.78rem">Phase 1 ends (week)</label>
+                          <input type="number" class="trn-dec-elim-phase1" data-lg="${_esc(lgId)}"
+                            min="1" max="18" value="${lgCfg.cumulativeEndWeek||""}" placeholder="e.g. 4"
+                            style="width:60px;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                          <span class="field-hint" style="font-size:.72rem">Cumulative PF used before this week</span>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0">
+                          <label style="font-size:.78rem">First elimination (week)</label>
+                          <input type="number" class="trn-dec-elim-wk" data-lg="${_esc(lgId)}"
+                            min="1" max="18" value="${curElimWk}" placeholder="e.g. 4"
+                            style="width:60px;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                          <span class="field-hint" style="font-size:.72rem">Week of first knockout</span>
+                        </div>
+                      </div>
+                      ${(() => {
+                        const elims = lgCfg.eliminations || [];
+                        const elimCount = elims.length;
+                        return `<button class="btn-secondary btn-sm trn-dec-manage-elim-btn"
+                          data-lg="${_esc(lgId)}" data-lg-name="${_esc(lgName)}">
+                          ☠️ Manage Weekly Knockouts${elimCount ? ` (${elimCount} recorded)` : ""}
+                        </button>`;
+                      })()}
+                    </div>
+                  </div>
+                </div>`;
+            }).join("");
           })()}
         </div>
 
@@ -4902,26 +4932,39 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       });
     });
 
-    // Update basis card borders on change
-    document.querySelectorAll('input[name="dec-basis"]').forEach(radio => {
-      radio.addEventListener("change", () => {
-        document.querySelectorAll('input[name="dec-basis"]').forEach(r => {
-          const card = r.closest("label");
-          if (card) card.style.borderColor = r.checked ? "var(--color-gold)" : "var(--color-border)";
-        });
+    // Per-league basis buttons
+    const BASIS_LABELS = { record:"📋 H2H Record", pf:"📊 Total Points", playoffs:"🏆 League Playoffs", elimination:"☠️ Elimination" };
+    document.querySelectorAll(".trn-dec-basis-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const lgId  = btn.dataset.lg;
+        const basis = btn.dataset.basis;
+        document.querySelectorAll(`.trn-dec-basis-btn[data-lg="${lgId}"]`).forEach(b =>
+          b.classList.toggle("trn-dec-basis-btn--active", b.dataset.basis === basis));
+        const elimRow = document.getElementById(`trn-dec-elim-row-${lgId}`);
+        if (elimRow) elimRow.style.display = basis === "elimination" ? "flex" : "none";
+        const lbl = document.getElementById(`trn-dec-basis-label-${lgId}`);
+        if (lbl) lbl.textContent = BASIS_LABELS[basis] || basis;
+      });
+    });
+
+    // Manage Weekly Knockouts button
+    document.querySelectorAll(".trn-dec-manage-elim-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const lgId   = btn.dataset.lg;
+        const lgName = btn.dataset.lgName;
+        // Get current league config from local state
+        const curPo  = _poLocal();
+        const lgCfg  = (curPo?.decathlon?.leagueConfig || {})[lgId] || {};
+        _openEliminationManager(tid, t, lgId, lgName, lgCfg);
       });
     });
 
     // Add/remove rows in the finish-points table
     document.getElementById("trn-dec-add-row-btn")?.addEventListener("click", () => {
-      const inputs = document.querySelectorAll(".trn-dec-pts-input");
-      const lastVal = parseInt(inputs[inputs.length-1]?.value)||0;
-      const newPos  = inputs.length;
-      const tbl     = document.getElementById("trn-dec-pts-table");
+      const tbl = document.getElementById("trn-dec-pts-table");
       if (!tbl) return;
-      // Remove old last-row delete/add buttons and rebuild
       const rows = [...tbl.querySelectorAll(".trn-dec-pts-input")];
-      // Re-render the whole table from current values + new row
+      const lastVal = parseInt(rows[rows.length-1]?.value)||0;
       const vals = rows.map(inp => parseInt(inp.value)||0);
       vals.push(Math.max(0, lastVal - 1));
       _renderDecPtsTable(tbl, vals);
@@ -4930,12 +4973,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.getElementById("trn-dec-pts-table")?.addEventListener("click", e => {
       const btn = e.target.closest(".trn-dec-del-row-btn");
       if (!btn) return;
-      const pos = parseInt(btn.dataset.del);
       const tbl = document.getElementById("trn-dec-pts-table");
       if (!tbl) return;
       const vals = [...tbl.querySelectorAll(".trn-dec-pts-input")].map(inp => parseInt(inp.value)||0);
-      if (vals.length <= 2) return; // keep at least 2 rows
-      vals.splice(pos, 1);
+      if (vals.length <= 2) return;
+      vals.splice(parseInt(btn.dataset.del), 1);
       _renderDecPtsTable(tbl, vals);
     });
 
@@ -4946,7 +4988,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     document.getElementById("trn-dec-save-btn")?.addEventListener("click", async () => {
       const method      = document.querySelector('input[name="dec-method"]:checked')?.value || "combined_pf";
-      const finishBasis = document.querySelector('input[name="dec-basis"]:checked')?.value  || "record";
       const identity    = document.getElementById("trn-dec-identity")?.value || "sleeperUsername";
       const sw          = parseInt(document.getElementById("trn-dec-start-week")?.value)||null;
       const ew          = parseInt(document.getElementById("trn-dec-end-week")?.value)||null;
@@ -4955,13 +4996,30 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
       if (sw && ew && ew < sw) { showToast("End week must be ≥ start week", "error"); return; }
 
+      // Collect per-league config from the basis buttons
+      const leagueConfig = {};
+      document.querySelectorAll(".trn-dec-league-cfg-card[data-lg-id]").forEach(card => {
+        const lgId = card.dataset.lgId;
+        const activeBtn = card.querySelector(".trn-dec-basis-btn--active");
+        const basis = activeBtn?.dataset.basis || "record";
+        const elimWk    = parseInt(card.querySelector(".trn-dec-elim-wk")?.value)    || null;
+        const phase1End = parseInt(card.querySelector(".trn-dec-elim-phase1")?.value) || null;
+        // Preserve existing eliminations list — don't overwrite from config save
+        const existingCfg = ((po?.decathlon?.leagueConfig)||{})[lgId] || {};
+        leagueConfig[lgId] = {
+          finishBasis: basis,
+          ...(basis === "elimination" && elimWk    ? { eliminationStartWeek: elimWk }    : {}),
+          ...(basis === "elimination" && phase1End  ? { cumulativeEndWeek:    phase1End } : {}),
+          ...(existingCfg.eliminations?.length      ? { eliminations: existingCfg.eliminations } : {}),
+        };
+      });
+
       const decConfig = {
         scoringMethod: method,
-        finishBasis:   method === "finish_points" ? finishBasis : null,
         identityKey:   identity,
         pointsTable:   method === "finish_points" ? pointsTable : null,
+        leagueConfig:  Object.keys(leagueConfig).length ? leagueConfig : null,
       };
-      // Clean nulls
       Object.keys(decConfig).forEach(k => { if (decConfig[k] === null) delete decConfig[k]; });
 
       try {
@@ -4970,15 +5028,242 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           endWeek:   ew || null,
           decathlon: decConfig,
         });
-        Object.assign(_poLocal(), {
-          startWeek: sw||null, endWeek: ew||null, decathlon: decConfig
-        });
+        Object.assign(_poLocal(), { startWeek:sw||null, endWeek:ew||null, decathlon:decConfig });
         showToast("Decathlon config saved ✓");
       } catch(e) { showToast("Save failed: " + e.message, "error"); }
     });
   }
 
   // Helper: re-render the finish-points table from a values array
+  // ── Elimination Manager Modal ─────────────────────────────────────────────
+  // Shows each week's knockout entry for a league.
+  // Data model: leagueConfig[lgId].eliminations = [
+  //   { week: 4, playerId: "...", playerName: "John", note: "Lowest cumulative PF wks 1-4" },
+  //   { week: 5, playerId: "...", playerName: "Jane", note: "" },
+  //   ...
+  // ]
+  // Stored in reverse finish order: index 0 = eliminated first = worst finish.
+  // Finish rank = (totalPlayers - index). Last in array = champion = finish #1.
+  function _openEliminationManager(tid, t, lgId, lgName, lgCfg) {
+    const eliminations    = Array.isArray(lgCfg.eliminations) ? [...lgCfg.eliminations] : [];
+    const elimStartWk     = lgCfg.eliminationStartWeek || null;
+    const phase1End       = lgCfg.cumulativeEndWeek    || null;
+
+    // Get all players in this league from standingsCache
+    const yr = String(_tournamentYear || _activePoYear || new Date().getFullYear());
+    const leaguePlayers = [];
+    Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== yr) return;
+      const lid = String(lc.leagueId || lc.league_id || ck);
+      if (lid !== lgId) return;
+      (lc.teams || []).forEach(tm => {
+        leaguePlayers.push({
+          id:   String(tm.teamId || tm.rosterId || ""),
+          name: tm.teamName || tm.rawTeamName || "",
+        });
+      });
+    });
+
+    // Track which players have been eliminated (to exclude from future dropdowns)
+    const eliminatedIds = new Set(eliminations.map(e => e.playerId).filter(Boolean));
+
+    function _renderRows() {
+      if (!eliminations.length) {
+        return `<div class="trn-elim-empty">No knockouts recorded yet. Add the first eliminated player below.</div>`;
+      }
+      return eliminations.map((e, idx) => {
+        const finishPos = leaguePlayers.length - idx;
+        const isFirst   = idx === 0;
+        const isLast    = idx === eliminations.length - 1;
+        const medal     = finishPos === 1 ? "🥇" : finishPos === 2 ? "🥈" : finishPos === 3 ? "🥉" : "";
+        return `
+          <div class="trn-elim-row" data-idx="${idx}">
+            <div class="trn-elim-row-pos">${medal || "#" + finishPos}</div>
+            <div class="trn-elim-row-info">
+              <div class="trn-elim-row-name">${_esc(e.playerName || e.playerId || "Unknown")}</div>
+              <div class="trn-elim-row-detail">
+                Wk ${e.week || "?"}
+                ${e.note ? ` · ${_esc(e.note)}` : ""}
+                ${e.score != null ? ` · ${Number(e.score).toFixed(2)} pts` : ""}
+              </div>
+            </div>
+            <div class="trn-elim-row-actions">
+              ${!isFirst ? `<button class="btn-ghost btn-xs trn-elim-move-up" data-idx="${idx}" title="Move up">↑</button>` : ""}
+              ${!isLast  ? `<button class="btn-ghost btn-xs trn-elim-move-dn" data-idx="${idx}" title="Move down">↓</button>` : ""}
+              <button class="btn-ghost btn-xs trn-elim-del" data-idx="${idx}" title="Remove">✕</button>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function _availablePlayers() {
+      return leaguePlayers.filter(p => !eliminatedIds.has(p.id));
+    }
+
+    function _modalHTML() {
+      const available = _availablePlayers();
+      const phase1Note = phase1End
+        ? `Phase 1 (cumulative PF, wks 1–${phase1End}): first elimination at wk ${elimStartWk || "?"}`
+        : elimStartWk ? `Elimination starts week ${elimStartWk}` : "Set elimination start week in config";
+
+      return `
+        <div class="modal-header">
+          <h3>☠️ ${_esc(lgName)} — Weekly Knockouts</h3>
+          <button class="modal-close" id="trn-elim-close">✕</button>
+        </div>
+        <div class="modal-body" style="max-height:62vh;overflow-y:auto;padding:var(--space-4)">
+          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">${_esc(phase1Note)}</p>
+          <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
+            List players from <strong>first eliminated (bottom finish) to last eliminated (champion)</strong>.
+            Use ↑↓ to reorder if you made a mistake. The position shown = finish rank in this league.
+          </p>
+
+          <!-- Existing knockouts -->
+          <div id="trn-elim-rows-container">${_renderRows()}</div>
+
+          ${available.length ? `
+          <!-- Add next knockout -->
+          <div class="trn-elim-add-row">
+            <div class="trn-section-card-title" style="margin-bottom:var(--space-2)">
+              Add Next Knockout
+              <span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim)">
+                (finish position #${leaguePlayers.length - eliminations.length})
+              </span>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="margin-bottom:0;flex:1;min-width:120px">
+                <label>Player</label>
+                <select id="trn-elim-add-player" class="trn-filter-select" style="width:100%">
+                  <option value="">— select —</option>
+                  ${available.map(p => `<option value="${_esc(p.id)}" data-name="${_esc(p.name)}">${_esc(p.name)}</option>`).join("")}
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:0;width:70px">
+                <label>Week</label>
+                <input type="number" id="trn-elim-add-week" min="1" max="18"
+                  value="${elimStartWk || ""}" placeholder="wk"
+                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+              </div>
+              <div class="form-group" style="margin-bottom:0;width:80px">
+                <label>Score</label>
+                <input type="number" id="trn-elim-add-score" min="0" step="0.01" placeholder="opt."
+                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+              </div>
+              <div class="form-group" style="margin-bottom:0;flex:2;min-width:120px">
+                <label>Note <span style="font-weight:400;color:var(--color-text-dim)">(optional)</span></label>
+                <input type="text" id="trn-elim-add-note" placeholder="e.g. Lowest cumulative PF"
+                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem;box-sizing:border-box" />
+              </div>
+              <button class="btn-primary btn-sm" id="trn-elim-add-btn" style="flex-shrink:0">+ Add</button>
+            </div>
+          </div>` : `
+          <div style="padding:var(--space-3);background:rgba(240,180,41,.06);border:1px solid var(--color-gold);border-radius:var(--radius-md);font-size:.85rem;color:var(--color-gold);margin-top:var(--space-3)">
+            ✓ All ${leaguePlayers.length} players have been recorded. The last entry is the league champion.
+          </div>`}
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:.78rem;color:var(--color-text-dim)">${eliminations.length} of ${leaguePlayers.length} players recorded</span>
+          <div style="display:flex;gap:var(--space-2)">
+            <button class="btn-secondary" id="trn-elim-cancel">Cancel</button>
+            <button class="btn-primary" id="trn-elim-save">💾 Save Knockouts</button>
+          </div>
+        </div>`;
+    }
+
+    function _refresh() {
+      const box = document.getElementById("trn-modal-box");
+      if (box) box.innerHTML = _modalHTML();
+      _wireModal();
+    }
+
+    function _wireModal() {
+      document.getElementById("trn-elim-close")?.addEventListener("click",  _closeModal);
+      document.getElementById("trn-elim-cancel")?.addEventListener("click", _closeModal);
+
+      // Move up/down
+      document.querySelectorAll(".trn-elim-move-up").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const i = parseInt(btn.dataset.idx);
+          if (i < 1) return;
+          [eliminations[i-1], eliminations[i]] = [eliminations[i], eliminations[i-1]];
+          _refresh();
+        });
+      });
+      document.querySelectorAll(".trn-elim-move-dn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const i = parseInt(btn.dataset.idx);
+          if (i >= eliminations.length - 1) return;
+          [eliminations[i], eliminations[i+1]] = [eliminations[i+1], eliminations[i]];
+          _refresh();
+        });
+      });
+
+      // Delete
+      document.querySelectorAll(".trn-elim-del").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const i = parseInt(btn.dataset.idx);
+          const entry = eliminations[i];
+          if (entry?.playerId) eliminatedIds.delete(entry.playerId);
+          eliminations.splice(i, 1);
+          _refresh();
+        });
+      });
+
+      // Add next knockout
+      document.getElementById("trn-elim-add-btn")?.addEventListener("click", () => {
+        const sel   = document.getElementById("trn-elim-add-player");
+        const pid   = sel?.value;
+        const pname = sel?.options[sel.selectedIndex]?.dataset.name || pid;
+        const week  = parseInt(document.getElementById("trn-elim-add-week")?.value) || null;
+        const score = parseFloat(document.getElementById("trn-elim-add-score")?.value) || null;
+        const note  = document.getElementById("trn-elim-add-note")?.value.trim() || "";
+        if (!pid) { showToast("Select a player to eliminate", "error"); return; }
+        if (!week){ showToast("Enter the week of elimination", "error"); return; }
+        eliminations.push({ week, playerId: pid, playerName: pname, score, note });
+        eliminatedIds.add(pid);
+        _refresh();
+      });
+
+      // Save to Firebase
+      document.getElementById("trn-elim-save")?.addEventListener("click", async () => {
+        const saveBtn = document.getElementById("trn-elim-save");
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+        try {
+          // Merge into existing leagueConfig — only update this league's eliminations
+          const curPo  = _poLocal();
+          const curDec = curPo?.decathlon || {};
+          const curLgCfg = (curDec.leagueConfig || {})[lgId] || {};
+          const updatedLgCfg = { ...curLgCfg, eliminations };
+          const updatedLeagueCfg = { ...(curDec.leagueConfig || {}), [lgId]: updatedLgCfg };
+          await _tPlayoffsRef(tid, _activePoYear).update({
+            "decathlon/leagueConfig": updatedLeagueCfg
+          });
+          // Update local cache
+          if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+          if (!_tournaments[tid].playoffs[_activePoYear]) _tournaments[tid].playoffs[_activePoYear] = {};
+          if (!_tournaments[tid].playoffs[_activePoYear].decathlon) _tournaments[tid].playoffs[_activePoYear].decathlon = {};
+          _tournaments[tid].playoffs[_activePoYear].decathlon.leagueConfig = updatedLeagueCfg;
+          // Update the lgCfg reference so the button label refreshes on modal close
+          lgCfg.eliminations = eliminations;
+          showToast(`${eliminations.length} knockouts saved for ${lgName} ✓`);
+          _closeModal();
+          // Refresh the config section so button label updates
+          const card = document.querySelector(`.trn-pc-section--decathlon`);
+          if (!card) return;
+          await _rerender(_activePoYear);
+        } catch(e) {
+          showToast("Save failed: " + e.message, "error");
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 Save Knockouts"; }
+        }
+      });
+    }
+
+    _showModal(_modalHTML());
+    const wizBox = document.getElementById("trn-modal-box");
+    if (wizBox) wizBox.className = "modal-box modal-box--lg";
+    _wireModal();
+  }
+
   function _renderDecPtsTable(tbl, vals) {
     tbl.innerHTML = vals.map((pts, i) => `
       <span style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">${i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)+"th"}</span>
@@ -12915,70 +13200,128 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // Each player object:
   //   { identityKey, displayName, gender, leagues: [{leagueName, rank, wins, losses, pf, points}],
   //     totalPF, totalPoints, overallRank, divisionsWon: [leagueName] }
-  function _buildDecathlonLeaderboard(t, year, po) {
-    const yr          = String(year);
-    const decConfig   = po.decathlon || {};
-    const identityKey = decConfig.identityKey  || "sleeperUsername";
-    const method      = decConfig.scoringMethod || "combined_pf";
-    const finishBasis = decConfig.finishBasis   || "record"; // record | pf | playoffs
-    const ptsTable    = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : [10,8,6,5,4,3,2,1];
+  // Helper: sort a league's teams by the given finishBasis
+  function _decSortByBasis(teams, basis) {
+    const sorted = [...teams];
+    if (basis === "pf" || basis === "elimination") {
+      // PF-basis: pure points scored descending
+      // Elimination: after syncing, eliminated teams have lower PF — sort PF desc
+      sorted.sort((a,b) => (b.pf||0) - (a.pf||0));
+    } else if (basis === "playoffs") {
+      // Playoffs: total wins (includes playoff games if synced), PF tiebreak
+      sorted.sort((a,b) =>
+        ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) ||
+        (b.wins||0) - (a.wins||0) ||
+        (b.pf||0)   - (a.pf||0));
+    } else {
+      // Default (record): H2H wins-losses, PF tiebreak
+      sorted.sort((a,b) =>
+        ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) ||
+        (b.pf||0) - (a.pf||0));
+    }
+    return sorted;
+  }
+
+  function _buildDecathlonLeaderboard(t, year, po, weekScoreMap) {
+    // weekScoreMap: optional { [leagueId+"|"+teamId]: weeklyPF } for week-range PF filtering.
+    // When provided, Combined PF and pf-basis leagues use it instead of standingsCache .pf.
+    const yr           = String(year);
+    const decConfig    = po.decathlon || {};
+    const identityKey  = decConfig.identityKey  || "sleeperUsername";
+    const method       = decConfig.scoringMethod || "combined_pf";
+    const ptsTable     = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : [10,8,6,5,4,3,2,1];
+    const leagueConfig = decConfig.leagueConfig  || {}; // { [lgId]: { finishBasis, eliminationStartWeek } }
+    const startWk      = po.startWeek || null;
+    const endWk        = po.endWeek   || null;
+    const hasWeekRange = !!(startWk && endWk && weekScoreMap);
 
     // Participant display name + gender maps
     const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-    const displayNameMap = {}, genderMap = {}, dlrByUsername = {};
+    const displayNameMap = {}, genderMap = {};
     Object.values(t.participants||{}).forEach(p => {
-      const names = [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean);
-      names.forEach(n => {
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(n => {
         const k = _sk(n);
         if (p.displayName) displayNameMap[k] = p.displayName;
         if (p.gender)      genderMap[k]      = p.gender;
       });
-      if (p.sleeperUsername && p.dlrUsername) {
-        dlrByUsername[p.sleeperUsername.toLowerCase()] = p.dlrUsername;
-      }
     });
 
-    // Collect all leagues for this year from standingsCache
-    // Group into { leagueKey: { leagueName, teams:[...sorted by current standings] } }
+    // Collect leagues from standingsCache
     const leagueMap = {};
     Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
       if (String(lc.year) !== yr) return;
-      const lgName = lc.leagueName || ck;
       const lgId   = String(lc.leagueId || lc.league_id || ck);
-      if (!leagueMap[lgId]) leagueMap[lgId] = { leagueName: lgName, teams: [] };
-      (lc.teams||[]).forEach(tm => leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId }));
+      const lgName = lc.leagueName || ck;
+      if (!leagueMap[lgId]) leagueMap[lgId] = { leagueName: lgName, lgId, teams: [] };
+      (lc.teams||[]).forEach(tm => {
+        // If we have a week-score map, compute ranged PF; otherwise use standingsCache pf
+        const rangedPF = hasWeekRange
+          ? (weekScoreMap[lgId + "|" + String(tm.teamId)] ?? (tm.pf || 0))
+          : (tm.pf || 0);
+        leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId, rangedPF });
+      });
     });
 
-    // Sort each league by the configured finishBasis to determine finish rank.
-    // record:   W-L record, PF as tiebreaker (standard regular season standings)
-    // pf:       Pure points scored — highest PF = 1st regardless of W-L record
-    // playoffs: Uses final post-season record if available (more wins from playoff games),
-    //           falls back to regular season record. Works best after a full-standings sync
-    //           that captured playoff game results.
-    Object.values(leagueMap).forEach(lg => {
-      if (finishBasis === "pf") {
-        // Sort purely by PF descending
-        lg.teams.sort((a,b) => (b.pf||0) - (a.pf||0));
-      } else if (finishBasis === "playoffs") {
-        // Playoffs basis: use total wins (includes playoff wins if synced), PF tiebreak.
-        // Same sort as record — the difference is that the admin should sync standings
-        // after the league's playoffs complete so these totals include playoff wins.
-        lg.teams.sort((a,b) =>
-          ((b.wins||0) - (b.losses||0)) - ((a.wins||0) - (a.losses||0)) ||
-          (b.wins||0) - (a.wins||0) ||
-          (b.pf||0) - (a.pf||0));
+    // Sort each league by its individual finishBasis, assign ranks
+    Object.entries(leagueMap).forEach(([lgId, lg]) => {
+      const lgCfg = leagueConfig[lgId] || {};
+      const basis = lgCfg.finishBasis || "record";
+      lg.finishBasis = basis;
+
+      if (basis === "elimination") {
+        // Elimination basis: rank is determined by the manually recorded knockouts list.
+        // eliminations[0] = first eliminated = worst finish.
+        // eliminations[last] = last eliminated = champion = finish #1.
+        const elims = Array.isArray(lgCfg.eliminations) ? lgCfg.eliminations : [];
+        const totalPlayers = lg.teams.length;
+
+        if (elims.length > 0) {
+          // Build pid→rank map from the eliminations list
+          const rankByPid = {};
+          elims.forEach((e, idx) => {
+            // idx 0 = first out = worst finish = rank totalPlayers
+            // idx last = champion = rank 1
+            const rank = totalPlayers - idx;
+            if (e.playerId) rankByPid[e.playerId] = rank;
+            // Also match by playerName for teams not fully linked
+            if (e.playerName) {
+              const normName = String(e.playerName).trim().toLowerCase();
+              lg.teams.forEach(tm => {
+                if (String(tm.teamName||"").trim().toLowerCase() === normName ||
+                    String(tm.sleeperUsername||"").trim().toLowerCase() === normName) {
+                  rankByPid[String(tm.teamId||"")] = rank;
+                }
+              });
+            }
+          });
+
+          // Assign rank to each team; unrecorded teams get rank after all eliminated
+          let nextUnranked = elims.length + 1; // still-active teams start after recorded eliminations
+          lg.teams.forEach(tm => {
+            const pid = String(tm.teamId || "");
+            tm._leagueRank = rankByPid[pid] ?? (nextUnranked++);
+          });
+          // Sort by rank ascending
+          lg.teams.sort((a,b) => a._leagueRank - b._leagueRank);
+        } else {
+          // No knockouts recorded yet — fall back to record sort, mark as unresolved
+          const sortedTeams = _decSortByBasis(lg.teams, "record");
+          sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+          lg.teams = sortedTeams;
+        }
+      } else if ((basis === "pf") && hasWeekRange) {
+        const sortedTeams = [...lg.teams].sort((a,b) => (b.rangedPF||0) - (a.rangedPF||0));
+        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+        lg.teams = sortedTeams;
       } else {
-        // Default: H2H record (wins - losses), PF tiebreaker
-        lg.teams.sort((a,b) =>
-          ((b.wins||0) - (b.losses||0)) - ((a.wins||0) - (a.losses||0)) ||
-          (b.pf||0) - (a.pf||0));
+        const sortedTeams = _decSortByBasis(lg.teams, basis);
+        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+        lg.teams = sortedTeams;
       }
-      lg.teams.forEach((tm, i) => { tm._leagueRank = i + 1; });
     });
 
-    // Aggregate per player across all leagues
-    const playerMap = {}; // identityKey → player aggregate
-
+    // Aggregate per player
+    const playerMap = {};
     Object.values(leagueMap).forEach(lg => {
       lg.teams.forEach(tm => {
         const idk = _decIdentityKey(tm, identityKey);
@@ -12996,40 +13339,46 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         }
         const p    = playerMap[idk];
         const rank = tm._leagueRank;
-        const pts  = method === "finish_points"
-          ? (ptsTable[rank - 1] ?? 0)
-          : 0;
+        const pts  = method === "finish_points" ? (ptsTable[rank - 1] ?? 0) : 0;
+        // Use rangedPF for combined PF leaderboard total
+        const pfForTotal = hasWeekRange ? (tm.rangedPF || 0) : (tm.pf || 0);
 
         p.leagues.push({
-          leagueName: lg.leagueName,
-          leagueId:   tm.leagueId,
+          leagueName:  lg.leagueName,
+          leagueId:    tm.leagueId,
+          finishBasis: lg.finishBasis,
           rank,
-          wins:   tm.wins   || 0,
-          losses: tm.losses || 0,
-          pf:     tm.pf     || 0,
-          points: pts,
+          wins:    tm.wins   || 0,
+          losses:  tm.losses || 0,
+          pf:      tm.pf     || 0,
+          rangedPF: tm.rangedPF || 0,
+          points:  pts,
         });
-        p.totalPF     += (tm.pf || 0);
+        p.totalPF     += pfForTotal;
         p.totalPoints += pts;
       });
     });
 
-    // Sort by the active method
     const sorted = Object.values(playerMap).sort((a,b) =>
       method === "finish_points"
         ? b.totalPoints - a.totalPoints || b.totalPF - a.totalPF
         : b.totalPF - a.totalPF
     );
 
-    // Assign overall rank + identify division (league) winners
-    sorted.forEach((p, i) => { p.overallRank = i + 1; });
-
-    // Division winner = rank 1 in that league
-    sorted.forEach(p => {
+    sorted.forEach((p, i) => {
+      p.overallRank  = i + 1;
       p.divisionsWon = p.leagues.filter(l => l.rank === 1).map(l => l.leagueName);
     });
 
-    return { players: sorted, method, finishBasis, leagueNames: Object.values(leagueMap).map(l=>l.leagueName), ptsTable };
+    return {
+      players:      sorted,
+      method,
+      leagueNames:  Object.values(leagueMap).map(l => l.leagueName),
+      leagueConfig,
+      ptsTable,
+      hasWeekRange,
+      startWk, endWk,
+    };
   }
 
   function _renderPlayoffsTab(tid, t, body) {
@@ -15137,8 +15486,29 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     };
 
     // ── Decathlon: Combined Standings ───────────────────────────────────────────
+    // Build week-range score map from _weekScoreCache for decathlon PF filtering
+    const _buildDecWeekScoreMap = () => {
+      const sw = po.startWeek, ew = po.endWeek;
+      if (!sw || !ew) return null;
+      const map = {}; // { leagueId|teamId: sumPF }
+      // Sum scores for weeks sw..ew from _weekScoreCache
+      for (let wk = sw; wk <= ew; wk++) {
+        Object.entries(_weekScoreCache).forEach(([cacheKey, teamMap]) => {
+          // cacheKey = leagueId+"|"+week
+          const [lid, wkStr] = cacheKey.split("|");
+          if (parseInt(wkStr) < sw || parseInt(wkStr) > ew) return;
+          Object.entries(teamMap).forEach(([teamId, score]) => {
+            const k = lid + "|" + teamId;
+            map[k] = (map[k] || 0) + (score || 0);
+          });
+        });
+      }
+      return Object.keys(map).length ? map : null;
+    };
+
     const _renderDecathlonLeaderboard = () => {
-      const { players, method, finishBasis, leagueNames, ptsTable } = _buildDecathlonLeaderboard(t, activeY, po);
+      const weekMap = _buildDecWeekScoreMap();
+      const { players, method, leagueNames, leagueConfig, ptsTable, hasWeekRange, startWk, endWk } = _buildDecathlonLeaderboard(t, activeY, po, weekMap);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet. Add leagues and sync standings to populate the leaderboard.</div>`;
 
       const valueCol   = method === "finish_points" ? "Total Pts" : "Combined PF";
@@ -15181,12 +15551,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </tr>`;
       }).join("");
 
-      const basisLabel = finishBasis === "pf"       ? "by Points Scored"
-                       : finishBasis === "playoffs" ? "by League Playoffs (H2H tiebreak)"
-                       :                              "by H2H Record";
+      const rangeNote  = (hasWeekRange && startWk && endWk) ? ` (Wk ${startWk}–${endWk})` : "";
       const methodNote = method === "finish_points"
-        ? `Finish Points (${basisLabel}) — ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
-        : "Combined PF — sum of points scored across all leagues.";
+        ? `Finish Points — ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…  (finish method configured per league)`
+        : `Combined PF${rangeNote} — sum of points scored across all leagues.`;
 
       return `
         <div class="trn-dec-podium-row">${podium}</div>
@@ -15207,7 +15575,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Decathlon: By League breakdown ───────────────────────────────────────────
     const _renderDecathlonByLeague = () => {
-      const { players, method, finishBasis, leagueNames } = _buildDecathlonLeaderboard(t, activeY, po);
+      const weekMap = _buildDecWeekScoreMap();
+      const { players, method, leagueNames, leagueConfig } = _buildDecathlonLeaderboard(t, activeY, po, weekMap);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet.</div>`;
 
       // Group players by their result in each league — show each league's standings
@@ -15227,7 +15596,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div>${_esc(p.displayName)}</div>
               <div class="trn-po-team-sub">Overall #${p.overallRank}</div>
             </td>
-            <td class="trn-po-num">${finishBasis==="pf" ? `#${p._lg.rank} PF` : `${p._lg.wins}–${p._lg.losses}`}</td>
+            <td class="trn-po-num">${p._lg.finishBasis==="pf" ? `#${p._lg.rank} PF` : `${p._lg.wins}–${p._lg.losses}`}</td>
             <td class="trn-po-num trn-po-pf">${p._lg.pf.toFixed(2)}</td>
             ${method==="finish_points"
               ? `<td class="trn-po-num"><strong>${p._lg.points}</strong> pts</td>`
@@ -15236,12 +15605,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         return `
           <div style="margin-bottom:var(--space-5)">
-            <div class="trn-dec-league-header">🏟 ${_esc(lgName)}</div>
+            ${(() => {
+            const lgFirstPlayer = inLeague[0];
+            const basis = lgFirstPlayer?._lg?.finishBasis || "record";
+            const basisLbl = {record:"H2H Record",pf:"Total Points",playoffs:"League Playoffs",elimination:"Elimination"}[basis]||basis;
+            return `<div class="trn-dec-league-header">🏟 ${_esc(lgName)} <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim)">· ${basisLbl}</span></div>`;
+          })()}
             <div class="trn-po-table-wrap">
               <table class="trn-po-table">
                 <thead><tr>
                   <th>#</th><th>Player</th>
-                  <th class="trn-po-th-num">${finishBasis==="pf"?"PF Rank":"W–L"}</th>
+                  <th class="trn-po-th-num">${(leagueConfig[lgName]?.finishBasis||"record")==="pf"?"PF Rank":"W–L"}</th>
                   <th class="trn-po-th-num">PF</th>
                   ${method==="finish_points"?`<th class="trn-po-th-num">Pts</th>`:""}
                 </tr></thead>

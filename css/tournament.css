@@ -5353,3 +5353,146 @@
 .trn-dec-basis-card  { flex: 1; min-width: 140px; }
 .trn-dec-method-card:hover,
 .trn-dec-basis-card:hover { border-color: var(--color-gold); }
+
+/* ── Decathlon per-league config cards ─────────────────────── */
+.trn-dec-league-cfg-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.trn-dec-league-cfg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-2);
+}
+
+.trn-dec-league-cfg-name {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.trn-dec-league-cfg-badge {
+  font-size: .72rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-border);
+  color: var(--color-text-dim);
+  margin-left: 6px;
+}
+
+.trn-dec-league-cfg-basis-label {
+  font-size: .78rem;
+  color: var(--color-gold);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.trn-dec-league-cfg-body {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.trn-dec-basis-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.trn-dec-basis-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg);
+  color: var(--color-text-dim);
+  font-size: .78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.trn-dec-basis-btn:hover {
+  border-color: var(--color-gold);
+  color: var(--color-text);
+}
+.trn-dec-basis-btn--active {
+  border-color: var(--color-gold);
+  background: rgba(240,180,41,.12);
+  color: var(--color-gold);
+  font-weight: 600;
+}
+
+/* ── Elimination Manager Modal ──────────────────────────────── */
+.trn-elim-empty {
+  font-size: .82rem;
+  color: var(--color-text-dim);
+  padding: var(--space-3);
+  text-align: center;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.trn-elim-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
+  background: var(--color-surface);
+}
+.trn-elim-row:first-child { border-color: var(--color-gold); background: rgba(240,180,41,.05); }
+
+.trn-elim-row-pos {
+  font-size: .85rem;
+  font-weight: 700;
+  min-width: 36px;
+  color: var(--color-text-dim);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.trn-elim-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.trn-elim-row-name {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trn-elim-row-detail {
+  font-size: .75rem;
+  color: var(--color-text-dim);
+  margin-top: 1px;
+}
+
+.trn-elim-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.trn-elim-add-row {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+@media (max-width: 600px) {
+  .trn-elim-add-row > div { flex-direction: column; }
+}
