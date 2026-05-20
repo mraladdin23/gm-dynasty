@@ -17885,10 +17885,110 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
 
   // ── Public API ─────────────────────────────────────────
+  // ── diagnoseDecathlon() — call from console while on the Playoffs tab ────────
+  // Shows exactly what the engine sees for the active tournament/year:
+  // what's saved in Firebase, what po.startWeek/endWeek resolve to,
+  // whether _buildDecWeekScoreMap has data, and a sample of per-league ranks.
+  async function diagnoseDecathlon(tidOverride) {
+    const tid = tidOverride || _activeTournamentId;
+    if (!tid) { console.warn("[diagnoseDecathlon] No active tournament. Pass tid explicitly."); return; }
+    const t  = _tournaments[tid];
+    if (!t)  { console.warn("[diagnoseDecathlon] Tournament not in cache. Navigate to it first."); return; }
+
+    const yr = String(_tournamentYear || new Date().getFullYear());
+    const po = _playoffForYear(t, yr);
+
+    console.group(`[diagnoseDecathlon] tid=${tid} year=${yr}`);
+
+    // 1. What's in Firebase for this year's playoffs node
+    console.log("Firebase playoffs[" + yr + "]:", JSON.parse(JSON.stringify(po)));
+    console.log("po.mode:      ", po.mode);
+    console.log("po.startWeek: ", po.startWeek, typeof po.startWeek);
+    console.log("po.endWeek:   ", po.endWeek,   typeof po.endWeek);
+    console.log("po.decathlon: ", JSON.parse(JSON.stringify(po.decathlon || {})));
+
+    // 2. Check _poLocal() value if we're inside the config panel
+    const dec = po.decathlon || {};
+    console.log("scoringMethod:", dec.scoringMethod);
+    console.log("identityKey:  ", dec.identityKey);
+    console.log("leagueConfig keys:", Object.keys(dec.leagueConfig || {}));
+
+    // 3. Leagues in standingsCache for this year
+    const lgIds = new Set();
+    Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== yr) return;
+      lgIds.add(String(lc.leagueId || lc.league_id || ck));
+    });
+    console.log("Leagues in standingsCache for year " + yr + ":", [...lgIds]);
+
+    // 4. Try fetching week scores for week range and show result
+    const sw = po.startWeek, ew = po.endWeek;
+    if (sw && ew) {
+      console.log("Fetching week scores for weeks " + sw + "–" + ew + " across " + lgIds.size + " leagues…");
+      const pfMapTest = {};
+      const wlMapTest = {};
+      const weeks = [];
+      for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
+      await Promise.allSettled(
+        [...lgIds].flatMap(lid => weeks.map(async wk => {
+          const key = lid + "|" + wk;
+          try {
+            const r = await fetch("https://api.sleeper.app/v1/league/" + lid + "/matchups/" + wk);
+            if (!r.ok) return;
+            const data = await r.json();
+            (data || []).forEach(m => {
+              if (!m.roster_id) return;
+              const k = lid + "|" + String(m.roster_id);
+              pfMapTest[k] = (pfMapTest[k] || 0) + (m.points || 0);
+            });
+          } catch(e) {}
+        }))
+      );
+      console.log("pfMap entries (sample of 5):", Object.entries(pfMapTest).slice(0, 5));
+      console.log("Total pfMap keys:", Object.keys(pfMapTest).length);
+      if (!Object.keys(pfMapTest).length) {
+        console.warn("⚠️  pfMap is EMPTY — week score fetch returned no data. Check league IDs and that weeks " + sw + "–" + ew + " have played.");
+      }
+    } else {
+      console.warn("⚠️  po.startWeek or po.endWeek is missing — week range NOT applied.");
+      console.warn("    startWeek=" + sw + " endWeek=" + ew);
+      console.warn("    Save the Decathlon config (click Save Decathlon Config) to persist these values.");
+    }
+
+    // 5. Per-league config from leagueConfig
+    const lgCfg = dec.leagueConfig || {};
+    console.table(Object.entries(lgCfg).map(([lgId, cfg]) => ({
+      lgId,
+      finishBasis: cfg.finishBasis || "record",
+      eliminationStartWeek: cfg.eliminationStartWeek || "—",
+      eliminations: (cfg.eliminations || []).length,
+    })));
+
+    // 6. Sample standings for first league — show full-season vs what we expect
+    const firstLgId = [...lgIds][0];
+    if (firstLgId) {
+      const lc = Object.values(t.standingsCache || {}).find(lc2 =>
+        String(lc2.year) === yr && String(lc2.leagueId || lc2.league_id) === firstLgId
+      );
+      if (lc) {
+        console.log("Sample league: " + (lc.leagueName || firstLgId));
+        console.log("Full-season standings (what standingsCache has):");
+        console.table((lc.teams || []).slice(0, 5).map(tm => ({
+          teamName: tm.teamName, wins: tm.wins, losses: tm.losses, pf: tm.pf
+        })));
+      }
+    }
+
+    console.groupEnd();
+    console.log("[diagnoseDecathlon] Done. Look for ⚠️ warnings above.");
+    return { yr, po, lgIds: [...lgIds], dec };
+  }
+
   return {
     init,
     runDiscovery,
-    _expandTrnMatchup
+    _expandTrnMatchup,
+    diagnoseDecathlon,
   };
 
 })();
