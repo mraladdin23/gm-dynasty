@@ -3745,7 +3745,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${(() => {
             const BASIS_OPTS = [
               { val:"record",      label:"H2H Record",      icon:"📋", hint:"Wins/losses, PF tiebreak" },
-              { val:"pf",          label:"Total Points",     icon:"📊", hint:"Highest PF = 1st" },
+              { val:"median_wins", label:"Median Wins",      icon:"📊", hint:"Beat the weekly median score = +1 win; PF tiebreak" },
+              { val:"pf",          label:"Total Points",     icon:"🎯", hint:"Highest PF in week range = 1st" },
               { val:"playoffs",    label:"League Playoffs",  icon:"🏆", hint:"Post-playoff record; sync after playoffs" },
               { val:"elimination", label:"Elimination",      icon:"☠️", hint:"Weekly knockout; set elimination week below" },
             ];
@@ -4933,7 +4934,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     // Per-league basis buttons
-    const BASIS_LABELS = { record:"📋 H2H Record", pf:"📊 Total Points", playoffs:"🏆 League Playoffs", elimination:"☠️ Elimination" };
+    const BASIS_LABELS = { record:"📋 H2H Record", median_wins:"📊 Median Wins", pf:"🎯 Total Points", playoffs:"🏆 League Playoffs", elimination:"☠️ Elimination" };
     document.querySelectorAll(".trn-dec-basis-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const lgId  = btn.dataset.lg;
@@ -4955,7 +4956,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         // Get current league config from local state
         const curPo  = _poLocal();
         const lgCfg  = (curPo?.decathlon?.leagueConfig || {})[lgId] || {};
-        _openEliminationManager(tid, t, lgId, lgName, lgCfg);
+        _openEliminationManager(tid, t, lgId, lgName, lgCfg, _activePoYear);
       });
     });
 
@@ -5045,13 +5046,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // ]
   // Stored in reverse finish order: index 0 = eliminated first = worst finish.
   // Finish rank = (totalPlayers - index). Last in array = champion = finish #1.
-  function _openEliminationManager(tid, t, lgId, lgName, lgCfg) {
+  function _openEliminationManager(tid, t, lgId, lgName, lgCfg, poYear) {
     const eliminations = Array.isArray(lgCfg.eliminations) ? [...lgCfg.eliminations] : [];
     const elimStartWk  = lgCfg.eliminationStartWeek || null;
     const phase1End    = lgCfg.cumulativeEndWeek    || null;
+    // poYear passed from the caller which has _activePoYear in scope
+    const resolvedPoYear = poYear || _tournamentYear || new Date().getFullYear();
 
     // Get all players in this league from standingsCache
-    const yr = String(_tournamentYear || _activePoYear || new Date().getFullYear());
+    const yr = String(resolvedPoYear);
     const leaguePlayers = [];
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== yr) return;
@@ -5367,28 +5370,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const saveBtn = document.getElementById("trn-elim-save");
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
         try {
-          // Merge into existing leagueConfig — only update this league's eliminations
-          const curPo  = _poLocal();
-          const curDec = curPo?.decathlon || {};
-          const curLgCfg = (curDec.leagueConfig || {})[lgId] || {};
-          const updatedLgCfg = { ...curLgCfg, eliminations };
+          // Merge into existing leagueConfig — only update this league's eliminations.
+          // _poLocal() and _activePoYear are only in scope inside _wirePlayoffConfigListeners,
+          // so we use resolvedPoYear (passed in as poYear) and _tournaments cache directly.
+          const curPoData  = (_tournaments[tid]?.playoffs || {})[resolvedPoYear] || {};
+          const curDec     = curPoData.decathlon || {};
+          const curLgCfg   = (curDec.leagueConfig || {})[lgId] || {};
+          const updatedLgCfg    = { ...curLgCfg, eliminations };
           const updatedLeagueCfg = { ...(curDec.leagueConfig || {}), [lgId]: updatedLgCfg };
-          await _tPlayoffsRef(tid, _activePoYear).update({
+          await _tPlayoffsRef(tid, resolvedPoYear).update({
             "decathlon/leagueConfig": updatedLeagueCfg
           });
-          // Update local cache
-          if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
-          if (!_tournaments[tid].playoffs[_activePoYear]) _tournaments[tid].playoffs[_activePoYear] = {};
-          if (!_tournaments[tid].playoffs[_activePoYear].decathlon) _tournaments[tid].playoffs[_activePoYear].decathlon = {};
-          _tournaments[tid].playoffs[_activePoYear].decathlon.leagueConfig = updatedLeagueCfg;
-          // Update the lgCfg reference so the button label refreshes on modal close
+          // Update local tournament cache
+          if (!_tournaments[tid])                                      _tournaments[tid] = {};
+          if (!_tournaments[tid].playoffs)                             _tournaments[tid].playoffs = {};
+          if (!_tournaments[tid].playoffs[resolvedPoYear])             _tournaments[tid].playoffs[resolvedPoYear] = {};
+          if (!_tournaments[tid].playoffs[resolvedPoYear].decathlon)   _tournaments[tid].playoffs[resolvedPoYear].decathlon = {};
+          _tournaments[tid].playoffs[resolvedPoYear].decathlon.leagueConfig = updatedLeagueCfg;
           lgCfg.eliminations = eliminations;
           showToast(`${eliminations.length} knockouts saved for ${lgName} ✓`);
           _closeModal();
-          // Refresh the config section so button label updates
-          const card = document.querySelector(`.trn-pc-section--decathlon`);
-          if (!card) return;
-          await _rerender(_activePoYear);
         } catch(e) {
           showToast("Save failed: " + e.message, "error");
           if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 Save Knockouts"; }
@@ -13380,9 +13381,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   function _decSortByBasis(teams, basis) {
     const sorted = [...teams];
     if (basis === "pf" || basis === "elimination") {
-      // PF-basis: pure points scored descending
-      // Elimination: after syncing, eliminated teams have lower PF — sort PF desc
       sorted.sort((a,b) => (b.pf||0) - (a.pf||0));
+    } else if (basis === "median_wins") {
+      // No week-range data available — proxy with standingsCache wins
+      sorted.sort((a,b) => (b.wins||0) - (a.wins||0) || (b.pf||0) - (a.pf||0));
     } else if (basis === "playoffs") {
       // Playoffs: total wins (includes playoff games if synced), PF tiebreak
       sorted.sort((a,b) =>
@@ -13411,8 +13413,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const leagueConfig = decConfig.leagueConfig  || {};
     const startWk      = po.startWeek || null;
     const endWk        = po.endWeek   || null;
-    const pfMap        = weekData?.pfMap || null;
-    const wlMap        = weekData?.wlMap || null;
+    const pfMap        = weekData?.pfMap  || null;
+    const wlMap        = weekData?.wlMap  || null;
+    const medMap       = weekData?.medMap || null;
     const hasWeekRange = !!(startWk && endWk && pfMap);
 
     // Participant display name + gender maps
@@ -13435,13 +13438,29 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (!leagueMap[lgId]) leagueMap[lgId] = { leagueName: lgName, lgId, teams: [] };
       (lc.teams||[]).forEach(tm => {
         // If we have a week-score map, compute ranged PF; otherwise use standingsCache pf
+        const _pfKey   = lgId + "|" + String(tm.teamId);
+        const _pfHit   = hasWeekRange ? pfMap[_pfKey] : undefined;
+        if (hasWeekRange && _pfHit == null && tm.teamId) {
+          // Log first miss per league to diagnose key format mismatch
+          if (!window._decPfMissLogged) window._decPfMissLogged = {};
+          if (!window._decPfMissLogged[lgId]) {
+            console.warn("[decathlon] pfMap MISS for key:", _pfKey, "| sample pfMap keys:", Object.keys(pfMap).slice(0,3));
+            window._decPfMissLogged[lgId] = true;
+          }
+        }
         const rangedPF = hasWeekRange
-          ? (pfMap[lgId + "|" + String(tm.teamId)] ?? (tm.pf || 0))
+          ? (_pfHit ?? (tm.pf || 0))
           : (tm.pf || 0);
-        // Ranged wins/losses from H2H matchup data (only for record-basis leagues)
-        const wlKey    = lgId + "|" + String(tm.teamId);
-        const rangedWL = (hasWeekRange && wlMap && wlMap[wlKey]) ? wlMap[wlKey] : null;
-        leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId, rangedPF, rangedWins: rangedWL?.wins ?? null, rangedLosses: rangedWL?.losses ?? null });
+        // Ranged W/L from H2H matchup data; ranged median wins from median computation
+        const wlKey     = lgId + "|" + String(tm.teamId);
+        const rangedWL  = (hasWeekRange && wlMap   && wlMap[wlKey])  ? wlMap[wlKey]  : null;
+        const rangedMed = (hasWeekRange && medMap  && medMap[wlKey]) ? medMap[wlKey] : null;
+        leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId, rangedPF,
+          rangedWins:    rangedWL?.wins     ?? null,
+          rangedLosses:  rangedWL?.losses   ?? null,
+          rangedMedWins: rangedMed?.wins    ?? null,
+          rangedMedLoss: rangedMed?.losses  ?? null,
+        });
       });
     });
 
@@ -13536,6 +13555,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       } else if (basis === "pf" && hasWeekRange) {
         // PF-basis within week range: sort by rangedPF
         const sortedTeams = [...lg.teams].sort((a,b) => (b.rangedPF||0) - (a.rangedPF||0));
+        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+        lg.teams = sortedTeams;
+      } else if (basis === "median_wins" && hasWeekRange && medMap) {
+        // Median wins in week range: beat weekly median = +1 win; rangedPF tiebreak
+        const sortedTeams = [...lg.teams].sort((a,b) => {
+          const aw = a.rangedMedWins ?? 0, bw = b.rangedMedWins ?? 0;
+          return (bw - aw) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
+        });
+        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+        lg.teams = sortedTeams;
+      } else if (basis === "median_wins") {
+        // Fallback when no week-range data: use standingsCache wins, PF tiebreak
+        const sortedTeams = [...lg.teams].sort((a,b) =>
+          (b.wins||0) - (a.wins||0) || (b.pf||0) - (a.pf||0));
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
       } else if ((basis === "record" || basis === "playoffs") && hasWeekRange && wlMap) {
@@ -15744,7 +15777,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       } else {
         el.innerHTML = _renderContent(tabId);
       }
-      _wcWireBracketButtons();
+      // Guard: _wcWireBracketButtons is defined later in this closure
+      if (typeof _wcWireBracketButtons === "function") _wcWireBracketButtons();
     };
 
     // ── Decathlon: Combined Standings ───────────────────────────────────────────
@@ -15812,8 +15846,30 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           });
         });
       });
+      // Build median-wins map: beat the weekly median score in your league = +1 win
+      const medMap = {};
+      [...lgIds].forEach(lid => {
+        weeks.forEach(wk => {
+          const matchups = _weekMatchupCache[lid + "|" + wk] || [];
+          if (!matchups.length) return;
+          const allScores = matchups.map(m => m.points || 0);
+          allScores.sort((a,b) => a - b);
+          const mid    = Math.floor(allScores.length / 2);
+          const median = allScores.length % 2 === 0
+            ? (allScores[mid-1] + allScores[mid]) / 2
+            : allScores[mid];
+          matchups.forEach(m => {
+            if (!m.roster_id) return;
+            const k = lid + "|" + String(m.roster_id);
+            if (!medMap[k]) medMap[k] = { wins: 0, losses: 0 };
+            if ((m.points || 0) > median) medMap[k].wins++;
+            else                           medMap[k].losses++;
+          });
+        });
+      });
+
       if (!Object.keys(pfMap).length) return null;
-      return { pfMap, wlMap };
+      return { pfMap, wlMap, medMap };
     };
 
     const _renderDecathlonLeaderboard = async () => {
