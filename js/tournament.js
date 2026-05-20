@@ -5005,7 +5005,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const elimWk    = parseInt(card.querySelector(".trn-dec-elim-wk")?.value)    || null;
         const phase1End = parseInt(card.querySelector(".trn-dec-elim-phase1")?.value) || null;
         // Preserve existing eliminations list — don't overwrite from config save
-        const existingCfg = ((po?.decathlon?.leagueConfig)||{})[lgId] || {};
+        const _curPo = _poLocal();
+        const existingCfg = ((_curPo?.decathlon?.leagueConfig)||{})[lgId] || {};
         leagueConfig[lgId] = {
           finishBasis: basis,
           ...(basis === "elimination" && elimWk    ? { eliminationStartWeek: elimWk }    : {}),
@@ -8326,13 +8327,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
         </div>
 
-        <!-- Admin action bar: invite email + division builder -->
+        <!-- Admin action bar: invite email + division builder + backfill -->
         <div class="trn-admin-action-bar">
           <button class="btn-secondary btn-sm" id="trn-send-invite-btn" title="Email league invites to approved registrants">
             ✉ Send League Invites
           </button>
           <button class="btn-secondary btn-sm" id="trn-division-builder-btn">
             🗂 Assign Divisions / Conferences
+          </button>
+          <button class="btn-ghost btn-sm" id="trn-backfill-reg-year-btn"
+            title="Tag all registrations that have no year with the current open registration year. Run this once to fix registrations submitted before year-tracking was added.">
+            🔧 Tag Registrations with Year
           </button>
         </div>
 
@@ -8477,6 +8482,40 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // ── Divisions / Conferences builder ───────────────────
     document.getElementById("trn-division-builder-btn")?.addEventListener("click", () => {
       _openDivisionBuilderModal(tid, t, approved.map(([rid, r]) => ({ rid, ...r })));
+    });
+
+    document.getElementById("trn-backfill-reg-year-btn")?.addEventListener("click", async () => {
+      // Find the currently open registration year
+      const curT  = _tournaments[tid] || t;
+      const po    = curT.playoffs || {};
+      const openYr = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
+      const targetYear = openYr || String(curT.meta?.registrationYear || new Date().getFullYear());
+
+      // Count how many registrations are missing a year tag
+      const freshSnap = await _tRegsRef(tid).once("value");
+      const allRegs   = freshSnap.val() || {};
+      const untagged  = Object.entries(allRegs).filter(([, r]) => !r.year);
+
+      if (!untagged.length) {
+        showToast("All registrations already have a year tag ✓");
+        return;
+      }
+
+      if (!confirm(`Tag ${untagged.length} registration${untagged.length !== 1 ? "s" : ""} with year "${targetYear}"?
+
+This marks all registrations that have no year as belonging to ${targetYear}. Run this once to fix registrations submitted before year-tracking was added.`)) return;
+
+      try {
+        const updates = {};
+        untagged.forEach(([rid]) => { updates[rid + "/year"] = targetYear; });
+        await _tRegsRef(tid).update(updates);
+        showToast(`${untagged.length} registration${untagged.length !== 1 ? "s" : ""} tagged with year ${targetYear} ✓`);
+        // Refresh the registrants tab
+        const body = _getTabBody();
+        if (body) _renderRegistrantsTab(tid, _tournaments[tid] || t, body);
+      } catch(e) {
+        showToast("Backfill failed: " + e.message, "error");
+      }
     });
   }).catch(err => {
     body.innerHTML = `<div class="trn-empty">Failed to load registrations: ${_esc(err.message)}</div>`;
@@ -17362,24 +17401,36 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Duplicate check ────────────────────────────────────
     // Collect the identity fields entered so far (before full validation)
-    // so we can check against existing registrations early.
-    const checkEmail   = document.getElementById("trn-reg-email")?.value.trim().toLowerCase()        || "";
+    const checkEmail   = document.getElementById("trn-reg-email")?.value.trim().toLowerCase()           || "";
     const checkSleeper = document.getElementById("trn-reg-sleeperUsername")?.value.trim().toLowerCase() || "";
     const checkDlr     = (_currentUsername || "").toLowerCase();
 
-    // Always fetch fresh registrations — the stale `t` object may not reflect
-    // a registration submitted earlier in the same session.
+    // Resolve which year registration is currently open for.
+    // This is the year we check duplicates against — someone who registered
+    // in 2025 or earlier must be able to register again for 2026.
+    const currentRegYear = (() => {
+      const po = t.playoffs || {};
+      const openYr = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
+      return openYr ? String(openYr) : String(t.meta?.registrationYear || new Date().getFullYear());
+    })();
+
+    // Always fetch fresh — the stale t object may not reflect recent submissions.
     const freshRegSnap = await _tRegsRef(tid).once("value");
     const existingRegs = Object.values(freshRegSnap.val() || {});
-    const duplicate = existingRegs.find(r => {
-      if (checkDlr     && r.dlrUsername?.toLowerCase()      === checkDlr)      return true;
-      if (checkEmail   && r.email?.toLowerCase()            === checkEmail)    return true;
-      if (checkSleeper && r.sleeperUsername?.toLowerCase()  === checkSleeper)  return true;
+
+    // Only block if there is already a registration for THIS SAME YEAR that
+    // matches their identity. Registrations with no year field are legacy entries
+    // from before year-tracking was added — never block on those.
+    const sameYearRegs = existingRegs.filter(r => r.year && String(r.year) === currentRegYear);
+    const duplicate = sameYearRegs.find(r => {
+      if (checkDlr     && r.dlrUsername?.toLowerCase()     === checkDlr)     return true;
+      if (checkEmail   && r.email?.toLowerCase()           === checkEmail)   return true;
+      if (checkSleeper && r.sleeperUsername?.toLowerCase() === checkSleeper) return true;
       return false;
     });
 
     if (duplicate) {
-      errEl.textContent = "You've already registered for this tournament. Contact the admin if you need to update your info.";
+      errEl.textContent = `You have already registered for ${currentRegYear}. Contact the admin if you need to update your info.`;
       errEl.classList.remove("hidden");
       return;
     }
@@ -17415,6 +17466,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const autoRegister = document.getElementById("trn-reg-auto")?.checked || false;
     entry.autoRegister = autoRegister;
     entry.dlrUsername  = _currentUsername || null;
+    entry.year         = currentRegYear; // year-tag every new registration for scoped duplicate checks
 
     const btn = document.getElementById("trn-submit-reg-btn");
     if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
