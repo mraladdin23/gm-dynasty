@@ -200,6 +200,7 @@ const DLRTournament = (() => {
     custom_rounds: "⚙️ Custom Rounds",
     worldcup:      "🌍 World Cup",
     total_points:  "🎯 Total Points",
+    decathlon:     "🏅 Decathlon",
   };
 
   async function _renderView(tab) {
@@ -430,6 +431,7 @@ const DLRTournament = (() => {
     custom_rounds: { icon: "⚙️", label: "Custom Rounds", cls: "trn-type-custom"  },
     worldcup:      { icon: "🌍", label: "World Cup",     cls: "trn-type-wc"      },
     total_points:  { icon: "🎯", label: "Total Points",  cls: "trn-type-total"   },
+    decathlon:     { icon: "🏅", label: "Decathlon",     cls: "trn-type-decathlon"},
   };
 
   // Derive the active playoff mode from a tournament object (handles year-keyed + legacy flat)
@@ -648,6 +650,22 @@ const DLRTournament = (() => {
           "No playoff rounds needed — standings update live throughout the window.",
           "Set status → Active when scoring begins; → Completed to lock the final rankings.",
           "Use the public site to share a live leaderboard with participants."
+        ]
+      },
+      {
+        mode:  "decathlon",
+        icon:  "🏅",
+        label: "Decathlon",
+        color: "#f59e0b",
+        summary: "The same participants compete across multiple leagues simultaneously. An overall champion is crowned by either combined PF across all leagues, or finish-points earned from regular season standings in each league. Division (league) winners are also recognized.",
+        when: "Best for: multi-league tournaments where the same people play in several formats at once and you want one combined champion at the end.",
+        steps: [
+          "Section A — Add all leagues (same participants must appear in each).",
+          "Section B — Set the regular season week range.",
+          "Section D (Decathlon Config) — Choose scoring method: Combined PF or Finish Points.",
+          "If Finish Points: set the points table (1st = X, 2nd = Y, etc.).",
+          "The Playoffs tab shows a live combined leaderboard updated each week.",
+          "1st, 2nd, and 3rd place overall plus each division (league) winner are highlighted."
         ]
       }
     ];
@@ -3086,7 +3104,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       points_rounds: "Teams qualify, then advance each week by top score. One pool per round.",
       h2h_bracket:   "Standard single-elimination bracket. System manages draws and advancement.",
       custom_rounds: "Author each round manually: groups, teams per group, advancement rules.",
-      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round)."
+      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round).",
+      decathlon:     "Same participants play in multiple leagues simultaneously. Overall winner is determined by combined PF across all leagues or finish-points earned from regular season standings in each league. Division (league) winners are also recognized."
     };
 
     // ── Year bar HTML (rendered outside sections, always visible) ────────────
@@ -3124,7 +3143,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             { val:"points_rounds", icon:"📈", label:"Points Rounds", sub:"Advance by score"  },
             { val:"h2h_bracket",   icon:"🥊", label:"H2H Bracket",   sub:"System bracket"    },
             { val:"custom_rounds", icon:"⚙️", label:"Custom Rounds", sub:"Author each round" },
-            { val:"worldcup",      icon:"🌍", label:"World Cup",     sub:"Groups → bracket"  }
+            { val:"worldcup",      icon:"🌍", label:"World Cup",     sub:"Groups → bracket"  },
+            { val:"decathlon",     icon:"🏅", label:"Decathlon",     sub:"Multi-league combined" }
           ].map(m=>`
             <button class="trn-mode-card ${mode===m.val?"trn-mode-card--active":""}" data-mode="${m.val}">
               <span class="trn-mode-icon">${m.icon}</span>
@@ -3319,8 +3339,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>`;
 
     // ── Section D: Round Config ───────────────────────────────────────────────
-    const showRounds = ["points_rounds","custom_rounds","h2h_bracket"].includes(mode);
-    const showWC     = mode === "worldcup";
+    const showRounds    = ["points_rounds","custom_rounds","h2h_bracket"].includes(mode);
+    const showWC        = mode === "worldcup";
+    const showDecathlon = mode === "decathlon";
+
+    // ── Decathlon config data ───────────────────────────────────────────────────
+    const decConfig        = po.decathlon || {};
+    const decScoringMethod = decConfig.scoringMethod || "combined_pf"; // combined_pf | finish_points
+    // Default finish-points table: 1st→10, 2nd→8, 3rd→6, 4th→5, 5th→4, 6th→3, 7th→2, 8th+→1
+    const decDefaultPts    = [10, 8, 6, 5, 4, 3, 2, 1];
+    const decPointsTable   = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : decDefaultPts;
 
     // H2H bracket rounds — stored as po.h2hRounds (array of {weeksPerRound, blend})
     // Falls back to building from po.h2hRoundWeeks (per-round weeks) + no blend.
@@ -3625,6 +3653,93 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         </div>
       </div>`;
 
+    // ── Section D(dec): Decathlon Config ─────────────────────────────────────────
+    const sectionDecathlon = `
+      <div class="trn-pc-section trn-pc-section--decathlon" id="trn-pc-decathlon" style="display:none">
+        <div class="trn-pc-row-label" style="margin-bottom:var(--space-3)">Decathlon Configuration</div>
+        <p style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
+          All leagues must have the same participants. The system matches players across leagues
+          by Sleeper username, MFL email, or Yahoo login — or DLR account if participants are linked.
+        </p>
+
+        <!-- Identity key -->
+        <div class="form-group" style="margin-bottom:var(--space-4)">
+          <label>Player Identity Key</label>
+          <select id="trn-dec-identity" class="trn-filter-select">
+            <option value="sleeperUsername" ${(decConfig.identityKey||"sleeperUsername")==="sleeperUsername"?"selected":""}>Sleeper Username</option>
+            <option value="mflEmail"        ${decConfig.identityKey==="mflEmail"?"selected":""}>MFL Email</option>
+            <option value="yahooLogin"      ${decConfig.identityKey==="yahooLogin"?"selected":""}>Yahoo Login</option>
+            <option value="dlrUsername"     ${decConfig.identityKey==="dlrUsername"?"selected":""}>DLR Username (all platforms)</option>
+          </select>
+          <span class="field-hint">How to match the same player across different leagues.</span>
+        </div>
+
+        <!-- Scoring method -->
+        <div class="form-group" style="margin-bottom:var(--space-4)">
+          <label>Scoring Method</label>
+          <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-2)">
+            <label style="display:flex;align-items:flex-start;gap:var(--space-2);cursor:pointer;flex:1;min-width:180px;background:var(--color-surface);border:1.5px solid ${decScoringMethod==="combined_pf"?"var(--color-gold)":"var(--color-border)"};border-radius:var(--radius-md);padding:var(--space-3)">
+              <input type="radio" name="dec-method" value="combined_pf" ${decScoringMethod==="combined_pf"?"checked":""} style="margin-top:2px;accent-color:var(--color-gold)" />
+              <div>
+                <div style="font-weight:600;font-size:.88rem">📊 Combined PF</div>
+                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Sum of each player's points scored across all leagues. Updates live each week.</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:var(--space-2);cursor:pointer;flex:1;min-width:180px;background:var(--color-surface);border:1.5px solid ${decScoringMethod==="finish_points"?"var(--color-gold)":"var(--color-border)"};border-radius:var(--radius-md);padding:var(--space-3)">
+              <input type="radio" name="dec-method" value="finish_points" ${decScoringMethod==="finish_points"?"checked":""} style="margin-top:2px;accent-color:var(--color-gold)" />
+              <div>
+                <div style="font-weight:600;font-size:.88rem">🏅 Finish Points</div>
+                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Each league finish earns points per the table below. Cumulative total wins. Updates live each week.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Finish points table (shown when method = finish_points) -->
+        <div id="trn-dec-pts-section" style="display:${decScoringMethod==="finish_points"?"":"none"}">
+          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Finish Points Table</div>
+          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Points awarded per finish position in each league. Row N = Nth place finish.
+            Players finishing beyond the last row each receive 0 points.
+          </p>
+          <div id="trn-dec-pts-table" style="display:grid;grid-template-columns:auto 1fr auto;gap:var(--space-2);max-width:320px;align-items:center">
+            ${decPointsTable.map((pts, i) => `
+              <span style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">${i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)+"th"}</span>
+              <input type="number" class="trn-dec-pts-input" data-pos="${i}" min="0" max="999" step="1"
+                value="${pts}" style="width:70px;text-align:center;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+              ${i === decPointsTable.length - 1
+                ? `<button class="btn-ghost btn-xs" id="trn-dec-add-row-btn" title="Add row">+</button>`
+                : `<button class="btn-ghost btn-xs trn-dec-del-row-btn" data-del="${i}" title="Remove">✕</button>`}
+            `).join("")}
+          </div>
+          <div style="margin-top:var(--space-2)">
+            <button class="btn-secondary btn-sm" id="trn-dec-reset-pts-btn">↺ Reset to Default</button>
+          </div>
+        </div>
+
+        <!-- Season week range (shared with regular season but shown here for Decathlon) -->
+        <div style="margin-top:var(--space-4)">
+          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Season Week Range</div>
+          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Which weeks count toward standings. Leave blank to use all regular season weeks.
+          </p>
+          <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+            <div class="form-group" style="margin-bottom:0">
+              <label>Start Week</label>
+              <input type="number" id="trn-dec-start-week" min="1" max="18" value="${po.startWeek||""}" placeholder="1" style="width:70px" />
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>End Week</label>
+              <input type="number" id="trn-dec-end-week"   min="1" max="18" value="${po.endWeek||""}"   placeholder="14" style="width:70px" />
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:var(--space-4);display:flex;gap:var(--space-2)">
+          <button class="btn-primary btn-sm" id="trn-dec-save-btn">Save Decathlon Config</button>
+        </div>
+      </div>`;
+
     // ── Outer shell with section-nav select ───────────────────────────────────
     return `
       <div class="trn-section-card trn-pc-card" id="trn-playoff-config-card">
@@ -3637,6 +3752,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <option value="seeding" ${(!showSeeding||showWC)?"disabled":""} title="${showWC?"World Cup: bracket seeding is done manually in the Playoffs → Bracket tab":""}">🏅 Seeding &amp; Byes${(!showSeeding||showWC)?" (n/a)":""}</option>
             <option value="rounds" ${(!showRounds&&!showWC)?"disabled":""}>🔄 Round Config${mode==="h2h_bracket"?" (H2H)":(!showRounds&&!showWC)?" (n/a)":""}</option>
             <option value="scoring">📊 Scoring Settings</option>
+            <option value="decathlon" ${!showDecathlon?"disabled":""}>🏅 Decathlon Config${!showDecathlon?" (n/a)":""}</option>
           </select>
         </div>
         <div class="trn-pc-body" id="trn-pc-body">
@@ -3645,6 +3761,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${sectionSeeding}
           ${sectionRounds}
           ${sectionScoring}
+          ${showDecathlon ? sectionDecathlon : ""}
         </div>
       </div>`;
   }
@@ -3656,7 +3773,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       points_rounds: "Teams qualify, then advance each week by top score. One pool per round.",
       h2h_bracket:   "Standard single-elimination bracket. System manages draws and advancement.",
       custom_rounds: "Author each round manually: groups, teams per group, advancement rules.",
-      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round)."
+      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round).",
+      decathlon:     "Same participants play across multiple leagues. Overall winner by combined PF or finish-points earned from each league's regular season standings."
     };
     const currentNFLYear = String(new Date().getMonth() >= 8
       ? new Date().getFullYear() : new Date().getFullYear() - 1);
@@ -3685,7 +3803,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     let _activePoSection = "format";
 
     const _showPCSection = (sec) => {
-      ["format","qual","seeding","rounds","scoring"].forEach(s => {
+      ["format","qual","seeding","rounds","scoring","decathlon"].forEach(s => {
         const el = document.getElementById(`trn-pc-${s}`);
         if (el) el.style.display = s === sec ? "" : "none";
       });
@@ -3762,6 +3880,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       document.getElementById("trn-start-week-row")?.style.setProperty("display", mode==="total_points"?"none":"");
       document.getElementById("trn-seed-method-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
       document.getElementById("trn-bracket-size-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
+      // Decathlon: show its config section option, disable others that don't apply
+      const sel2 = document.getElementById("trn-pc-section-select");
+      if (sel2) {
+        sel2.querySelector('option[value="decathlon"]')?.toggleAttribute("disabled", mode !== "decathlon");
+        sel2.querySelector('option[value="qual"]')?.toggleAttribute("disabled",
+          ["total_points","worldcup","decathlon"].includes(mode));
+        sel2.querySelector('option[value="seeding"]')?.toggleAttribute("disabled",
+          ["total_points","worldcup","decathlon"].includes(mode));
+        sel2.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",
+          !["points_rounds","custom_rounds","worldcup","h2h_bracket"].includes(mode));
+      }
+      // Auto-navigate to decathlon section when mode is selected
+      if (mode === "decathlon") _showPCSection("decathlon");
     };
 
     document.querySelectorAll(".trn-mode-card").forEach(btn => {
@@ -4700,6 +4831,102 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     };
     document.getElementById("trn-league-champ-yes")?.addEventListener("click",()=>_saveLeagueChamp(true));
     document.getElementById("trn-league-champ-no")?.addEventListener("click", ()=>_saveLeagueChamp(false));
+
+    // ── Decathlon config listeners ──────────────────────────────────────────────
+    // Toggle finish-points table visibility when method changes
+    document.querySelectorAll('input[name="dec-method"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        const isFinishPts = radio.value === "finish_points";
+        document.getElementById("trn-dec-pts-section").style.display = isFinishPts ? "" : "none";
+        // Update card borders
+        document.querySelectorAll('input[name="dec-method"]').forEach(r => {
+          const card = r.closest("label");
+          if (card) card.style.borderColor = r.checked ? "var(--color-gold)" : "var(--color-border)";
+        });
+      });
+    });
+
+    // Add/remove rows in the finish-points table
+    document.getElementById("trn-dec-add-row-btn")?.addEventListener("click", () => {
+      const inputs = document.querySelectorAll(".trn-dec-pts-input");
+      const lastVal = parseInt(inputs[inputs.length-1]?.value)||0;
+      const newPos  = inputs.length;
+      const tbl     = document.getElementById("trn-dec-pts-table");
+      if (!tbl) return;
+      // Remove old last-row delete/add buttons and rebuild
+      const rows = [...tbl.querySelectorAll(".trn-dec-pts-input")];
+      // Re-render the whole table from current values + new row
+      const vals = rows.map(inp => parseInt(inp.value)||0);
+      vals.push(Math.max(0, lastVal - 1));
+      _renderDecPtsTable(tbl, vals);
+    });
+
+    document.getElementById("trn-dec-pts-table")?.addEventListener("click", e => {
+      const btn = e.target.closest(".trn-dec-del-row-btn");
+      if (!btn) return;
+      const pos = parseInt(btn.dataset.del);
+      const tbl = document.getElementById("trn-dec-pts-table");
+      if (!tbl) return;
+      const vals = [...tbl.querySelectorAll(".trn-dec-pts-input")].map(inp => parseInt(inp.value)||0);
+      if (vals.length <= 2) return; // keep at least 2 rows
+      vals.splice(pos, 1);
+      _renderDecPtsTable(tbl, vals);
+    });
+
+    document.getElementById("trn-dec-reset-pts-btn")?.addEventListener("click", () => {
+      const tbl = document.getElementById("trn-dec-pts-table");
+      if (tbl) _renderDecPtsTable(tbl, [10, 8, 6, 5, 4, 3, 2, 1]);
+    });
+
+    document.getElementById("trn-dec-save-btn")?.addEventListener("click", async () => {
+      const method   = document.querySelector('input[name="dec-method"]:checked')?.value || "combined_pf";
+      const identity = document.getElementById("trn-dec-identity")?.value || "sleeperUsername";
+      const sw       = parseInt(document.getElementById("trn-dec-start-week")?.value)||null;
+      const ew       = parseInt(document.getElementById("trn-dec-end-week")?.value)||null;
+      const ptInputs = document.querySelectorAll(".trn-dec-pts-input");
+      const pointsTable = [...ptInputs].map(inp => parseInt(inp.value)||0);
+
+      if (sw && ew && ew < sw) { showToast("End week must be ≥ start week", "error"); return; }
+
+      const decUpdate = {
+        "decathlon.scoringMethod": method,
+        "decathlon.identityKey":   identity,
+        "decathlon.pointsTable":   method === "finish_points" ? pointsTable : null,
+      };
+      const poUpdate = { startWeek: sw || null, endWeek: ew || null };
+
+      try {
+        await _tPlayoffsRef(tid, _activePoYear).update({ ...poUpdate, decathlon: {
+          scoringMethod: method,
+          identityKey:   identity,
+          pointsTable:   method === "finish_points" ? pointsTable : null,
+        }});
+        Object.assign(_poLocal(), { startWeek: sw||null, endWeek: ew||null,
+          decathlon: { scoringMethod:method, identityKey:identity,
+            pointsTable: method==="finish_points" ? pointsTable : null }});
+        showToast("Decathlon config saved ✓");
+      } catch(e) { showToast("Save failed: " + e.message, "error"); }
+    });
+  }
+
+  // Helper: re-render the finish-points table from a values array
+  function _renderDecPtsTable(tbl, vals) {
+    tbl.innerHTML = vals.map((pts, i) => `
+      <span style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">${i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)+"th"}</span>
+      <input type="number" class="trn-dec-pts-input" data-pos="${i}" min="0" max="999" step="1"
+        value="${pts}" style="width:70px;text-align:center;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+      ${i === vals.length - 1
+        ? `<button class="btn-ghost btn-xs" id="trn-dec-add-row-btn" title="Add row">+</button>`
+        : `<button class="btn-ghost btn-xs trn-dec-del-row-btn" data-del="${i}" title="Remove">✕</button>`}
+    `).join("");
+    // Re-wire the add button (it was just re-created)
+    tbl.querySelector("#trn-dec-add-row-btn")?.addEventListener("click", () => {
+      const rows = [...tbl.querySelectorAll(".trn-dec-pts-input")];
+      const lastVal = parseInt(rows[rows.length-1]?.value)||0;
+      const vals2 = rows.map(inp => parseInt(inp.value)||0);
+      vals2.push(Math.max(0, lastVal - 1));
+      _renderDecPtsTable(tbl, vals2);
+    });
   }
 
   // ── Scoring admin helpers ────────────────────────────────────────────────────
@@ -12594,6 +12821,127 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // ── Playoffs Tab ─────────────────────────────────────────────────────────────
   // Tabs: Standings (qualifier tags) | mode-specific round tabs | League Champs
   // Admin-only: Publish Playoffs button writes snapshot to publicTournaments/{tid}/playoffs
+  // ══════════════════════════════════════════════════════════
+  //  DECATHLON ENGINE
+  //  Aggregates per-player scores across multiple leagues for
+  //  a given tournament year. No Firebase reads — pure compute
+  //  from standingsCache + playoff config.
+  // ══════════════════════════════════════════════════════════
+
+  // Build the identity key for a player in a given standings row.
+  // Tries platform identity fields in priority order; falls back to teamName.
+  function _decIdentityKey(tm, identityKey) {
+    const _norm = s => String(s||"").trim().toLowerCase();
+    switch (identityKey) {
+      case "sleeperUsername": return _norm(tm.sleeperUsername || tm.teamName);
+      case "mflEmail":        return _norm(tm.mflEmail || tm.teamName);
+      case "yahooLogin":      return _norm(tm.yahooLogin || tm.teamName);
+      case "dlrUsername":     return _norm(tm.dlrUsername || tm.sleeperUsername || tm.teamName);
+      default:                return _norm(tm.sleeperUsername || tm.teamName);
+    }
+  }
+
+  // Build the aggregated decathlon leaderboard from standingsCache.
+  // Returns array of player objects sorted by the configured scoring method.
+  // Each player object:
+  //   { identityKey, displayName, gender, leagues: [{leagueName, rank, wins, losses, pf, points}],
+  //     totalPF, totalPoints, overallRank, divisionsWon: [leagueName] }
+  function _buildDecathlonLeaderboard(t, year, po) {
+    const yr         = String(year);
+    const decConfig  = po.decathlon || {};
+    const identityKey = decConfig.identityKey || "sleeperUsername";
+    const method     = decConfig.scoringMethod || "combined_pf";
+    const ptsTable   = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : [10,8,6,5,4,3,2,1];
+
+    // Participant display name + gender maps
+    const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+    const displayNameMap = {}, genderMap = {}, dlrByUsername = {};
+    Object.values(t.participants||{}).forEach(p => {
+      const names = [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean);
+      names.forEach(n => {
+        const k = _sk(n);
+        if (p.displayName) displayNameMap[k] = p.displayName;
+        if (p.gender)      genderMap[k]      = p.gender;
+      });
+      if (p.sleeperUsername && p.dlrUsername) {
+        dlrByUsername[p.sleeperUsername.toLowerCase()] = p.dlrUsername;
+      }
+    });
+
+    // Collect all leagues for this year from standingsCache
+    // Group into { leagueKey: { leagueName, teams:[...sorted by current standings] } }
+    const leagueMap = {};
+    Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== yr) return;
+      const lgName = lc.leagueName || ck;
+      const lgId   = String(lc.leagueId || lc.league_id || ck);
+      if (!leagueMap[lgId]) leagueMap[lgId] = { leagueName: lgName, teams: [] };
+      (lc.teams||[]).forEach(tm => leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId }));
+    });
+
+    // For each league, sort by wins desc then PF desc → that's the "finish" rank
+    Object.values(leagueMap).forEach(lg => {
+      lg.teams.sort((a,b) => ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0));
+      // Assign rank 1..N
+      lg.teams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+    });
+
+    // Aggregate per player across all leagues
+    const playerMap = {}; // identityKey → player aggregate
+
+    Object.values(leagueMap).forEach(lg => {
+      lg.teams.forEach(tm => {
+        const idk = _decIdentityKey(tm, identityKey);
+        if (!idk) return;
+        if (!playerMap[idk]) {
+          const dnKey = _sk(tm.sleeperUsername || tm.teamName);
+          playerMap[idk] = {
+            identityKey: idk,
+            displayName: displayNameMap[dnKey] || tm.teamName || idk,
+            gender:      genderMap[dnKey] || "",
+            leagues:     [],
+            totalPF:     0,
+            totalPoints: 0,
+          };
+        }
+        const p    = playerMap[idk];
+        const rank = tm._leagueRank;
+        const pts  = method === "finish_points"
+          ? (ptsTable[rank - 1] ?? 0)
+          : 0;
+
+        p.leagues.push({
+          leagueName: lg.leagueName,
+          leagueId:   tm.leagueId,
+          rank,
+          wins:   tm.wins   || 0,
+          losses: tm.losses || 0,
+          pf:     tm.pf     || 0,
+          points: pts,
+        });
+        p.totalPF     += (tm.pf || 0);
+        p.totalPoints += pts;
+      });
+    });
+
+    // Sort by the active method
+    const sorted = Object.values(playerMap).sort((a,b) =>
+      method === "finish_points"
+        ? b.totalPoints - a.totalPoints || b.totalPF - a.totalPF
+        : b.totalPF - a.totalPF
+    );
+
+    // Assign overall rank + identify division (league) winners
+    sorted.forEach((p, i) => { p.overallRank = i + 1; });
+
+    // Division winner = rank 1 in that league
+    sorted.forEach(p => {
+      p.divisionsWon = p.leagues.filter(l => l.rank === 1).map(l => l.leagueName);
+    });
+
+    return { players: sorted, method, leagueNames: Object.values(leagueMap).map(l=>l.leagueName), ptsTable };
+  }
+
   function _renderPlayoffsTab(tid, t, body) {
     const years   = _playoffYears(t);
     const activeY = _tournamentYear ? String(_tournamentYear)
@@ -12610,7 +12958,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Non-WC modes: gate playoff tab behind regular season completion ───────
     // Admins always see the full tab so they can configure it during the season.
-    if (mode !== "worldcup" && !isAdmin && !_playoffsUnderway(t, po, activeY)) {
+    if (mode !== "worldcup" && mode !== "decathlon" && !isAdmin && !_playoffsUnderway(t, po, activeY)) {
       const startWeek = po.startWeek;
       body.innerHTML = `
         <div class="trn-empty" style="padding:var(--space-8) 0">
@@ -13117,6 +13465,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         tabs.push({ id:"wc_bracket", label:"🥊 Bracket" });
       }
       if (po.recognizeLeagueChampions) tabs.push({ id:"league_champs", label:"🏅 League Champs" });
+      if (mode === "decathlon") {
+        // Decathlon replaces all other tabs with its own views
+        tabs.length = 0;
+        tabs.push({ id:"dec_leaderboard", label:"🏅 Combined Standings" });
+        tabs.push({ id:"dec_bylgue",      label:"📊 By League" });
+      }
       return tabs;
     };
     const tabs = _buildTabs();
@@ -14679,25 +15033,145 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     }
 
     const _renderContent = (tabId) => {
-      if (tabId==="standings")     return _renderStandingsView();
-      if (tabId==="leaderboard")   return _renderLeaderboard();
-      if (tabId==="bracket")       return _renderBracket();
-      if (tabId==="league_champs") return _renderLeagueChamps();
-      if (tabId==="wc_bracket")    return _renderWCBracket();
+      if (tabId==="standings")       return _renderStandingsView();
+      if (tabId==="leaderboard")     return _renderLeaderboard();
+      if (tabId==="bracket")         return _renderBracket();
+      if (tabId==="league_champs")   return _renderLeagueChamps();
+      if (tabId==="wc_bracket")      return _renderWCBracket();
+      if (tabId==="dec_leaderboard") return _renderDecathlonLeaderboard();
+      if (tabId==="dec_bylgue")      return _renderDecathlonByLeague();
       if (tabId.startsWith("round_"))   return _renderPointsRound(parseInt(tabId.split("_")[1]));
       if (tabId.startsWith("cround_"))  return _renderCustomRound(parseInt(tabId.split("_")[1]));
       if (tabId.startsWith("wcgroup_")) return _renderWCGroup(parseInt(tabId.split("_")[1]));
       return `<div class="trn-po-empty">Unknown tab.</div>`;
     };
 
+    // ── Decathlon: Combined Standings ───────────────────────────────────────────
+    const _renderDecathlonLeaderboard = () => {
+      const { players, method, leagueNames, ptsTable } = _buildDecathlonLeaderboard(t, activeY, po);
+      if (!players.length) return `<div class="trn-po-empty">No standings data yet. Add leagues and sync standings to populate the leaderboard.</div>`;
+
+      const valueCol   = method === "finish_points" ? "Total Pts" : "Combined PF";
+      const valueFn    = p => method === "finish_points"
+        ? `<strong>${p.totalPoints}</strong> pts`
+        : `<strong>${p.totalPF.toFixed(2)}</strong>`;
+
+      const podiumMedal = i => i===0?"🥇":i===1?"🥈":i===2?"🥉":"";
+
+      // Top-3 podium cards
+      const podium = players.slice(0,3).map((p, i) => `
+        <div class="trn-dec-podium-card trn-dec-podium-${i+1}">
+          <div class="trn-dec-podium-medal">${podiumMedal(i)}</div>
+          <div class="trn-dec-podium-name">${_esc(p.displayName)}</div>
+          <div class="trn-dec-podium-value">${valueFn(p)}</div>
+          <div class="trn-dec-podium-leagues">${p.leagues.length} league${p.leagues.length!==1?"s":""}</div>
+          ${p.divisionsWon.length ? `<div class="trn-dec-podium-divwins">🏆 ${p.divisionsWon.map(l=>_esc(l)).join(", ")}</div>` : ""}
+        </div>`).join("");
+
+      // Full leaderboard table
+      const rows = players.map((p, i) => {
+        const isTrophy = i < 3;
+        const rowCls   = i===0?"trn-po-row--champion":i===1?"trn-dec-row--silver":i===2?"trn-dec-row--bronze":"";
+        // Per-league breakdown tooltip text
+        const breakdown = p.leagues.map(l =>
+          `${l.leagueName}: #${l.rank} (${method==="finish_points"?l.points+"pts":l.pf.toFixed(1)})`
+        ).join(" | ");
+        return `<tr class="${rowCls}" title="${_esc(breakdown)}">
+          <td class="trn-po-rank">${podiumMedal(i)||i+1}</td>
+          <td class="trn-po-team-name">
+            <div>${_esc(p.displayName)}${p.gender?" "+{M:"♂",F:"♀",m:"♂",f:"♀"}[p.gender]||"":""}</div>
+            ${p.divisionsWon.length ? `<div class="trn-po-team-sub">🏆 ${p.divisionsWon.map(l=>_esc(l)).join(", ")}</div>` : ""}
+          </td>
+          <td class="trn-po-num" style="font-size:.8rem;color:var(--color-text-dim)">${p.leagues.length}</td>
+          ${method==="finish_points"
+            ? `<td class="trn-po-num trn-po-pf">${p.totalPoints}</td>
+               <td class="trn-po-num" style="font-size:.78rem;color:var(--color-text-dim)">${p.totalPF.toFixed(1)}</td>`
+            : `<td class="trn-po-num trn-po-pf">${p.totalPF.toFixed(2)}</td>
+               <td class="trn-po-num" style="font-size:.78rem;color:var(--color-text-dim)">${p.leagues.map(l=>`#${l.rank}`).join(", ")}</td>`}
+        </tr>`;
+      }).join("");
+
+      const methodNote = method === "finish_points"
+        ? `Finish Points — points per league finish: ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
+        : "Combined PF — sum of points scored across all leagues.";
+
+      return `
+        <div class="trn-dec-podium-row">${podium}</div>
+        <div class="trn-po-tp-note">${_esc(methodNote)}</div>
+        <div class="trn-po-table-wrap">
+          <table class="trn-po-table">
+            <thead><tr>
+              <th>#</th><th>Player</th><th class="trn-po-th-num">Leagues</th>
+              ${method==="finish_points"
+                ? `<th class="trn-po-th-num">Points</th><th class="trn-po-th-num">PF</th>`
+                : `<th class="trn-po-th-num">Combined PF</th><th class="trn-po-th-num">Ranks</th>`}
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div style="font-size:.72rem;color:var(--color-text-dim);margin-top:var(--space-2)">Hover/tap a row for per-league breakdown.</div>`;
+    };
+
+    // ── Decathlon: By League breakdown ───────────────────────────────────────────
+    const _renderDecathlonByLeague = () => {
+      const { players, method, leagueNames } = _buildDecathlonLeaderboard(t, activeY, po);
+      if (!players.length) return `<div class="trn-po-empty">No standings data yet.</div>`;
+
+      // Group players by their result in each league — show each league's standings
+      // with that league's winner highlighted, plus the player's overall rank shown
+      const leagueBlocks = leagueNames.map(lgName => {
+        const inLeague = players
+          .filter(p => p.leagues.some(l => l.leagueName === lgName))
+          .map(p => ({ ...p, _lg: p.leagues.find(l => l.leagueName === lgName) }))
+          .sort((a,b) => a._lg.rank - b._lg.rank);
+
+        if (!inLeague.length) return "";
+
+        const rows = inLeague.map(p => `
+          <tr class="${p._lg.rank===1?"trn-po-row--champion":""}">
+            <td class="trn-po-rank">${p._lg.rank===1?"🏆":p._lg.rank}</td>
+            <td class="trn-po-team-name">
+              <div>${_esc(p.displayName)}</div>
+              <div class="trn-po-team-sub">Overall #${p.overallRank}</div>
+            </td>
+            <td class="trn-po-num">${p._lg.wins}–${p._lg.losses}</td>
+            <td class="trn-po-num trn-po-pf">${p._lg.pf.toFixed(2)}</td>
+            ${method==="finish_points"
+              ? `<td class="trn-po-num"><strong>${p._lg.points}</strong> pts</td>`
+              : ""}
+          </tr>`).join("");
+
+        return `
+          <div style="margin-bottom:var(--space-5)">
+            <div class="trn-dec-league-header">🏟 ${_esc(lgName)}</div>
+            <div class="trn-po-table-wrap">
+              <table class="trn-po-table">
+                <thead><tr>
+                  <th>#</th><th>Player</th>
+                  <th class="trn-po-th-num">W–L</th>
+                  <th class="trn-po-th-num">PF</th>
+                  ${method==="finish_points"?`<th class="trn-po-th-num">Pts</th>`:""}
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>`;
+      }).join("");
+
+      return leagueBlocks || `<div class="trn-po-empty">No league data available.</div>`;
+    };
+
+    // Small ordinal helper (1→1st, 2→2nd …)
+    const ordinal = n => n + (["th","st","nd","rd"][(n>3&&n<21)?0:(n%10<4?n%10:0)]||"th");
+
     body.innerHTML = `
       <div class="trn-po-container">
         <div class="trn-po-header">
           <div class="trn-po-title">
-            ${{total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍"}[mode]||"🏆"}
+            ${{total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍",decathlon:"🏅"}[mode]||"🏆"}
             Playoffs <span class="trn-po-year-badge">${activeY}</span>
           </div>
-          <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode}</div>
+          <div class="trn-po-mode-chip">${{total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup",decathlon:"Decathlon"}[mode]||mode}</div>
           ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-po-publish-btn" style="margin-left:auto">📢 Publish</button>` : ""}
           ${isAdmin && mode==="custom_rounds" ? `<button class="btn-secondary btn-sm" id="trn-cr-set-matchups-btn">📋 Set Matchups</button>` : ""}
         </div>
@@ -16735,6 +17209,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       };
 
       await GMD.child("publicTournaments/" + tid).update(summary);
+
+      // Surgical per-year writes: only touch the specific sub-keys we own,
+      // never overwriting the rich published snapshot written by the publish button.
+      const poYrs = Object.keys(t.playoffs || {}).filter(yr => /^\d{4}$/.test(yr));
+      await Promise.all(poYrs.map(yr => {
+        const yrPo = t.playoffs[yr] || {};
+        const upd = {
+          registrationOpen: !!(yrPo.registrationOpen),
+          published:        !!(yrPo.published),
+        };
+        // For decathlon: also write the config so public site can render leaderboard
+        if (yrPo.mode === "decathlon" && yrPo.decathlon) {
+          upd.decathlon = yrPo.decathlon;
+          upd.mode      = "decathlon";
+        }
+        return GMD.child(`publicTournaments/${tid}/playoffs/${yr}`).update(upd);
+      }));
     } catch(err) {
       console.warn("[Tournament] _writePublicSummary failed:", err.message);
     }
