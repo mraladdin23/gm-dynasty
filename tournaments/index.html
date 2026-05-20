@@ -794,10 +794,16 @@
       ));
       const hasAdp = !!(t.adp?.length || Object.keys(t.adpByYear||{}).length);
 
+      // Check if any year uses decathlon mode
+      const hasDecathlon = Object.keys(t.playoffs||{})
+        .filter(k => /^\d{4}$/.test(k))
+        .some(y => t.playoffs[y]?.mode === "decathlon");
+
       const histTabs = [
-        { id:"standings", label:"Standings", show: true },
-        { id:"playoffs",  label:"Playoffs",  show: hasPlayoffs },
-        { id:"adp",       label:"ADP",       show: hasAdp },
+        { id:"standings",   label:"Standings",   show: true },
+        { id:"decathlon",   label:"🏅 Combined",  show: hasDecathlon },
+        { id:"playoffs",    label:"Playoffs",    show: hasPlayoffs && !hasDecathlon },
+        { id:"adp",         label:"ADP",         show: hasAdp },
       ].filter(h => h.show);
 
       if (!histTabs.find(h => h.id === _activeHistTab)) _activeHistTab = "standings";
@@ -870,11 +876,130 @@
       if (!content) return;
       content.innerHTML = "";
       switch (_activeHistTab) {
-        case "standings": return renderStandingsTab(content);
-        case "playoffs":  return renderPlayoffsTab(content);
-        case "adp":       return renderAdpTab(content);
-        default:          return renderStandingsTab(content);
+        case "standings":  return renderStandingsTab(content);
+        case "decathlon":  return renderDecathlonTab(content);
+        case "playoffs":   return renderPlayoffsTab(content);
+        case "adp":        return renderAdpTab(content);
+        default:           return renderStandingsTab(content);
       }
+    }
+
+    // ── Public Decathlon tab ───────────────────────────────────────────────────
+    // Reads from publicTournaments standingsCache + playoffs/{year}.decathlon config.
+    // Mirrors _buildDecathlonLeaderboard from tournament.js — no Firebase reads needed.
+    function renderDecathlonTab(body) {
+      const t    = _currentT;
+      const year = _selectedYear || new Date().getFullYear();
+      const po   = (t.playoffs || {})[year] || {};
+      const dec  = po.decathlon || {};
+      const method      = dec.scoringMethod || "combined_pf";
+      const identityKey = dec.identityKey   || "sleeperUsername";
+      const ptsTable    = Array.isArray(dec.pointsTable) ? dec.pointsTable : [10,8,6,5,4,3,2,1];
+
+      // Build participant display name map
+      const dispMap = {};
+      Object.values(t.participantMap || {}).forEach(p => {
+        if (p.displayName) dispMap[(p.sleeperUsername||"").toLowerCase()] = p.displayName;
+      });
+
+      // Collect leagues from standingsCache for this year
+      const leagueMap = {};
+      Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+        if (String(lc.year) !== String(year)) return;
+        const lgName = lc.leagueName || ck;
+        const lgId   = String(lc.leagueId || lc.league_id || ck);
+        if (!leagueMap[lgId]) leagueMap[lgId] = { leagueName: lgName, teams: [] };
+        (lc.teams||[]).forEach(tm => leagueMap[lgId].teams.push({ ...tm, leagueName: lgName }));
+      });
+
+      // Sort each league by record then PF
+      Object.values(leagueMap).forEach(lg => {
+        lg.teams.sort((a,b) => ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0));
+        lg.teams.forEach((tm, i) => { tm._rank = i + 1; });
+      });
+
+      const _idk = tm => {
+        const norm = s => String(s||"").trim().toLowerCase();
+        return norm(identityKey==="sleeperUsername" ? (tm.sleeperUsername||tm.teamName)
+          : identityKey==="mflEmail"    ? (tm.mflEmail||tm.teamName)
+          : identityKey==="yahooLogin"  ? (tm.yahooLogin||tm.teamName)
+          : (tm.dlrUsername||tm.sleeperUsername||tm.teamName));
+      };
+
+      // Aggregate per player
+      const playerMap = {};
+      Object.values(leagueMap).forEach(lg => {
+        lg.teams.forEach(tm => {
+          const idk = _idk(tm);
+          if (!idk) return;
+          if (!playerMap[idk]) {
+            const dn = dispMap[idk] || dispMap[(tm.sleeperUsername||"").toLowerCase()] || tm.teamName || idk;
+            playerMap[idk] = { idk, displayName: dn, leagues:[], totalPF:0, totalPoints:0 };
+          }
+          const p   = playerMap[idk];
+          const pts = method === "finish_points" ? (ptsTable[tm._rank-1]??0) : 0;
+          p.leagues.push({ leagueName:lg.leagueName, rank:tm._rank, wins:tm.wins||0, losses:tm.losses||0, pf:tm.pf||0, points:pts });
+          p.totalPF     += tm.pf||0;
+          p.totalPoints += pts;
+        });
+      });
+
+      const sorted = Object.values(playerMap).sort((a,b) =>
+        method==="finish_points" ? b.totalPoints-a.totalPoints||b.totalPF-a.totalPF : b.totalPF-a.totalPF
+      );
+      sorted.forEach((p,i) => { p.rank=i+1; p.divisionsWon=p.leagues.filter(l=>l.rank===1).map(l=>l.leagueName); });
+
+      if (!sorted.length) {
+        body.innerHTML = `<div class="trn-po-empty">No standings data yet for ${year}.</div>`;
+        return;
+      }
+
+      const medal = i => i===0?"🥇":i===1?"🥈":i===2?"🥉":"";
+      const valueFn = p => method==="finish_points" ? `${p.totalPoints} pts` : p.totalPF.toFixed(2);
+      const ordinal = n => n+(["th","st","nd","rd"][(n>3&&n<21)?0:(n%10<4?n%10:0)]||"th");
+      const methodNote = method==="finish_points"
+        ? `Finish Points — ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
+        : "Combined PF across all leagues";
+
+      const podium = sorted.slice(0,3).map((p,i) => `
+        <div class="trn-dec-podium-card trn-dec-podium-${i+1}">
+          <div class="trn-dec-podium-medal">${medal(i)}</div>
+          <div class="trn-dec-podium-name">${esc(p.displayName)}</div>
+          <div class="trn-dec-podium-value">${valueFn(p)}</div>
+          <div class="trn-dec-podium-leagues">${p.leagues.length} league${p.leagues.length!==1?"s":""}</div>
+          ${p.divisionsWon.length?`<div class="trn-dec-podium-divwins">🏆 ${p.divisionsWon.map(l=>esc(l)).join(", ")}</div>`:""}
+        </div>`).join("");
+
+      const rows = sorted.map((p,i) => {
+        const breakdown = p.leagues.map(l=>`${l.leagueName}: #${l.rank} (${method==="finish_points"?l.points+"pts":l.pf.toFixed(1)})`).join(" | ");
+        return `<tr class="${i===0?"trn-po-row--champion":i===1?"trn-dec-row--silver":i===2?"trn-dec-row--bronze":""}" title="${esc(breakdown)}">
+          <td class="trn-po-rank">${medal(i)||i+1}</td>
+          <td class="trn-po-team-name">
+            <div>${esc(p.displayName)}</div>
+            ${p.divisionsWon.length?`<div class="trn-po-team-sub">🏆 ${p.divisionsWon.map(l=>esc(l)).join(", ")}</div>`:""}
+          </td>
+          <td class="trn-po-num">${p.leagues.length}</td>
+          ${method==="finish_points"
+            ? `<td class="trn-po-num trn-po-pf">${p.totalPoints}</td><td class="trn-po-num" style="font-size:.78rem;color:var(--color-text-dim)">${p.totalPF.toFixed(1)}</td>`
+            : `<td class="trn-po-num trn-po-pf">${p.totalPF.toFixed(2)}</td><td class="trn-po-num" style="font-size:.78rem;color:var(--color-text-dim)">${p.leagues.map(l=>`#${l.rank}`).join(", ")}</td>`}
+        </tr>`;
+      }).join("");
+
+      body.innerHTML = `
+        <div class="trn-dec-podium-row">${podium}</div>
+        <div class="trn-po-tp-note">${esc(methodNote)}</div>
+        <div class="trn-po-table-wrap">
+          <table class="trn-po-table">
+            <thead><tr>
+              <th>#</th><th>Player</th><th class="trn-po-th-num">Leagues</th>
+              ${method==="finish_points"
+                ? `<th class="trn-po-th-num">Points</th><th class="trn-po-th-num">PF</th>`
+                : `<th class="trn-po-th-num">Combined PF</th><th class="trn-po-th-num">Ranks</th>`}
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <p style="font-size:.72rem;color:var(--color-text-dim);margin-top:var(--space-2)">Hover/tap a row for per-league breakdown.</p>`;
     }
 
     // Legacy alias so existing renderTab calls still work when called from other places

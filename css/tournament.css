@@ -5248,3 +5248,90 @@
     max-height: calc(100vh - 120px) !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   DECATHLON MODE
+   ═══════════════════════════════════════════════════════════ */
+
+/* Tournament type badge */
+.trn-type-decathlon {
+  background: rgba(245,158,11,.15);
+  color: #f59e0b;
+}
+
+/* ── Podium cards ─────────────────────────────────────────── */
+.trn-dec-podium-row {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.trn-dec-podium-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  min-width: 130px;
+  max-width: 180px;
+  text-align: center;
+  transition: box-shadow .15s;
+}
+.trn-dec-podium-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+
+.trn-dec-podium-1 {
+  border-color: var(--color-gold);
+  background: rgba(240,180,41,.08);
+  order: 1;
+}
+.trn-dec-podium-2 {
+  border-color: #94a3b8;
+  background: rgba(148,163,184,.08);
+  order: 0;
+  margin-top: var(--space-4);
+}
+.trn-dec-podium-3 {
+  border-color: #cd7f32;
+  background: rgba(205,127,50,.08);
+  order: 2;
+  margin-top: var(--space-4);
+}
+
+.trn-dec-podium-medal  { font-size: 1.75rem; line-height: 1; }
+.trn-dec-podium-name   { font-size: .9rem; font-weight: 700; color: var(--color-text); }
+.trn-dec-podium-value  { font-size: .88rem; color: var(--color-gold); }
+.trn-dec-podium-leagues{ font-size: .72rem; color: var(--color-text-dim); }
+.trn-dec-podium-divwins{ font-size: .72rem; color: var(--color-text-dim); }
+
+/* ── Leaderboard rows ─────────────────────────────────────── */
+.trn-dec-row--silver td { background: rgba(148,163,184,.06); }
+.trn-dec-row--bronze td { background: rgba(205,127,50,.06); }
+
+/* ── By-league section header ─────────────────────────────── */
+.trn-dec-league-header {
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--color-text);
+  padding: var(--space-2) 0 var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-2);
+}
+
+/* ── Config section ───────────────────────────────────────── */
+.trn-pc-section--decathlon .form-group label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: .85rem;
+}
+
+@media (max-width: 600px) {
+  .trn-dec-podium-row { gap: var(--space-2); }
+  .trn-dec-podium-card { min-width: 100px; padding: var(--space-2); }
+  .trn-dec-podium-medal { font-size: 1.4rem; }
+  .trn-dec-podium-2, .trn-dec-podium-3 { margin-top: var(--space-2); }
+}
