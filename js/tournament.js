@@ -1729,7 +1729,7 @@ const DLRTournament = (() => {
       <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
         <button class="btn-secondary" id="trn-wiz-back-btn" ${_wizardStep===1?"style='visibility:hidden'":""}>← Back</button>
         <div style="display:flex;gap:var(--space-2)">
-          ${_wizardStep < 7 ? `<button class="btn-ghost btn-sm" id="trn-wiz-saveclose-btn">💾 Save & Close</button>` : ""}
+          ${_wizardStep < 7 ? `<button class="btn-secondary" id="trn-wiz-saveclose-btn">💾 Save & Close</button>` : ""}
           <button class="btn-primary" id="trn-wiz-next-btn">${_wizardStep===7?"✓ Save & Close":"Next →"}</button>
         </div>
       </div>
@@ -3678,25 +3678,45 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         <div class="form-group" style="margin-bottom:var(--space-4)">
           <label>Scoring Method</label>
           <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-2)">
-            <label style="display:flex;align-items:flex-start;gap:var(--space-2);cursor:pointer;flex:1;min-width:180px;background:var(--color-surface);border:1.5px solid ${decScoringMethod==="combined_pf"?"var(--color-gold)":"var(--color-border)"};border-radius:var(--radius-md);padding:var(--space-3)">
+            <label class="trn-dec-method-card" style="border-color:${decScoringMethod==="combined_pf"?"var(--color-gold)":"var(--color-border)"}">
               <input type="radio" name="dec-method" value="combined_pf" ${decScoringMethod==="combined_pf"?"checked":""} style="margin-top:2px;accent-color:var(--color-gold)" />
               <div>
                 <div style="font-weight:600;font-size:.88rem">📊 Combined PF</div>
                 <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Sum of each player's points scored across all leagues. Updates live each week.</div>
               </div>
             </label>
-            <label style="display:flex;align-items:flex-start;gap:var(--space-2);cursor:pointer;flex:1;min-width:180px;background:var(--color-surface);border:1.5px solid ${decScoringMethod==="finish_points"?"var(--color-gold)":"var(--color-border)"};border-radius:var(--radius-md);padding:var(--space-3)">
+            <label class="trn-dec-method-card" style="border-color:${decScoringMethod==="finish_points"?"var(--color-gold)":"var(--color-border)"}">
               <input type="radio" name="dec-method" value="finish_points" ${decScoringMethod==="finish_points"?"checked":""} style="margin-top:2px;accent-color:var(--color-gold)" />
               <div>
                 <div style="font-weight:600;font-size:.88rem">🏅 Finish Points</div>
-                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Each league finish earns points per the table below. Cumulative total wins. Updates live each week.</div>
+                <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Each league finish earns points per the table below. Configure how finish is determined.</div>
               </div>
             </label>
           </div>
         </div>
 
-        <!-- Finish points table (shown when method = finish_points) -->
+        <!-- Finish points table + basis (shown when method = finish_points) -->
         <div id="trn-dec-pts-section" style="display:${decScoringMethod==="finish_points"?"":"none"}">
+          <!-- How finish rank is determined within each league -->
+          <div class="form-group" style="margin-bottom:var(--space-3)">
+            <label>How is finish determined in each league?</label>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)">
+              ${[
+                { val:"record",   label:"📋 H2H Record",     sub:"Wins/losses, PF as tiebreaker" },
+                { val:"pf",       label:"📊 Points Scored",  sub:"Highest PF in league = 1st" },
+                { val:"playoffs", label:"🏆 League Playoffs",sub:"Uses post-playoff standings if available, falls back to record" }
+              ].map(opt => `
+                <label class="trn-dec-basis-card" style="border-color:${(decConfig.finishBasis||"record")===opt.val?"var(--color-gold)":"var(--color-border)"}">
+                  <input type="radio" name="dec-basis" value="${opt.val}"
+                    ${(decConfig.finishBasis||"record")===opt.val?"checked":""}
+                    style="margin-top:2px;accent-color:var(--color-gold)" />
+                  <div>
+                    <div style="font-weight:600;font-size:.85rem">${opt.label}</div>
+                    <div style="font-size:.75rem;color:var(--color-text-dim);margin-top:1px">${opt.sub}</div>
+                  </div>
+                </label>`).join("")}
+            </div>
+          </div>
           <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Finish Points Table</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
             Points awarded per finish position in each league. Row N = Nth place finish.
@@ -3717,7 +3737,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
         </div>
 
-        <!-- Season week range (shared with regular season but shown here for Decathlon) -->
+        <!-- Season week range -->
         <div style="margin-top:var(--space-4)">
           <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Season Week Range</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
@@ -3733,6 +3753,43 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <input type="number" id="trn-dec-end-week"   min="1" max="18" value="${po.endWeek||""}"   placeholder="14" style="width:70px" />
             </div>
           </div>
+        </div>
+
+        <!-- Per-league scoring settings info -->
+        <div style="margin-top:var(--space-4)">
+          <div class="trn-pc-row-label" style="margin-bottom:var(--space-2)">Scoring Settings by League</div>
+          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Each league in a Decathlon may use different scoring rules (PPR, half-PPR, standard).
+            Scoring settings are synced per-league when you run Sync Standings. The Combined PF
+            leaderboard uses each league's actual point totals — no normalization needed since
+            players are being compared by accumulated score, not head-to-head.
+            If you're using Finish Points, only rank matters so scoring differences don't affect results.
+          </p>
+          ${(() => {
+            // Show per-league scoring summaries from standingsCache + scoringSettings
+            const leagueSummaries = [];
+            Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+              if (String(lc.year) !== String(activeYear)) return;
+              const lgName   = lc.leagueName || ck;
+              const lgId     = String(lc.leagueId || lc.league_id || ck);
+              const ss       = (t.scoringSettings || {})[activeYear] || {};
+              // Try leagueId-specific entry first, then platform-level
+              const platform = lc.platform || "sleeper";
+              const lgSS     = ss[lgId] || ss[platform] || null;
+              const format   = lgSS?._format || lgSS?.format || null;
+              const ppr      = lgSS?.rec !== undefined ? (+lgSS.rec === 1 ? "PPR" : +lgSS.rec === 0.5 ? "Half-PPR" : +lgSS.rec === 0 ? "Standard" : `${lgSS.rec} rec`) : null;
+              leagueSummaries.push({ lgName, lgId, format, ppr });
+            });
+            if (!leagueSummaries.length) return '<div style="font-size:.82rem;color:var(--color-text-dim)">Add leagues and sync standings to see per-league scoring.</div>';
+            return leagueSummaries.map(ls => `
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);margin-bottom:6px;font-size:.82rem">
+                <span style="font-weight:500">${_esc(ls.lgName)}</span>
+                <span style="color:var(--color-text-dim)">
+                  ${ls.ppr || "—"}${ls.format ? " · " + _esc(ls.format) : ""}
+                  ${(!ls.ppr && !ls.format) ? "Sync standings to load" : ""}
+                </span>
+              </div>`).join("");
+          })()}
         </div>
 
         <div style="margin-top:var(--space-4);display:flex;gap:var(--space-2)">
@@ -4833,13 +4890,22 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.getElementById("trn-league-champ-no")?.addEventListener("click", ()=>_saveLeagueChamp(false));
 
     // ── Decathlon config listeners ──────────────────────────────────────────────
-    // Toggle finish-points table visibility when method changes
+    // Toggle finish-points section visibility + update card borders on method change
     document.querySelectorAll('input[name="dec-method"]').forEach(radio => {
       radio.addEventListener("change", () => {
         const isFinishPts = radio.value === "finish_points";
         document.getElementById("trn-dec-pts-section").style.display = isFinishPts ? "" : "none";
-        // Update card borders
         document.querySelectorAll('input[name="dec-method"]').forEach(r => {
+          const card = r.closest("label");
+          if (card) card.style.borderColor = r.checked ? "var(--color-gold)" : "var(--color-border)";
+        });
+      });
+    });
+
+    // Update basis card borders on change
+    document.querySelectorAll('input[name="dec-basis"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        document.querySelectorAll('input[name="dec-basis"]').forEach(r => {
           const card = r.closest("label");
           if (card) card.style.borderColor = r.checked ? "var(--color-gold)" : "var(--color-border)";
         });
@@ -4879,31 +4945,34 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     document.getElementById("trn-dec-save-btn")?.addEventListener("click", async () => {
-      const method   = document.querySelector('input[name="dec-method"]:checked')?.value || "combined_pf";
-      const identity = document.getElementById("trn-dec-identity")?.value || "sleeperUsername";
-      const sw       = parseInt(document.getElementById("trn-dec-start-week")?.value)||null;
-      const ew       = parseInt(document.getElementById("trn-dec-end-week")?.value)||null;
-      const ptInputs = document.querySelectorAll(".trn-dec-pts-input");
+      const method      = document.querySelector('input[name="dec-method"]:checked')?.value || "combined_pf";
+      const finishBasis = document.querySelector('input[name="dec-basis"]:checked')?.value  || "record";
+      const identity    = document.getElementById("trn-dec-identity")?.value || "sleeperUsername";
+      const sw          = parseInt(document.getElementById("trn-dec-start-week")?.value)||null;
+      const ew          = parseInt(document.getElementById("trn-dec-end-week")?.value)||null;
+      const ptInputs    = document.querySelectorAll(".trn-dec-pts-input");
       const pointsTable = [...ptInputs].map(inp => parseInt(inp.value)||0);
 
       if (sw && ew && ew < sw) { showToast("End week must be ≥ start week", "error"); return; }
 
-      const decUpdate = {
-        "decathlon.scoringMethod": method,
-        "decathlon.identityKey":   identity,
-        "decathlon.pointsTable":   method === "finish_points" ? pointsTable : null,
+      const decConfig = {
+        scoringMethod: method,
+        finishBasis:   method === "finish_points" ? finishBasis : null,
+        identityKey:   identity,
+        pointsTable:   method === "finish_points" ? pointsTable : null,
       };
-      const poUpdate = { startWeek: sw || null, endWeek: ew || null };
+      // Clean nulls
+      Object.keys(decConfig).forEach(k => { if (decConfig[k] === null) delete decConfig[k]; });
 
       try {
-        await _tPlayoffsRef(tid, _activePoYear).update({ ...poUpdate, decathlon: {
-          scoringMethod: method,
-          identityKey:   identity,
-          pointsTable:   method === "finish_points" ? pointsTable : null,
-        }});
-        Object.assign(_poLocal(), { startWeek: sw||null, endWeek: ew||null,
-          decathlon: { scoringMethod:method, identityKey:identity,
-            pointsTable: method==="finish_points" ? pointsTable : null }});
+        await _tPlayoffsRef(tid, _activePoYear).update({
+          startWeek: sw || null,
+          endWeek:   ew || null,
+          decathlon: decConfig,
+        });
+        Object.assign(_poLocal(), {
+          startWeek: sw||null, endWeek: ew||null, decathlon: decConfig
+        });
         showToast("Decathlon config saved ✓");
       } catch(e) { showToast("Save failed: " + e.message, "error"); }
     });
@@ -12847,11 +12916,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   //   { identityKey, displayName, gender, leagues: [{leagueName, rank, wins, losses, pf, points}],
   //     totalPF, totalPoints, overallRank, divisionsWon: [leagueName] }
   function _buildDecathlonLeaderboard(t, year, po) {
-    const yr         = String(year);
-    const decConfig  = po.decathlon || {};
-    const identityKey = decConfig.identityKey || "sleeperUsername";
-    const method     = decConfig.scoringMethod || "combined_pf";
-    const ptsTable   = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : [10,8,6,5,4,3,2,1];
+    const yr          = String(year);
+    const decConfig   = po.decathlon || {};
+    const identityKey = decConfig.identityKey  || "sleeperUsername";
+    const method      = decConfig.scoringMethod || "combined_pf";
+    const finishBasis = decConfig.finishBasis   || "record"; // record | pf | playoffs
+    const ptsTable    = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : [10,8,6,5,4,3,2,1];
 
     // Participant display name + gender maps
     const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
@@ -12879,10 +12949,30 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       (lc.teams||[]).forEach(tm => leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId }));
     });
 
-    // For each league, sort by wins desc then PF desc → that's the "finish" rank
+    // Sort each league by the configured finishBasis to determine finish rank.
+    // record:   W-L record, PF as tiebreaker (standard regular season standings)
+    // pf:       Pure points scored — highest PF = 1st regardless of W-L record
+    // playoffs: Uses final post-season record if available (more wins from playoff games),
+    //           falls back to regular season record. Works best after a full-standings sync
+    //           that captured playoff game results.
     Object.values(leagueMap).forEach(lg => {
-      lg.teams.sort((a,b) => ((b.wins||0)-(b.losses||0)) - ((a.wins||0)-(a.losses||0)) || (b.pf||0)-(a.pf||0));
-      // Assign rank 1..N
+      if (finishBasis === "pf") {
+        // Sort purely by PF descending
+        lg.teams.sort((a,b) => (b.pf||0) - (a.pf||0));
+      } else if (finishBasis === "playoffs") {
+        // Playoffs basis: use total wins (includes playoff wins if synced), PF tiebreak.
+        // Same sort as record — the difference is that the admin should sync standings
+        // after the league's playoffs complete so these totals include playoff wins.
+        lg.teams.sort((a,b) =>
+          ((b.wins||0) - (b.losses||0)) - ((a.wins||0) - (a.losses||0)) ||
+          (b.wins||0) - (a.wins||0) ||
+          (b.pf||0) - (a.pf||0));
+      } else {
+        // Default: H2H record (wins - losses), PF tiebreaker
+        lg.teams.sort((a,b) =>
+          ((b.wins||0) - (b.losses||0)) - ((a.wins||0) - (a.losses||0)) ||
+          (b.pf||0) - (a.pf||0));
+      }
       lg.teams.forEach((tm, i) => { tm._leagueRank = i + 1; });
     });
 
@@ -12939,7 +13029,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       p.divisionsWon = p.leagues.filter(l => l.rank === 1).map(l => l.leagueName);
     });
 
-    return { players: sorted, method, leagueNames: Object.values(leagueMap).map(l=>l.leagueName), ptsTable };
+    return { players: sorted, method, finishBasis, leagueNames: Object.values(leagueMap).map(l=>l.leagueName), ptsTable };
   }
 
   function _renderPlayoffsTab(tid, t, body) {
@@ -15048,7 +15138,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Decathlon: Combined Standings ───────────────────────────────────────────
     const _renderDecathlonLeaderboard = () => {
-      const { players, method, leagueNames, ptsTable } = _buildDecathlonLeaderboard(t, activeY, po);
+      const { players, method, finishBasis, leagueNames, ptsTable } = _buildDecathlonLeaderboard(t, activeY, po);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet. Add leagues and sync standings to populate the leaderboard.</div>`;
 
       const valueCol   = method === "finish_points" ? "Total Pts" : "Combined PF";
@@ -15091,8 +15181,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </tr>`;
       }).join("");
 
+      const basisLabel = finishBasis === "pf"       ? "by Points Scored"
+                       : finishBasis === "playoffs" ? "by League Playoffs (H2H tiebreak)"
+                       :                              "by H2H Record";
       const methodNote = method === "finish_points"
-        ? `Finish Points — points per league finish: ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
+        ? `Finish Points (${basisLabel}) — ${ptsTable.slice(0,4).map((v,i)=>ordinal(i+1)+"="+v).join(", ")}…`
         : "Combined PF — sum of points scored across all leagues.";
 
       return `
@@ -15114,7 +15207,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Decathlon: By League breakdown ───────────────────────────────────────────
     const _renderDecathlonByLeague = () => {
-      const { players, method, leagueNames } = _buildDecathlonLeaderboard(t, activeY, po);
+      const { players, method, finishBasis, leagueNames } = _buildDecathlonLeaderboard(t, activeY, po);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet.</div>`;
 
       // Group players by their result in each league — show each league's standings
@@ -15134,7 +15227,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div>${_esc(p.displayName)}</div>
               <div class="trn-po-team-sub">Overall #${p.overallRank}</div>
             </td>
-            <td class="trn-po-num">${p._lg.wins}–${p._lg.losses}</td>
+            <td class="trn-po-num">${finishBasis==="pf" ? `#${p._lg.rank} PF` : `${p._lg.wins}–${p._lg.losses}`}</td>
             <td class="trn-po-num trn-po-pf">${p._lg.pf.toFixed(2)}</td>
             ${method==="finish_points"
               ? `<td class="trn-po-num"><strong>${p._lg.points}</strong> pts</td>`
@@ -15148,7 +15241,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <table class="trn-po-table">
                 <thead><tr>
                   <th>#</th><th>Player</th>
-                  <th class="trn-po-th-num">W–L</th>
+                  <th class="trn-po-th-num">${finishBasis==="pf"?"PF Rank":"W–L"}</th>
                   <th class="trn-po-th-num">PF</th>
                   ${method==="finish_points"?`<th class="trn-po-th-num">Pts</th>`:""}
                 </tr></thead>
