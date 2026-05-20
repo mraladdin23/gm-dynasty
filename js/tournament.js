@@ -13315,33 +13315,74 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const totalPlayers = lg.teams.length;
 
         if (elims.length > 0) {
-          // Build pid→rank map from the eliminations list
-          const rankByPid = {};
-          elims.forEach((e, idx) => {
-            // idx 0 = first out = worst finish = rank totalPlayers
-            // idx last = champion = rank 1
-            const rank = totalPlayers - idx;
-            if (e.playerId) rankByPid[e.playerId] = rank;
-            // Also match by playerName for teams not fully linked
-            if (e.playerName) {
-              const normName = String(e.playerName).trim().toLowerCase();
-              lg.teams.forEach(tm => {
-                if (String(tm.teamName||"").trim().toLowerCase() === normName ||
-                    String(tm.sleeperUsername||"").trim().toLowerCase() === normName) {
-                  rankByPid[String(tm.teamId||"")] = rank;
-                }
-              });
+          // Elimination ranking model:
+          // - Players are listed in eliminations[] from FIRST ELIMINATED (index 0) to LAST ELIMINATED (index last).
+          // - First eliminated = worst finish = highest rank number (e.g. 10th in a 10-player league).
+          // - Last eliminated = champion = rank 1.
+          // - Players NOT yet in the list are still active = they have the BEST current ranks.
+          //
+          // Current active players (not in eliminations list) occupy ranks 1..N_active.
+          // Then eliminated players fill ranks (N_active+1)..totalPlayers in reverse order of elimination.
+          //
+          // Example (10 players, 4 eliminated):
+          //   Active (6 players): ranks 1-6 (sorted by PF as tiebreak among still-active)
+          //   elims[3] (last out): rank 7
+          //   elims[2]:            rank 8
+          //   elims[1]:            rank 9
+          //   elims[0] (first out):rank 10
+
+          const elimSet = new Set(elims.map(e => String(e.playerId || "").trim()));
+          // Also build a name→teamId map for matching by playerName
+          const nameToTeamId = {};
+          lg.teams.forEach(tm => {
+            const n1 = String(tm.teamName||"").trim().toLowerCase();
+            const n2 = String(tm.sleeperUsername||"").trim().toLowerCase();
+            if (n1) nameToTeamId[n1] = String(tm.teamId || "");
+            if (n2) nameToTeamId[n2] = String(tm.teamId || "");
+          });
+
+          // Expand elimSet to include name-matched team IDs
+          elims.forEach(e => {
+            if (!e.playerId && e.playerName) {
+              const nm = String(e.playerName).trim().toLowerCase();
+              const tid2 = nameToTeamId[nm];
+              if (tid2) elimSet.add(tid2);
             }
           });
 
-          // Assign rank to each team; unrecorded teams get rank after all eliminated
-          let nextUnranked = elims.length + 1; // still-active teams start after recorded eliminations
-          lg.teams.forEach(tm => {
-            const pid = String(tm.teamId || "");
-            tm._leagueRank = rankByPid[pid] ?? (nextUnranked++);
+          // Separate active (not eliminated) from eliminated teams
+          const activeTeams = lg.teams.filter(tm => !elimSet.has(String(tm.teamId||"").trim()));
+          const elimTeams   = lg.teams.filter(tm =>  elimSet.has(String(tm.teamId||"").trim()));
+
+          // Active teams: sort by PF desc as interim ranking, assign ranks 1..N_active
+          activeTeams.sort((a,b) => (b.pf||0) - (a.pf||0));
+          activeTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+
+          // Build playerId→rank map for eliminated players
+          // elims[0] = first eliminated = rank totalPlayers (worst)
+          // elims[last] = last eliminated = rank activeTeams.length + 1
+          const rankByPid = {};
+          elims.forEach((e, idx) => {
+            const rank = totalPlayers - idx; // elims[0]→totalPlayers, elims[last]→activeTeams.length+1
+            const pid  = String(e.playerId || "").trim();
+            if (pid) rankByPid[pid] = rank;
+            if (e.playerName) {
+              const nm = String(e.playerName).trim().toLowerCase();
+              const tid2 = nameToTeamId[nm];
+              if (tid2) rankByPid[tid2] = rank;
+            }
           });
-          // Sort by rank ascending
-          lg.teams.sort((a,b) => a._leagueRank - b._leagueRank);
+
+          elimTeams.forEach(tm => {
+            const pid = String(tm.teamId || "").trim();
+            tm._leagueRank = rankByPid[pid] ?? (activeTeams.length + elimTeams.length); // fallback = worst
+          });
+
+          // Rebuild sorted teams list: active first (ranks 1..N), then eliminated (worst last)
+          lg.teams = [
+            ...activeTeams.sort((a,b) => a._leagueRank - b._leagueRank),
+            ...elimTeams.sort((a,b)   => a._leagueRank - b._leagueRank),
+          ];
         } else {
           // No knockouts recorded yet — fall back to record sort, mark as unresolved
           const sortedTeams = _decSortByBasis(lg.teams, "record");
@@ -15511,42 +15552,73 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     }
 
     const _renderContent = (tabId) => {
-      if (tabId==="standings")       return _renderStandingsView();
-      if (tabId==="leaderboard")     return _renderLeaderboard();
-      if (tabId==="bracket")         return _renderBracket();
-      if (tabId==="league_champs")   return _renderLeagueChamps();
-      if (tabId==="wc_bracket")      return _renderWCBracket();
-      if (tabId==="dec_leaderboard") return _renderDecathlonLeaderboard();
-      if (tabId==="dec_bylgue")      return _renderDecathlonByLeague();
+      if (tabId==="standings")     return _renderStandingsView();
+      if (tabId==="leaderboard")   return _renderLeaderboard();
+      if (tabId==="bracket")       return _renderBracket();
+      if (tabId==="league_champs") return _renderLeagueChamps();
+      if (tabId==="wc_bracket")    return _renderWCBracket();
       if (tabId.startsWith("round_"))   return _renderPointsRound(parseInt(tabId.split("_")[1]));
       if (tabId.startsWith("cround_"))  return _renderCustomRound(parseInt(tabId.split("_")[1]));
       if (tabId.startsWith("wcgroup_")) return _renderWCGroup(parseInt(tabId.split("_")[1]));
       return `<div class="trn-po-empty">Unknown tab.</div>`;
     };
 
+    // Async content renderer for tabs that need API fetches (decathlon week scores)
+    const _renderContentAsync = async (tabId) => {
+      if (tabId === "dec_leaderboard") return await _renderDecathlonLeaderboard();
+      if (tabId === "dec_bylgue")      return await _renderDecathlonByLeague();
+      return _renderContent(tabId);
+    };
+
+    const _setTabContent = async (tabId) => {
+      const el = document.getElementById("trn-po-content");
+      if (!el) return;
+      if (tabId.startsWith("dec_")) {
+        el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading…</div>`;
+        el.innerHTML = await _renderContentAsync(tabId);
+      } else {
+        el.innerHTML = _renderContent(tabId);
+      }
+      _wcWireBracketButtons();
+    };
+
     // ── Decathlon: Combined Standings ───────────────────────────────────────────
     // Build week-range score map from _weekScoreCache for decathlon PF filtering
-    const _buildDecWeekScoreMap = () => {
+    // Fetch week scores for all decathlon leagues across sw..ew,
+    // then build a { leagueId|teamId: sumPF } map for week-range filtering.
+    // This is async because _fetchWeekScores hits the Sleeper API.
+    const _buildDecWeekScoreMap = async () => {
       const sw = po.startWeek, ew = po.endWeek;
       if (!sw || !ew) return null;
-      const map = {}; // { leagueId|teamId: sumPF }
-      // Sum scores for weeks sw..ew from _weekScoreCache
-      for (let wk = sw; wk <= ew; wk++) {
-        Object.entries(_weekScoreCache).forEach(([cacheKey, teamMap]) => {
-          // cacheKey = leagueId+"|"+week
-          const [lid, wkStr] = cacheKey.split("|");
-          if (parseInt(wkStr) < sw || parseInt(wkStr) > ew) return;
+      // Collect all league IDs that appear in standingsCache for this year
+      const lgIds = new Set();
+      Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+        if (String(lc.year) !== String(activeY)) return;
+        lgIds.add(String(lc.leagueId || lc.league_id || ck));
+      });
+      if (!lgIds.size) return null;
+      // Fetch all weeks for all leagues in parallel
+      const weeks = [];
+      for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
+      await Promise.allSettled(
+        [...lgIds].flatMap(lid => weeks.map(wk => _fetchWeekScores(lid, wk)))
+      );
+      // Now sum from the populated cache
+      const map = {};
+      [...lgIds].forEach(lid => {
+        weeks.forEach(wk => {
+          const teamMap = _weekScoreCache[lid + "|" + wk] || {};
           Object.entries(teamMap).forEach(([teamId, score]) => {
             const k = lid + "|" + teamId;
             map[k] = (map[k] || 0) + (score || 0);
           });
         });
-      }
+      });
       return Object.keys(map).length ? map : null;
     };
 
-    const _renderDecathlonLeaderboard = () => {
-      const weekMap = _buildDecWeekScoreMap();
+    const _renderDecathlonLeaderboard = async () => {
+      const weekMap = await _buildDecWeekScoreMap();
       const { players, method, leagueNames, leagueConfig, ptsTable, hasWeekRange, startWk, endWk } = _buildDecathlonLeaderboard(t, activeY, po, weekMap);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet. Add leagues and sync standings to populate the leaderboard.</div>`;
 
@@ -15613,8 +15685,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     };
 
     // ── Decathlon: By League breakdown ───────────────────────────────────────────
-    const _renderDecathlonByLeague = () => {
-      const weekMap = _buildDecWeekScoreMap();
+    const _renderDecathlonByLeague = async () => {
+      const weekMap = await _buildDecWeekScoreMap();
       const { players, method, leagueNames, leagueConfig } = _buildDecathlonLeaderboard(t, activeY, po, weekMap);
       if (!players.length) return `<div class="trn-po-empty">No standings data yet.</div>`;
 
@@ -15683,8 +15755,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>
         ${isAdmin && mode==="custom_rounds" ? `<div id="trn-cr-matchup-panel"></div>` : ""}
         ${_tabBar(_poViewTab)}
-        <div id="trn-po-content">${_renderContent(_poViewTab)}</div>
+        <div id="trn-po-content"></div>
       </div>`;
+
+    // Render initial tab content (async-safe)
+    _setTabContent(_poViewTab);
 
     body.querySelectorAll(".trn-po-subtab-btn").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -15693,16 +15768,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
         const sel = document.getElementById("trn-po-tab-select");
         if (sel) sel.value = _poViewTab;
-        document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
-        _wcWireBracketButtons();
+        _setTabContent(_poViewTab);
       });
     });
     document.getElementById("trn-po-tab-select")?.addEventListener("change", function() {
       _poViewTab = this.value;
       body.querySelectorAll(".trn-po-subtab-btn").forEach(b =>
         b.classList.toggle("trn-po-subtab-btn--active", b.dataset.subtab===_poViewTab));
-      document.getElementById("trn-po-content").innerHTML = _renderContent(_poViewTab);
-      _wcWireBracketButtons();
+      _setTabContent(_poViewTab);
     });
 
     // ── World Cup bracket wiring ─────────────────────────────────────────────

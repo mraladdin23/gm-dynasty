@@ -2925,15 +2925,29 @@
         if (val) entry["custom_" + i] = val;
       }
 
-      // ── Pre-flight: check if already approved ─────────
-      // participantMap is in publicTournaments and already loaded in _currentT
+      // ── Pre-flight: year-scoped duplicate registration check ─────────
+      // Only block if the person has already registered for THIS specific year.
+      // Past participants from prior years (2025, etc.) must be able to register for 2026.
       const _norm = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
-      const pMap  = _currentT.participantMap || {};
-      const emailKey = _norm(entry.email       || "");
-      const nameKey  = _norm(entry.displayName || "");
-      if ((emailKey && pMap[emailKey]) || (nameKey && pMap[nameKey])) {
-        return _showError("✅ You're already an approved participant in this tournament! Check your email for your league invite.");
-      }
+      // Resolve the open registration year from the playoffs node
+      const _regYear = (() => {
+        const po2 = _currentT.playoffs || {};
+        const openYr2 = Object.keys(po2).find(k => /^\d{4}$/.test(k) && po2[k]?.registrationOpen);
+        return openYr2 ? String(openYr2) : String(_currentT.registrationYear || new Date().getFullYear());
+      })();
+      // Fetch current registrations and only check same-year entries
+      try {
+        const regSnap2 = await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations").once("value");
+        const allRegs2 = Object.values(regSnap2.val() || {});
+        const sameYearRegs2 = allRegs2.filter(r => r.year && String(r.year) === _regYear);
+        const checkE2 = (entry.email || "").trim().toLowerCase();
+        const checkN2 = (entry.displayName || "").trim().toLowerCase();
+        const dup2 = sameYearRegs2.find(r =>
+          (checkE2 && r.email?.toLowerCase() === checkE2) ||
+          (checkN2 && r.displayName?.toLowerCase() === checkN2)
+        );
+        if (dup2) return _showError(`You have already registered for ${_regYear}. Contact the admin if you need to update your info.`);
+      } catch(e) { /* non-fatal — don't block on fetch error */ }
 
       // ── Pre-flight: check localStorage guard (client-side duplicate prevention) ──
       // This catches the case where the Firebase write succeeded but the success screen
@@ -2951,6 +2965,7 @@
 
       try {
         const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        entry.year = _regYear; // tag every registration with the open year for future scoped checks
         await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
 
         // Mark submitted in localStorage so repeat clicks show a friendly message
