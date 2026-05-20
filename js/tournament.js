@@ -3744,9 +3744,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </p>
           ${(() => {
             const BASIS_OPTS = [
-              { val:"record",      label:"H2H Record",      icon:"📋", hint:"Wins/losses, PF tiebreak" },
-              { val:"median_wins", label:"Median Wins",      icon:"📊", hint:"Beat the weekly median score = +1 win; PF tiebreak" },
-              { val:"pf",          label:"Total Points",     icon:"🎯", hint:"Highest PF in week range = 1st" },
+              { val:"record",      label:"H2H Record",      icon:"📋", hint:"Wins/losses, PF tiebreak. Optionally add median wins below." },
+              { val:"pf",          label:"Total Points",     icon:"🎯", hint:"Sum points scored. Set week range per league below." },
               { val:"playoffs",    label:"League Playoffs",  icon:"🏆", hint:"Post-playoff record; sync after playoffs" },
               { val:"elimination", label:"Elimination",      icon:"☠️", hint:"Weekly knockout; set elimination week below" },
             ];
@@ -3790,6 +3789,37 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                           ${opt.icon} ${opt.label}
                         </button>`).join("")}
                     </div>
+
+                    <!-- H2H Record sub-option: median wins toggle -->
+                    <div class="trn-dec-record-row" id="trn-dec-record-row-${_esc(lgId)}"
+                      style="display:${curBasis==="record"?"flex":"none"};align-items:center;gap:var(--space-3);margin-top:var(--space-2);flex-wrap:wrap">
+                      <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;cursor:pointer">
+                        <input type="checkbox" class="trn-dec-median-chk" data-lg="${_esc(lgId)}"
+                          ${lgCfg.medianWins?"checked":""}
+                          style="accent-color:var(--color-gold)" />
+                        <span>Use <strong>median wins</strong> instead of H2H record</span>
+                      </label>
+                      <span style="font-size:.75rem;color:var(--color-text-dim)">Beat weekly median score = +1 win; PF tiebreak</span>
+                    </div>
+
+                    <!-- PF sub-option: per-league week range -->
+                    <div class="trn-dec-pf-row" id="trn-dec-pf-row-${_esc(lgId)}"
+                      style="display:${curBasis==="pf"?"flex":"none"};align-items:center;gap:var(--space-3);margin-top:var(--space-2);flex-wrap:wrap">
+                      <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:.78rem">Start Week</label>
+                        <input type="number" class="trn-dec-pf-start" data-lg="${_esc(lgId)}"
+                          min="1" max="18" value="${lgCfg.pfStartWeek||po.startWeek||""}" placeholder="${po.startWeek||1}"
+                          style="width:60px;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                      </div>
+                      <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:.78rem">End Week</label>
+                        <input type="number" class="trn-dec-pf-end" data-lg="${_esc(lgId)}"
+                          min="1" max="18" value="${lgCfg.pfEndWeek||po.endWeek||""}" placeholder="${po.endWeek||16}"
+                          style="width:60px;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                      </div>
+                      <span style="font-size:.75rem;color:var(--color-text-dim)">Sum points scored in these weeks only</span>
+                    </div>
+
                     <div class="trn-dec-elim-row" id="trn-dec-elim-row-${_esc(lgId)}"
                       style="display:${curBasis==="elimination"?"":"none"};margin-top:var(--space-3)">
                       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);margin-bottom:var(--space-2)">
@@ -4934,15 +4964,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     // Per-league basis buttons
-    const BASIS_LABELS = { record:"📋 H2H Record", median_wins:"📊 Median Wins", pf:"🎯 Total Points", playoffs:"🏆 League Playoffs", elimination:"☠️ Elimination" };
+    const BASIS_LABELS = { record:"📋 H2H Record", pf:"🎯 Total Points", playoffs:"🏆 League Playoffs", elimination:"☠️ Elimination" };
     document.querySelectorAll(".trn-dec-basis-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const lgId  = btn.dataset.lg;
         const basis = btn.dataset.basis;
         document.querySelectorAll(`.trn-dec-basis-btn[data-lg="${lgId}"]`).forEach(b =>
           b.classList.toggle("trn-dec-basis-btn--active", b.dataset.basis === basis));
-        const elimRow = document.getElementById(`trn-dec-elim-row-${lgId}`);
-        if (elimRow) elimRow.style.display = basis === "elimination" ? "flex" : "none";
+        // Show/hide sub-option rows for this league
+        const elimRow   = document.getElementById(`trn-dec-elim-row-${lgId}`);
+        const recordRow = document.getElementById(`trn-dec-record-row-${lgId}`);
+        const pfRow     = document.getElementById(`trn-dec-pf-row-${lgId}`);
+        if (elimRow)   elimRow.style.display   = basis === "elimination" ? ""     : "none";
+        if (recordRow) recordRow.style.display = basis === "record"      ? "flex" : "none";
+        if (pfRow)     pfRow.style.display     = basis === "pf"          ? "flex" : "none";
         const lbl = document.getElementById(`trn-dec-basis-label-${lgId}`);
         if (lbl) lbl.textContent = BASIS_LABELS[basis] || basis;
       });
@@ -5003,16 +5038,21 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const lgId = card.dataset.lgId;
         const activeBtn = card.querySelector(".trn-dec-basis-btn--active");
         const basis = activeBtn?.dataset.basis || "record";
-        const elimWk    = parseInt(card.querySelector(".trn-dec-elim-wk")?.value)    || null;
-        const phase1End = parseInt(card.querySelector(".trn-dec-elim-phase1")?.value) || null;
+        const elimWk    = parseInt(card.querySelector(".trn-dec-elim-wk")?.value)     || null;
+        const phase1End = parseInt(card.querySelector(".trn-dec-elim-phase1")?.value)  || null;
+        const medChk    = card.querySelector(".trn-dec-median-chk")?.checked           || false;
+        const pfStart   = parseInt(card.querySelector(".trn-dec-pf-start")?.value)     || null;
+        const pfEnd     = parseInt(card.querySelector(".trn-dec-pf-end")?.value)       || null;
         // Preserve existing eliminations list — don't overwrite from config save
-        const _curPo = _poLocal();
-        const existingCfg = ((_curPo?.decathlon?.leagueConfig)||{})[lgId] || {};
+        const existingDecathlon = ((_poLocal()?.decathlon?.leagueConfig)||{})[lgId] || {};
         leagueConfig[lgId] = {
           finishBasis: basis,
-          ...(basis === "elimination" && elimWk    ? { eliminationStartWeek: elimWk }    : {}),
-          ...(basis === "elimination" && phase1End  ? { cumulativeEndWeek:    phase1End } : {}),
-          ...(existingCfg.eliminations?.length      ? { eliminations: existingCfg.eliminations } : {}),
+          ...(basis === "record"      ? { medianWins: medChk }                             : {}),
+          ...(basis === "pf"          && pfStart ? { pfStartWeek: pfStart }                : {}),
+          ...(basis === "pf"          && pfEnd   ? { pfEndWeek:   pfEnd   }                : {}),
+          ...(basis === "elimination" && elimWk    ? { eliminationStartWeek: elimWk }      : {}),
+          ...(basis === "elimination" && phase1End  ? { cumulativeEndWeek:    phase1End }  : {}),
+          ...(existingDecathlon.eliminations?.length ? { eliminations: existingDecathlon.eliminations } : {}),
         };
       });
 
@@ -13382,9 +13422,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const sorted = [...teams];
     if (basis === "pf" || basis === "elimination") {
       sorted.sort((a,b) => (b.pf||0) - (a.pf||0));
-    } else if (basis === "median_wins") {
-      // No week-range data available — proxy with standingsCache wins
-      sorted.sort((a,b) => (b.wins||0) - (a.wins||0) || (b.pf||0) - (a.pf||0));
     } else if (basis === "playoffs") {
       // Playoffs: total wins (includes playoff games if synced), PF tiebreak
       sorted.sort((a,b) =>
@@ -13437,20 +13474,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const lgName = lc.leagueName || ck;
       if (!leagueMap[lgId]) leagueMap[lgId] = { leagueName: lgName, lgId, teams: [] };
       (lc.teams||[]).forEach(tm => {
-        // If we have a week-score map, compute ranged PF; otherwise use standingsCache pf
+        // rangedPF: sum of points scored in the configured week range (per-league for PF basis,
+        // global range for others). Falls back to full-season pf if no week data was fetched.
         const _pfKey   = lgId + "|" + String(tm.teamId);
-        const _pfHit   = hasWeekRange ? pfMap[_pfKey] : undefined;
-        if (hasWeekRange && _pfHit == null && tm.teamId) {
-          // Log first miss per league to diagnose key format mismatch
-          if (!window._decPfMissLogged) window._decPfMissLogged = {};
-          if (!window._decPfMissLogged[lgId]) {
-            console.warn("[decathlon] pfMap MISS for key:", _pfKey, "| sample pfMap keys:", Object.keys(pfMap).slice(0,3));
-            window._decPfMissLogged[lgId] = true;
-          }
-        }
-        const rangedPF = hasWeekRange
-          ? (_pfHit ?? (tm.pf || 0))
-          : (tm.pf || 0);
+        const _pfHit   = pfMap ? pfMap[_pfKey] : null;
+        const rangedPF = _pfHit != null ? _pfHit : (tm.pf || 0);
         // Ranged W/L from H2H matchup data; ranged median wins from median computation
         const wlKey     = lgId + "|" + String(tm.teamId);
         const rangedWL  = (hasWeekRange && wlMap   && wlMap[wlKey])  ? wlMap[wlKey]  : null;
@@ -13552,23 +13580,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
           lg.teams = sortedTeams;
         }
-      } else if (basis === "pf" && hasWeekRange) {
-        // PF-basis within week range: sort by rangedPF
-        const sortedTeams = [...lg.teams].sort((a,b) => (b.rangedPF||0) - (a.rangedPF||0));
+      } else if (basis === "pf") {
+        // PF-basis: sort by rangedPF (which was computed from per-league pfStartWeek..pfEndWeek)
+        // Falls back to full-season pf if no rangedPF data available
+        const sortedTeams = [...lg.teams].sort((a,b) =>
+          (b.rangedPF != null ? b.rangedPF : b.pf||0) - (a.rangedPF != null ? a.rangedPF : a.pf||0));
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
-      } else if (basis === "median_wins" && hasWeekRange && medMap) {
-        // Median wins in week range: beat weekly median = +1 win; rangedPF tiebreak
+      } else if (basis === "record" && lgCfg.medianWins && hasWeekRange && medMap) {
+        // Record with median wins sub-option: beat weekly median = +1 win; rangedPF tiebreak
         const sortedTeams = [...lg.teams].sort((a,b) => {
-          const aw = a.rangedMedWins ?? 0, bw = b.rangedMedWins ?? 0;
+          const aw = a.rangedMedWins ?? (a.wins||0), bw = b.rangedMedWins ?? (b.wins||0);
           return (bw - aw) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
         });
-        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
-        lg.teams = sortedTeams;
-      } else if (basis === "median_wins") {
-        // Fallback when no week-range data: use standingsCache wins, PF tiebreak
-        const sortedTeams = [...lg.teams].sort((a,b) =>
-          (b.wins||0) - (a.wins||0) || (b.pf||0) - (a.pf||0));
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
       } else if ((basis === "record" || basis === "playoffs") && hasWeekRange && wlMap) {
@@ -15787,27 +15811,41 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // then build a { leagueId|teamId: sumPF } map for week-range filtering.
     // This is async because _fetchWeekScores hits the Sleeper API.
     const _buildDecWeekScoreMap = async () => {
-      const sw = po.startWeek, ew = po.endWeek;
-      if (!sw || !ew) return null;
-      // Collect all league IDs for this year
-      const lgIds = new Set();
+      const globalSw = po.startWeek, globalEw = po.endWeek;
+      // Collect leagues and their individual week ranges
+      // PF-basis leagues use pfStartWeek/pfEndWeek from leagueConfig if set
+      const decCfg     = po.decathlon || {};
+      const lgCfgMap   = decCfg.leagueConfig || {};
+      const lgWeekRanges = {}; // lgId → { sw, ew }
       Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
         if (String(lc.year) !== String(activeY)) return;
-        lgIds.add(String(lc.leagueId || lc.league_id || ck));
+        const lgId   = String(lc.leagueId || lc.league_id || ck);
+        const lgConf = lgCfgMap[lgId] || {};
+        const basis  = lgConf.finishBasis || "record";
+        if (basis === "pf") {
+          // Use per-league week range, fallback to global
+          const sw = lgConf.pfStartWeek || globalSw;
+          const ew = lgConf.pfEndWeek   || globalEw;
+          if (sw && ew) lgWeekRanges[lgId] = { sw, ew };
+        } else {
+          // H2H record, median, playoffs all use global week range
+          if (globalSw && globalEw) lgWeekRanges[lgId] = { sw: globalSw, ew: globalEw };
+        }
       });
-      if (!lgIds.size) return null;
-      const weeks = [];
-      for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
-      // Fetch all week matchup data in parallel — this populates both
-      // _weekScoreCache (points) and _weekMatchupCache (full matchup rows)
-      await Promise.allSettled(
-        [...lgIds].flatMap(lid => weeks.map(wk => _fetchWeekScores(lid, wk)))
-      );
+      if (!Object.keys(lgWeekRanges).length) return null;
+      // Fetch all needed league+week combos in parallel
+      const fetchList = [];
+      Object.entries(lgWeekRanges).forEach(([lid, { sw, ew }]) => {
+        for (let wk = sw; wk <= ew; wk++) fetchList.push({ lid, wk });
+      });
+      await Promise.allSettled(fetchList.map(({ lid, wk }) => _fetchWeekScores(lid, wk)));
       // Build ranged PF map: { leagueId|teamId: sumPF }
       const pfMap = {};
       // Build ranged W/L map: { leagueId|teamId: { wins, losses } }
       const wlMap = {};
-      [...lgIds].forEach(lid => {
+      Object.entries(lgWeekRanges).forEach(([lid, { sw, ew }]) => {
+        const weeks = [];
+        for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
         weeks.forEach(wk => {
           const cacheKey  = lid + "|" + wk;
           const teamMap   = _weekScoreCache[cacheKey]  || {};
@@ -15848,8 +15886,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       });
       // Build median-wins map: beat the weekly median score in your league = +1 win
       const medMap = {};
-      [...lgIds].forEach(lid => {
-        weeks.forEach(wk => {
+      Object.entries(lgWeekRanges).forEach(([lid, { sw: msw, ew: mew }]) => {
+        for (let wk = msw; wk <= mew; wk++) {
           const matchups = _weekMatchupCache[lid + "|" + wk] || [];
           if (!matchups.length) return;
           const allScores = matchups.map(m => m.points || 0);
@@ -15865,8 +15903,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             if ((m.points || 0) > median) medMap[k].wins++;
             else                           medMap[k].losses++;
           });
-        });
-      });
+        } // end for wk
+      }); // end lgWeekRanges.forEach
 
       if (!Object.keys(pfMap).length) return null;
       return { pfMap, wlMap, medMap };
