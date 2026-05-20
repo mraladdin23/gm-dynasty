@@ -5046,37 +5046,49 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // Stored in reverse finish order: index 0 = eliminated first = worst finish.
   // Finish rank = (totalPlayers - index). Last in array = champion = finish #1.
   function _openEliminationManager(tid, t, lgId, lgName, lgCfg) {
-    const eliminations    = Array.isArray(lgCfg.eliminations) ? [...lgCfg.eliminations] : [];
-    const elimStartWk     = lgCfg.eliminationStartWeek || null;
-    const phase1End       = lgCfg.cumulativeEndWeek    || null;
+    const eliminations = Array.isArray(lgCfg.eliminations) ? [...lgCfg.eliminations] : [];
+    const elimStartWk  = lgCfg.eliminationStartWeek || null;
+    const phase1End    = lgCfg.cumulativeEndWeek    || null;
 
     // Get all players in this league from standingsCache
     const yr = String(_tournamentYear || _activePoYear || new Date().getFullYear());
     const leaguePlayers = [];
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== yr) return;
-      const lid = String(lc.leagueId || lc.league_id || ck);
+      const rawLid = String(lc.leagueId || lc.league_id || "");
+      const lid = rawLid || ck.replace(/^\d{4}_/, "");
       if (lid !== lgId) return;
       (lc.teams || []).forEach(tm => {
         leaguePlayers.push({
           id:   String(tm.teamId || tm.rosterId || ""),
           name: tm.teamName || tm.rawTeamName || "",
+          pf:   tm.pf || 0,
         });
       });
     });
 
-    // Track which players have been eliminated (to exclude from future dropdowns)
     const eliminatedIds = new Set(eliminations.map(e => e.playerId).filter(Boolean));
+
+    // Work out the next week to enter based on last recorded week + 1
+    function _nextWeek() {
+      if (!eliminations.length) return elimStartWk || null;
+      return (eliminations[eliminations.length - 1].week || elimStartWk || 1);
+    }
+
+    // True if the given week is within Phase 1 (cumulative PF scoring)
+    function _isPhase1(wk) {
+      return phase1End && wk && Number(wk) <= Number(phase1End);
+    }
 
     function _renderRows() {
       if (!eliminations.length) {
-        return `<div class="trn-elim-empty">No knockouts recorded yet. Add the first eliminated player below.</div>`;
+        return `<div class="trn-elim-empty">No knockouts recorded yet. Use "Suggest Next" or pick manually below.</div>`;
       }
       return eliminations.map((e, idx) => {
         const finishPos = leaguePlayers.length - idx;
+        const medal     = finishPos === 1 ? "🥇" : finishPos === 2 ? "🥈" : finishPos === 3 ? "🥉" : "";
         const isFirst   = idx === 0;
         const isLast    = idx === eliminations.length - 1;
-        const medal     = finishPos === 1 ? "🥇" : finishPos === 2 ? "🥈" : finishPos === 3 ? "🥉" : "";
         return `
           <div class="trn-elim-row" data-idx="${idx}">
             <div class="trn-elim-row-pos">${medal || "#" + finishPos}</div>
@@ -5084,13 +5096,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               <div class="trn-elim-row-name">${_esc(e.playerName || e.playerId || "Unknown")}</div>
               <div class="trn-elim-row-detail">
                 Wk ${e.week || "?"}
-                ${e.note ? ` · ${_esc(e.note)}` : ""}
                 ${e.score != null ? ` · ${Number(e.score).toFixed(2)} pts` : ""}
+                ${e.note ? ` · ${_esc(e.note)}` : ""}
               </div>
             </div>
             <div class="trn-elim-row-actions">
-              ${!isFirst ? `<button class="btn-ghost btn-xs trn-elim-move-up" data-idx="${idx}" title="Move up">↑</button>` : ""}
-              ${!isLast  ? `<button class="btn-ghost btn-xs trn-elim-move-dn" data-idx="${idx}" title="Move down">↓</button>` : ""}
+              ${!isFirst ? `<button class="btn-ghost btn-xs trn-elim-move-up" data-idx="${idx}" title="Move up (better finish)">↑</button>` : ""}
+              ${!isLast  ? `<button class="btn-ghost btn-xs trn-elim-move-dn" data-idx="${idx}" title="Move down (worse finish)">↓</button>` : ""}
               <button class="btn-ghost btn-xs trn-elim-del" data-idx="${idx}" title="Remove">✕</button>
             </div>
           </div>`;
@@ -5102,63 +5114,82 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     }
 
     function _modalHTML() {
-      const available = _availablePlayers();
-      const phase1Note = phase1End
-        ? `Phase 1 (cumulative PF, wks 1–${phase1End}): first elimination at wk ${elimStartWk || "?"}`
-        : elimStartWk ? `Elimination starts week ${elimStartWk}` : "Set elimination start week in config";
+      const available  = _availablePlayers();
+      const nextWk     = _nextWeek();
+      // The suggest week is always nextWk (same week for phase 1, next week for phase 2+)
+      const suggestWk  = nextWk;
+      const inPhase1   = _isPhase1(suggestWk);
+      const phaseNote  = phase1End
+        ? `Phase 1 (wks 1–${phase1End}): eliminated by lowest <strong>cumulative PF</strong>. Phase 2 (wk ${Number(phase1End)+1}+): eliminated by lowest <strong>single-week score</strong>.`
+        : elimStartWk ? `Elimination starts week ${elimStartWk}. Lowest score each week is eliminated.` : "Set elimination start week in config first.";
 
       return `
         <div class="modal-header">
           <h3>☠️ ${_esc(lgName)} — Weekly Knockouts</h3>
           <button class="modal-close" id="trn-elim-close">✕</button>
         </div>
-        <div class="modal-body" style="max-height:62vh;overflow-y:auto;padding:var(--space-4)">
-          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">${_esc(phase1Note)}</p>
-          <p style="font-size:.78rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
-            List players from <strong>first eliminated (bottom finish) to last eliminated (champion)</strong>.
-            Use ↑↓ to reorder if you made a mistake. The position shown = finish rank in this league.
-          </p>
+        <div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:var(--space-4)">
+          <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">${phaseNote}</p>
 
-          <!-- Existing knockouts -->
-          <div id="trn-elim-rows-container">${_renderRows()}</div>
+          <!-- Recorded eliminations (worst finish first, champion last) -->
+          <div style="margin-bottom:var(--space-3)">
+            <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">
+              Knockout List — first listed = worst finish
+            </div>
+            <div id="trn-elim-rows-container">${_renderRows()}</div>
+          </div>
 
           ${available.length ? `
-          <!-- Add next knockout -->
+          <!-- Suggest + manual add -->
           <div class="trn-elim-add-row">
-            <div class="trn-section-card-title" style="margin-bottom:var(--space-2)">
-              Add Next Knockout
-              <span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim)">
-                (finish position #${leaguePlayers.length - eliminations.length})
-              </span>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3);flex-wrap:wrap;gap:var(--space-2)">
+              <div class="trn-section-card-title" style="margin-bottom:0">
+                Add Next Knockout
+                <span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim)">
+                  · finish position #${leaguePlayers.length - eliminations.length}
+                </span>
+              </div>
+              <button class="btn-secondary btn-sm" id="trn-elim-suggest-btn"
+                title="Fetch scores from Sleeper and suggest who scored lowest">
+                🎯 Suggest from Sleeper (wk ${suggestWk || "?"})
+              </button>
             </div>
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:flex-end">
-              <div class="form-group" style="margin-bottom:0;flex:1;min-width:120px">
-                <label>Player</label>
+
+            <!-- Suggest result banner -->
+            <div id="trn-elim-suggest-result" style="display:none;padding:var(--space-2) var(--space-3);
+              background:rgba(240,180,41,.08);border:1px solid var(--color-gold);border-radius:var(--radius-md);
+              font-size:.82rem;margin-bottom:var(--space-3)"></div>
+
+            <div style="display:grid;grid-template-columns:1fr auto auto;gap:var(--space-2);align-items:end">
+              <div class="form-group" style="margin-bottom:0">
+                <label>Eliminated player</label>
                 <select id="trn-elim-add-player" class="trn-filter-select" style="width:100%">
-                  <option value="">— select —</option>
+                  <option value="">— select player —</option>
                   ${available.map(p => `<option value="${_esc(p.id)}" data-name="${_esc(p.name)}">${_esc(p.name)}</option>`).join("")}
                 </select>
               </div>
-              <div class="form-group" style="margin-bottom:0;width:70px">
+              <div class="form-group" style="margin-bottom:0">
                 <label>Week</label>
                 <input type="number" id="trn-elim-add-week" min="1" max="18"
-                  value="${elimStartWk || ""}" placeholder="wk"
-                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                  value="${suggestWk || ""}" placeholder="wk"
+                  style="width:65px;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
               </div>
-              <div class="form-group" style="margin-bottom:0;width:80px">
-                <label>Score</label>
-                <input type="number" id="trn-elim-add-score" min="0" step="0.01" placeholder="opt."
-                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+              <div class="form-group" style="margin-bottom:0">
+                <label>Score <span style="font-weight:400;color:var(--color-text-dim)">(opt.)</span></label>
+                <input type="number" id="trn-elim-add-score" min="0" step="0.01" placeholder="—"
+                  style="width:80px;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
               </div>
-              <div class="form-group" style="margin-bottom:0;flex:2;min-width:120px">
-                <label>Note <span style="font-weight:400;color:var(--color-text-dim)">(optional)</span></label>
-                <input type="text" id="trn-elim-add-note" placeholder="e.g. Lowest cumulative PF"
-                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem;box-sizing:border-box" />
-              </div>
-              <button class="btn-primary btn-sm" id="trn-elim-add-btn" style="flex-shrink:0">+ Add</button>
             </div>
+            <div class="form-group" style="margin-top:var(--space-2);margin-bottom:var(--space-3)">
+              <label>Note <span style="font-weight:400;color:var(--color-text-dim)">(optional)</span></label>
+              <input type="text" id="trn-elim-add-note"
+                placeholder="${inPhase1 ? `Lowest cumulative PF wks 1–${phase1End}` : `Lowest score wk ${suggestWk||"?"}`}"
+                style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem;box-sizing:border-box" />
+            </div>
+            <button class="btn-primary btn-sm" id="trn-elim-add-btn">+ Confirm Elimination</button>
           </div>` : `
-          <div style="padding:var(--space-3);background:rgba(240,180,41,.06);border:1px solid var(--color-gold);border-radius:var(--radius-md);font-size:.85rem;color:var(--color-gold);margin-top:var(--space-3)">
+          <div style="padding:var(--space-3);background:rgba(240,180,41,.06);border:1px solid var(--color-gold);
+            border-radius:var(--radius-md);font-size:.85rem;color:var(--color-gold);margin-top:var(--space-3)">
             ✓ All ${leaguePlayers.length} players have been recorded. The last entry is the league champion.
           </div>`}
         </div>
@@ -5208,6 +5239,112 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           eliminations.splice(i, 1);
           _refresh();
         });
+      });
+
+      // Suggest next elimination from Sleeper scores
+      document.getElementById("trn-elim-suggest-btn")?.addEventListener("click", async () => {
+        const btn    = document.getElementById("trn-elim-suggest-btn");
+        const result = document.getElementById("trn-elim-suggest-result");
+        const wkInput = document.getElementById("trn-elim-add-week");
+        const week   = parseInt(wkInput?.value) || null;
+        if (!week) { showToast("Enter a week number first", "error"); return; }
+        if (!lgId)  { showToast("League ID missing", "error"); return; }
+
+        if (btn) { btn.disabled = true; btn.textContent = "Fetching…"; }
+        if (result) result.style.display = "none";
+
+        try {
+          const available = _availablePlayers();
+          const activeIds = new Set(available.map(p => p.id));
+          const inPhase1  = _isPhase1(week);
+
+          let scores = {}; // { playerId: score }
+
+          if (inPhase1 && phase1End) {
+            // Phase 1: cumulative PF across weeks 1..week (or 1..phase1End)
+            const endWk = Math.min(week, phase1End);
+            const fetches = [];
+            for (let wk = 1; wk <= endWk; wk++) {
+              fetches.push(
+                fetch(`https://api.sleeper.app/v1/league/${lgId}/matchups/${wk}`)
+                  .then(r => r.ok ? r.json() : []).catch(() => [])
+              );
+            }
+            const weekData = await Promise.all(fetches);
+            weekData.forEach(matchups => {
+              (matchups || []).forEach(m => {
+                if (!m.roster_id) return;
+                const pid = String(m.roster_id);
+                if (!activeIds.has(pid)) return;
+                scores[pid] = (scores[pid] || 0) + (m.points || 0);
+              });
+            });
+          } else {
+            // Phase 2+: single week score
+            const matchups = await fetch(`https://api.sleeper.app/v1/league/${lgId}/matchups/${week}`)
+              .then(r => r.ok ? r.json() : []).catch(() => []);
+            (matchups || []).forEach(m => {
+              if (!m.roster_id) return;
+              const pid = String(m.roster_id);
+              if (!activeIds.has(pid)) return;
+              scores[pid] = m.points || 0;
+            });
+          }
+
+          if (!Object.keys(scores).length) {
+            if (result) {
+              result.style.display = "";
+              result.innerHTML = `⚠️ No scores found for week ${week}. The week may not have played yet, or the league ID may be wrong.`;
+            }
+            return;
+          }
+
+          // Sort active players by score ascending — lowest score = eliminated
+          const ranked = available
+            .filter(p => scores[p.id] != null)
+            .sort((a,b) => (scores[a.id] || 0) - (scores[b.id] || 0));
+
+          if (!ranked.length) {
+            if (result) {
+              result.style.display = "";
+              result.innerHTML = `⚠️ Couldn't match scores to active players. Check that standingsCache is synced.`;
+            }
+            return;
+          }
+
+          const loser = ranked[0];
+          const loserScore = (scores[loser.id] || 0).toFixed(2);
+          const scoreType = inPhase1 ? `cumulative PF wks 1–${phase1End}` : `wk ${week} score`;
+
+          // Pre-fill the form
+          const sel = document.getElementById("trn-elim-add-player");
+          if (sel) sel.value = loser.id;
+          const scoreInput = document.getElementById("trn-elim-add-score");
+          if (scoreInput) scoreInput.value = loserScore;
+          const noteInput = document.getElementById("trn-elim-add-note");
+          if (noteInput && !noteInput.value) {
+            noteInput.value = `Lowest ${scoreType}: ${loserScore} pts`;
+          }
+
+          // Show ranked list as context
+          const rankRows = ranked.map((p, i) => {
+            const s = (scores[p.id] || 0).toFixed(2);
+            return `<span style="color:${i===0?"var(--color-red)":"var(--color-text-dim)"}">
+              ${i===0?"🔴":"·"} ${_esc(p.name)}: ${s}
+            </span>`;
+          }).join(" &nbsp;");
+
+          if (result) {
+            result.style.display = "";
+            result.innerHTML = `
+              <strong>Suggested: ${_esc(loser.name)}</strong> (lowest ${scoreType}: ${loserScore} pts)<br>
+              <span style="font-size:.75rem;color:var(--color-text-dim)">${rankRows}</span>`;
+          }
+        } catch(e) {
+          if (result) { result.style.display = ""; result.innerHTML = `⚠️ Error: ${_esc(e.message)}`; }
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = `🎯 Suggest from Sleeper (wk ${parseInt(wkInput?.value)||"?"})`; }
+        }
       });
 
       // Add next knockout
