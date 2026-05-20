@@ -13261,18 +13261,22 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     return sorted;
   }
 
-  function _buildDecathlonLeaderboard(t, year, po, weekScoreMap) {
-    // weekScoreMap: optional { [leagueId+"|"+teamId]: weeklyPF } for week-range PF filtering.
-    // When provided, Combined PF and pf-basis leagues use it instead of standingsCache .pf.
+  function _buildDecathlonLeaderboard(t, year, po, weekData) {
+    // weekData: optional { pfMap, wlMap } from _buildDecWeekScoreMap.
+    //   pfMap: { leagueId+"|"+teamId: sumPF }     — points scored in week range
+    //   wlMap: { leagueId+"|"+teamId: {wins,losses} } — H2H record in week range
+    // ALL finish-basis types (record, pf, playoffs) use week-range data when available.
     const yr           = String(year);
     const decConfig    = po.decathlon || {};
     const identityKey  = decConfig.identityKey  || "sleeperUsername";
     const method       = decConfig.scoringMethod || "combined_pf";
     const ptsTable     = Array.isArray(decConfig.pointsTable) ? decConfig.pointsTable : [10,8,6,5,4,3,2,1];
-    const leagueConfig = decConfig.leagueConfig  || {}; // { [lgId]: { finishBasis, eliminationStartWeek } }
+    const leagueConfig = decConfig.leagueConfig  || {};
     const startWk      = po.startWeek || null;
     const endWk        = po.endWeek   || null;
-    const hasWeekRange = !!(startWk && endWk && weekScoreMap);
+    const pfMap        = weekData?.pfMap || null;
+    const wlMap        = weekData?.wlMap || null;
+    const hasWeekRange = !!(startWk && endWk && pfMap);
 
     // Participant display name + gender maps
     const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
@@ -13295,9 +13299,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       (lc.teams||[]).forEach(tm => {
         // If we have a week-score map, compute ranged PF; otherwise use standingsCache pf
         const rangedPF = hasWeekRange
-          ? (weekScoreMap[lgId + "|" + String(tm.teamId)] ?? (tm.pf || 0))
+          ? (pfMap[lgId + "|" + String(tm.teamId)] ?? (tm.pf || 0))
           : (tm.pf || 0);
-        leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId, rangedPF });
+        // Ranged wins/losses from H2H matchup data (only for record-basis leagues)
+        const wlKey    = lgId + "|" + String(tm.teamId);
+        const rangedWL = (hasWeekRange && wlMap && wlMap[wlKey]) ? wlMap[wlKey] : null;
+        leagueMap[lgId].teams.push({ ...tm, leagueName: lgName, leagueId: lgId, rangedPF, rangedWins: rangedWL?.wins ?? null, rangedLosses: rangedWL?.losses ?? null });
       });
     });
 
@@ -13389,11 +13396,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
           lg.teams = sortedTeams;
         }
-      } else if ((basis === "pf") && hasWeekRange) {
+      } else if (basis === "pf" && hasWeekRange) {
+        // PF-basis within week range: sort by rangedPF
         const sortedTeams = [...lg.teams].sort((a,b) => (b.rangedPF||0) - (a.rangedPF||0));
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
+      } else if ((basis === "record" || basis === "playoffs") && hasWeekRange && wlMap) {
+        // Record/playoffs basis within week range: use H2H record from matchup data
+        // This correctly captures only weeks startWk–endWk
+        const sortedTeams = [...lg.teams].sort((a,b) => {
+          const aW = a.rangedWins  ?? (a.wins  || 0);
+          const aL = a.rangedLosses ?? (a.losses || 0);
+          const bW = b.rangedWins  ?? (b.wins  || 0);
+          const bL = b.rangedLosses ?? (b.losses || 0);
+          return ((bW - bL) - (aW - aL)) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
+        });
+        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+        lg.teams = sortedTeams;
       } else {
+        // No week range or no matchup data — use full-season standingsCache values
         const sortedTeams = _decSortByBasis(lg.teams, basis);
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
@@ -13420,18 +13441,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const p    = playerMap[idk];
         const rank = tm._leagueRank;
         const pts  = method === "finish_points" ? (ptsTable[rank - 1] ?? 0) : 0;
-        // Use rangedPF for combined PF leaderboard total
-        const pfForTotal = hasWeekRange ? (tm.rangedPF || 0) : (tm.pf || 0);
+        // Use rangedPF for combined PF leaderboard total when week range is active
+        const pfForTotal = (hasWeekRange && tm.rangedPF != null) ? tm.rangedPF : (tm.pf || 0);
 
         p.leagues.push({
-          leagueName:  lg.leagueName,
-          leagueId:    tm.leagueId,
-          finishBasis: lg.finishBasis,
+          leagueName:   lg.leagueName,
+          leagueId:     tm.leagueId,
+          finishBasis:  lg.finishBasis,
           rank,
-          wins:    tm.wins   || 0,
-          losses:  tm.losses || 0,
-          pf:      tm.pf     || 0,
-          rangedPF: tm.rangedPF || 0,
+          wins:         tm.wins         || 0,
+          losses:       tm.losses       || 0,
+          pf:           tm.pf           || 0,
+          rangedPF:     tm.rangedPF     || 0,
+          rangedWins:   tm.rangedWins   ?? null,
+          rangedLosses: tm.rangedLosses ?? null,
           points:  pts,
         });
         p.totalPF     += pfForTotal;
@@ -14132,7 +14155,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const regSeasonWeeks = po.startWeek ? (po.startWeek - 1) : null;
 
     // Cache for fetched weekly scores: "leagueId|week" → {rosterId: score}
-    const _weekScoreCache = {};
+    const _weekScoreCache  = {};
+    const _weekMatchupCache = {}; // { leagueId+"|"+week: [{roster_id, matchup_id, points}] }
     const _fetchWeekScores = async (leagueId, week) => {
       const key = leagueId + "|" + week;
       if (_weekScoreCache[key]) return _weekScoreCache[key];
@@ -14142,7 +14166,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const data = await r.json();
         const map = {};
         (data || []).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
-        _weekScoreCache[key] = map;
+        _weekScoreCache[key]   = map;
+        _weekMatchupCache[key] = data || []; // preserve full matchup data for H2H record computation
         return map;
       } catch(e) { return {}; }
     };
@@ -15590,31 +15615,65 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const _buildDecWeekScoreMap = async () => {
       const sw = po.startWeek, ew = po.endWeek;
       if (!sw || !ew) return null;
-      // Collect all league IDs that appear in standingsCache for this year
+      // Collect all league IDs for this year
       const lgIds = new Set();
       Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
         if (String(lc.year) !== String(activeY)) return;
         lgIds.add(String(lc.leagueId || lc.league_id || ck));
       });
       if (!lgIds.size) return null;
-      // Fetch all weeks for all leagues in parallel
       const weeks = [];
       for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
+      // Fetch all week matchup data in parallel — this populates both
+      // _weekScoreCache (points) and _weekMatchupCache (full matchup rows)
       await Promise.allSettled(
         [...lgIds].flatMap(lid => weeks.map(wk => _fetchWeekScores(lid, wk)))
       );
-      // Now sum from the populated cache
-      const map = {};
+      // Build ranged PF map: { leagueId|teamId: sumPF }
+      const pfMap = {};
+      // Build ranged W/L map: { leagueId|teamId: { wins, losses } }
+      const wlMap = {};
       [...lgIds].forEach(lid => {
         weeks.forEach(wk => {
-          const teamMap = _weekScoreCache[lid + "|" + wk] || {};
+          const cacheKey  = lid + "|" + wk;
+          const teamMap   = _weekScoreCache[cacheKey]  || {};
+          const matchups  = _weekMatchupCache[cacheKey] || [];
+
+          // Accumulate PF
           Object.entries(teamMap).forEach(([teamId, score]) => {
             const k = lid + "|" + teamId;
-            map[k] = (map[k] || 0) + (score || 0);
+            pfMap[k] = (pfMap[k] || 0) + (score || 0);
+          });
+
+          // Compute H2H win/loss for this week from matchup pairs
+          // Group by matchup_id, then compare points
+          const byMatchup = {};
+          matchups.forEach(m => {
+            if (!m.roster_id || !m.matchup_id) return;
+            if (!byMatchup[m.matchup_id]) byMatchup[m.matchup_id] = [];
+            byMatchup[m.matchup_id].push(m);
+          });
+          Object.values(byMatchup).forEach(pair => {
+            if (pair.length !== 2) return; // only standard 1v1 matchups
+            const [a, b] = pair;
+            const ka = lid + "|" + String(a.roster_id);
+            const kb = lid + "|" + String(b.roster_id);
+            if (!wlMap[ka]) wlMap[ka] = { wins: 0, losses: 0 };
+            if (!wlMap[kb]) wlMap[kb] = { wins: 0, losses: 0 };
+            if ((a.points || 0) > (b.points || 0)) {
+              wlMap[ka].wins++;  wlMap[kb].losses++;
+            } else if ((b.points || 0) > (a.points || 0)) {
+              wlMap[kb].wins++;  wlMap[ka].losses++;
+            } else {
+              // Tie — count as half-win each (or as loss to be conservative)
+              wlMap[ka].wins += 0.5; wlMap[ka].losses += 0.5;
+              wlMap[kb].wins += 0.5; wlMap[kb].losses += 0.5;
+            }
           });
         });
       });
-      return Object.keys(map).length ? map : null;
+      if (!Object.keys(pfMap).length) return null;
+      return { pfMap, wlMap };
     };
 
     const _renderDecathlonLeaderboard = async () => {
@@ -15707,7 +15766,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div>${_esc(p.displayName)}</div>
               <div class="trn-po-team-sub">Overall #${p.overallRank}</div>
             </td>
-            <td class="trn-po-num">${p._lg.finishBasis==="pf" ? `#${p._lg.rank} PF` : `${p._lg.wins}–${p._lg.losses}`}</td>
+            <td class="trn-po-num">${p._lg.finishBasis==="pf" ? `#${p._lg.rank} PF`
+              : (p._lg.rangedWins != null ? `${p._lg.rangedWins}–${p._lg.rangedLosses} (Wk ${startWk||"?"}–${endWk||"?"})` : `${p._lg.wins}–${p._lg.losses}`)}</td>
             <td class="trn-po-num trn-po-pf">${p._lg.pf.toFixed(2)}</td>
             ${method==="finish_points"
               ? `<td class="trn-po-num"><strong>${p._lg.points}</strong> pts</td>`
