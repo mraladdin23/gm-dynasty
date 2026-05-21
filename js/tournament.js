@@ -7281,6 +7281,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const poYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
     const poYear  = poYears.find(y => String(y) === String(_tournamentYear)) || poYears[0];
     const wcPo    = poYear ? (t.playoffs[poYear] || {}) : {};
+    if (wcPo.mode === "decathlon") {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">🏅</div>
+          <div class="trn-empty-title">Decathlon Standings</div>
+          <div class="trn-empty-sub">Standings for Decathlon tournaments use week-ranged results
+            across all leagues. View the leaderboard under
+            <strong>Playoffs → 🏅 Combined Standings</strong>.</div>
+        </div>`;
+      return;
+    }
+
     if (wcPo.mode === "worldcup") {
       const wcGroups = wcPo.worldcupGroups || [];
       if (!wcGroups.length) {
