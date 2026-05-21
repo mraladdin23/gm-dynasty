@@ -3777,9 +3777,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                       <span class="trn-dec-league-cfg-name">${_esc(lgName)}</span>
                       ${ppr ? `<span class="trn-dec-league-cfg-badge">${_esc(ppr)}</span>` : ""}
                     </div>
-                    <span class="trn-dec-league-cfg-basis-label" id="trn-dec-basis-label-${_esc(lgId)}">
-                      ${BASIS_OPTS.find(b=>b.val===curBasis)?.icon||"📋"} ${BASIS_OPTS.find(b=>b.val===curBasis)?.label||curBasis}
-                    </span>
+                    <div style="display:flex;align-items:center;gap:var(--space-2)">
+                      <span class="trn-dec-league-cfg-basis-label" id="trn-dec-basis-label-${_esc(lgId)}">
+                        ${BASIS_OPTS.find(b=>b.val===curBasis)?.icon||"📋"} ${BASIS_OPTS.find(b=>b.val===curBasis)?.label||curBasis}
+                      </span>
+                      <button class="trn-dec-remove-league-btn btn-ghost btn-xs"
+                        data-lg-id="${_esc(lgId)}" data-lg-name="${_esc(lgName)}"
+                        title="Remove this league from Decathlon config"
+                        style="color:var(--color-text-dim);font-size:.75rem;padding:2px 6px;opacity:.6">
+                        🗑
+                      </button>
+                    </div>
                   </div>
                   <div class="trn-dec-league-cfg-body">
                     <div class="trn-dec-basis-btn-row">
@@ -5020,6 +5028,34 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.getElementById("trn-dec-reset-pts-btn")?.addEventListener("click", () => {
       const tbl = document.getElementById("trn-dec-pts-table");
       if (tbl) _renderDecPtsTable(tbl, [10, 8, 6, 5, 4, 3, 2, 1]);
+    });
+
+    // Remove a single league from decathlon config (removes it from leagueConfig and standingsCache)
+    document.querySelectorAll(".trn-dec-remove-league-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const lgId   = btn.dataset.lgId;
+        const lgName = btn.dataset.lgName || lgId;
+        if (!confirm(`Remove "${lgName}" from Decathlon config?\n\nThis removes its finish-basis config and synced standings for the active year. The league itself is not deleted from your tournament.`)) return;
+        try {
+          const po2     = _poLocal() || {};
+          const dec2    = po2.decathlon || {};
+          const newLgCfg = { ...(dec2.leagueConfig || {}) };
+          delete newLgCfg[lgId];
+          // Remove from Firebase: clear leagueConfig entry and standingsCache entry for active year
+          const updates = {};
+          updates[`decathlon/leagueConfig/${lgId}`] = null;
+          await _tPlayoffsRef(tid, _activePoYear).update(updates);
+          // Also remove standingsCache entry for this year+league
+          const cacheKey = `${_activePoYear}_${lgId}`;
+          await _tStandingsRef(tid).child(cacheKey).remove();
+          // Update local cache
+          if (dec2.leagueConfig) delete dec2.leagueConfig[lgId];
+          if (_tournaments[tid]?.standingsCache) delete _tournaments[tid].standingsCache[cacheKey];
+          showToast(`Removed "${lgName}" from Decathlon config ✓`);
+          // Re-render the playoff config panel
+          _wirePlayoffConfigListeners(tid, _tournaments[tid], _activePoYear);
+        } catch(e) { showToast("Remove failed: " + e.message, "error"); }
+      });
     });
 
     document.getElementById("trn-dec-save-btn")?.addEventListener("click", async () => {
@@ -13587,23 +13623,40 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           (b.rangedPF != null ? b.rangedPF : b.pf||0) - (a.rangedPF != null ? a.rangedPF : a.pf||0));
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
-      } else if (basis === "record" && lgCfg.medianWins && hasWeekRange && medMap) {
-        // Record with median wins sub-option: beat weekly median = +1 win; rangedPF tiebreak
+      } else if (basis === "record" && lgCfg.medianWins && hasWeekRange && wlMap && medMap) {
+        // Record + median wins: total wins = H2H wins + median wins each week.
+        // Sort by total wins desc, total losses desc (inverse), rangedPF tiebreak.
         const sortedTeams = [...lg.teams].sort((a,b) => {
-          const aw = a.rangedMedWins ?? (a.wins||0), bw = b.rangedMedWins ?? (b.wins||0);
-          return (bw - aw) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
+          const aH2H = a.rangedWins   ?? (a.wins  || 0);
+          const aHL  = a.rangedLosses ?? (a.losses || 0);
+          const bH2H = b.rangedWins   ?? (b.wins  || 0);
+          const bHL  = b.rangedLosses ?? (b.losses || 0);
+          const aMed = a.rangedMedWins  ?? 0;
+          const aML  = a.rangedMedLoss  ?? 0;
+          const bMed = b.rangedMedWins  ?? 0;
+          const bML  = b.rangedMedLoss  ?? 0;
+          const aW   = aH2H + aMed;
+          const aL   = aHL  + aML;
+          const bW   = bH2H + bMed;
+          const bL   = bHL  + bML;
+          return (bW - aW) || (aL - bL) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
         });
-        sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
+        // Stamp combined totals onto each team for display
+        sortedTeams.forEach((tm, i) => {
+          tm._leagueRank = i + 1;
+          tm._combinedWins   = (tm.rangedWins   ?? (tm.wins  ||0)) + (tm.rangedMedWins ?? 0);
+          tm._combinedLosses = (tm.rangedLosses ?? (tm.losses||0)) + (tm.rangedMedLoss ?? 0);
+        });
         lg.teams = sortedTeams;
       } else if ((basis === "record" || basis === "playoffs") && hasWeekRange && wlMap) {
-        // Record/playoffs basis within week range: use H2H record from matchup data
-        // This correctly captures only weeks startWk–endWk
+        // Record/playoffs basis within week range: use H2H record from matchup data.
+        // Sort: wins desc → losses asc → rangedPF desc (standard fantasy standings order).
         const sortedTeams = [...lg.teams].sort((a,b) => {
-          const aW = a.rangedWins  ?? (a.wins  || 0);
+          const aW = a.rangedWins   ?? (a.wins   || 0);
           const aL = a.rangedLosses ?? (a.losses || 0);
-          const bW = b.rangedWins  ?? (b.wins  || 0);
+          const bW = b.rangedWins   ?? (b.wins   || 0);
           const bL = b.rangedLosses ?? (b.losses || 0);
-          return ((bW - bL) - (aW - aL)) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
+          return (bW - aW) || (aL - bL) || (b.rangedPF||b.pf||0) - (a.rangedPF||a.pf||0);
         });
         sortedTeams.forEach((tm, i) => { tm._leagueRank = i + 1; });
         lg.teams = sortedTeams;
@@ -16015,7 +16068,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div class="trn-po-team-sub">Overall #${p.overallRank}</div>
             </td>
             <td class="trn-po-num">${p._lg.finishBasis==="pf" ? `#${p._lg.rank} PF`
-              : (p._lg.rangedWins != null ? `${p._lg.rangedWins}–${p._lg.rangedLosses} (Wk ${startWk||"?"}–${endWk||"?"})` : `${p._lg.wins}–${p._lg.losses}`)}</td>
+              : (p._lg._combinedWins != null
+                  ? `${p._lg._combinedWins}–${p._lg._combinedLosses} (H2H+Med, Wk ${startWk||"?"}–${endWk||"?"})`
+                  : p._lg.rangedWins != null
+                    ? `${p._lg.rangedWins}–${p._lg.rangedLosses} (Wk ${startWk||"?"}–${endWk||"?"})`
+                    : `${p._lg.wins}–${p._lg.losses}`)}</td>
             <td class="trn-po-num trn-po-pf">${_pfDisplay(p._lg)}</td>
             ${method==="finish_points"
               ? `<td class="trn-po-num"><strong>${p._lg.points}</strong> pts</td>`
