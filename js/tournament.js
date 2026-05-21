@@ -3784,8 +3784,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                       <button class="trn-dec-remove-league-btn btn-ghost btn-xs"
                         data-lg-id="${_esc(lgId)}" data-lg-name="${_esc(lgName)}"
                         title="Remove this league from Decathlon config"
-                        style="color:var(--color-danger,#e53935);font-size:.75rem;padding:2px 6px">
-                        🗑 Remove
+                        style="color:var(--color-text-dim);font-size:.75rem;padding:2px 6px;opacity:.6">
+                        🗑
                       </button>
                     </div>
                   </div>
@@ -5030,29 +5030,36 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (tbl) _renderDecPtsTable(tbl, [10, 8, 6, 5, 4, 3, 2, 1]);
     });
 
-    // Remove a single league from decathlon config (removes it from leagueConfig and standingsCache)
+    // Remove a single league — from decathlon config, standingsCache, AND the tournament leagues list
     document.querySelectorAll(".trn-dec-remove-league-btn").forEach(btn => {
       btn.addEventListener("click", async () => {
         const lgId   = btn.dataset.lgId;
         const lgName = btn.dataset.lgName || lgId;
-        if (!confirm(`Remove "${lgName}" from Decathlon config?\n\nThis removes its finish-basis config and synced standings for the active year. The league itself is not deleted from your tournament.`)) return;
+        if (!confirm(`Fully remove "${lgName}" from this tournament?\n\nThis removes:\n• The league from the tournament leagues list\n• Its Decathlon finish-basis config\n• Its synced standings for the active year\n\nThe Sleeper/MFL league itself is not affected.`)) return;
         try {
-          const po2     = _poLocal() || {};
-          const dec2    = po2.decathlon || {};
-          const newLgCfg = { ...(dec2.leagueConfig || {}) };
-          delete newLgCfg[lgId];
-          // Remove from Firebase: clear leagueConfig entry and standingsCache entry for active year
           const updates = {};
+          // 1. Remove decathlon leagueConfig entry
           updates[`decathlon/leagueConfig/${lgId}`] = null;
           await _tPlayoffsRef(tid, _activePoYear).update(updates);
-          // Also remove standingsCache entry for this year+league
+          // 2. Remove standingsCache entry for this year+league
           const cacheKey = `${_activePoYear}_${lgId}`;
           await _tStandingsRef(tid).child(cacheKey).remove();
-          // Update local cache
+          // 3. Remove from tournament leagues batches
+          const batches = _tournaments[tid]?.leagues || {};
+          for (const [batchId, batch] of Object.entries(batches)) {
+            if (batch && batch.leagues && batch.leagues[lgId] !== undefined) {
+              await GMD.child(`tournaments/${tid}/leagues/${batchId}/leagues/${lgId}`).remove();
+              if (_tournaments[tid]?.leagues?.[batchId]?.leagues)
+                delete _tournaments[tid].leagues[batchId].leagues[lgId];
+              break;
+            }
+          }
+          // 4. Update local cache
+          const po2 = _poLocal() || {};
+          const dec2 = po2.decathlon || {};
           if (dec2.leagueConfig) delete dec2.leagueConfig[lgId];
           if (_tournaments[tid]?.standingsCache) delete _tournaments[tid].standingsCache[cacheKey];
-          showToast(`Removed "${lgName}" from Decathlon config ✓`);
-          // Re-render the playoff config panel
+          showToast(`Removed "${lgName}" from tournament ✓`);
           _wirePlayoffConfigListeners(tid, _tournaments[tid], _activePoYear);
         } catch(e) { showToast("Remove failed: " + e.message, "error"); }
       });
@@ -7274,19 +7281,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const poYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
     const poYear  = poYears.find(y => String(y) === String(_tournamentYear)) || poYears[0];
     const wcPo    = poYear ? (t.playoffs[poYear] || {}) : {};
-    // Decathlon: standings live in Playoffs → Combined Standings, not here
-    if (wcPo.mode === "decathlon") {
-      body.innerHTML = `
-        <div class="trn-empty">
-          <div class="trn-empty-icon">🏅</div>
-          <div class="trn-empty-title">Decathlon Standings</div>
-          <div class="trn-empty-sub">Standings for Decathlon tournaments use week-ranged results
-            across all leagues. View the leaderboard under
-            <strong>Playoffs → 🏅 Combined Standings</strong>.</div>
-        </div>`;
-      return;
-    }
-
     if (wcPo.mode === "worldcup") {
       const wcGroups = wcPo.worldcupGroups || [];
       if (!wcGroups.length) {
@@ -15955,7 +15949,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       Object.entries(lgWeekRanges).forEach(([lid, { sw: msw, ew: mew }]) => {
         for (let wk = msw; wk <= mew; wk++) {
           const matchups = _weekMatchupCache[lid + "|" + wk] || [];
-          if (!matchups.length) continue; // skip weeks with no cached data; don't exit league loop
+          if (!matchups.length) continue;
           const allScores = matchups.map(m => m.points || 0);
           allScores.sort((a,b) => a - b);
           const mid    = Math.floor(allScores.length / 2);
@@ -18305,10 +18299,51 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const lgCfg = dec.leagueConfig || {};
     console.table(Object.entries(lgCfg).map(([lgId, cfg]) => ({
       lgId,
-      finishBasis: cfg.finishBasis || "record",
+      finishBasis:          cfg.finishBasis || "record",
+      medianWins:           cfg.medianWins  || false,
       eliminationStartWeek: cfg.eliminationStartWeek || "—",
-      eliminations: (cfg.eliminations || []).length,
+      eliminations:         (cfg.eliminations || []).length,
     })));
+
+    // 5b. medMap diagnostic — fetch matchups for one record+medianWins league and compute
+    const medTestLgId = Object.entries(lgCfg).find(([,cfg]) => cfg.finishBasis === "record" && cfg.medianWins)?.[0];
+    if (medTestLgId && sw && ew) {
+      console.log("--- medMap test for league:", medTestLgId, "---");
+      const medTest = {};
+      let weeksWithGames = 0, weeksEmpty = 0;
+      for (let wk = sw; wk <= ew; wk++) {
+        try {
+          const r = await fetch("https://api.sleeper.app/v1/league/" + medTestLgId + "/matchups/" + wk);
+          const data = r.ok ? await r.json() : [];
+          const scores = (data||[]).filter(m => m.roster_id).map(m => m.points || 0);
+          if (!scores.length) { weeksEmpty++; continue; }
+          weeksWithGames++;
+          scores.sort((a,b)=>a-b);
+          const mid = Math.floor(scores.length/2);
+          const median = scores.length%2===0 ? (scores[mid-1]+scores[mid])/2 : scores[mid];
+          (data||[]).forEach(m => {
+            if (!m.roster_id) return;
+            const k = String(m.roster_id);
+            if (!medTest[k]) medTest[k] = {wins:0,losses:0};
+            if ((m.points||0) > median) medTest[k].wins++;
+            else medTest[k].losses++;
+          });
+        } catch(e) { console.warn("  fetch error week", wk, e.message); }
+      }
+      console.log("  Weeks with games:", weeksWithGames, "  Empty weeks (skipped):", weeksEmpty);
+      console.log("  medMap result (roster_id → {wins,losses}):");
+      console.table(medTest);
+      if (!Object.keys(medTest).length) {
+        console.warn("⚠️  medMap is EMPTY for this league — median wins will NOT be applied!");
+      } else {
+        const totalMedWins = Object.values(medTest).reduce((s,v)=>s+v.wins,0);
+        const teamsPerWeek = Object.keys(medTest).length;
+        console.log("✓ medMap has data. Total median wins across all teams:", totalMedWins,
+          "(expected", weeksWithGames * Math.floor(teamsPerWeek/2), "for", teamsPerWeek, "teams ×", weeksWithGames, "weeks)");
+      }
+    } else if (!medTestLgId) {
+      console.log("  No record+medianWins league found in config — medMap test skipped.");
+    }
 
     // 6. Sample standings for first league — show full-season vs what we expect
     const firstLgId = [...lgIds][0];
