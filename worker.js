@@ -1867,6 +1867,8 @@ async function runDraftWatcher(env) {
   for (const id of allIds) {
     const prev = existing[id];
 
+    // League in watchIndex but not yet in draftStatus — treat as never-checked
+    if (!prev) { pending.push(id); continue; }
     if (prev.status === "complete") {
       toSkip.push(id);
       continue;
@@ -1876,8 +1878,11 @@ async function runDraftWatcher(env) {
       urgent.push(id);
       continue;
     }
-    if (!prev || prev.picks_hash === "seeded") {
-      pending.push(id); // never properly checked
+    // "seeded" = placeholder written before Worker ran
+    // "client-checked" = client polled Sleeper but Worker has never confirmed
+    // Treat both as never-properly-checked by the Worker
+    if (prev.picks_hash === "seeded" || prev.picks_hash === "client-checked") {
+      pending.push(id);
       continue;
     }
     if (prev.status === "pre_draft") {
