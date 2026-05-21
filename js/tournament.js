@@ -3784,8 +3784,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                       <button class="trn-dec-remove-league-btn btn-ghost btn-xs"
                         data-lg-id="${_esc(lgId)}" data-lg-name="${_esc(lgName)}"
                         title="Remove this league from Decathlon config"
-                        style="color:var(--color-text-dim);font-size:.75rem;padding:2px 6px;opacity:.6">
-                        🗑
+                        style="color:var(--color-danger,#e53935);font-size:.75rem;padding:2px 6px">
+                        🗑 Remove
                       </button>
                     </div>
                   </div>
@@ -7274,6 +7274,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const poYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
     const poYear  = poYears.find(y => String(y) === String(_tournamentYear)) || poYears[0];
     const wcPo    = poYear ? (t.playoffs[poYear] || {}) : {};
+    // Decathlon: standings live in Playoffs → Combined Standings, not here
+    if (wcPo.mode === "decathlon") {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">🏅</div>
+          <div class="trn-empty-title">Decathlon Standings</div>
+          <div class="trn-empty-sub">Standings for Decathlon tournaments use week-ranged results
+            across all leagues. View the leaderboard under
+            <strong>Playoffs → 🏅 Combined Standings</strong>.</div>
+        </div>`;
+      return;
+    }
+
     if (wcPo.mode === "worldcup") {
       const wcGroups = wcPo.worldcupGroups || [];
       if (!wcGroups.length) {
@@ -15942,7 +15955,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       Object.entries(lgWeekRanges).forEach(([lid, { sw: msw, ew: mew }]) => {
         for (let wk = msw; wk <= mew; wk++) {
           const matchups = _weekMatchupCache[lid + "|" + wk] || [];
-          if (!matchups.length) return;
+          if (!matchups.length) continue; // skip weeks with no cached data; don't exit league loop
           const allScores = matchups.map(m => m.points || 0);
           allScores.sort((a,b) => a - b);
           const mid    = Math.floor(allScores.length / 2);
