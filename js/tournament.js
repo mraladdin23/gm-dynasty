@@ -15936,9 +15936,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const rows = players.map((p, i) => {
         const isTrophy = i < 3;
         const rowCls   = i===0?"trn-po-row--champion":i===1?"trn-dec-row--silver":i===2?"trn-dec-row--bronze":"";
-        // Per-league breakdown tooltip text
+        // Per-league breakdown tooltip text — show rangedPF when week range active
         const breakdown = p.leagues.map(l =>
-          `${l.leagueName}: #${l.rank} (${method==="finish_points"?l.points+"pts":l.pf.toFixed(1)})`
+          `${l.leagueName}: #${l.rank} (${method==="finish_points"
+            ? l.points+"pts"
+            : (hasWeekRange && l.rangedPF ? l.rangedPF.toFixed(1) : l.pf.toFixed(1))})`
         ).join(" | ");
         return `<tr class="${rowCls}" title="${_esc(breakdown)}">
           <td class="trn-po-rank">${podiumMedal(i)||i+1}</td>
@@ -15993,6 +15995,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         if (!inLeague.length) return "";
 
+        // Determine this league's finishBasis from the first player's league entry
+        const lgBasis = inLeague[0]?._lg?.finishBasis || "record";
+        // For PF-basis: show rangedPF (week-range filtered) if available, else full-season pf.
+        // For record/playoffs/elimination: show full-season pf as context column (standings
+        // are ranked by rangedWins/rangedLosses or eliminations list, not PF).
+        const _pfDisplay = (lg) => lgBasis === "pf"
+          ? (lg.rangedPF != null ? lg.rangedPF : lg.pf).toFixed(2)
+          : lg.pf.toFixed(2);
+        const pfColHeader = (lgBasis === "pf" && hasWeekRange && startWk && endWk)
+          ? `PF (Wk ${startWk}–${endWk})`
+          : "PF";
+
         const rows = inLeague.map(p => `
           <tr class="${p._lg.rank===1?"trn-po-row--champion":""}">
             <td class="trn-po-rank">${p._lg.rank===1?"🏆":p._lg.rank}</td>
@@ -16002,26 +16016,22 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             </td>
             <td class="trn-po-num">${p._lg.finishBasis==="pf" ? `#${p._lg.rank} PF`
               : (p._lg.rangedWins != null ? `${p._lg.rangedWins}–${p._lg.rangedLosses} (Wk ${startWk||"?"}–${endWk||"?"})` : `${p._lg.wins}–${p._lg.losses}`)}</td>
-            <td class="trn-po-num trn-po-pf">${p._lg.pf.toFixed(2)}</td>
+            <td class="trn-po-num trn-po-pf">${_pfDisplay(p._lg)}</td>
             ${method==="finish_points"
               ? `<td class="trn-po-num"><strong>${p._lg.points}</strong> pts</td>`
               : ""}
           </tr>`).join("");
 
+        const basisLbl = {record:"H2H Record",pf:"Total Points",playoffs:"League Playoffs",elimination:"Elimination"}[lgBasis]||lgBasis;
         return `
           <div style="margin-bottom:var(--space-5)">
-            ${(() => {
-            const lgFirstPlayer = inLeague[0];
-            const basis = lgFirstPlayer?._lg?.finishBasis || "record";
-            const basisLbl = {record:"H2H Record",pf:"Total Points",playoffs:"League Playoffs",elimination:"Elimination"}[basis]||basis;
-            return `<div class="trn-dec-league-header">🏟 ${_esc(lgName)} <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim)">· ${basisLbl}</span></div>`;
-          })()}
+            <div class="trn-dec-league-header">🏟 ${_esc(lgName)} <span style="font-size:.72rem;font-weight:400;color:var(--color-text-dim)">· ${basisLbl}</span></div>
             <div class="trn-po-table-wrap">
               <table class="trn-po-table">
                 <thead><tr>
                   <th>#</th><th>Player</th>
-                  <th class="trn-po-th-num">${(leagueConfig[lgName]?.finishBasis||"record")==="pf"?"PF Rank":"W–L"}</th>
-                  <th class="trn-po-th-num">PF</th>
+                  <th class="trn-po-th-num">${lgBasis==="pf"?"PF Rank":"W–L"}</th>
+                  <th class="trn-po-th-num">${pfColHeader}</th>
                   ${method==="finish_points"?`<th class="trn-po-th-num">Pts</th>`:""}
                 </tr></thead>
                 <tbody>${rows}</tbody>
@@ -18242,69 +18252,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         console.table((lc.teams || []).slice(0, 5).map(tm => ({
           teamName: tm.teamName, wins: tm.wins, losses: tm.losses, pf: tm.pf
         })));
-      }
-    }
-
-    // 7. Key match test — confirm pfMap keys match standingsCache teamIds
-    if (sw && ew) {
-      console.log("--- Key match test ---");
-      const pfMapFull = {};
-      await Promise.allSettled([...lgIds].flatMap(lid => {
-        const weeks = [];
-        for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
-        return weeks.map(async wk => {
-          try {
-            const r = await fetch("https://api.sleeper.app/v1/league/" + lid + "/matchups/" + wk);
-            if (!r.ok) return;
-            const data = await r.json();
-            (data || []).forEach(m => {
-              if (!m.roster_id) return;
-              const k = lid + "|" + String(m.roster_id);
-              pfMapFull[k] = (pfMapFull[k] || 0) + (m.points || 0);
-            });
-          } catch(e) {}
-        });
-      }));
-      // For first league, show side-by-side lookup
-      const firstLgId2 = [...lgIds][0];
-      const lc2 = Object.values(t.standingsCache || {}).find(lc3 =>
-        String(lc3.year) === yr && String(lc3.leagueId || lc3.league_id) === firstLgId2
-      );
-      if (lc2 && firstLgId2) {
-        console.log("pfMap lookup test for league: " + (lc2.leagueName || firstLgId2));
-        console.table((lc2.teams || []).slice(0, 5).map(tm => {
-          const lookupKey = firstLgId2 + "|" + String(tm.teamId);
-          const hit = pfMapFull[lookupKey];
-          return {
-            teamName: tm.teamName,
-            teamId: tm.teamId,
-            lookupKey,
-            pfMapHit: hit != null ? hit.toFixed(2) : "MISS",
-            fullSeasonPF: tm.pf
-          };
-        }));
-        if ((lc2.teams || []).every(tm => pfMapFull[firstLgId2 + "|" + String(tm.teamId)] == null)) {
-          console.warn("⚠️  ALL lookups MISSED — pfMap keys don't match standingsCache teamIds!");
-          console.log("Sample pfMap keys:", Object.keys(pfMapFull).slice(0, 5));
-          console.log("Sample standingsCache teamIds:", (lc2.teams||[]).slice(0,5).map(tm => firstLgId2+"|"+String(tm.teamId)));
-        } else {
-          console.log("✓ pfMap lookup working — rangedPF will be applied in leaderboard.");
-        }
-      }
-      // 8. Run the actual leaderboard computation and show what it produces
-      console.log("--- Actual leaderboard output ---");
-      const weekMapReal = { pfMap: pfMapFull, wlMap: {}, medMap: {} };
-      const result = _buildDecathlonLeaderboard(t, yr, po, weekMapReal);
-      console.log("hasWeekRange:", result.hasWeekRange, "startWk:", result.startWk, "endWk:", result.endWk);
-      console.table((result.players || []).slice(0, 5).map(p => ({
-        displayName: p.displayName,
-        totalPoints: p.totalPoints,
-        totalPF: p.totalPF.toFixed(2),
-        leagues: p.leagues.length
-      })));
-      if (!result.hasWeekRange) {
-        console.warn("⚠️  hasWeekRange is FALSE in actual leaderboard — check startWk/endWk/pfMap");
-        console.log("    startWk:", result.startWk, "endWk:", result.endWk, "pfMap non-null:", pfMapFull && Object.keys(pfMapFull).length > 0);
       }
     }
 
