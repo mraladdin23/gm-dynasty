@@ -18245,6 +18245,69 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       }
     }
 
+    // 7. Key match test — confirm pfMap keys match standingsCache teamIds
+    if (sw && ew) {
+      console.log("--- Key match test ---");
+      const pfMapFull = {};
+      await Promise.allSettled([...lgIds].flatMap(lid => {
+        const weeks = [];
+        for (let wk = sw; wk <= ew; wk++) weeks.push(wk);
+        return weeks.map(async wk => {
+          try {
+            const r = await fetch("https://api.sleeper.app/v1/league/" + lid + "/matchups/" + wk);
+            if (!r.ok) return;
+            const data = await r.json();
+            (data || []).forEach(m => {
+              if (!m.roster_id) return;
+              const k = lid + "|" + String(m.roster_id);
+              pfMapFull[k] = (pfMapFull[k] || 0) + (m.points || 0);
+            });
+          } catch(e) {}
+        });
+      }));
+      // For first league, show side-by-side lookup
+      const firstLgId2 = [...lgIds][0];
+      const lc2 = Object.values(t.standingsCache || {}).find(lc3 =>
+        String(lc3.year) === yr && String(lc3.leagueId || lc3.league_id) === firstLgId2
+      );
+      if (lc2 && firstLgId2) {
+        console.log("pfMap lookup test for league: " + (lc2.leagueName || firstLgId2));
+        console.table((lc2.teams || []).slice(0, 5).map(tm => {
+          const lookupKey = firstLgId2 + "|" + String(tm.teamId);
+          const hit = pfMapFull[lookupKey];
+          return {
+            teamName: tm.teamName,
+            teamId: tm.teamId,
+            lookupKey,
+            pfMapHit: hit != null ? hit.toFixed(2) : "MISS",
+            fullSeasonPF: tm.pf
+          };
+        }));
+        if ((lc2.teams || []).every(tm => pfMapFull[firstLgId2 + "|" + String(tm.teamId)] == null)) {
+          console.warn("⚠️  ALL lookups MISSED — pfMap keys don't match standingsCache teamIds!");
+          console.log("Sample pfMap keys:", Object.keys(pfMapFull).slice(0, 5));
+          console.log("Sample standingsCache teamIds:", (lc2.teams||[]).slice(0,5).map(tm => firstLgId2+"|"+String(tm.teamId)));
+        } else {
+          console.log("✓ pfMap lookup working — rangedPF will be applied in leaderboard.");
+        }
+      }
+      // 8. Run the actual leaderboard computation and show what it produces
+      console.log("--- Actual leaderboard output ---");
+      const weekMapReal = { pfMap: pfMapFull, wlMap: {}, medMap: {} };
+      const result = _buildDecathlonLeaderboard(t, yr, po, weekMapReal);
+      console.log("hasWeekRange:", result.hasWeekRange, "startWk:", result.startWk, "endWk:", result.endWk);
+      console.table((result.players || []).slice(0, 5).map(p => ({
+        displayName: p.displayName,
+        totalPoints: p.totalPoints,
+        totalPF: p.totalPF.toFixed(2),
+        leagues: p.leagues.length
+      })));
+      if (!result.hasWeekRange) {
+        console.warn("⚠️  hasWeekRange is FALSE in actual leaderboard — check startWk/endWk/pfMap");
+        console.log("    startWk:", result.startWk, "endWk:", result.endWk, "pfMap non-null:", pfMapFull && Object.keys(pfMapFull).length > 0);
+      }
+    }
+
     console.groupEnd();
     console.log("[diagnoseDecathlon] Done. Look for ⚠️ warnings above.");
     return { yr, po, lgIds: [...lgIds], dec };

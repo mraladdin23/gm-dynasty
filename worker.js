@@ -1887,10 +1887,14 @@ async function runDraftWatcher(env) {
     }
     if (prev.status === "pre_draft") {
       if (!prev.startTime) {
-        // Already checked, no draft found — skip for a while
-        // Re-check every 30 minutes using updatedAt
-        if (!prev.updatedAt || (now - prev.updatedAt) > 30 * 60 * 1000) {
-          pending.push(id);
+        // No startTime means either: never drafted, or draft started without a
+        // scheduled time (commissioner clicked "Start Draft" manually).
+        // In the latter case the draft transitions pre_draft→paused/drafting
+        // with no startTime signal — we'd never catch it with a 30-min check.
+        // Use urgent if stale >5 min so manually-started drafts are caught quickly.
+        const staleness = now - (prev.updatedAt || 0);
+        if (staleness > 5 * 60 * 1000) {
+          urgent.push(id);  // stale unknown — check immediately
         }
         continue;
       }
