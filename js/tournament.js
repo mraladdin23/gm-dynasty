@@ -13509,6 +13509,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const wlMap        = weekData?.wlMap  || null;
     const medMap       = weekData?.medMap || null;
     const hasWeekRange = !!(startWk && endWk && pfMap);
+    // Temporary diagnostic — remove after confirming
+    console.log("[decathlon] hasWeekRange:", hasWeekRange,
+      "pfMap keys:", pfMap ? Object.keys(pfMap).length : 0,
+      "wlMap keys:", wlMap ? Object.keys(wlMap).length : 0,
+      "medMap keys:", medMap ? Object.keys(medMap).length : 0);
+    if (medMap) {
+      const sampleMedKey = Object.keys(medMap)[0];
+      console.log("[decathlon] medMap sample key:", sampleMedKey, "value:", medMap[sampleMedKey]);
+    }
 
     // Participant display name + gender maps
     const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
