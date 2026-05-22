@@ -13136,6 +13136,29 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           });
         }
 
+        // For decathlon years: set isChamp per-league from finalRankings.leagueResults
+        // (standingsCache champion is based on full-season record, not decathlon rankings)
+        const yrPo = _playoffForYear(t, yr);
+        if (yrPo.mode === "decathlon" && Array.isArray(yrPo.finalRankings)) {
+          const decEntry = yrPo.finalRankings.find(e =>
+            _sk(e.displayName) === cKey || _sk(e.teamName) === cKey
+          );
+          if (decEntry?.leagueResults?.length) {
+            (c.seasons[yr] || []).forEach(season => {
+              const lr = decEntry.leagueResults.find(l =>
+                _sk(l.leagueName) === _sk(season.leagueName)
+              );
+              if (!lr) return;
+              season.wins   = lr._combinedWins   != null ? lr._combinedWins
+                            : lr.rangedWins       != null ? lr.rangedWins   : season.wins;
+              season.losses = lr._combinedLosses != null ? lr._combinedLosses
+                            : lr.rangedLosses     != null ? lr.rangedLosses : season.losses;
+              season.pf     = lr.rangedPF || lr.pf || season.pf;
+              season.isChamp = (lr.rank === 1);
+            });
+          }
+        }
+
         c.seasons[yr].forEach(s => {
           totalLeagues++; totalWins += s.wins; totalLosses += s.losses; totalPF += s.pf;
           // Titles: only count after bracket is complete (final published with champion)
