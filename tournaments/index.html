@@ -1295,6 +1295,8 @@
                               : lr.rangedLosses     != null ? lr.rangedLosses
                               : season.losses;
                 season.pf     = lr.rangedPF || lr.pf || season.pf;
+                // League champion = rank #1 in this league's decathlon standings
+                season.isChamp = (lr.rank === 1);
               });
             }
           }
