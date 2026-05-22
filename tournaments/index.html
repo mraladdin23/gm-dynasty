@@ -1273,6 +1273,32 @@
             });
           }
 
+          // For decathlon years: override each per-league season with ranged values from
+          // finalRankings.leagueResults so player records show the actual scored weeks
+          const yrPoData = (t.playoffs || {})[yr] || {};
+          if (yrPoData.mode === "decathlon" && Array.isArray(yrPoData.finalRankings)) {
+            const cKey2 = _sk(c.displayName);
+            const decEntry = yrPoData.finalRankings.find(e =>
+              _sk(e.displayName) === cKey2 || _sk(e.teamName) === cKey2
+            );
+            if (decEntry?.leagueResults?.length) {
+              (c.seasons[yr] || []).forEach(season => {
+                const lr = decEntry.leagueResults.find(l =>
+                  _sk(l.leagueName) === _sk(season.leagueName)
+                );
+                if (!lr) return;
+                // Use combined wins for median-wins leagues, ranged for plain H2H
+                season.wins   = lr._combinedWins   != null ? lr._combinedWins
+                              : lr.rangedWins       != null ? lr.rangedWins
+                              : season.wins;
+                season.losses = lr._combinedLosses != null ? lr._combinedLosses
+                              : lr.rangedLosses     != null ? lr.rangedLosses
+                              : season.losses;
+                season.pf     = lr.rangedPF || lr.pf || season.pf;
+              });
+            }
+          }
+
           const bracketComplete = Array.isArray(((t.playoffs||{})[yr]||{}).finalRankings)
             && ((t.playoffs||{})[yr]||{}).finalRankings.some(e => e.isTChamp);
 
@@ -1683,11 +1709,25 @@
       const t       = _currentT;
       const cache   = t.standingsCache || {};
 
-      // ── World Cup: group dropdown selector ──────────────────────────────────
+      // ── World Cup / Decathlon: mode-specific handling ───────────────────────
       const allPoYears = Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort((a,b) => b-a);
       // Respect the global year selector
       const poYear = allPoYears.find(y => String(y) === String(_selectedYear)) || allPoYears[0] || null;
       const po     = poYear ? (t.playoffs[poYear] || {}) : {};
+
+      // Decathlon: standings are in the Combined tab, not here
+      if (po.mode === "decathlon") {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">🏅</div>
+            <div class="trn-empty-title">Decathlon Standings</div>
+            <div class="trn-empty-sub">Standings for Decathlon tournaments use week-ranged results
+              across all leagues. View the leaderboard in the
+              <strong>🏅 Combined</strong> tab.</div>
+          </div>`;
+        return;
+      }
+
       if (po.mode === "worldcup") {
         const wcGroups  = po.worldcupGroups  || [];
         const wcSched   = po.worldcupSchedule || {};

@@ -16900,6 +16900,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
         const snapshot = _buildPlayoffSnapshot();
         snapshot.computedRounds = _computedRounds;
+        // Include decathlon config in snapshot so public site has method/ptsTable/leagueConfig
+        if (mode === "decathlon") {
+          snapshot.decathlon = po.decathlon || {};
+        }
         if (btn) btn.textContent = "Writing…";
 
         // ── Build finalRankings: authoritative ordered list for analytics tabs ──
@@ -17442,7 +17446,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         };
 
         const finalRankings = await _buildFinalRankings();
-        snapshot.finalRankings = finalRankings; // include in public snapshot too
+        // Include finalRankings in public snapshot so po.finalRankings is readable on public site
+        snapshot.finalRankings = finalRankings;
 
         // Scrub any undefined values from the snapshot before writing —
         // Firebase rejects undefined anywhere in the payload.
