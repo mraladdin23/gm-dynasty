@@ -1170,11 +1170,12 @@ const DLRTournament = (() => {
       { id:"standings",     label:"Standings"       },
       { id:"playoffs",      label:"Playoffs"        },
       { id:"draft",         label:"Draft"           },
-      { id:"adpvsfinish",   label:"ADP"             },
       { id:"matchups",      label:"Matchups"        },
       { id:"match_analysis",label:"Match Analysis"  },
       { id:"rosters",       label:"Rosters"         },
       { id:"mostrostered",  label:"Most Rostered"   },
+      { id:"adpvsfinish",   label:"Playoff ADP"     },
+      { id:"elimination",   label:"⚔️ Elimination"  },
     ];
 
     const tabOpts = histTabs.map(tab =>
@@ -1258,6 +1259,7 @@ const DLRTournament = (() => {
       case "match_analysis": return _renderAnalyticsMatchups(tid, t, content);
       case "rosters":        return _renderAnalyticsRosters(tid, t, content);
       case "mostrostered":   return _renderAnalyticsMostRostered(tid, t, content);
+      case "elimination":    return _renderEliminationManagerTab(tid, t, content);
       default:               return _renderStandingsTab(tid, t, content, showAdmin);
     }
   }
@@ -1435,11 +1437,14 @@ const DLRTournament = (() => {
         <h3>Playoff Configuration</h3>
         <button class="modal-close" id="trn-modal-close">✕</button>
       </div>
-      <div class="modal-body" style="max-height:75vh;overflow-y:auto">${html}</div>
+      <div class="modal-body">${html}</div>
       <div class="modal-footer">
         <button class="btn-secondary" id="trn-modal-cancel">Close</button>
       </div>
     `);
+    // Use modal-box--scroll so header/footer stay pinned and only the body scrolls
+    const pcBox = document.getElementById("trn-modal-box");
+    if (pcBox) pcBox.classList.add("modal-box--scroll");
     document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
     document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
     _wirePlayoffConfigListeners(tid, t, _tournamentYear ? String(_tournamentYear) : (_playoffYears(t)[0] || null));
@@ -3805,9 +3810,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                         <input type="checkbox" class="trn-dec-median-chk" data-lg="${_esc(lgId)}"
                           ${lgCfg.medianWins?"checked":""}
                           style="accent-color:var(--color-gold)" />
-                        <span>Use <strong>median wins</strong> instead of H2H record</span>
+                        <span>Extra Game Against League Median</span>
                       </label>
-                      <span style="font-size:.75rem;color:var(--color-text-dim)">Beat weekly median score = +1 win; PF tiebreak</span>
+                      <span style="font-size:.75rem;color:var(--color-text-dim)">Beat weekly median score earn a win; others get a loss</span>
                     </div>
 
                     <!-- PF sub-option: per-league week range -->
@@ -5127,6 +5132,294 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   //   { week: 5, playerId: "...", playerName: "Jane", note: "" },
   //   ...
   // ]
+  // ── Elimination Manager: inline tab version ───────────────────────────────
+  // Renders the elimination manager in the Tournament History tab (instead of
+  // opening a modal from the playoff-config league setup card).
+  // Only shown when at least one league has finishBasis = "elimination".
+  function _renderEliminationManagerTab(tid, t, body) {
+    const year = _tournamentYear || new Date().getFullYear();
+    const po   = _playoffForYear(t, year) || {};
+    const dec  = po.decathlon || {};
+    const lgCfgMap = dec.leagueConfig || {};
+
+    // Find all elimination leagues for this year
+    const elimLeagues = [];
+    const batches = t.leagues || {};
+    const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
+    for (const [, batch] of Object.entries(batches)) {
+      if (!isBatch(batch) || String(batch.year) !== String(year)) continue;
+      for (const [lid, linfo] of Object.entries(batch.leagues || {})) {
+        const cfg = lgCfgMap[lid] || {};
+        if (cfg.finishBasis === "elimination") {
+          elimLeagues.push({ id: lid, name: linfo.name || lid, cfg });
+        }
+      }
+    }
+
+    if (!elimLeagues.length) {
+      body.innerHTML = `<div class="trn-empty">
+        <div class="trn-empty-icon">⚔️</div>
+        <div class="trn-empty-title">No Elimination Leagues</div>
+        <div class="trn-empty-sub">Set a league's Finish Basis to "Elimination" in Playoff Config to manage knockouts here.</div>
+      </div>`;
+      return;
+    }
+
+    // If only one elimination league, open it directly; otherwise show picker
+    const [firstLg] = elimLeagues;
+    let selectedId = firstLg.id;
+
+    function _renderPicker() {
+      if (elimLeagues.length === 1) return "";
+      return `<div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4)">
+        <label style="font-size:.85rem;font-weight:600;color:var(--color-text-dim)">League</label>
+        <select id="trn-elimtab-lg-sel" style="font-size:.85rem;padding:4px 10px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+          ${elimLeagues.map(l => `<option value="${_esc(l.id)}" ${l.id === selectedId ? "selected" : ""}>${_esc(l.name)}</option>`).join("")}
+        </select>
+      </div>`;
+    }
+
+    function _renderInlineManager(lgId, lgName, lgCfg) {
+      // Inline version of _openEliminationManager — same logic, no modal shell
+      const container = document.getElementById("trn-elimtab-container");
+      if (!container) return;
+      // Delegate to the modal version but capture it in an inline card
+      // We re-use the manager by opening it into the body directly
+      const eliminations = Array.isArray(lgCfg.eliminations) ? [...lgCfg.eliminations] : [];
+      const elimStartWk  = lgCfg.eliminationStartWeek || null;
+      const phase1End    = lgCfg.cumulativeEndWeek    || null;
+      const resolvedPoYear = String(year);
+
+      const leaguePlayers = [];
+      Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+        if (String(lc.year) !== resolvedPoYear) return;
+        const rawLid = String(lc.leagueId || lc.league_id || "");
+        const lid2 = rawLid || ck.replace(/^\d{4}_/, "");
+        if (lid2 !== lgId) return;
+        (lc.teams || []).forEach(tm => {
+          leaguePlayers.push({ id: String(tm.teamId || tm.rosterId || ""), name: tm.teamName || tm.rawTeamName || "", pf: tm.pf || 0 });
+        });
+      });
+
+      const eliminatedIds = new Set(eliminations.map(e => e.playerId).filter(Boolean));
+      const phaseNote = phase1End
+        ? `Phase 1 (wks 1–${phase1End}): eliminated by lowest <strong>cumulative PF</strong>. Phase 2 (wk ${Number(phase1End)+1}+): eliminated by lowest <strong>single-week score</strong>.`
+        : elimStartWk ? `Elimination starts week ${elimStartWk}. Lowest score each week is eliminated.` : "Set elimination start week in Playoff Config first.";
+
+      function _nextWeek() {
+        if (!eliminations.length) return elimStartWk || null;
+        return (eliminations[eliminations.length - 1].week || elimStartWk || 1);
+      }
+      function _isPhase1(wk) { return phase1End && wk && Number(wk) <= Number(phase1End); }
+      function _availablePlayers() { return leaguePlayers.filter(p => !eliminatedIds.has(p.id)); }
+
+      function _renderRows() {
+        if (!eliminations.length) return `<div class="trn-elim-empty">No knockouts recorded yet.</div>`;
+        return eliminations.map((e, idx) => {
+          const finishPos = leaguePlayers.length - idx;
+          const medal = finishPos === 1 ? "🥇" : finishPos === 2 ? "🥈" : finishPos === 3 ? "🥉" : "";
+          return `<div class="trn-elim-row" data-idx="${idx}">
+            <div class="trn-elim-row-pos">${medal || "#" + finishPos}</div>
+            <div class="trn-elim-row-info">
+              <div class="trn-elim-row-name">${_esc(e.playerName || e.playerId || "Unknown")}</div>
+              <div class="trn-elim-row-detail">Wk ${e.week || "?"}${e.score != null ? ` · ${Number(e.score).toFixed(2)} pts` : ""}${e.note ? ` · ${_esc(e.note)}` : ""}</div>
+            </div>
+            <div class="trn-elim-row-actions">
+              ${idx > 0 ? `<button class="btn-ghost btn-xs trn-elim-move-up" data-idx="${idx}" title="Move up">↑</button>` : ""}
+              ${idx < eliminations.length - 1 ? `<button class="btn-ghost btn-xs trn-elim-move-dn" data-idx="${idx}" title="Move down">↓</button>` : ""}
+              <button class="btn-ghost btn-xs trn-elim-del" data-idx="${idx}" title="Remove">✕</button>
+            </div>
+          </div>`;
+        }).join("");
+      }
+
+      function _buildHTML() {
+        const available = _availablePlayers();
+        const nextWk    = _nextWeek();
+        const inPhase1  = _isPhase1(nextWk);
+        return `
+          <div class="trn-section-card" style="margin-top:var(--space-4)">
+            <div class="trn-section-card-title">☠️ ${_esc(lgName)} — Weekly Knockouts</div>
+            <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">${phaseNote}</p>
+            <div style="margin-bottom:var(--space-3)">
+              <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Knockout List — first = worst finish</div>
+              <div id="trn-elim-rows-container">${_renderRows()}</div>
+            </div>
+            ${available.length ? `
+            <div class="trn-elim-add-row">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3);flex-wrap:wrap;gap:var(--space-2)">
+                <div class="trn-section-card-title" style="margin-bottom:0">Add Next Knockout
+                  <span style="font-size:.75rem;font-weight:400;color:var(--color-text-dim)">· finish #${leaguePlayers.length - eliminations.length}</span>
+                </div>
+                <button class="btn-secondary btn-sm" id="trn-elim-suggest-btn">🎯 Suggest from Sleeper (wk ${nextWk || "?"})</button>
+              </div>
+              <div id="trn-elim-suggest-result" style="display:none;padding:var(--space-2) var(--space-3);background:rgba(240,180,41,.08);border:1px solid var(--color-gold);border-radius:var(--radius-md);font-size:.82rem;margin-bottom:var(--space-3)"></div>
+              <div style="display:grid;grid-template-columns:1fr auto auto;gap:var(--space-2);align-items:end">
+                <div class="form-group" style="margin-bottom:0">
+                  <label>Eliminated player</label>
+                  <select id="trn-elim-add-player" class="trn-filter-select" style="width:100%">
+                    <option value="">— select player —</option>
+                    ${available.map(p => `<option value="${_esc(p.id)}" data-name="${_esc(p.name)}">${_esc(p.name)}</option>`).join("")}
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label>Week</label>
+                  <input type="number" id="trn-elim-add-week" min="1" max="18" value="${nextWk || ""}" placeholder="wk"
+                    style="width:65px;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label>Score <span style="font-weight:400;color:var(--color-text-dim)">(opt.)</span></label>
+                  <input type="number" id="trn-elim-add-score" min="0" step="0.01" placeholder="—"
+                    style="width:80px;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem" />
+                </div>
+              </div>
+              <div class="form-group" style="margin-top:var(--space-2);margin-bottom:var(--space-3)">
+                <label>Note <span style="font-weight:400;color:var(--color-text-dim)">(optional)</span></label>
+                <input type="text" id="trn-elim-add-note"
+                  placeholder="${inPhase1 ? `Lowest cumulative PF wks 1–${phase1End}` : `Lowest score wk ${nextWk||"?"}`}"
+                  style="width:100%;padding:5px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font-size:.85rem;box-sizing:border-box" />
+              </div>
+              <button class="btn-primary btn-sm" id="trn-elim-add-btn">+ Confirm Elimination</button>
+            </div>` : `
+            <div style="padding:var(--space-3);background:rgba(240,180,41,.06);border:1px solid var(--color-gold);border-radius:var(--radius-md);font-size:.85rem;color:var(--color-gold);margin-top:var(--space-3)">
+              ✓ All ${leaguePlayers.length} players recorded. Last entry is the league champion.
+            </div>`}
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-4);padding-top:var(--space-3);border-top:1px solid var(--color-border)">
+              <span style="font-size:.78rem;color:var(--color-text-dim)">${eliminations.length} of ${leaguePlayers.length} players recorded</span>
+              <button class="btn-primary" id="trn-elim-save">💾 Save Knockouts</button>
+            </div>
+          </div>`;
+      }
+
+      function _refresh() {
+        const c = document.getElementById("trn-elimtab-container");
+        if (c) { c.innerHTML = _buildHTML(); _wireInline(); }
+      }
+
+      function _wireInline() {
+        // Move up/down
+        document.querySelectorAll(".trn-elim-move-up").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const i = parseInt(btn.dataset.idx); if (i < 1) return;
+            [eliminations[i-1], eliminations[i]] = [eliminations[i], eliminations[i-1]]; _refresh();
+          });
+        });
+        document.querySelectorAll(".trn-elim-move-dn").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const i = parseInt(btn.dataset.idx); if (i >= eliminations.length - 1) return;
+            [eliminations[i], eliminations[i+1]] = [eliminations[i+1], eliminations[i]]; _refresh();
+          });
+        });
+        document.querySelectorAll(".trn-elim-del").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const i = parseInt(btn.dataset.idx);
+            const entry = eliminations[i];
+            if (entry?.playerId) eliminatedIds.delete(entry.playerId);
+            eliminations.splice(i, 1); _refresh();
+          });
+        });
+
+        // Suggest
+        document.getElementById("trn-elim-suggest-btn")?.addEventListener("click", async () => {
+          const btn    = document.getElementById("trn-elim-suggest-btn");
+          const result = document.getElementById("trn-elim-suggest-result");
+          const wkInput = document.getElementById("trn-elim-add-week");
+          const week   = parseInt(wkInput?.value) || null;
+          if (!week) { showToast("Enter a week number first", "error"); return; }
+          if (btn) { btn.disabled = true; btn.textContent = "Fetching…"; }
+          if (result) result.style.display = "none";
+          try {
+            const available2 = _availablePlayers();
+            const activeIds2 = new Set(available2.map(p => p.id));
+            const inP1 = _isPhase1(week);
+            let scores = {};
+            if (inP1 && phase1End) {
+              const endWk = Math.min(week, phase1End);
+              const fetches = [];
+              for (let wk = 1; wk <= endWk; wk++) {
+                fetches.push(fetch(`https://api.sleeper.app/v1/league/${lgId}/matchups/${wk}`).then(r=>r.ok?r.json():[]).catch(()=>[]));
+              }
+              const weekData = await Promise.all(fetches);
+              weekData.forEach(mups => { (mups||[]).forEach(m => { if (!m.roster_id) return; const pid=String(m.roster_id); if(!activeIds2.has(pid)) return; scores[pid]=(scores[pid]||0)+(m.points||0); }); });
+            } else {
+              const mups = await fetch(`https://api.sleeper.app/v1/league/${lgId}/matchups/${week}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+              mups.forEach(m => { if (!m.roster_id) return; const pid=String(m.roster_id); if(!activeIds2.has(pid)) return; scores[pid]=m.points||0; });
+            }
+            if (!Object.keys(scores).length) { if(result){result.style.display="";result.innerHTML=`⚠️ No scores found for week ${week}.`;} return; }
+            const ranked = available2.filter(p=>scores[p.id]!=null).sort((a,b)=>(scores[a.id]||0)-(scores[b.id]||0));
+            if (!ranked.length) { if(result){result.style.display="";result.innerHTML="⚠️ Couldn't match scores to active players.";} return; }
+            const loser = ranked[0]; const loserScore = (scores[loser.id]||0).toFixed(2);
+            const scoreType = inP1 ? `cumulative PF wks 1–${phase1End}` : `wk ${week} score`;
+            const sel2 = document.getElementById("trn-elim-add-player"); if(sel2) sel2.value = loser.id;
+            const si = document.getElementById("trn-elim-add-score"); if(si) si.value = loserScore;
+            const ni = document.getElementById("trn-elim-add-note"); if(ni && !ni.value) ni.value = `Lowest ${scoreType}: ${loserScore} pts`;
+            const rankRows = ranked.map((p,i)=>`<span style="color:${i===0?"var(--color-red)":"var(--color-text-dim)"}">${i===0?"🔴":"·"} ${_esc(p.name)}: ${(scores[p.id]||0).toFixed(2)}</span>`).join(" &nbsp;");
+            if(result){result.style.display="";result.innerHTML=`<strong>Suggested: ${_esc(loser.name)}</strong> (${loserScore} pts)<br><span style="font-size:.75rem;color:var(--color-text-dim)">${rankRows}</span>`;}
+          } catch(e) { if(result){result.style.display="";result.innerHTML=`⚠️ ${_esc(e.message)}`;} }
+          finally { if(btn){btn.disabled=false;btn.textContent=`🎯 Suggest from Sleeper (wk ${parseInt(wkInput?.value)||"?"})`; } }
+        });
+
+        // Add
+        document.getElementById("trn-elim-add-btn")?.addEventListener("click", () => {
+          const sel = document.getElementById("trn-elim-add-player");
+          const pid = sel?.value; const pname = sel?.options[sel.selectedIndex]?.dataset.name || pid;
+          const wk  = parseInt(document.getElementById("trn-elim-add-week")?.value) || null;
+          const sc  = parseFloat(document.getElementById("trn-elim-add-score")?.value) || null;
+          const nt  = document.getElementById("trn-elim-add-note")?.value.trim() || "";
+          if (!pid) { showToast("Select a player to eliminate", "error"); return; }
+          if (!wk)  { showToast("Enter the week of elimination", "error"); return; }
+          eliminations.push({ week: wk, playerId: pid, playerName: pname, score: sc, note: nt });
+          eliminatedIds.add(pid); _refresh();
+        });
+
+        // Save
+        document.getElementById("trn-elim-save")?.addEventListener("click", async () => {
+          const saveBtn = document.getElementById("trn-elim-save");
+          if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+          try {
+            const curPoData  = (_tournaments[tid]?.playoffs || {})[resolvedPoYear] || {};
+            const curDec     = curPoData.decathlon || {};
+            const curLgCfg   = (curDec.leagueConfig || {})[lgId] || {};
+            const updatedLgCfg     = { ...curLgCfg, eliminations };
+            const updatedLeagueCfg = { ...(curDec.leagueConfig || {}), [lgId]: updatedLgCfg };
+            await _tPlayoffsRef(tid, resolvedPoYear).update({ "decathlon/leagueConfig": updatedLeagueCfg });
+            if (!_tournaments[tid])                                         _tournaments[tid] = {};
+            if (!_tournaments[tid].playoffs)                                _tournaments[tid].playoffs = {};
+            if (!_tournaments[tid].playoffs[resolvedPoYear])                _tournaments[tid].playoffs[resolvedPoYear] = {};
+            if (!_tournaments[tid].playoffs[resolvedPoYear].decathlon)      _tournaments[tid].playoffs[resolvedPoYear].decathlon = {};
+            _tournaments[tid].playoffs[resolvedPoYear].decathlon.leagueConfig = updatedLeagueCfg;
+            lgCfg.eliminations = eliminations;
+            showToast(`${eliminations.length} knockouts saved ✓`);
+            // Refresh the local t reference too
+            t = _tournaments[tid];
+          } catch(e) {
+            showToast("Save failed: " + e.message, "error");
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 Save Knockouts"; }
+          }
+        });
+      }
+
+      container.innerHTML = _buildHTML();
+      _wireInline();
+    }
+
+    // Render the outer shell with league picker (if needed)
+    body.innerHTML = `
+      ${_renderPicker()}
+      <div id="trn-elimtab-container"></div>`;
+
+    // Wire the league picker
+    document.getElementById("trn-elimtab-lg-sel")?.addEventListener("change", function() {
+      selectedId = this.value;
+      const lg = elimLeagues.find(l => l.id === selectedId);
+      if (lg) _renderInlineManager(lg.id, lg.name, lg.cfg);
+    });
+
+    // Render the first (or only) league
+    const initLg = elimLeagues.find(l => l.id === selectedId) || elimLeagues[0];
+    if (initLg) _renderInlineManager(initLg.id, initLg.name, initLg.cfg);
+  }
+
   // Stored in reverse finish order: index 0 = eliminated first = worst finish.
   // Finish rank = (totalPlayers - index). Last in array = champion = finish #1.
   function _openEliminationManager(tid, t, lgId, lgName, lgCfg, poYear) {
@@ -8759,10 +9052,16 @@ This marks all registrations that have no year as belonging to ${targetYear}. Ru
     const statusClass = r.status === "approved" ? "trn-reg--approved"
                       : r.status === "denied"   ? "trn-reg--denied"
                       : "trn-reg--pending";
+    const dupWarning = r._isDuplicate
+      ? `<span title="This person may have already registered for this year — verify before approving"
+           style="display:inline-flex;align-items:center;gap:3px;font-size:.72rem;font-weight:700;
+                  color:#d97706;background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.35);
+                  border-radius:4px;padding:1px 6px;margin-left:6px">⚠️ Possible duplicate</span>`
+      : "";
     return `
       <div class="trn-reg-row ${statusClass}">
         <div class="trn-reg-main">
-          <div class="trn-reg-name">${_esc(r.displayName || r.teamName || "Unknown")}</div>
+          <div class="trn-reg-name">${_esc(r.displayName || r.teamName || "Unknown")}${dupWarning}</div>
           <div class="trn-reg-meta">
             ${r.teamName ? `🏈 ${_esc(r.teamName)} · ` : ""}
             ${r.email    ? `📧 ${_esc(r.email)} · ` : ""}
@@ -10982,7 +11281,9 @@ Good luck this season!
       });
     });
     latestWeek = Math.min(latestWeek, maxRegWeek);
-    if (!_weeklyMuWeek || _weeklyMuWeek > maxRegWeek) _weeklyMuWeek = latestWeek || 1;
+    // Always show at least weeks 1–17 so the dropdown isn't empty when standingsCache is unsynced
+    const displayMaxWeek = Math.max(maxRegWeek, 17);
+    if (!_weeklyMuWeek || _weeklyMuWeek > displayMaxWeek) _weeklyMuWeek = latestWeek || 1;
 
     // Gather all leagues for this year across all platforms
     const batches  = t.leagues || {};
@@ -11038,7 +11339,7 @@ Good luck this season!
       leagueGroup
     ].join("");
 
-    const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
+    const weeks = Array.from({ length: displayMaxWeek }, (_, i) => i + 1);
 
     body.innerHTML = `
       <div class="trn-az-toolbar">
@@ -17959,9 +18260,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const freshRegSnap = await _tRegsRef(tid).once("value");
     const existingRegs = Object.values(freshRegSnap.val() || {});
 
-    // Only block if there is already a registration for THIS SAME YEAR that
-    // matches their identity. Registrations with no year field are legacy entries
-    // from before year-tracking was added — never block on those.
+    // Only flag (don't block) if there is already a same-year registration matching
+    // their identity. Admin sees the flag on the approval page and can decide.
     const sameYearRegs = existingRegs.filter(r => r.year && String(r.year) === currentRegYear);
     const duplicate = sameYearRegs.find(r => {
       if (checkDlr     && r.dlrUsername?.toLowerCase()     === checkDlr)     return true;
@@ -17970,11 +18270,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       return false;
     });
 
-    if (duplicate) {
-      errEl.textContent = `You have already registered for ${currentRegYear}. Contact the admin if you need to update your info.`;
-      errEl.classList.remove("hidden");
-      return;
-    }
+    // No longer block on duplicate — just tag the entry so admin can verify
+    // (prevents edge cases where someone is falsely blocked from registering)
 
     // Collect all form fields — only STD_FIELDS are truly required
     for (const f of fields) {
@@ -18008,6 +18305,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     entry.autoRegister = autoRegister;
     entry.dlrUsername  = _currentUsername || null;
     entry.year         = currentRegYear; // year-tag every new registration for scoped duplicate checks
+    if (duplicate) entry._isDuplicate = true; // flag for admin review — do not block submission
 
     const btn = document.getElementById("trn-submit-reg-btn");
     if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
