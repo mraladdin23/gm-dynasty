@@ -16764,6 +16764,27 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
         }
 
+        // Decathlon: fetch all week scores so _buildDecWeekScoreMap can run synchronously
+        // during _buildFinalRankings below. This mirrors what _renderDecathlonLeaderboard does.
+        if (mode === "decathlon" && po.startWeek && po.endWeek) {
+          const decCfg2   = po.decathlon || {};
+          const lgCfgMap2 = decCfg2.leagueConfig || {};
+          const lgIds2    = [...new Set(Object.values(t.standingsCache || {})
+            .filter(lc => String(lc.year) === String(activeY))
+            .map(lc => String(lc.leagueId || lc.league_id)))];
+          const fetchList2 = [];
+          lgIds2.forEach(lid2 => {
+            const lgConf2 = lgCfgMap2[lid2] || {};
+            const sw2 = lgConf2.finishBasis === "pf"
+              ? (lgConf2.pfStartWeek || po.startWeek) : po.startWeek;
+            const ew2 = lgConf2.finishBasis === "pf"
+              ? (lgConf2.pfEndWeek   || po.endWeek)   : po.endWeek;
+            for (let wk = sw2; wk <= ew2; wk++) fetchList2.push({ lid: lid2, wk });
+          });
+          if (btn) btn.textContent = `Fetching ${lgIds2.length} leagues × ${po.endWeek - po.startWeek + 1} weeks…`;
+          await Promise.allSettled(fetchList2.map(({ lid, wk }) => _fetchWeekScores(lid, wk)));
+        }
+
         // Build pre-computed round results: each round gets a sorted results array
         // ready to display on the public site — no re-derivation needed
         const _computedRounds = (() => {
@@ -16886,7 +16907,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         //   Finals survivors ordered by final-round score → last-round elim → … → non-qualifiers by PF.
         // Written to gmd/tournaments/{tid}/playoffs/{year}/finalRankings so analytics
         // tabs can read from t.playoffs[year].finalRankings without re-simulation.
-        const _buildFinalRankings = () => {
+        const _buildFinalRankings = async () => {
           const _leagueIdForTeam = (tm) => leagueIdByTeamKey[_teamKey(tm)] || "";
 
           if (mode === "points_rounds" && _computedRounds.length) {
@@ -17367,6 +17388,41 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               };
             });
 
+          } else if (mode === "decathlon") {
+            // Decathlon: build weekMap from populated caches, run leaderboard, emit per-player rankings.
+            // _weekScoreCache and _weekMatchupCache are already populated by the fetch above.
+            const weekMap2 = await _buildDecWeekScoreMap();
+            const { players: decPlayers } = _buildDecathlonLeaderboard(t, activeY, po, weekMap2);
+            return decPlayers.map((p, i) => ({
+              finalRank:   i + 1,
+              teamName:    p.displayName,
+              displayName: p.displayName,
+              leagueId:    "",
+              teamId:      p.identityKey || "",
+              qualified:   true,
+              bye:         false,
+              isTChamp:    i === 0,
+              pf:          p.totalPF || 0,
+              totalPoints: p.totalPoints || 0,
+              gender:      p.gender || "",
+              // Per-league breakdown for public site rendering
+              leagueResults: p.leagues.map(l => ({
+                leagueName:      l.leagueName,
+                leagueId:        l.leagueId || "",
+                finishBasis:     l.finishBasis || "record",
+                rank:            l.rank,
+                wins:            l.wins            || 0,
+                losses:          l.losses          || 0,
+                pf:              l.pf              || 0,
+                rangedPF:        l.rangedPF        || 0,
+                rangedWins:      l.rangedWins      ?? null,
+                rangedLosses:    l.rangedLosses    ?? null,
+                _combinedWins:   l._combinedWins   ?? null,
+                _combinedLosses: l._combinedLosses ?? null,
+                points:          l.points          || 0,
+              })),
+            }));
+
           } else {
             // Unknown mode: qual teams first by PF, then non-qualifiers by PF
             const qual    = sortedTeams.filter(tm =>  qualSet.has(_teamKey(tm)));
@@ -17385,7 +17441,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
         };
 
-        const finalRankings = _buildFinalRankings();
+        const finalRankings = await _buildFinalRankings();
         snapshot.finalRankings = finalRankings; // include in public snapshot too
 
         // Scrub any undefined values from the snapshot before writing —
