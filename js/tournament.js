@@ -13509,15 +13509,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const wlMap        = weekData?.wlMap  || null;
     const medMap       = weekData?.medMap || null;
     const hasWeekRange = !!(startWk && endWk && pfMap);
-    // Temporary diagnostic — remove after confirming
-    console.log("[decathlon] hasWeekRange:", hasWeekRange,
-      "pfMap keys:", pfMap ? Object.keys(pfMap).length : 0,
-      "wlMap keys:", wlMap ? Object.keys(wlMap).length : 0,
-      "medMap keys:", medMap ? Object.keys(medMap).length : 0);
-    if (medMap) {
-      const sampleMedKey = Object.keys(medMap)[0];
-      console.log("[decathlon] medMap sample key:", sampleMedKey, "value:", medMap[sampleMedKey]);
-    }
 
     // Participant display name + gender maps
     const _sk = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
@@ -13675,14 +13666,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           tm._combinedWins   = (tm.rangedWins   ?? (tm.wins  ||0)) + (tm.rangedMedWins ?? 0);
           tm._combinedLosses = (tm.rangedLosses ?? (tm.losses||0)) + (tm.rangedMedLoss ?? 0);
         });
-        // Temporary diagnostic — first team
-        const dbgTm = sortedTeams[0];
-        console.log("[decathlon] medianWins stamp sample for lgId:", lgId,
-          "teamId:", dbgTm?.teamId,
-          "rangedWins:", dbgTm?.rangedWins, "rangedMedWins:", dbgTm?.rangedMedWins,
-          "_combinedWins:", dbgTm?._combinedWins,
-          "wlKey:", lgId+"|"+String(dbgTm?.teamId),
-          "medMapHit:", medMap?.[lgId+"|"+String(dbgTm?.teamId)]);
         lg.teams = sortedTeams;
       } else if ((basis === "record" || basis === "playoffs") && hasWeekRange && wlMap) {
         // Record/playoffs basis within week range: use H2H record from matchup data.
@@ -13728,16 +13711,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const pfForTotal = (hasWeekRange && tm.rangedPF != null) ? tm.rangedPF : (tm.pf || 0);
 
         p.leagues.push({
-          leagueName:   lg.leagueName,
-          leagueId:     tm.leagueId,
-          finishBasis:  lg.finishBasis,
+          leagueName:    lg.leagueName,
+          leagueId:      tm.leagueId,
+          finishBasis:   lg.finishBasis,
           rank,
-          wins:         tm.wins         || 0,
-          losses:       tm.losses       || 0,
-          pf:           tm.pf           || 0,
-          rangedPF:     tm.rangedPF     || 0,
-          rangedWins:   tm.rangedWins   ?? null,
-          rangedLosses: tm.rangedLosses ?? null,
+          wins:          tm.wins          || 0,
+          losses:        tm.losses        || 0,
+          pf:            tm.pf            || 0,
+          rangedPF:      tm.rangedPF      || 0,
+          rangedWins:    tm.rangedWins    ?? null,
+          rangedLosses:  tm.rangedLosses  ?? null,
+          rangedMedWins: tm.rangedMedWins ?? null,
+          rangedMedLoss: tm.rangedMedLoss ?? null,
+          _combinedWins:   tm._combinedWins   ?? null,
+          _combinedLosses: tm._combinedLosses ?? null,
           points:  pts,
         });
         p.totalPF     += pfForTotal;
