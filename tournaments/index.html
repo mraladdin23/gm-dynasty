@@ -2929,9 +2929,11 @@
         if (val) entry["custom_" + i] = val;
       }
 
-      // ── Pre-flight: year-scoped duplicate registration check ─────────
-      // Only block if the person has already registered for THIS specific year.
-      // Past participants from prior years (2025, etc.) must be able to register for 2026.
+      // ── Pre-flight: year-scoped duplicate check (flag only — do not block) ──
+      // If a same-year registration already exists for this email/name, tag the
+      // new entry so the admin sees a warning badge on the approval page.
+      // We no longer block submission — past false-positives caused real registrants
+      // to be turned away. Admin verifies before approving.
       const _norm = (s) => String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
       // Resolve the open registration year from the playoffs node
       const _regYear = (() => {
@@ -2939,7 +2941,6 @@
         const openYr2 = Object.keys(po2).find(k => /^\d{4}$/.test(k) && po2[k]?.registrationOpen);
         return openYr2 ? String(openYr2) : String(_currentT.registrationYear || new Date().getFullYear());
       })();
-      // Fetch current registrations and only check same-year entries
       try {
         const regSnap2 = await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations").once("value");
         const allRegs2 = Object.values(regSnap2.val() || {});
@@ -2950,18 +2951,8 @@
           (checkE2 && r.email?.toLowerCase() === checkE2) ||
           (checkN2 && r.displayName?.toLowerCase() === checkN2)
         );
-        if (dup2) return _showError(`You have already registered for ${_regYear}. Contact the admin if you need to update your info.`);
-      } catch(e) { /* non-fatal — don't block on fetch error */ }
-
-      // ── Pre-flight: check localStorage guard (client-side duplicate prevention) ──
-      // This catches the case where the Firebase write succeeded but the success screen
-      // didn't show (e.g. network hiccup on the count update).
-      const _storageKey = "reg_submitted_" + _currentTid + "_" + _norm(entry.email || entry.displayName || "");
-      try {
-        if (localStorage.getItem(_storageKey)) {
-          return _showError("📬 It looks like you already submitted a registration for this tournament. If you haven't heard back, please contact the tournament admin.");
-        }
-      } catch(e) { /* localStorage may be blocked — non-fatal */ }
+        if (dup2) entry._isDuplicate = true; // flag for admin — do not block
+      } catch(e) { /* non-fatal */ }
 
       // ── Disable button and clear any previous error ────
       if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
@@ -2971,9 +2962,6 @@
         const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         entry.year = _regYear; // tag every registration with the open year for future scoped checks
         await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
-
-        // Mark submitted in localStorage so repeat clicks show a friendly message
-        try { localStorage.setItem(_storageKey, "1"); } catch(e) {}
 
         // Update public registrationCount (non-fatal if this fails)
         try {
@@ -3002,16 +2990,7 @@
         const code = (err.code || err.message || "").toLowerCase();
         let friendlyMsg;
         if (code.includes("permission_denied") || code.includes("permission denied")) {
-          // Check localStorage — if we stored a key, the first write succeeded and this
-          // is a duplicate attempt caught by Firebase rules
-          let alreadySubmitted = false;
-          try { alreadySubmitted = !!localStorage.getItem(_storageKey); } catch(e) {}
-          if (alreadySubmitted) {
-            friendlyMsg = "📬 Your registration was already submitted! The admin will review it shortly.";
-          } else {
-            // Check participantMap again — might have been approved since page load
-            friendlyMsg = "⚠️ Registration could not be submitted. You may already be registered or approved for this tournament. Please contact the tournament admin if you think this is an error.";
-          }
+          friendlyMsg = "⚠️ Registration could not be submitted. Please contact the tournament admin if you think this is an error.";
         } else if (code.includes("network") || code.includes("unavailable") || code.includes("timeout")) {
           friendlyMsg = "⚠️ Network error — please check your connection and try again.";
         } else {
