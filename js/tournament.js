@@ -13653,9 +13653,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         lg.teams = sortedTeams;
       } else if (basis === "record" && lgCfg.medianWins && hasWeekRange && wlMap && medMap) {
         // Record + median wins: total wins = H2H wins + median wins each week.
-        console.log("[decathlon] ENTERING medianWins path for lgId:", lgId,
-          "medianWins:", lgCfg.medianWins, "hasWeekRange:", hasWeekRange,
-          "wlMap:", !!wlMap, "medMap:", !!medMap);
         // Sort by total wins desc, total losses desc (inverse), rangedPF tiebreak.
         const sortedTeams = [...lg.teams].sort((a,b) => {
           const aH2H = a.rangedWins   ?? (a.wins  || 0);
@@ -13678,12 +13675,17 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           tm._combinedWins   = (tm.rangedWins   ?? (tm.wins  ||0)) + (tm.rangedMedWins ?? 0);
           tm._combinedLosses = (tm.rangedLosses ?? (tm.losses||0)) + (tm.rangedMedLoss ?? 0);
         });
+        // Temporary diagnostic — first team
+        const dbgTm = sortedTeams[0];
+        console.log("[decathlon] medianWins stamp sample for lgId:", lgId,
+          "teamId:", dbgTm?.teamId,
+          "rangedWins:", dbgTm?.rangedWins, "rangedMedWins:", dbgTm?.rangedMedWins,
+          "_combinedWins:", dbgTm?._combinedWins,
+          "wlKey:", lgId+"|"+String(dbgTm?.teamId),
+          "medMapHit:", medMap?.[lgId+"|"+String(dbgTm?.teamId)]);
         lg.teams = sortedTeams;
       } else if ((basis === "record" || basis === "playoffs") && hasWeekRange && wlMap) {
         // Record/playoffs basis within week range: use H2H record from matchup data.
-        console.log("[decathlon] plain H2H path for lgId:", lgId,
-          "basis:", basis, "lgCfg.medianWins:", lgCfg.medianWins,
-          "medMap:", !!medMap, "medMapKeys:", medMap ? Object.keys(medMap).length : 0);
         // Sort: wins desc → losses asc → rangedPF desc (standard fantasy standings order).
         const sortedTeams = [...lg.teams].sort((a,b) => {
           const aW = a.rangedWins   ?? (a.wins   || 0);
