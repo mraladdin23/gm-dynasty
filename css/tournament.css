@@ -5244,6 +5244,9 @@
     border-radius: 0 !important;
     max-height: 100vh !important;
   }
+  .modal-box--lg.modal-box--scroll {
+    overflow: hidden !important;  /* keep pinned header/footer on mobile too */
+  }
   .trn-wizard-modal-body {
     max-height: calc(100vh - 120px) !important;
   }

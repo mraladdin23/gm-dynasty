@@ -1442,9 +1442,9 @@ const DLRTournament = (() => {
         <button class="btn-secondary" id="trn-modal-cancel">Close</button>
       </div>
     `);
-    // Use modal-box--scroll so header/footer stay pinned and only the body scrolls
+    // Match wizard size + pinned header/footer scroll
     const pcBox = document.getElementById("trn-modal-box");
-    if (pcBox) pcBox.classList.add("modal-box--scroll");
+    if (pcBox) pcBox.className = "modal-box modal-box--lg modal-box--scroll";
     document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
     document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
     _wirePlayoffConfigListeners(tid, t, _tournamentYear ? String(_tournamentYear) : (_playoffYears(t)[0] || null));
