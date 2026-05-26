@@ -3854,10 +3854,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                       ${(() => {
                         const elims = lgCfg.eliminations || [];
                         const elimCount = elims.length;
-                        return `<button class="btn-secondary btn-sm trn-dec-manage-elim-btn"
-                          data-lg="${_esc(lgId)}" data-lg-name="${_esc(lgName)}">
-                          ☠️ Manage Weekly Knockouts${elimCount ? ` (${elimCount} recorded)` : ""}
-                        </button>`;
+                        return elimCount
+                          ? `<div style="font-size:.78rem;color:var(--color-text-dim);margin-top:var(--space-2)">☠️ ${elimCount} knockout${elimCount===1?"":"s"} recorded — manage in the <strong>⚔️ Elimination</strong> history tab.</div>`
+                          : `<div style="font-size:.78rem;color:var(--color-text-dim);margin-top:var(--space-2)">No knockouts recorded yet — use the <strong>⚔️ Elimination</strong> history tab to add them.</div>`;
                       })()}
                     </div>
                   </div>
@@ -4997,17 +4996,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     // Manage Weekly Knockouts button
-    document.querySelectorAll(".trn-dec-manage-elim-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const lgId   = btn.dataset.lg;
-        const lgName = btn.dataset.lgName;
-        // Get current league config from local state
-        const curPo  = _poLocal();
-        const lgCfg  = (curPo?.decathlon?.leagueConfig || {})[lgId] || {};
-        _openEliminationManager(tid, t, lgId, lgName, lgCfg, _activePoYear);
-      });
-    });
-
     // Add/remove rows in the finish-points table
     document.getElementById("trn-dec-add-row-btn")?.addEventListener("click", () => {
       const tbl = document.getElementById("trn-dec-pts-table");
@@ -18363,7 +18351,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       overlay.addEventListener("click", e => { if (e.target === overlay) _closeModal(); });
       document.body.appendChild(overlay);
     }
-    document.getElementById("trn-modal-box").innerHTML = html;
+    // Always reset to default size — callers that need --lg or --scroll add their class after
+    const box = document.getElementById("trn-modal-box");
+    box.className = "modal-box modal-box--sm";
+    box.innerHTML = html;
     overlay.classList.remove("hidden");
   }
 

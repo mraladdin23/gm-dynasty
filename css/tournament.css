@@ -2866,7 +2866,7 @@
 .trn-scoring-del-row:hover { opacity: 1; color: #e05555; }
 
 /* ── Playoff Config Section-Nav ──────────────────────── */
-.trn-pc-card { overflow: hidden; }
+.trn-pc-card { overflow: visible; }  /* must not clip — decathlon league cards extend below modal body height */
 .trn-pc-header {
   display: flex;
   align-items: center;
