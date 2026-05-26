@@ -372,9 +372,8 @@ const GMDB = (() => {
   // ── Salary cap data — uses SDK ref for auth ──────────────
   async function getSalarySettings(leagueKey) {
     try {
-      // Use REST to bypass Firebase SDK local cache — SDK can return stale empty
-      // data on cold page load before the network response arrives.
-      return await _restGet(`gmd/salaryCap/${leagueKey}/settings`) || null;
+      const snap = await GMD.child(`salaryCap/${leagueKey}/settings`).once("value");
+      return snap.val() || null;
     } catch(e) { return null; }
   }
 
@@ -384,13 +383,21 @@ const GMDB = (() => {
 
   async function getSalaryRosters(leagueKey) {
     try {
-      // Use REST to bypass Firebase SDK local cache — same reason as getSalarySettings.
+      // Use REST to bypass Firebase SDK local cache which can return stale empty
+      // data on cold page load before the network response arrives.
       return await _restGet(`gmd/salaryCap/${leagueKey}/rosters`) || {};
     } catch(e) { return {}; }
   }
 
   async function saveSalaryRosters(leagueKey, rosters) {
-    await GMD.child(`salaryCap/${leagueKey}/rosters`).set(rosters);
+    // Write each team individually via multi-path update() rather than a single
+    // set() on the whole object. Firebase silently converts all-numeric string
+    // keys to array indices on a plain set(), corrupting or dropping those entries.
+    const updates = {};
+    for (const [username, data] of Object.entries(rosters || {})) {
+      updates[`salaryCap/${leagueKey}/rosters/${username}`] = data;
+    }
+    if (Object.keys(updates).length) await GMD.update(updates);
   }
 
   // ── Cross-platform merge links ─────────────────────────
