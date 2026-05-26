@@ -416,10 +416,6 @@ const DLRSalaryCap = (() => {
 
   async function _saveSalaryData() {
     await GMDB.saveSalaryRosters(_storageKey, _salaryData);
-    // Force a fresh read so the local Firebase SDK cache reflects the write
-    // immediately — without this, the next init() call returns stale cached
-    // data and manual edits appear lost until the cache expires naturally.
-    _salaryData = await GMDB.getSalaryRosters(_storageKey) || {};
   }
 
   // ── Main render ───────────────────────────────────────────
@@ -1404,16 +1400,8 @@ const DLRSalaryCap = (() => {
     return (_salaryData[username]?.players || []);
   }
 
-  // Returns true if salary data is fully loaded and rendered for this leagueKey.
-  // Used by profile.js to skip redundant re-init when the background eager init
-  // already completed before the user clicks the Roster tab.
-  function isReady(leagueKey) {
-    return _leagueKey === leagueKey && !!_settings && !!_rosterData && !!_salaryData;
-  }
-
   return {
     init, preloadCap, reset, setView, setPos, selectTeam,
-    isReady,
     openEditModal, savePlayerSalary, addAuctionWin, reconcileAuctionWins,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,

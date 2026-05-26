@@ -372,8 +372,9 @@ const GMDB = (() => {
   // ── Salary cap data — uses SDK ref for auth ──────────────
   async function getSalarySettings(leagueKey) {
     try {
-      const snap = await GMD.child(`salaryCap/${leagueKey}/settings`).once("value");
-      return snap.val() || null;
+      // Use REST to bypass Firebase SDK local cache — SDK can return stale empty
+      // data on cold page load before the network response arrives.
+      return await _restGet(`gmd/salaryCap/${leagueKey}/settings`) || null;
     } catch(e) { return null; }
   }
 
@@ -383,8 +384,8 @@ const GMDB = (() => {
 
   async function getSalaryRosters(leagueKey) {
     try {
-      const snap = await GMD.child(`salaryCap/${leagueKey}/rosters`).once("value");
-      return snap.val() || {};
+      // Use REST to bypass Firebase SDK local cache — same reason as getSalarySettings.
+      return await _restGet(`gmd/salaryCap/${leagueKey}/rosters`) || {};
     } catch(e) { return {}; }
   }
 

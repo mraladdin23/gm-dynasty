@@ -2892,18 +2892,9 @@ const Profile = (() => {
         league.platform || "sleeper", sleeperUid, franchiseId4);
     }
 
-    // For salary cap leagues: run a full background init so dtab-salary is populated
-    // immediately on league open, not just when the user clicks the Roster tab.
-    // The _initToken guard in DLRSalaryCap.init handles the case where the user
-    // clicks the Roster tab while this is still in-flight — the second init call
-    // wins and the first silently aborts.
-    // For non-salary leagues that only have auctionEnabled: preloadCap is enough
-    // since they don't have a dedicated salary tab to pre-render.
+    // Silently preload salary cap data so Teams tab always has cap figures
     const isSalary4 = (meta3.leagueTypeOverride === "salary") || league.leagueType === "salary";
-    if (isSalary4) {
-      DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId4,
-        league.platform, league.season, league.leagueKey || leagueKey).catch(() => {});
-    } else if (meta3.auctionEnabled) {
+    if (isSalary4 || meta3.auctionEnabled) {
       DLRSalaryCap.preloadCap(leagueKey, league.leagueId, franchiseId4).catch(() => {});
     }
 
@@ -3064,11 +3055,7 @@ const Profile = (() => {
         document.querySelectorAll(".detail-tab-content").forEach(c => c.classList.remove("active"));
         document.getElementById("dtab-salary")?.classList.add("active");
         const franchiseId2 = franchise2?.franchiseId || leagueKey;
-        // Skip re-init if the background eager init (fired on league open) already
-        // finished — avoids a loading flash and redundant Firebase/API calls.
-        if (!DLRSalaryCap.isReady(leagueKey)) {
-          DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2, league.platform, league.season, league.leagueKey || leagueKey);
-        }
+        DLRSalaryCap.init(leagueKey, league.leagueId, league.isCommissioner, franchiseId2, league.platform, league.season, league.leagueKey || leagueKey);
       } else {
         DLRRoster.init(league.leagueId, league.platform, league.season, league.leagueKey || leagueKey, league.myRosterId || null);
       }
