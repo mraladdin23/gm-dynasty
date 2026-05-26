@@ -127,10 +127,14 @@ const DLRSalaryCap = (() => {
       (users||[]).forEach(u => { userMap[u.user_id] = u; });
       return (rosters||[]).map(r => {
         const u = userMap[r.owner_id] || {};
+        // Firebase keys cannot be bare numeric strings (treated as array indices).
+        // If the user has no username, fall back to user_id but prefix with "uid_"
+        // so it's always a valid non-numeric Firebase key.
+        const rawId = u.username || (u.user_id ? `uid_${u.user_id}` : null) || `team_${r.roster_id}`;
         return {
           roster_id: r.roster_id,
           ownerId:   r.owner_id,
-          username:  (u.username || u.user_id || `team_${r.roster_id}`).toLowerCase(),
+          username:  rawId.toLowerCase(),
           teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
           avatar:    u.avatar || null,
           players:   r.players  || [],
@@ -405,7 +409,25 @@ const DLRSalaryCap = (() => {
 
   async function _loadSalaryData(leagueKey) {
     try {
-      return await GMDB.getSalaryRosters(leagueKey) || {};
+      const data = await GMDB.getSalaryRosters(leagueKey) || {};
+      // Migrate any bare numeric keys (e.g. "599820639284568064") → "uid_599820639284568064".
+      // These were created before the uid_ prefix fix and cause Firebase .set() to fail
+      // because numeric-string keys are treated as array indices.
+      let migrated = false;
+      const fixed = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (/^\d+$/.test(k)) {
+          fixed[`uid_${k}`] = v;
+          migrated = true;
+        } else {
+          fixed[k] = v;
+        }
+      }
+      if (migrated) {
+        // Save the fixed keys back so future loads are clean
+        GMDB.saveSalaryRosters(leagueKey, fixed).catch(() => {});
+      }
+      return migrated ? fixed : data;
     } catch(e) { return {}; }
   }
 
@@ -416,6 +438,10 @@ const DLRSalaryCap = (() => {
 
   async function _saveSalaryData() {
     await GMDB.saveSalaryRosters(_storageKey, _salaryData);
+    // Force a fresh read so the local Firebase SDK cache reflects the write
+    // immediately — without this, the next init() call returns stale cached
+    // data and manual edits appear lost until the cache expires naturally.
+    _salaryData = await GMDB.getSalaryRosters(_storageKey) || {};
   }
 
   // ── Main render ───────────────────────────────────────────
@@ -1050,6 +1076,8 @@ const DLRSalaryCap = (() => {
     const rosterToUsername = {};
     (_rosterData || []).forEach(r => {
       rosterToUsername[String(r.roster_id)] = r.username;
+      // Also key by ownerId — but use the already-sanitized username from _rosterData,
+      // not the raw ownerId, since _rosterData.username already has the uid_ prefix applied.
       if (r.ownerId) rosterToUsername[String(r.ownerId)] = r.username;
     });
 
@@ -1400,8 +1428,16 @@ const DLRSalaryCap = (() => {
     return (_salaryData[username]?.players || []);
   }
 
+  // Returns true if salary data is fully loaded and rendered for this leagueKey.
+  // Used by profile.js to skip redundant re-init when the background eager init
+  // already completed before the user clicks the Roster tab.
+  function isReady(leagueKey) {
+    return _leagueKey === leagueKey && !!_settings && !!_rosterData && !!_salaryData;
+  }
+
   return {
     init, preloadCap, reset, setView, setPos, selectTeam,
+    isReady,
     openEditModal, savePlayerSalary, addAuctionWin, reconcileAuctionWins,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
