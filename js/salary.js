@@ -419,10 +419,6 @@ const DLRSalaryCap = (() => {
 
   async function _saveSalaryData() {
     await GMDB.saveSalaryRosters(_storageKey, _salaryData);
-    // Force a fresh read so the local Firebase SDK cache reflects the write
-    // immediately — without this, the next init() call returns stale cached
-    // data and manual edits appear lost until the cache expires naturally.
-    _salaryData = await GMDB.getSalaryRosters(_storageKey) || {};
   }
 
   // ── Main render ───────────────────────────────────────────
@@ -500,10 +496,14 @@ const DLRSalaryCap = (() => {
   function _getTeamSalaryMap() {
     const map = {};
     Object.entries(_salaryData || {}).forEach(([username, td]) => {
-      map[username] = {};
-      (td.players || []).forEach(p => {
-        if (p.playerId) map[username][p.playerId] = p;
-      });
+      // Index under both the stored key and its uid_-stripped/added variant
+      // so lookups work regardless of which key format is in Firebase
+      const bare   = username.startsWith("uid_") ? username.slice(4) : username;
+      const prefixed = username.startsWith("uid_") ? username : `uid_${username}`;
+      const entry = {};
+      (td.players || []).forEach(p => { if (p.playerId) entry[p.playerId] = p; });
+      map[bare]     = map[bare]     ? { ...map[bare],     ...entry } : entry;
+      map[prefixed] = map[prefixed] ? { ...map[prefixed], ...entry } : entry;
     });
     return map;
   }
