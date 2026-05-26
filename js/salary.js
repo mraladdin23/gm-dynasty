@@ -71,7 +71,10 @@ const DLRSalaryCap = (() => {
     _platform   = platform || "sleeper";
     _season     = season   || new Date().getFullYear().toString();
     _platformLeagueKey = platformLeagueKey || null;
-    _storageKey = franchiseId || leagueKey;
+    // Always use leagueKey as the storage key — franchiseId is the oldest league
+    // in a dynasty chain and has no relationship to where auction/salary data lives.
+    // Using franchiseId caused saves to go to a different Firebase path than reads.
+    _storageKey = leagueKey;
     _settings   = null;
     _salaryData = null;
     _rosterData = null;
@@ -127,14 +130,10 @@ const DLRSalaryCap = (() => {
       (users||[]).forEach(u => { userMap[u.user_id] = u; });
       return (rosters||[]).map(r => {
         const u = userMap[r.owner_id] || {};
-        // Firebase keys cannot be bare numeric strings (treated as array indices).
-        // If the user has no username, fall back to user_id but prefix with "uid_"
-        // so it's always a valid non-numeric Firebase key.
-        const rawId = u.username || (u.user_id ? `uid_${u.user_id}` : null) || `team_${r.roster_id}`;
         return {
           roster_id: r.roster_id,
           ownerId:   r.owner_id,
-          username:  rawId.toLowerCase(),
+          username:  (u.username || u.user_id || `team_${r.roster_id}`).toLowerCase(),
           teamName:  u.metadata?.team_name || u.display_name || u.username || `Team ${r.roster_id}`,
           avatar:    u.avatar || null,
           players:   r.players  || [],
@@ -409,25 +408,7 @@ const DLRSalaryCap = (() => {
 
   async function _loadSalaryData(leagueKey) {
     try {
-      const data = await GMDB.getSalaryRosters(leagueKey) || {};
-      // Migrate any bare numeric keys (e.g. "599820639284568064") → "uid_599820639284568064".
-      // These were created before the uid_ prefix fix and cause Firebase .set() to fail
-      // because numeric-string keys are treated as array indices.
-      let migrated = false;
-      const fixed = {};
-      for (const [k, v] of Object.entries(data)) {
-        if (/^\d+$/.test(k)) {
-          fixed[`uid_${k}`] = v;
-          migrated = true;
-        } else {
-          fixed[k] = v;
-        }
-      }
-      if (migrated) {
-        // Save the fixed keys back so future loads are clean
-        GMDB.saveSalaryRosters(leagueKey, fixed).catch(() => {});
-      }
-      return migrated ? fixed : data;
+      return await GMDB.getSalaryRosters(leagueKey) || {};
     } catch(e) { return {}; }
   }
 
@@ -1076,8 +1057,6 @@ const DLRSalaryCap = (() => {
     const rosterToUsername = {};
     (_rosterData || []).forEach(r => {
       rosterToUsername[String(r.roster_id)] = r.username;
-      // Also key by ownerId — but use the already-sanitized username from _rosterData,
-      // not the raw ownerId, since _rosterData.username already has the uid_ prefix applied.
       if (r.ownerId) rosterToUsername[String(r.ownerId)] = r.username;
     });
 
@@ -1370,7 +1349,7 @@ const DLRSalaryCap = (() => {
   async function preloadCap(leagueKey, leagueId, franchiseId) {
     if (_leagueKey === leagueKey && _settings && _rosterData) return;
 
-    const storageKey = franchiseId || leagueKey;
+    const storageKey = leagueKey; // always use leagueKey, not franchiseId
     try {
       const [settings, salaryData] = await Promise.all([
         _loadSettings(storageKey),
