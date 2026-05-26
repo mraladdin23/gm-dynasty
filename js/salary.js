@@ -1049,10 +1049,23 @@ const DLRSalaryCap = (() => {
     }
     if (!bids) return;
 
+    // Always do a fresh read of salary data from Firebase before reconciling.
+    // This ensures we don't incorrectly flag players as missing due to stale
+    // in-memory state from a preloadCap or prior init call.
+    let freshSalaryData;
+    try {
+      freshSalaryData = await GMDB.getSalaryRosters(_storageKey) || {};
+      // Sync the fresh data into _salaryData so the rest of the module is current
+      _salaryData = freshSalaryData;
+    } catch(e) {
+      freshSalaryData = _salaryData; // fall back to in-memory if read fails
+    }
+
     // Build roster_id → username map
     const rosterToUsername = {};
     (_rosterData || []).forEach(r => {
       rosterToUsername[String(r.roster_id)] = r.username;
+      // Also key by ownerId — use the already-sanitized username from _rosterData
       if (r.ownerId) rosterToUsername[String(r.ownerId)] = r.username;
     });
 
@@ -1067,8 +1080,8 @@ const DLRSalaryCap = (() => {
       const username = rosterToUsername[winnerId];
       if (!username) return;
 
-      // Check if this player already has a salary entry for this team
-      const existing = (_salaryData[username]?.players || [])
+      // Check fresh Firebase data — not stale in-memory state
+      const existing = (freshSalaryData[username]?.players || [])
         .find(p => String(p.playerId) === playerId);
       if (existing) return; // already recorded — don't overwrite manual edits
 
@@ -1080,7 +1093,7 @@ const DLRSalaryCap = (() => {
         years:      1,
         holdout:    false,
         auctionWin: true,
-        reconciled: true,  // flag so we can identify auto-reconciled entries
+        reconciled: true,
       });
       changed = true;
       console.log(`[Salary] Reconciled auction win: ${a.playerName || playerId} → ${username} @ ${salary}`);
