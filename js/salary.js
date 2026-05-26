@@ -496,14 +496,10 @@ const DLRSalaryCap = (() => {
   function _getTeamSalaryMap() {
     const map = {};
     Object.entries(_salaryData || {}).forEach(([username, td]) => {
-      // Index under both the stored key and its uid_-stripped/added variant
-      // so lookups work regardless of which key format is in Firebase
-      const bare   = username.startsWith("uid_") ? username.slice(4) : username;
-      const prefixed = username.startsWith("uid_") ? username : `uid_${username}`;
-      const entry = {};
-      (td.players || []).forEach(p => { if (p.playerId) entry[p.playerId] = p; });
-      map[bare]     = map[bare]     ? { ...map[bare],     ...entry } : entry;
-      map[prefixed] = map[prefixed] ? { ...map[prefixed], ...entry } : entry;
+      map[username] = {};
+      (td.players || []).forEach(p => {
+        if (p.playerId) map[username][p.playerId] = p;
+      });
     });
     return map;
   }
@@ -1041,7 +1037,7 @@ const DLRSalaryCap = (() => {
   // Safe to call multiple times — only writes entries not already present.
   async function reconcileAuctionWins(leagueKey) {
     const key = leagueKey || _leagueKey;
-    if (!key || !_salaryData || !_rosterData) return;
+    if (!key || !_salaryData || !_rosterData?.length) return;
 
     let bids;
     try {
