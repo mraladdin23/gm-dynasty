@@ -8850,6 +8850,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <button class="btn-secondary btn-sm" id="trn-lapsed-report-btn" title="Find prior-year players who haven't registered this year">
             👻 Lapsed Players
           </button>
+          <button class="btn-secondary btn-sm" id="trn-div-select-email-btn" title="Email approved registrants who haven't picked a division yet">
+            🗂 Division Select Email
+          </button>
           <button class="btn-secondary btn-sm" id="trn-division-builder-btn">
             🗂 Assign Divisions / Conferences
           </button>
@@ -9000,6 +9003,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // ── Lapsed player report ───────────────────────────────
     document.getElementById("trn-lapsed-report-btn")?.addEventListener("click", () => {
       _openLapsedPlayersModal(tid, t, regs);
+    });
+
+    // ── Division Select Email ──────────────────────────────
+    document.getElementById("trn-div-select-email-btn")?.addEventListener("click", async () => {
+      await _openDivSelectEmailModal(tid, t, approved.map(([rid, r]) => ({ rid, ...r })));
     });
 
     // ── Divisions / Conferences builder ───────────────────
@@ -9520,56 +9528,58 @@ Good luck this season!
   }
 
   // ── Lapsed Players Modal (F10) ─────────────────────────
-  // Shows prior-year players who haven't registered for the current open year.
-  // Provides BCC email batching (50/batch) to reach them without hitting
-  // people who have already registered.
+  // Compares the participants list (historical player database) against
+  // 2026 registrations and surfaces everyone who has played before but
+  // hasn't registered for the current year.
   async function _openLapsedPlayersModal(tid, t, allRegsObj) {
     const meta     = t.meta || {};
     const tourName = meta.name || "Tournament";
     const po       = _tournaments[tid]?.playoffs || t.playoffs || {};
 
-    // Resolve the currently open registration year
-    const openYr = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
-    const curYear = openYr ? String(openYr) : String(new Date().getFullYear());
+    // Resolve current open year — default to 2026
+    const openYr  = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
+    const curYear = openYr ? String(openYr) : "2026";
 
-    const allRegs = Object.entries(allRegsObj || {});
+    // Build lookup sets from current-year registrations (any status)
+    const curYearRegs = Object.values(allRegsObj || {})
+      .filter(r => r.year && String(r.year) === curYear);
+    const curEmails  = new Set(curYearRegs.map(r => (r.email || "").toLowerCase()).filter(Boolean));
+    const curNames   = new Set(curYearRegs.map(r => (r.displayName || "").toLowerCase().trim()).filter(Boolean));
+    const curSleeper = new Set(curYearRegs.map(r => (r.sleeperUsername || "").toLowerCase()).filter(Boolean));
+    const curMfl     = new Set(curYearRegs.map(r => (r.mflEmail || "").toLowerCase()).filter(Boolean));
+    const curYahoo   = new Set(curYearRegs.map(r => (r.yahooUsername || "").toLowerCase()).filter(Boolean));
 
-    // Current-year registrations (any status)
-    const curYearRegs = allRegs.filter(([, r]) => r.year && String(r.year) === curYear);
-    const curEmails   = new Set(curYearRegs.map(([, r]) => (r.email || "").toLowerCase()).filter(Boolean));
-    const curNames    = new Set(curYearRegs.map(([, r]) => (r.displayName || "").toLowerCase().trim()).filter(Boolean));
-    const curSleeper  = new Set(curYearRegs.map(([, r]) => (r.sleeperUsername || "").toLowerCase()).filter(Boolean));
+    // Load participants (the curated historical player list)
+    let participants = {};
+    try {
+      const snap = await _tParticipantsRef(tid).once("value");
+      participants = snap.val() || {};
+    } catch(e) {
+      participants = t.participants || {};
+    }
 
-    // Prior-year approved registrants
-    const priorApproved = allRegs.filter(([, r]) =>
-      r.year && String(r.year) !== curYear && (r.status || "").toLowerCase() === "approved"
-    );
+    const pList = Object.entries(participants);
 
-    // Dedupe prior players by email — keep highest/most recent year per person
-    const byEmail = {};
-    priorApproved.forEach(([, r]) => {
-      const key = (r.email || r.displayName || "").toLowerCase().trim();
-      if (!key) return;
-      if (!byEmail[key] || String(r.year) > String(byEmail[key].year)) {
-        byEmail[key] = r;
-      }
-    });
-
-    // Determine lapsed vs already-registered
+    // Split into lapsed (not yet in curYear regs) vs already registered
     const lapsed = [], alreadyReg = [];
-    Object.values(byEmail).forEach(r => {
-      const email   = (r.email || "").toLowerCase();
-      const name    = (r.displayName || "").toLowerCase().trim();
-      const sleeper = (r.sleeperUsername || "").toLowerCase();
-      const matched = (email && curEmails.has(email)) ||
-                      (name  && curNames.has(name))   ||
-                      (sleeper && curSleeper.has(sleeper));
-      if (matched) alreadyReg.push(r);
-      else         lapsed.push(r);
+    pList.forEach(([pid, p]) => {
+      const email   = (p.email || "").toLowerCase();
+      const name    = (p.displayName || "").toLowerCase().trim();
+      const sleeper = (p.sleeperUsername || "").toLowerCase();
+      const mfl     = (p.mflEmail || "").toLowerCase();
+      const yahoo   = (p.yahooUsername || "").toLowerCase();
+      const matched =
+        (email   && curEmails.has(email))   ||
+        (name    && curNames.has(name))     ||
+        (sleeper && curSleeper.has(sleeper)) ||
+        (mfl     && curMfl.has(mfl))        ||
+        (yahoo   && curYahoo.has(yahoo));
+      if (matched) alreadyReg.push(p);
+      else         lapsed.push(p);
     });
 
-    const lapsedWithEmail = lapsed.filter(r => r.email);
-    const lapsedNoEmail   = lapsed.filter(r => !r.email);
+    const lapsedWithEmail = lapsed.filter(p => p.email);
+    const lapsedNoEmail   = lapsed.filter(p => !p.email);
 
     _showModal(`
       <div class="modal-header">
@@ -9578,22 +9588,25 @@ Good luck this season!
       </div>
       <div class="modal-body trn-form-body" style="max-height:70vh;overflow-y:auto">
         <div class="trn-detail-rows" style="margin-bottom:var(--space-4)">
-          <div class="trn-detail-row"><span>Current open year</span><span>${_esc(curYear)}</span></div>
-          <div class="trn-detail-row"><span>Prior-year approved players</span><span>${Object.keys(byEmail).length}</span></div>
-          <div class="trn-detail-row" style="color:var(--color-orange)"><span>Not yet registered this year</span><span>${lapsed.length}</span></div>
-          <div class="trn-detail-row" style="color:var(--color-green,#22c55e)"><span>Already registered this year</span><span>${alreadyReg.length}</span></div>
+          <div class="trn-detail-row"><span>Current year</span><span>${_esc(curYear)}</span></div>
+          <div class="trn-detail-row"><span>Total participants on record</span><span>${pList.length}</span></div>
+          <div class="trn-detail-row" style="color:var(--color-orange)"><span>Not yet registered for ${_esc(curYear)}</span><span>${lapsed.length}</span></div>
+          <div class="trn-detail-row" style="color:var(--color-green,#22c55e)"><span>Already registered for ${_esc(curYear)}</span><span>${alreadyReg.length}</span></div>
           ${lapsedNoEmail.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Lapsed but no email on file</span><span>${lapsedNoEmail.length}</span></div>` : ""}
         </div>
 
         ${lapsed.length ? `
-          <div style="margin-bottom:var(--space-3);max-height:180px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius);padding:var(--space-2) var(--space-3)">
-            ${lapsed.map(r => `
+          <div style="margin-bottom:var(--space-3);max-height:200px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius);padding:var(--space-2) var(--space-3)">
+            ${lapsed.map(p => `
               <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--color-border);font-size:.82rem">
-                <span>${_esc(r.displayName || r.teamName || "—")}</span>
-                <span style="color:var(--color-text-dim)">${_esc(r.email || "no email")} · ${_esc(String(r.year || "?"))}</span>
+                <span>${_esc(p.displayName || p.teamName || "—")}</span>
+                <span style="color:var(--color-text-dim)">
+                  ${_esc(p.email || "no email")}
+                  ${p.years ? ` · ${_esc(String(p.years).replace(/\|/g, ", "))}` : ""}
+                </span>
               </div>`).join("")}
           </div>
-        ` : `<div class="trn-empty" style="margin-bottom:var(--space-3)">No lapsed players found — everyone from prior years has registered! 🎉</div>`}
+        ` : `<div class="trn-empty" style="margin-bottom:var(--space-3)">No lapsed players — everyone in the participant list has registered! 🎉</div>`}
 
         ${lapsedWithEmail.length ? `
           <div class="form-group">
@@ -9635,7 +9648,6 @@ If you have any questions, just reply to this email.
           </button>` : ""}
       </div>
     `);
-    document.getElementById("modal-box--lg");
     const box = document.getElementById("trn-modal-box");
     if (box) box.classList.add("modal-box--lg");
 
@@ -9643,9 +9655,9 @@ If you have any questions, just reply to this email.
     document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
 
     document.getElementById("trn-lapsed-export-btn")?.addEventListener("click", () => {
-      const headers = ["displayName","email","sleeperUsername","mflEmail","yahooUsername","gender","teamName","year"];
-      const rows = lapsed.map(r =>
-        headers.map(h => `"${String(r[h] || "").replace(/"/g,'""')}"`).join(",")
+      const headers = ["displayName","email","sleeperUsername","mflEmail","yahooUsername","gender","teamName","years"];
+      const rows = lapsed.map(p =>
+        headers.map(h => `"${String(p[h] || "").replace(/"/g,'""')}"`).join(",")
       );
       const csv  = [headers.join(","), ...rows].join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
@@ -9663,7 +9675,7 @@ If you have any questions, just reply to this email.
       const subject = document.getElementById("trn-lapsed-subject")?.value.trim() || "";
       const body    = document.getElementById("trn-lapsed-body")?.value || "";
       if (!lapsedWithEmail.length) { showToast("No lapsed players with email addresses", "error"); return; }
-      const emails = lapsedWithEmail.map(r => r.email);
+      const emails = lapsedWithEmail.map(p => p.email);
       const BCC_LIMIT = 50;
       const chunks = [];
       for (let i = 0; i < emails.length; i += BCC_LIMIT) chunks.push(emails.slice(i, i + BCC_LIMIT));
@@ -9671,10 +9683,133 @@ If you have any questions, just reply to this email.
         const bcc  = encodeURIComponent(chunk.join(";"));
         const subj = encodeURIComponent(subject + (chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ""));
         const bd   = idx === 0 ? encodeURIComponent(body) : "";
-        const href = `mailto:${encodeURIComponent(from)}?bcc=${bcc}&subject=${subj}${bd ? `&body=${bd}` : ""}`;
-        window.open(href, "_blank");
+        window.open(`mailto:${encodeURIComponent(from)}?bcc=${bcc}&subject=${subj}${bd?`&body=${bd}`:""}`, "_blank");
       });
       showToast(`${chunks.length} email draft${chunks.length>1?"s":""} opened ✓`);
+      _closeModal();
+    });
+  }
+
+  // ── Division Select Email Modal ────────────────────────
+  // Emails approved current-year registrants who haven't been assigned
+  // to any division yet, prompting them to self-select.
+  async function _openDivSelectEmailModal(tid, t, approvedRegs) {
+    const meta     = t.meta || {};
+    const tourName = meta.name || "Tournament";
+    const po       = _tournaments[tid]?.playoffs || t.playoffs || {};
+    const openYr   = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
+    const curYear  = openYr ? String(openYr) : "2026";
+
+    // Load current division assignments
+    let divsObj = {};
+    try {
+      const snap = await GMD.child(`tournaments/${tid}/playoffs/${curYear}/divisions`).once("value");
+      divsObj = snap.val() || {};
+    } catch(e) { /* proceed without */ }
+
+    // Build set of all already-assigned rids
+    const assignedRids = new Set(
+      Object.values(divsObj).flatMap(d => Object.keys(d.memberIds || {}))
+    );
+
+    const unassigned     = approvedRegs.filter(r => !assignedRids.has(r.rid));
+    const withEmail      = unassigned.filter(r => r.email);
+    const withoutEmail   = unassigned.filter(r => !r.email);
+
+    // Build public division picker URL — best guess
+    const pubUrl = `https://dynastylockerroom.com/tournaments/?t=${tid}`;
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>🗂 Division Select Email</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body" style="max-height:70vh;overflow-y:auto">
+        <div class="trn-detail-rows" style="margin-bottom:var(--space-4)">
+          <div class="trn-detail-row"><span>Approved registrants</span><span>${approvedRegs.length}</span></div>
+          <div class="trn-detail-row" style="color:var(--color-green,#22c55e)"><span>Already in a division</span><span>${assignedRids.size}</span></div>
+          <div class="trn-detail-row" style="color:var(--color-orange)"><span>No division yet</span><span>${unassigned.length}</span></div>
+          ${withoutEmail.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>No email on file</span><span>${withoutEmail.length}</span></div>` : ""}
+        </div>
+
+        ${unassigned.length ? `
+          <div style="margin-bottom:var(--space-3);max-height:160px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius);padding:var(--space-2) var(--space-3)">
+            ${unassigned.map(r => `
+              <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--color-border);font-size:.82rem">
+                <span>${_esc(r.displayName || r.teamName || r.rid)}</span>
+                <span style="color:var(--color-text-dim)">${_esc(r.email || "no email")}</span>
+              </div>`).join("")}
+          </div>` : `<div class="trn-empty" style="margin-bottom:var(--space-3)">Everyone is already assigned to a division! 🎉</div>`}
+
+        ${withEmail.length ? `
+          <div class="form-group">
+            <label>From (Your Email)</label>
+            <input type="email" id="trn-divsel-from" value="${_esc(meta.adminEmail || "")}" placeholder="commissioner@example.com" />
+          </div>
+          <div class="form-group">
+            <label>Division Picker URL</label>
+            <input type="url" id="trn-divsel-url" value="${_esc(pubUrl)}" />
+            <span class="field-hint">Use [DIVISION_LINK] in the body — it will be replaced with this URL.</span>
+          </div>
+          <div class="form-group">
+            <label>Subject</label>
+            <input type="text" id="trn-divsel-subject" value="${_esc(`[${tourName}] ${curYear} — Select Your Division`)}" />
+          </div>
+          <div class="form-group">
+            <label>Message Body</label>
+            <textarea id="trn-divsel-body" rows="8" style="width:100%;resize:vertical;font-size:.875rem">${_esc(
+`Hi!
+
+You're registered for ${tourName} ${curYear} — now it's time to choose your division!
+
+Divisions are filling up fast, so grab your spot now:
+[DIVISION_LINK]
+
+Once you're on the page, look for the "Divisions" tab and click "Join Division" next to the one you want.
+
+Questions? Just reply to this email.
+
+— ${tourName} Commissioner`
+            )}</textarea>
+          </div>
+          ${withEmail.length > 50 ? `
+            <div class="trn-alert" style="margin-bottom:0">
+              ⚠️ ${withEmail.length} addresses → ${Math.ceil(withEmail.length/50)} BCC batches of 50.
+            </div>` : ""}
+        ` : ""}
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+        ${withEmail.length ? `
+          <button class="btn-primary" id="trn-divsel-send-btn">
+            ✉ Send (${withEmail.length})${withEmail.length > 50 ? ` · ${Math.ceil(withEmail.length/50)} drafts` : ""}
+          </button>` : ""}
+      </div>
+    `);
+    const box = document.getElementById("trn-modal-box");
+    if (box) box.classList.add("modal-box--lg");
+
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+
+    document.getElementById("trn-divsel-send-btn")?.addEventListener("click", () => {
+      const from    = document.getElementById("trn-divsel-from")?.value.trim()    || "";
+      const link    = document.getElementById("trn-divsel-url")?.value.trim()     || pubUrl;
+      const subject = document.getElementById("trn-divsel-subject")?.value.trim() || "";
+      const body    = (document.getElementById("trn-divsel-body")?.value || "")
+                        .replace(/\[DIVISION_LINK\]/g, link);
+      if (!withEmail.length) { showToast("No unassigned registrants with emails", "error"); return; }
+      const emails  = withEmail.map(r => r.email);
+      const BCC     = 50;
+      const chunks  = [];
+      for (let i = 0; i < emails.length; i += BCC) chunks.push(emails.slice(i, i + BCC));
+      chunks.forEach((chunk, idx) => {
+        const bcc  = encodeURIComponent(chunk.join(";"));
+        const subj = encodeURIComponent(subject + (chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ""));
+        const bd   = idx === 0 ? encodeURIComponent(body) : "";
+        window.open(`mailto:${encodeURIComponent(from)}?bcc=${bcc}&subject=${subj}${bd?`&body=${bd}`:""}`, "_blank");
+      });
+      showToast(`${chunks.length} draft${chunks.length>1?"s":""} opened ✓`);
       _closeModal();
     });
   }
@@ -9714,6 +9849,7 @@ If you have any questions, just reply to this email.
           <span style="font-size:.85rem;color:var(--color-text-dim)">${approvedRegs.length} approved · ${totalAssigned.size} assigned · ${unassigned.length} unassigned</span>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <button class="btn-secondary btn-sm" id="trn-div-add-btn">＋ New Division</button>
+            <button class="btn-secondary btn-sm" id="trn-div-random-all-btn" title="Randomly distribute all unassigned registrants across existing divisions">🎲 Random Assign All</button>
             <button class="btn-secondary btn-sm" id="trn-div-publish-btn" title="Publish division list to public site">🌐 Publish to Public</button>
           </div>
         </div>
@@ -9809,6 +9945,59 @@ If you have any questions, just reply to this email.
           await _writeDivisionsPublic(tid, yr, divsObj, regsObj);
           showToast("Divisions published to public site ✓");
         } catch(e) { showToast("Publish failed: " + e.message, "error"); }
+      });
+
+      // Random assign all unassigned registrants across existing divisions
+      document.getElementById("trn-div-random-all-btn")?.addEventListener("click", async () => {
+        const divEntries = Object.entries(divsObj);
+        if (!divEntries.length) { showToast("Create at least one division first", "error"); return; }
+
+        const totalAssigned = new Set(divEntries.flatMap(([, d]) => Object.keys(d.memberIds || {})));
+        const unassigned    = approvedRegs.filter(r => !totalAssigned.has(r.rid));
+        if (!unassigned.length) { showToast("Everyone is already assigned to a division ✓"); return; }
+
+        const divCount = divEntries.length;
+        if (!confirm(`Randomly distribute ${unassigned.length} unassigned registrant${unassigned.length!==1?"s":""} across ${divCount} division${divCount!==1?"s":""}?`)) return;
+
+        // Shuffle
+        const shuffled = [...unassigned].sort(() => Math.random() - 0.5);
+
+        // Respect caps — skip full divisions, cycle through open ones
+        const updatedMemberIds = {};
+        divEntries.forEach(([divId, div]) => {
+          updatedMemberIds[divId] = { ...(div.memberIds || {}) };
+        });
+
+        let placed = 0;
+        for (const r of shuffled) {
+          // Find division with fewest members (and cap space if enforced)
+          const eligible = divEntries.filter(([divId, div]) => {
+            const count = Object.keys(updatedMemberIds[divId]).length;
+            if (div.enforceTotal && div.teamCap && count >= div.teamCap) return false;
+            return true;
+          });
+          if (!eligible.length) break; // all divisions full
+          // Pick the one with the fewest current members
+          eligible.sort(([aId], [bId]) =>
+            Object.keys(updatedMemberIds[aId]).length - Object.keys(updatedMemberIds[bId]).length
+          );
+          const [targetId] = eligible[0];
+          updatedMemberIds[targetId][r.rid] = true;
+          placed++;
+        }
+
+        // Write all changes to Firebase
+        try {
+          const writes = divEntries.map(([divId]) =>
+            _divRef(divId).child("memberIds").set(updatedMemberIds[divId])
+          );
+          await Promise.all(writes);
+          divEntries.forEach(([divId, div]) => {
+            divsObj[divId].memberIds = updatedMemberIds[divId];
+          });
+          _renderAll();
+          showToast(`${placed} registrant${placed!==1?"s":""} randomly assigned ✓`);
+        } catch(e) { showToast("Random assign failed: " + e.message, "error"); }
       });
 
       // Edit
