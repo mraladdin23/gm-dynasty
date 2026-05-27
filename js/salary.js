@@ -95,6 +95,12 @@ const DLRSalaryCap = (() => {
       ]);
       if (token !== _initToken) return;
 
+      // Restore last-processed timestamp so we don't reprocess old transactions on reload
+      try {
+        const tsSnap = await GMD.child(`salaryCap/${_storageKey}/lastTxProcessed`).once("value");
+        _lastTxProcessed = tsSnap.val() || 0;
+      } catch(e) { _lastTxProcessed = 0; }
+
       _players = DLRPlayers.all();
       if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
       if (token !== _initToken) return;
@@ -234,7 +240,10 @@ const DLRSalaryCap = (() => {
       }
 
       const maxTs = Math.max(...newTx.map(tx => tx.ts));
-      if (maxTs > _lastTxProcessed) _lastTxProcessed = maxTs;
+      if (maxTs > _lastTxProcessed) {
+        _lastTxProcessed = maxTs;
+        GMD.child(`salaryCap/${_storageKey}/lastTxProcessed`).set(_lastTxProcessed).catch(() => {});
+      }
 
       if (changed) {
         await _saveSalaryData();
@@ -262,8 +271,8 @@ const DLRSalaryCap = (() => {
       ));
       return arrays.flat().filter(tx => tx?.status === "complete").map(tx => {
         const adds = {}, drops = {};
-        Object.entries(tx.adds  || {}).forEach(([pid, rid]) => { if (rosterMap[rid]) adds[pid]  = rosterMap[rid]; });
-        Object.entries(tx.drops || {}).forEach(([pid, rid]) => { if (rosterMap[rid]) drops[pid] = rosterMap[rid]; });
+        Object.entries(tx.adds  || {}).forEach(([pid, rid]) => { if (rosterMap[String(rid)]) adds[pid]  = rosterMap[String(rid)]; });
+        Object.entries(tx.drops || {}).forEach(([pid, rid]) => { if (rosterMap[String(rid)]) drops[pid] = rosterMap[String(rid)]; });
         return {
           type:    tx.type === "trade" ? "trade" : tx.type === "waiver" ? "waiver" : "free_agent",
           ts:      tx.created || tx.status_updated || 0,
@@ -334,8 +343,9 @@ const DLRSalaryCap = (() => {
         changed = _clearPlayerSalary(username, playerId) || changed;
       }
       // Adds — set salary based on FAAB bid × multiplier
+      // Note: no "skip if existing" guard here — drops already cleared the salary above,
+      // and the business rule is that re-adds always restart salary from the new bid.
       for (const [playerId, username] of Object.entries(adds)) {
-        if (_getPlayerSalary(username, playerId)) continue; // don't overwrite existing
         const salary = type === "waiver" && faabBid > 0
           ? Math.max(Math.round(faabBid * mult), minSal)
           : minSal;

@@ -462,20 +462,29 @@
       const hasPlayers  = hasStandings;
       // Show Register tab if form exists OR registration is open — always surfaced
       const hasRegForm  = !!(t.registrationForm?.fields?.length || t.registrationForm?.optionalFields?.length || t.registrationForm?.customQuestions?.length || anyRegOpen);
+      // Show Divisions tab if any year has at least one public division
+      const hasDivisions = (() => {
+        const allDivs = t.divisions || {};
+        return Object.values(allDivs).some(yrDivs =>
+          yrDivs && Object.values(yrDivs).some(d => d && d.showPublicly !== false)
+        );
+      })();
 
       const navPills = [
         _pill("overview",  "Overview"),
-        hasHistory  ? _pill("history",  "Tournament History") : "",
-        hasPlayers  ? _pill("players",  "Player Records")     : "",
-        hasRegForm  ? _pill("register", anyRegOpen ? "📬 Register" : "Register") : "",
+        hasHistory   ? _pill("history",   "Tournament History") : "",
+        hasPlayers   ? _pill("players",   "Player Records")     : "",
+        hasDivisions ? _pill("divisions", "Divisions")          : "",
+        hasRegForm   ? _pill("register",  anyRegOpen ? "📬 Register" : "Register") : "",
         _pill("chat", "Chat"),
       ].join("");
 
       const navOpts = [
         `<option value="overview"  ${_activePubNav==="overview" ?"selected":""}>Overview</option>`,
-        hasHistory  ? `<option value="history"  ${_activePubNav==="history" ?"selected":""}>Tournament History</option>`  : "",
-        hasPlayers  ? `<option value="players"  ${_activePubNav==="players" ?"selected":""}>Player Records</option>`      : "",
-        hasRegForm  ? `<option value="register" ${_activePubNav==="register"?"selected":""}>Register</option>`            : "",
+        hasHistory   ? `<option value="history"   ${_activePubNav==="history"   ?"selected":""}>Tournament History</option>`  : "",
+        hasPlayers   ? `<option value="players"   ${_activePubNav==="players"   ?"selected":""}>Player Records</option>`      : "",
+        hasDivisions ? `<option value="divisions" ${_activePubNav==="divisions" ?"selected":""}>Divisions</option>`           : "",
+        hasRegForm   ? `<option value="register"  ${_activePubNav==="register"  ?"selected":""}>Register</option>`            : "",
         `<option value="chat" ${_activePubNav==="chat"?"selected":""}>Chat</option>`,
       ].join("");
 
@@ -555,12 +564,13 @@
       if (!body) return;
       body.innerHTML = "";
       switch (_activePubNav) {
-        case "overview":  return renderPubOverview(body, allYears);
-        case "history":   return renderPubHistory(body, allYears);
-        case "players":   return renderPlayersTab(body);
-        case "register":  return renderPubRegisterSection(body);
-        case "chat":      return renderBoardTab(body);
-        default:          return renderPubOverview(body, allYears);
+        case "overview":   return renderPubOverview(body, allYears);
+        case "history":    return renderPubHistory(body, allYears);
+        case "players":    return renderPlayersTab(body);
+        case "divisions":  return renderDivisionsTab(body);
+        case "register":   return renderPubRegisterSection(body);
+        case "chat":       return renderBoardTab(body);
+        default:           return renderPubOverview(body, allYears);
       }
     }
 
@@ -2997,6 +3007,196 @@
           friendlyMsg = "Submission failed. Please try again or contact the tournament admin.";
         }
         _showError(friendlyMsg);
+      }
+    }
+
+    // ── Divisions tab (public) ───────────────────────────────
+    // Reads from publicTournaments/{tid}/divisions/{year}.
+    // Shows division cards with fill meters and member lists.
+    // If allowSelfSelect is on for a division and registration is approved, shows Join button.
+    async function renderDivisionsTab(body) {
+      const t      = _currentT;
+      const tid    = _currentTid;
+      const allDivsByYear = t.divisions || {};
+
+      // Pick the year to display — prefer open-registration year, else latest
+      const po         = t.playoffs || {};
+      const openYr     = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
+      const allDivYrs  = Object.keys(allDivsByYear).filter(k => /^\d{4}$/.test(k)).sort((a,b)=>b-a);
+      let   activeYear = openYr || allDivYrs[0] || String(new Date().getFullYear());
+
+      function _render(yr) {
+        const divsObj = allDivsByYear[yr] || {};
+        const divEntries = Object.entries(divsObj).filter(([,d]) => d);
+
+        if (!divEntries.length) {
+          body.innerHTML = `<div class="trn-section-card" style="text-align:center;padding:var(--space-6)">
+            <div style="font-size:1.5rem;margin-bottom:var(--space-2)">🗂</div>
+            <div style="font-weight:600">No divisions published yet</div>
+            <div style="font-size:.85rem;color:var(--color-text-dim);margin-top:var(--space-2)">Check back soon.</div>
+          </div>`;
+          return;
+        }
+
+        const yearToggle = allDivYrs.length > 1 ? `
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)">
+            ${allDivYrs.map(y => `
+              <button class="trn-year-pill${String(y)===String(yr)?" trn-year-pill--active":""}"
+                data-divyr="${esc(String(y))}">${esc(String(y))}</button>`).join("")}
+          </div>` : "";
+
+        body.innerHTML = yearToggle + divEntries.map(([divId, div]) => {
+          const members   = div.members || [];
+          const cap       = div.teamCap || 0;
+          const mCount    = members.filter(m => (m.gender||"").toLowerCase().startsWith("m")).length;
+          const fCount    = members.filter(m => (m.gender||"").toLowerCase().startsWith("f")).length;
+          const filled    = div.memberCount || members.length;
+          const pct       = cap ? Math.min(100, Math.round(filled / cap * 100)) : 0;
+          const isFull    = cap && div.enforceTotal && filled >= cap;
+          const canSelf   = div.allowSelfSelect;
+
+          return `
+            <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-2);flex-wrap:wrap">
+                <div>
+                  <strong style="font-size:.95rem">${esc(div.name || "Division")}</strong>
+                  ${div.description ? `<span style="font-size:.8rem;color:var(--color-text-dim);margin-left:var(--space-2)">${esc(div.description)}</span>` : ""}
+                </div>
+                ${canSelf && !isFull ? `
+                  <button class="btn-primary btn-sm" data-selfjoin="${esc(divId)}" data-divyr="${esc(yr)}">
+                    🙋 Join Division
+                  </button>` : isFull ? `
+                  <span style="font-size:.8rem;font-weight:600;color:var(--color-orange);padding:var(--space-1) var(--space-2);background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);border-radius:var(--radius)">
+                    Division Full
+                  </span>` : ""}
+              </div>
+
+              <!-- Fill meter -->
+              <div style="margin:var(--space-2) 0">
+                <div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:3px">
+                  <span>${filled}${cap ? `/${cap} teams` : " teams"}</span>
+                  <span style="color:var(--color-text-dim)">
+                    ${(div.maleCap || div.femaleCap) ? `M: ${mCount}${div.maleCap?`/${div.maleCap}`:""} · F: ${fCount}${div.femaleCap?`/${div.femaleCap}`:""}` : ""}
+                  </span>
+                </div>
+                ${cap ? `<div style="height:6px;background:var(--color-border);border-radius:3px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:${isFull?"var(--color-orange)":"var(--color-primary)"};transition:width .3s"></div>
+                </div>` : ""}
+              </div>
+
+              <!-- Member list -->
+              ${members.length ? `
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--space-2)">
+                  ${members.map(m => `
+                    <div class="trn-div-person" style="font-size:.8rem;cursor:default">
+                      ${esc(m.displayName || "—")}
+                      ${m.gender ? `<span class="trn-gender-${(m.gender||"").charAt(0).toLowerCase()}">${(m.gender||"").charAt(0)}</span>` : ""}
+                    </div>`).join("")}
+                </div>` : ""}
+            </div>`;
+        }).join("");
+
+        // Wire year pills
+        body.querySelectorAll("[data-divyr]").forEach(btn => {
+          if (!btn.dataset.selfjoin) { // skip join buttons which also have data-divyr
+            btn.addEventListener("click", () => { activeYear = btn.dataset.divyr; _render(activeYear); });
+          }
+        });
+
+        // Wire self-select join buttons
+        body.querySelectorAll("[data-selfjoin]").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            const divId = btn.dataset.selfjoin;
+            const divYr = btn.dataset.divyr;
+            await _handleSelfSelectJoin(tid, divId, divYr, divsObj[divId]);
+            // Refresh public data after join
+            const fresh = await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${divYr}`).once("value");
+            if (fresh.val()) allDivsByYear[divYr] = fresh.val();
+            _render(divYr);
+          });
+        });
+      }
+
+      _render(activeYear);
+    }
+
+    // Self-select join — asks for the registrant's email to look them up,
+    // checks caps if enforced, then writes their rid into the division.
+    async function _handleSelfSelectJoin(tid, divId, yr, div) {
+      const email = prompt("Enter the email address you registered with to join this division:");
+      if (!email) return;
+      const norm = email.trim().toLowerCase();
+
+      // Look up their registration
+      let matchRid = null, matchReg = null;
+      try {
+        const snap = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
+        const regs = snap.val() || {};
+        const entry = Object.entries(regs).find(([, r]) =>
+          (r.email || "").toLowerCase() === norm &&
+          (r.status || "").toLowerCase() === "approved" &&
+          (!yr || String(r.year) === String(yr))
+        );
+        if (!entry) {
+          alert("No approved registration found for that email address in this year's tournament. Please contact the commissioner.");
+          return;
+        }
+        [matchRid, matchReg] = entry;
+      } catch(e) {
+        alert("Could not look up registration. Please try again or contact the commissioner.");
+        return;
+      }
+
+      // Check if already in a division this year
+      try {
+        const divSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
+        const allDivs = divSnap.val() || {};
+        for (const [dId, d] of Object.entries(allDivs)) {
+          if (Object.keys(d.memberIds || {}).includes(matchRid)) {
+            const dName = d.name || dId;
+            if (dId === divId) { alert(`You are already in ${dName}.`); return; }
+            if (!confirm(`You are currently in ${dName}. Move to ${div.name || divId}?`)) return;
+            // Remove from old division
+            await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${dId}/memberIds/${matchRid}`).remove();
+            break;
+          }
+        }
+      } catch(e) { /* non-fatal — proceed */ }
+
+      // Cap enforcement checks
+      if (div.enforceTotal && div.teamCap) {
+        const currentSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds`).once("value");
+        const currentCount = Object.keys(currentSnap.val() || {}).length;
+        if (currentCount >= div.teamCap) {
+          alert(`Sorry — ${div.name || "this division"} is now full. Please contact the commissioner.`);
+          return;
+        }
+      }
+      if ((div.enforceMale || div.enforceFemale) && matchReg.gender) {
+        const currentSnap  = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds`).once("value");
+        const memberIds    = Object.keys(currentSnap.val() || {});
+        const regSnap      = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
+        const regsAll      = regSnap.val() || {};
+        const memberRegs   = memberIds.map(rid => regsAll[rid]).filter(Boolean);
+        const mCount       = memberRegs.filter(r => (r.gender||"").toLowerCase().startsWith("m")).length;
+        const fCount       = memberRegs.filter(r => (r.gender||"").toLowerCase().startsWith("f")).length;
+        const g            = matchReg.gender.toLowerCase();
+        if (g.startsWith("m") && div.enforceMale && div.maleCap && mCount >= div.maleCap) {
+          alert(`Sorry — the male spots in ${div.name||"this division"} are full. Please contact the commissioner.`);
+          return;
+        }
+        if (g.startsWith("f") && div.enforceFemale && div.femaleCap && fCount >= div.femaleCap) {
+          alert(`Sorry — the female spots in ${div.name||"this division"} are full. Please contact the commissioner.`);
+          return;
+        }
+      }
+
+      // Write the join
+      try {
+        await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds/${matchRid}`).set(true);
+        alert(`You've been added to ${div.name || "the division"}! 🎉 Check back here to see your division.`);
+      } catch(e) {
+        alert("Could not join division. Please contact the commissioner.");
       }
     }
 

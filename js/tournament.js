@@ -1339,11 +1339,11 @@ const DLRTournament = (() => {
 
       <!-- Admin management sub-tabs -->
       <div class="trn-admin-mgmt-tabs">
-        ${["registrants","participants"].map(id => `
+        ${[["registrants", "📋 Registrants" + (pendingCount ? ` <span class="trn-tab-count">${pendingCount}</span>` : "")],
+           ["participants", "👥 Participants"],
+           ["divisions",    "🗂 Divisions"]].map(([id, label]) => `
           <button class="trn-admin-mgmt-tab${_activeAdminMgmtTab===id?" trn-admin-mgmt-tab--active":""}"
-            data-mgmt="${id}">${id === "registrants"
-              ? "📋 Registrants" + (pendingCount ? ` <span class="trn-tab-count">${pendingCount}</span>` : "")
-              : "👥 Participants"}</button>`).join("")}
+            data-mgmt="${id}">${label}</button>`).join("")}
       </div>
 
       <div id="trn-admin-year-content"></div>
@@ -1425,6 +1425,7 @@ const DLRTournament = (() => {
     switch (_activeAdminMgmtTab) {
       case "registrants":  return _renderRegistrantsTab(tid, t, container);
       case "participants": return _renderParticipantsTab(tid, t, container);
+      case "divisions":    return _renderDivisionsAdminTab(tid, t, container, year);
       default:             return _renderRegistrantsTab(tid, t, container);
     }
   }
@@ -8846,6 +8847,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <button class="btn-secondary btn-sm" id="trn-send-invite-btn" title="Email league invites to approved registrants">
             ✉ Send League Invites
           </button>
+          <button class="btn-secondary btn-sm" id="trn-lapsed-report-btn" title="Find prior-year players who haven't registered this year">
+            👻 Lapsed Players
+          </button>
           <button class="btn-secondary btn-sm" id="trn-division-builder-btn">
             🗂 Assign Divisions / Conferences
           </button>
@@ -8991,6 +8995,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // ── League invite email launcher ──────────────────────
     document.getElementById("trn-send-invite-btn")?.addEventListener("click", () => {
       _openLeagueInviteModal(tid, t, approved.map(([, r]) => r));
+    });
+
+    // ── Lapsed player report ───────────────────────────────
+    document.getElementById("trn-lapsed-report-btn")?.addEventListener("click", () => {
+      _openLapsedPlayersModal(tid, t, regs);
     });
 
     // ── Divisions / Conferences builder ───────────────────
@@ -9509,6 +9518,660 @@ Good luck this season!
     // Initial render
     _rebuildGroups();
   }
+
+  // ── Lapsed Players Modal (F10) ─────────────────────────
+  // Shows prior-year players who haven't registered for the current open year.
+  // Provides BCC email batching (50/batch) to reach them without hitting
+  // people who have already registered.
+  async function _openLapsedPlayersModal(tid, t, allRegsObj) {
+    const meta     = t.meta || {};
+    const tourName = meta.name || "Tournament";
+    const po       = _tournaments[tid]?.playoffs || t.playoffs || {};
+
+    // Resolve the currently open registration year
+    const openYr = Object.keys(po).find(k => /^\d{4}$/.test(k) && po[k]?.registrationOpen);
+    const curYear = openYr ? String(openYr) : String(new Date().getFullYear());
+
+    const allRegs = Object.entries(allRegsObj || {});
+
+    // Current-year registrations (any status)
+    const curYearRegs = allRegs.filter(([, r]) => r.year && String(r.year) === curYear);
+    const curEmails   = new Set(curYearRegs.map(([, r]) => (r.email || "").toLowerCase()).filter(Boolean));
+    const curNames    = new Set(curYearRegs.map(([, r]) => (r.displayName || "").toLowerCase().trim()).filter(Boolean));
+    const curSleeper  = new Set(curYearRegs.map(([, r]) => (r.sleeperUsername || "").toLowerCase()).filter(Boolean));
+
+    // Prior-year approved registrants
+    const priorApproved = allRegs.filter(([, r]) =>
+      r.year && String(r.year) !== curYear && (r.status || "").toLowerCase() === "approved"
+    );
+
+    // Dedupe prior players by email — keep highest/most recent year per person
+    const byEmail = {};
+    priorApproved.forEach(([, r]) => {
+      const key = (r.email || r.displayName || "").toLowerCase().trim();
+      if (!key) return;
+      if (!byEmail[key] || String(r.year) > String(byEmail[key].year)) {
+        byEmail[key] = r;
+      }
+    });
+
+    // Determine lapsed vs already-registered
+    const lapsed = [], alreadyReg = [];
+    Object.values(byEmail).forEach(r => {
+      const email   = (r.email || "").toLowerCase();
+      const name    = (r.displayName || "").toLowerCase().trim();
+      const sleeper = (r.sleeperUsername || "").toLowerCase();
+      const matched = (email && curEmails.has(email)) ||
+                      (name  && curNames.has(name))   ||
+                      (sleeper && curSleeper.has(sleeper));
+      if (matched) alreadyReg.push(r);
+      else         lapsed.push(r);
+    });
+
+    const lapsedWithEmail = lapsed.filter(r => r.email);
+    const lapsedNoEmail   = lapsed.filter(r => !r.email);
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>👻 Lapsed Players</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body" style="max-height:70vh;overflow-y:auto">
+        <div class="trn-detail-rows" style="margin-bottom:var(--space-4)">
+          <div class="trn-detail-row"><span>Current open year</span><span>${_esc(curYear)}</span></div>
+          <div class="trn-detail-row"><span>Prior-year approved players</span><span>${Object.keys(byEmail).length}</span></div>
+          <div class="trn-detail-row" style="color:var(--color-orange)"><span>Not yet registered this year</span><span>${lapsed.length}</span></div>
+          <div class="trn-detail-row" style="color:var(--color-green,#22c55e)"><span>Already registered this year</span><span>${alreadyReg.length}</span></div>
+          ${lapsedNoEmail.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Lapsed but no email on file</span><span>${lapsedNoEmail.length}</span></div>` : ""}
+        </div>
+
+        ${lapsed.length ? `
+          <div style="margin-bottom:var(--space-3);max-height:180px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius);padding:var(--space-2) var(--space-3)">
+            ${lapsed.map(r => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--color-border);font-size:.82rem">
+                <span>${_esc(r.displayName || r.teamName || "—")}</span>
+                <span style="color:var(--color-text-dim)">${_esc(r.email || "no email")} · ${_esc(String(r.year || "?"))}</span>
+              </div>`).join("")}
+          </div>
+        ` : `<div class="trn-empty" style="margin-bottom:var(--space-3)">No lapsed players found — everyone from prior years has registered! 🎉</div>`}
+
+        ${lapsedWithEmail.length ? `
+          <div class="form-group">
+            <label>From (Your Email)</label>
+            <input type="email" id="trn-lapsed-from" value="${_esc(meta.adminEmail || "")}" placeholder="commissioner@example.com" />
+            <span class="field-hint">Used as the To: address — lapsed players go in BCC.</span>
+          </div>
+          <div class="form-group">
+            <label>Subject</label>
+            <input type="text" id="trn-lapsed-subject" value="${_esc(`[${tourName}] ${curYear} Registration is Open!`)}" />
+          </div>
+          <div class="form-group">
+            <label>Message Body</label>
+            <textarea id="trn-lapsed-body" rows="7" style="width:100%;resize:vertical;font-size:.875rem">${_esc(
+`Hey there!
+
+${tourName} ${curYear} registration is now open and we'd love to have you back!
+
+Register here: [REGISTRATION_LINK]
+
+If you have any questions, just reply to this email.
+
+— ${tourName} Commissioner`
+            )}</textarea>
+            <span class="field-hint">Use [REGISTRATION_LINK] as a placeholder for your registration URL.</span>
+          </div>
+          ${lapsedWithEmail.length > 50 ? `
+            <div class="trn-alert" style="margin-bottom:0">
+              ⚠️ ${lapsedWithEmail.length} addresses will be split across ${Math.ceil(lapsedWithEmail.length/50)} email drafts (50 per BCC batch).
+            </div>` : ""}
+        ` : ""}
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+        ${lapsedWithEmail.length ? `
+          <button class="btn-secondary" id="trn-lapsed-export-btn">⬇ Export CSV</button>
+          <button class="btn-primary" id="trn-lapsed-email-btn">
+            ✉ Email Lapsed (${lapsedWithEmail.length})${lapsedWithEmail.length > 50 ? ` · ${Math.ceil(lapsedWithEmail.length/50)} drafts` : ""}
+          </button>` : ""}
+      </div>
+    `);
+    document.getElementById("modal-box--lg");
+    const box = document.getElementById("trn-modal-box");
+    if (box) box.classList.add("modal-box--lg");
+
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+
+    document.getElementById("trn-lapsed-export-btn")?.addEventListener("click", () => {
+      const headers = ["displayName","email","sleeperUsername","mflEmail","yahooUsername","gender","teamName","year"];
+      const rows = lapsed.map(r =>
+        headers.map(h => `"${String(r[h] || "").replace(/"/g,'""')}"`).join(",")
+      );
+      const csv  = [headers.join(","), ...rows].join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `lapsed_players_${tourName.replace(/\s+/g,"_")}_${curYear}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Lapsed players CSV exported ✓");
+    });
+
+    document.getElementById("trn-lapsed-email-btn")?.addEventListener("click", () => {
+      const from    = document.getElementById("trn-lapsed-from")?.value.trim() || "";
+      const subject = document.getElementById("trn-lapsed-subject")?.value.trim() || "";
+      const body    = document.getElementById("trn-lapsed-body")?.value || "";
+      if (!lapsedWithEmail.length) { showToast("No lapsed players with email addresses", "error"); return; }
+      const emails = lapsedWithEmail.map(r => r.email);
+      const BCC_LIMIT = 50;
+      const chunks = [];
+      for (let i = 0; i < emails.length; i += BCC_LIMIT) chunks.push(emails.slice(i, i + BCC_LIMIT));
+      chunks.forEach((chunk, idx) => {
+        const bcc  = encodeURIComponent(chunk.join(";"));
+        const subj = encodeURIComponent(subject + (chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ""));
+        const bd   = idx === 0 ? encodeURIComponent(body) : "";
+        const href = `mailto:${encodeURIComponent(from)}?bcc=${bcc}&subject=${subj}${bd ? `&body=${bd}` : ""}`;
+        window.open(href, "_blank");
+      });
+      showToast(`${chunks.length} email draft${chunks.length>1?"s":""} opened ✓`);
+      _closeModal();
+    });
+  }
+
+  // ── Divisions Admin Tab (F9 / Feature 2 & 3) ─────────────────────────────
+  // Persistent named divisions per year. Each division has:
+  //   - name, description, teamCap, maleCap, femaleCap, enforceTotal, enforceMale,
+  //     enforceFemale, allowSelfSelect, showPublicly, template (subject/body)
+  //   - memberIds: { rid: true, ... }
+  // Firebase path: tournaments/{tid}/playoffs/{year}/divisions/{divId}
+  async function _renderDivisionsAdminTab(tid, t, container, year) {
+    const yr = String(year || _tournamentYear || new Date().getFullYear());
+    container.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading divisions…</div>`;
+
+    // Fetch fresh registrations + current division config
+    const [regSnap, divSnap] = await Promise.all([
+      _tRegsRef(tid).once("value"),
+      GMD.child(`tournaments/${tid}/playoffs/${yr}/divisions`).once("value"),
+    ]);
+    const regsObj     = regSnap.val() || {};
+    const divsObj     = divSnap.val() || {};
+    const approvedRegs = Object.entries(regsObj)
+      .filter(([, r]) => (r.status || "").toLowerCase() === "approved")
+      .map(([rid, r]) => ({ rid, ...r }));
+
+    function _divRef(divId) {
+      return GMD.child(`tournaments/${tid}/playoffs/${yr}/divisions/${divId}`);
+    }
+
+    function _renderAll() {
+      const divEntries = Object.entries(divsObj);
+      const totalAssigned = new Set(divEntries.flatMap(([, d]) => Object.keys(d.memberIds || {})));
+      const unassigned    = approvedRegs.filter(r => !totalAssigned.has(r.rid));
+
+      container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);flex-wrap:wrap;gap:var(--space-2)">
+          <span style="font-size:.85rem;color:var(--color-text-dim)">${approvedRegs.length} approved · ${totalAssigned.size} assigned · ${unassigned.length} unassigned</span>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" id="trn-div-add-btn">＋ New Division</button>
+            <button class="btn-secondary btn-sm" id="trn-div-publish-btn" title="Publish division list to public site">🌐 Publish to Public</button>
+          </div>
+        </div>
+
+        ${!divEntries.length ? `<div class="trn-empty">No divisions yet. Click "+ New Division" to create one.</div>` : ""}
+
+        <div id="trn-div-admin-list">
+          ${divEntries.map(([divId, div]) => _renderDivCard(divId, div, approvedRegs, regsObj)).join("")}
+        </div>
+
+        ${unassigned.length ? `
+          <div style="margin-top:var(--space-4)">
+            <div class="trn-section-card-title" style="margin-bottom:var(--space-2)">
+              Unassigned Approved Registrants (${unassigned.length})
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
+              ${unassigned.map(r => `
+                <div class="trn-div-person" style="cursor:default">
+                  ${_esc(r.displayName || r.teamName || r.rid)}
+                  ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}">${(r.gender||"").charAt(0)}</span>` : ""}
+                </div>`).join("")}
+            </div>
+          </div>` : ""}
+      `;
+
+      _wireDivAdminEvents(divEntries, approvedRegs, regsObj);
+    }
+
+    function _renderDivCard(divId, div, approvedRegs, regsObj) {
+      const members   = Object.keys(div.memberIds || {});
+      const memberRegs = members.map(rid => ({ rid, ...(regsObj[rid] || {}) }));
+      const maleCount  = memberRegs.filter(r => (r.gender || "").toLowerCase().startsWith("m")).length;
+      const femCount   = memberRegs.filter(r => (r.gender || "").toLowerCase().startsWith("f")).length;
+      const cap        = div.teamCap || 0;
+      const pct        = cap ? Math.min(100, Math.round(members.length / cap * 100)) : 0;
+      const isFull     = cap && div.enforceTotal && members.length >= cap;
+
+      return `
+        <div class="trn-section-card" style="margin-bottom:var(--space-3)" data-div-id="${_esc(divId)}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-2);flex-wrap:wrap">
+            <div>
+              <strong style="font-size:.95rem">${_esc(div.name || "Unnamed Division")}</strong>
+              ${div.description ? `<span style="font-size:.8rem;color:var(--color-text-dim);margin-left:var(--space-2)">${_esc(div.description)}</span>` : ""}
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-shrink:0">
+              <button class="btn-ghost btn-sm" data-div-edit="${_esc(divId)}">✏️ Edit</button>
+              <button class="btn-ghost btn-sm" data-div-assign="${_esc(divId)}">👤 Assign</button>
+              <button class="btn-ghost btn-sm" data-div-invite="${_esc(divId)}">✉ Invite</button>
+              <button class="btn-ghost btn-sm" style="color:var(--color-danger,#ef4444)" data-div-delete="${_esc(divId)}">🗑</button>
+            </div>
+          </div>
+
+          <!-- Fill meter -->
+          <div style="margin:var(--space-2) 0">
+            <div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:3px">
+              <span>${members.length}${cap ? `/${cap}` : ""} teams${cap && isFull ? " · <strong style='color:var(--color-orange)'>FULL</strong>" : ""}</span>
+              <span style="color:var(--color-text-dim)">
+                ${div.maleCap || div.femaleCap ? `M: ${maleCount}${div.maleCap ? `/${div.maleCap}` : ""} · F: ${femCount}${div.femaleCap ? `/${div.femaleCap}` : ""}` : ""}
+                ${div.enforceTotal || div.enforceMale || div.enforceFemale ? " · 🔒 enforced" : ""}
+                ${div.allowSelfSelect ? " · 🙋 self-select on" : ""}
+                ${div.showPublicly ? " · 🌐 public" : ""}
+              </span>
+            </div>
+            ${cap ? `<div style="height:6px;background:var(--color-border);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:${isFull?"var(--color-orange)":"var(--color-primary)"};transition:width .3s"></div>
+            </div>` : ""}
+          </div>
+
+          <!-- Members -->
+          ${memberRegs.length ? `
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--space-2)">
+              ${memberRegs.map(r => `
+                <div class="trn-div-person" style="font-size:.78rem;cursor:default">
+                  ${_esc(r.displayName || r.teamName || r.rid)}
+                  ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}">${(r.gender||"").charAt(0)}</span>` : ""}
+                  <button data-div-remove="${_esc(divId)}" data-rid="${_esc(r.rid)}"
+                    style="background:none;border:none;cursor:pointer;color:var(--color-text-dim);padding:0 0 0 4px;font-size:.7rem"
+                    title="Remove from division">✕</button>
+                </div>`).join("")}
+            </div>` : `<div style="font-size:.8rem;color:var(--color-text-dim);margin-top:var(--space-2)">No members yet.</div>`}
+        </div>`;
+    }
+
+    function _wireDivAdminEvents(divEntries, approvedRegs, regsObj) {
+      // New division
+      document.getElementById("trn-div-add-btn")?.addEventListener("click", () => {
+        _openDivEditModal(null, null);
+      });
+
+      // Publish to public
+      document.getElementById("trn-div-publish-btn")?.addEventListener("click", async () => {
+        try {
+          await _writeDivisionsPublic(tid, yr, divsObj, regsObj);
+          showToast("Divisions published to public site ✓");
+        } catch(e) { showToast("Publish failed: " + e.message, "error"); }
+      });
+
+      // Edit
+      container.querySelectorAll("[data-div-edit]").forEach(btn => {
+        const divId = btn.dataset.divEdit;
+        btn.addEventListener("click", () => _openDivEditModal(divId, divsObj[divId]));
+      });
+
+      // Delete
+      container.querySelectorAll("[data-div-delete]").forEach(btn => {
+        const divId = btn.dataset.divDelete;
+        btn.addEventListener("click", async () => {
+          const name = divsObj[divId]?.name || divId;
+          if (!confirm(`Delete division "${name}"? Members will be unassigned.`)) return;
+          try {
+            await _divRef(divId).remove();
+            delete divsObj[divId];
+            _renderAll();
+            showToast(`Division "${name}" deleted ✓`);
+          } catch(e) { showToast("Delete failed: " + e.message, "error"); }
+        });
+      });
+
+      // Assign members
+      container.querySelectorAll("[data-div-assign]").forEach(btn => {
+        const divId = btn.dataset.divAssign;
+        btn.addEventListener("click", () => _openDivAssignModal(divId, divsObj[divId], approvedRegs, regsObj));
+      });
+
+      // Remove individual member
+      container.querySelectorAll("[data-div-remove]").forEach(btn => {
+        const divId = btn.dataset.divRemove;
+        const rid   = btn.dataset.rid;
+        btn.addEventListener("click", async () => {
+          try {
+            await _divRef(divId).child(`memberIds/${rid}`).remove();
+            delete (divsObj[divId].memberIds || {})[rid];
+            _renderAll();
+          } catch(e) { showToast("Remove failed: " + e.message, "error"); }
+        });
+      });
+
+      // Send invite to division
+      container.querySelectorAll("[data-div-invite]").forEach(btn => {
+        const divId = btn.dataset.divInvite;
+        btn.addEventListener("click", () => _openDivInviteModal(tid, t, yr, divId, divsObj[divId], regsObj));
+      });
+    }
+
+    // Edit/create division modal
+    function _openDivEditModal(divId, existing) {
+      const isNew = !divId;
+      const div   = existing || {};
+      _showModal(`
+        <div class="modal-header">
+          <h3>${isNew ? "New Division" : "Edit Division"}</h3>
+          <button class="modal-close" id="trn-modal-close">✕</button>
+        </div>
+        <div class="modal-body trn-form-body" style="max-height:70vh;overflow-y:auto">
+          <div class="form-group">
+            <label>Division Name *</label>
+            <input type="text" id="trn-divedit-name" value="${_esc(div.name||"")}" placeholder="e.g. Division A, East, Men's Bracket…" />
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <input type="text" id="trn-divedit-desc" value="${_esc(div.description||"")}" placeholder="Optional short description" />
+          </div>
+          <div class="form-group">
+            <label>Team Cap (0 = unlimited)</label>
+            <input type="number" id="trn-divedit-cap" min="0" max="500" value="${div.teamCap||0}" style="width:100px" />
+          </div>
+          <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3)">
+            <div class="form-group" style="flex:1;min-width:120px">
+              <label>Male Cap (0 = none)</label>
+              <input type="number" id="trn-divedit-mcap" min="0" max="200" value="${div.maleCap||0}" style="width:100px" />
+            </div>
+            <div class="form-group" style="flex:1;min-width:120px">
+              <label>Female Cap (0 = none)</label>
+              <input type="number" id="trn-divedit-fcap" min="0" max="200" value="${div.femaleCap||0}" style="width:100px" />
+            </div>
+          </div>
+
+          <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Cap Enforcement (auto-blocks self-select when full)</div>
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
+            <label style="display:flex;align-items:center;gap:var(--space-2);font-size:.875rem;cursor:pointer">
+              <input type="checkbox" id="trn-divedit-enforce-total" ${div.enforceTotal?"checked":""} />
+              Enforce total team cap
+            </label>
+            <label style="display:flex;align-items:center;gap:var(--space-2);font-size:.875rem;cursor:pointer">
+              <input type="checkbox" id="trn-divedit-enforce-male" ${div.enforceMale?"checked":""} />
+              Enforce male cap
+            </label>
+            <label style="display:flex;align-items:center;gap:var(--space-2);font-size:.875rem;cursor:pointer">
+              <input type="checkbox" id="trn-divedit-enforce-female" ${div.enforceFemale?"checked":""} />
+              Enforce female cap
+            </label>
+          </div>
+
+          <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Self-Select & Visibility</div>
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
+            <label style="display:flex;align-items:center;gap:var(--space-2);font-size:.875rem;cursor:pointer">
+              <input type="checkbox" id="trn-divedit-selfselect" ${div.allowSelfSelect?"checked":""} />
+              Allow approved registrants to self-select into this division
+            </label>
+            <label style="display:flex;align-items:center;gap:var(--space-2);font-size:.875rem;cursor:pointer">
+              <input type="checkbox" id="trn-divedit-public" ${div.showPublicly?"checked":""} />
+              Show on public tournament page
+            </label>
+          </div>
+
+          <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Invite Email Template</div>
+          <div class="form-group">
+            <label>Subject</label>
+            <input type="text" id="trn-divedit-tpl-subj" value="${_esc(div.template?.subject||"")}"
+              placeholder="[Tournament] Your Division Invite" />
+          </div>
+          <div class="form-group">
+            <label>Body</label>
+            <textarea id="trn-divedit-tpl-body" rows="5" style="width:100%;resize:vertical;font-size:.875rem"
+              placeholder="Use [INVITE_LINK] as a placeholder for the league invite URL.">${_esc(div.template?.body||"")}</textarea>
+            <span class="field-hint">Saved as the default template for this division. You can override when sending.</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="trn-divedit-save-btn">💾 ${isNew ? "Create Division" : "Save Changes"}</button>
+        </div>
+      `);
+      const box = document.getElementById("trn-modal-box");
+      if (box) box.classList.add("modal-box--lg");
+      document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+      document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+      document.getElementById("trn-divedit-save-btn")?.addEventListener("click", async () => {
+        const name = document.getElementById("trn-divedit-name")?.value.trim();
+        if (!name) { showToast("Division name is required", "error"); return; }
+        const updated = {
+          name,
+          description:    document.getElementById("trn-divedit-desc")?.value.trim() || null,
+          teamCap:        parseInt(document.getElementById("trn-divedit-cap")?.value) || 0,
+          maleCap:        parseInt(document.getElementById("trn-divedit-mcap")?.value) || 0,
+          femaleCap:      parseInt(document.getElementById("trn-divedit-fcap")?.value) || 0,
+          enforceTotal:   document.getElementById("trn-divedit-enforce-total")?.checked || false,
+          enforceMale:    document.getElementById("trn-divedit-enforce-male")?.checked  || false,
+          enforceFemale:  document.getElementById("trn-divedit-enforce-female")?.checked || false,
+          allowSelfSelect: document.getElementById("trn-divedit-selfselect")?.checked  || false,
+          showPublicly:   document.getElementById("trn-divedit-public")?.checked        || false,
+          template: {
+            subject: document.getElementById("trn-divedit-tpl-subj")?.value.trim() || "",
+            body:    document.getElementById("trn-divedit-tpl-body")?.value || "",
+          },
+          memberIds: existing?.memberIds || {},
+        };
+        // Clean nulls
+        if (!updated.description) delete updated.description;
+        if (!updated.teamCap)   delete updated.teamCap;
+        if (!updated.maleCap)   delete updated.maleCap;
+        if (!updated.femaleCap) delete updated.femaleCap;
+        if (!updated.template.subject && !updated.template.body) delete updated.template;
+
+        try {
+          const newId = divId || _genId();
+          await _divRef(newId).set(updated);
+          divsObj[newId] = updated;
+          _closeModal();
+          _renderAll();
+          showToast(`Division "${name}" ${isNew ? "created" : "saved"} ✓`);
+        } catch(e) { showToast("Save failed: " + e.message, "error"); }
+      });
+    }
+
+    // Assign members modal — checklist of approved registrants
+    function _openDivAssignModal(divId, div, approvedRegs, regsObj) {
+      const divName   = div?.name || divId;
+      const memberIds = new Set(Object.keys(div?.memberIds || {}));
+
+      _showModal(`
+        <div class="modal-header">
+          <h3>Assign to ${_esc(divName)}</h3>
+          <button class="modal-close" id="trn-modal-close">✕</button>
+        </div>
+        <div class="modal-body trn-form-body" style="max-height:65vh;overflow-y:auto">
+          <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3)">
+            <button class="btn-ghost btn-sm" id="trn-assign-all-btn">☑ All</button>
+            <button class="btn-ghost btn-sm" id="trn-assign-none-btn">☐ None</button>
+            <input type="text" id="trn-assign-search" placeholder="Search…" style="flex:1;font-size:.82rem" />
+          </div>
+          <div id="trn-assign-list">
+            ${approvedRegs.map(r => `
+              <label style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) 0;cursor:pointer;font-size:.875rem;border-bottom:1px solid var(--color-border)">
+                <input type="checkbox" class="trn-assign-chk" value="${_esc(r.rid)}" ${memberIds.has(r.rid)?"checked":""} />
+                <span class="trn-assign-name">${_esc(r.displayName || r.teamName || r.rid)}</span>
+                ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}" style="font-size:.72rem">${(r.gender||"").charAt(0)}</span>` : ""}
+                ${r.email  ? `<span style="font-size:.72rem;color:var(--color-text-dim);margin-left:auto">${_esc(r.email)}</span>` : ""}
+              </label>`).join("")}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="trn-assign-save-btn">💾 Save Assignments</button>
+        </div>
+      `);
+      const box = document.getElementById("trn-modal-box");
+      if (box) box.classList.add("modal-box--lg");
+      document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+      document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+      document.getElementById("trn-assign-all-btn")?.addEventListener("click", () => {
+        document.querySelectorAll(".trn-assign-chk").forEach(c => c.checked = true);
+      });
+      document.getElementById("trn-assign-none-btn")?.addEventListener("click", () => {
+        document.querySelectorAll(".trn-assign-chk").forEach(c => c.checked = false);
+      });
+      document.getElementById("trn-assign-search")?.addEventListener("input", function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll("#trn-assign-list label").forEach(row => {
+          const name = row.querySelector(".trn-assign-name")?.textContent.toLowerCase() || "";
+          row.style.display = name.includes(q) ? "" : "none";
+        });
+      });
+      document.getElementById("trn-assign-save-btn")?.addEventListener("click", async () => {
+        const checked = [...document.querySelectorAll(".trn-assign-chk:checked")].map(c => c.value);
+        const newIds  = {};
+        checked.forEach(rid => { newIds[rid] = true; });
+        try {
+          await _divRef(divId).child("memberIds").set(newIds);
+          if (!divsObj[divId]) divsObj[divId] = { ...div };
+          divsObj[divId].memberIds = newIds;
+          _closeModal();
+          _renderAll();
+          showToast(`${checked.length} member${checked.length!==1?"s":""} assigned to ${divName} ✓`);
+        } catch(e) { showToast("Save failed: " + e.message, "error"); }
+      });
+    }
+
+    // Division invite email modal — pre-fills from template, allows override
+    function _openDivInviteModal(tid, t, yr, divId, div, regsObj) {
+      const divName   = div?.name || divId;
+      const memberIds = Object.keys(div?.memberIds || {});
+      const memberRegs = memberIds.map(rid => regsObj[rid]).filter(Boolean);
+      const withEmail  = memberRegs.filter(r => r.email);
+      const noEmail    = memberRegs.filter(r => !r.email);
+      const meta       = t.meta || {};
+      const tourName   = meta.name || "Tournament";
+      const tpl        = div?.template || {};
+
+      _showModal(`
+        <div class="modal-header">
+          <h3>✉ Invite — ${_esc(divName)}</h3>
+          <button class="modal-close" id="trn-modal-close">✕</button>
+        </div>
+        <div class="modal-body trn-form-body" style="max-height:70vh;overflow-y:auto">
+          <div class="trn-detail-rows" style="margin-bottom:var(--space-4)">
+            <div class="trn-detail-row"><span>Division members</span><span>${memberRegs.length}</span></div>
+            <div class="trn-detail-row"><span>With email</span><span>${withEmail.length}</span></div>
+            ${noEmail.length ? `<div class="trn-detail-row" style="color:var(--color-orange)"><span>Missing email</span><span>${noEmail.length}</span></div>` : ""}
+          </div>
+          <div class="form-group">
+            <label>From (Your Email)</label>
+            <input type="email" id="trn-divinv-from" value="${_esc(meta.adminEmail||"")}" placeholder="commissioner@example.com" />
+          </div>
+          <div class="form-group">
+            <label>League Invite Link</label>
+            <input type="url" id="trn-divinv-link" placeholder="https://sleeper.app/leagues/join/…" />
+            <span class="field-hint">Use [INVITE_LINK] in the body — it will be replaced with this URL.</span>
+          </div>
+          <div class="form-group">
+            <label>Subject</label>
+            <input type="text" id="trn-divinv-subject"
+              value="${_esc(tpl.subject || `[${tourName}] Welcome to ${yr} — ${divName} Invite`)}" />
+          </div>
+          <div class="form-group">
+            <label>Message Body</label>
+            <textarea id="trn-divinv-body" rows="8" style="width:100%;resize:vertical;font-size:.875rem">${_esc(
+              tpl.body ||
+`Welcome to ${tourName} ${yr}!
+
+You've been placed in ${divName}.
+
+Your league invite link:
+[INVITE_LINK]
+
+Please click the link above to accept your spot. If you have any questions, reply to this email.
+
+Good luck this season!
+
+— ${tourName} Commissioner`
+            )}</textarea>
+          </div>
+          ${withEmail.length > 50 ? `
+            <div class="trn-alert" style="margin-bottom:0">
+              ⚠️ ${withEmail.length} addresses → ${Math.ceil(withEmail.length/50)} BCC batches of 50.
+            </div>` : ""}
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="trn-divinv-send-btn">
+            ✉ Send${withEmail.length > 50 ? ` (${Math.ceil(withEmail.length/50)} drafts)` : ""}
+          </button>
+        </div>
+      `);
+      const box = document.getElementById("trn-modal-box");
+      if (box) box.classList.add("modal-box--lg");
+      document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+      document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+      document.getElementById("trn-divinv-send-btn")?.addEventListener("click", () => {
+        const from    = document.getElementById("trn-divinv-from")?.value.trim() || "";
+        const link    = document.getElementById("trn-divinv-link")?.value.trim()  || "";
+        const subject = document.getElementById("trn-divinv-subject")?.value.trim() || "";
+        const body    = (document.getElementById("trn-divinv-body")?.value || "")
+                          .replace(/\[INVITE_LINK\]/g, link || "[league invite link]");
+        if (!withEmail.length) { showToast("No members with email addresses", "error"); return; }
+        const emails  = withEmail.map(r => r.email);
+        const BCC     = 50;
+        const chunks  = [];
+        for (let i = 0; i < emails.length; i += BCC) chunks.push(emails.slice(i, i + BCC));
+        chunks.forEach((chunk, idx) => {
+          const bcc  = encodeURIComponent(chunk.join(";"));
+          const subj = encodeURIComponent(subject + (chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ""));
+          const bd   = idx === 0 ? encodeURIComponent(body) : "";
+          window.open(`mailto:${encodeURIComponent(from)}?bcc=${bcc}&subject=${subj}${bd?`&body=${bd}`:""}`, "_blank");
+        });
+        showToast(`${chunks.length} draft${chunks.length>1?"s":""} opened ✓`);
+        _closeModal();
+      });
+    }
+
+    _renderAll();
+  }
+
+  // ── Write divisions to public node ─────────────────────
+  // Publishes slim division data (no emails) to publicTournaments/{tid}/divisions/{yr}
+  async function _writeDivisionsPublic(tid, yr, divsObj, regsObj) {
+    const pubDivs = {};
+    Object.entries(divsObj).forEach(([divId, div]) => {
+      if (!div.showPublicly) return; // skip non-public divisions
+      const memberIds  = Object.keys(div.memberIds || {});
+      const members    = memberIds.map(rid => {
+        const r = regsObj[rid] || {};
+        return {
+          displayName: r.displayName || r.teamName || "—",
+          gender:      r.gender || null,
+        };
+      }).filter(m => m.displayName !== "—" || true);
+      pubDivs[divId] = {
+        name:          div.name || "",
+        description:   div.description || null,
+        teamCap:       div.teamCap || null,
+        maleCap:       div.maleCap || null,
+        femaleCap:     div.femaleCap || null,
+        enforceTotal:  div.enforceTotal  || false,
+        enforceMale:   div.enforceMale   || false,
+        enforceFemale: div.enforceFemale || false,
+        allowSelfSelect: div.allowSelfSelect || false,
+        memberCount:   memberIds.length,
+        members,
+      };
+      // Strip nulls for compactness
+      Object.keys(pubDivs[divId]).forEach(k => { if (pubDivs[divId][k] === null) delete pubDivs[divId][k]; });
+    });
+    await GMD.child(`publicTournaments/${tid}/divisions/${yr}`).set(
+      Object.keys(pubDivs).length ? pubDivs : null
+    );
+  }
+
   function _exportRegistrantsCSV(tid, t, preloadedRegs) {
     const regs = Object.entries(preloadedRegs || _tournaments[tid]?.registrations || t.registrations || {});
     if (!regs.length) { showToast("No registrants to export", "info"); return; }

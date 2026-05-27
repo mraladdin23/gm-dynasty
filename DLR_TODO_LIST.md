@@ -1,6 +1,229 @@
 # Dynasty Locker Room — Master TODO List
-*Updated: May 20, 2026 — Decathlon mode built, registration year-scoping, draft ticker snake fix, wizard polish, public site parity.*
+*Updated: May 26, 2026 — Salary cap Firebase fixes, tournament UI polish, registration unblocked.*
 *Attach with DLR_PROJECT_SUMMARY.md + specific files per task.*
+
+---
+
+## How to Use This Doc
+Each issue is self-contained. For each session: attach this doc + project summary +
+only the files listed under that issue. Fix one issue per session where possible.
+After completing an issue, move it to the ✅ Completed section at the bottom.
+
+---
+
+## 🔴 Critical — Crashes or Broken Core Features
+
+### DT-MISSING — Draft Ticker Not Picking Up Active Draft
+**Problem:** At least one league currently drafting is not appearing in the draft ticker.
+
+**Diagnostic steps (run in order):**
+1. `await DraftTicker.diagnosePickCalc()` — check which leagues are being monitored and their draft status
+2. Check `gmd/draftWatchList` (or `gmd/draftWatchIndex/{username}`) — is the missing league present?
+3. On Sleeper, confirm the draft status is `"drafting"` or `"paused"` (not `"complete"` or `"pre_draft"`)
+4. Check `gmd/draftStatus/{leagueId}` — does the Worker's entry exist? If not, league may not be in watchList
+5. Check `GET https://mfl-proxy.mraladdin23.workers.dev/draft/diagnose?username=mraladdin23` for full Worker-side report
+
+**Likely causes:**
+- League not in `_buildWatchList` (possibly filtered by `mostRecentSeason` logic — if league is a redraft that shares a chain with a dynasty, it may be excluded)
+- Draft type is snake and `slot_to_roster_id` is empty — now fixed (fetches `/draft/{id}` directly), but verify deployed
+- League linked to a different Sleeper username than stored
+
+**Files:** `draft-ticker.js`
+
+---
+
+## 🟡 Decathlon Mode — Remaining Items
+
+### DEC-WEEKRANGE — Week Range Not Applying to Standings/Results
+**Problem:** Even with `po.startWeek=1`, `po.endWeek=16` confirmed in Firebase, PF-basis and record-basis leagues still show full-season results in the combined standings and by-league view.
+
+**Architecture (as of latest session):**
+- Global `po.startWeek`/`po.endWeek` used for record, median, and playoffs basis leagues
+- PF-basis leagues have their own per-league `pfStartWeek`/`pfEndWeek` inputs (appear when "🎯 Total Points" selected in the per-league card)
+- `_buildDecWeekScoreMap()` is async — fetches Sleeper matchup API for all leagues × weeks, returns `{ pfMap, wlMap, medMap }`
+- `hasWeekRange = !!(startWk && endWk && pfMap)` — only true when pfMap is populated
+- `_setTabContent(tabId)` shows spinner then awaits the async render
+
+**Known remaining issue:** `pfMap` fetching logic is confirmed working (108 keys in diagnostic) but the rangedPF still isn't being applied. Suspected: `lgId` in `leagueMap` and `lgId` in `_buildDecWeekScoreMap` may still mismatch in edge cases, OR `hasWeekRange` is false because `pfMap` is null when the tab first renders.
+
+**Action required:**
+1. Deploy latest `tournament.js`
+2. For each PF-basis league card: enter Start Week / End Week in the sub-inputs → Save Decathlon Config
+3. Run `await DLRTournament.diagnoseDecathlon()` — look at the leagueConfig table for `pfStartWeek`/`pfEndWeek`
+4. Check the console for `[decathlon] pfMap MISS` warnings — these show the exact key format mismatch if one exists
+
+**Files:** `tournament.js`
+
+### DEC-ELIM — Elimination Manager Needs Verification
+**Status:** Major fixes applied. `_poLocal`/`_activePoYear` scope errors fixed. Player list population fixed (year-prefix key stripping). Rank logic fixed (active players = best ranks). "🎯 Suggest from Sleeper" button added (Phase 1: cumulative PF; Phase 2: single-week lowest scorer).
+**Verify:** Open Elimination Manager for the elimination league, record knockouts, save, confirm ranks display correctly in Combined Standings.
+**Files:** `tournament.js`
+
+---
+
+## 🟢 Tournament — Redesign & New Features
+
+### T-REDESIGN — Tournament Creation: Step-by-Step Modal
+**Priority:** High
+**Status:** Wizard fully functional (7 steps). Known issues all fixed. MFL "Fetch All Leagues" UI added but not yet wired (button exists, `display:none`, handler not implemented — deferred).
+**Files:** `tournament.js`, `tournament.css`, `index.html`
+
+### F10 — Tournament Lapsed-Player Report
+**Priority:** Medium
+**Description:** Give tournament admins a way to see and export a list of players who participated in a prior year but have NOT registered for the current open year. Lets admins target outreach to non-responders instead of messaging everyone.
+
+**Design:**
+- Appears in Admin → Registrants tab when a year has `registrationOpen = true`
+- Compares `participants` from prior year(s) against current-year `registrations`
+- Match by `sleeperUsername`, `email`, or `displayName` (normalized)
+- Shows table: Name | Prior Year(s) | Registration Status (Not Registered / Pending / Approved)
+- Export button → CSV download
+- Only visible to admin/commissioner
+
+**Files:** `tournament.js`
+
+### A2 — Registration Confirmation Email
+**Files:** `tournament.js`, `worker.js`
+
+### F9 — Tournament League Invite Emails
+**Files:** `tournament.js`, `worker.js`
+
+---
+
+## 🟢 Auth & Account
+*(none currently)*
+
+---
+
+## 🟢 New Features
+
+### F1 — Dynasty/Keeper League Overview Tab
+**Files:** `standings.js`, `profile.js`, `locker.css`
+
+### F4 — Locker Room Visual Redesign + NFL Team Themes
+**Files:** `locker.css`, `profile.js`, `app.js`
+
+### F6 — Post-It Trash Talk Wall
+**Files:** `chat.js`, new module
+
+### F7 — Custom Trophy Builder
+**Files:** `trophy-room.js`, `tournament.js`, `locker.css`
+
+---
+
+## 🔧 Console Scripts (for surgical Firebase fixes)
+
+### Diagnose decathlon week range and engine state
+```js
+await DLRTournament.diagnoseDecathlon()
+// Shows: po.startWeek/endWeek, pfMap key count, wlMap key count,
+// leagueConfig per-league basis/pfStartWeek/pfEndWeek,
+// standingsCache sample, key format check
+```
+
+### Diagnose custom playoffs visibility for a league
+```js
+await Profile.diagnoseCustomPlayoffs()
+```
+
+### Diagnose draft ticker pick calculation
+```js
+await DraftTicker.diagnosePickCalc()
+// or: await DraftTicker.diagnosePickCalc("leagueId")
+```
+
+### Salary cap diagnostic (run while Roster/Salary tab is open)
+```js
+// See salary_diagnose.js in repo — checks storageKey, Firebase paths,
+// auction bids, roster username resolution, and key mismatches
+await diagnoseSalary()
+```
+
+### Clear stale draft cache for one league
+```js
+await firebase.database().ref(`gmd/tournaments/${tid}/analyticsCache/drafts/${lid}`).remove();
+```
+
+### Clear bundles node (safe)
+```js
+await firebase.database().ref('gmd/users/mraladdin23/bundles').remove();
+```
+
+### Force-republish public summaries
+Open DLR while logged in as admin — `_backfillPublicSummaries()` runs automatically on tournament page load.
+
+### Tag registrations with current year (run once to fix old-participant blocking)
+Admin → Registrants tab → click "🔧 Tag Registrations with Year"
+
+### Worker debug endpoints
+```
+GET https://mfl-proxy.mraladdin23.workers.dev/draft/diagnose?username=USERNAME
+GET https://mfl-proxy.mraladdin23.workers.dev/draft/rebuildWatchIndex
+GET https://mfl-proxy.mraladdin23.workers.dev/draft/status
+```
+
+---
+
+*⚠️ NEVER run bulk Firebase reset scripts. Fix stale data surgically, one league at a time.*
+
+---
+
+## ✅ Completed
+
+### May 26, 2026 — Salary Cap: Firebase Numeric Key Corruption + Reconcile Wipe (`salary.js`, `firebase-db.js`)
+Root cause: two separate bugs compounding each other.
+
+**Bug 1 — Numeric key corruption:** `saveSalaryRosters` used a single `.set()` on the whole rosters object. Firebase silently converts all-numeric string keys (e.g. `"599820639284568064"`) to array indices, corrupting or dropping entries. Fixed by writing each team individually via `GMD.child(...rosters/${username}).set(data)` in parallel.
+
+**Bug 2 — Reconcile overwriting with stale data:** `reconcileAuctionWins` checked `_salaryData` in memory to determine which auction wins were missing. But `_salaryData` could be stale (loaded before per-team writes propagated, or set by a prior `preloadCap` call). So reconcile would "find" players missing, add them to stale `_salaryData`, then save — overwriting the correct Firebase data with the stale version. Fixed by having `reconcileAuctionWins` do its own fresh `getSalaryRosters` read before checking for missing entries.
+
+**Additional fixes in this session:**
+- `_storageKey = leagueKey` (not `franchiseId`) — franchise chain ID has no relation to where auction/salary data is stored
+- `_saveSalaryData` post-save re-read removed — was overwriting `_salaryData` with stale SDK cache after every save
+- `reconcileAuctionWins` guard: `!_rosterData?.length` (was `!_rosterData` — empty array is falsy-safe now)
+- `_getTeamSalaryMap` indexes both bare and `uid_`-prefixed keys for resilience
+
+### May 26, 2026 — Tournament UI Polish (`tournament.js`, `tournament.css`, `locker.css`, `tournaments/index.html`)
+- **Elimination Manager** moved from playoff-config modal to dedicated ⚔️ Elimination tab in Tournament History. Inline UI, no modal. "Manage Weekly Knockouts" button removed from playoff-config league card; replaced with status note pointing to the tab.
+- **Playoff ADP tab** renamed from "ADP" and moved to right of Most Rostered.
+- **Matchups week dropdown** fixed — was empty when standingsCache not yet synced (latestWeek=0 → weeks array empty). Now always generates weeks 1–17 minimum.
+- **Playoff config modal scroll** fixed — added `modal-box--scroll` CSS class (flex column, overflow hidden on box, body scrolls). Modal size bumped to match wizard (`modal-box--lg`).
+- **`_showModal` className reset** — always resets to `modal-box modal-box--sm` baseline so size classes don't bleed between opens.
+- **Decathlon config cut off** — `.trn-pc-card { overflow: hidden }` changed to `overflow: visible`.
+- **Registration no longer blocks** — duplicate submissions tag entry with `_isDuplicate: true` instead of blocking. Admin sees ⚠️ Possible duplicate badge on approval page. Both `tournament.js` and `tournaments/index.html` updated. `localStorage` guard removed from public site.
+
+### May 26, 2026 — Salary Cap: Initial Load Race Condition (`profile.js`, `salary.js`)
+- `preloadCap` storageKey fixed to always use `leagueKey` not `franchiseId`
+- `isReady()` method added and removed (introduced/reverted — eager init approach abandoned)
+- Root cause of original "salaries not loading" confirmed as Firebase numeric key corruption (see above)
+
+### May 20, 2026 — Decathlon Playoff Mode (`tournament.js`, `tournament.css`, `index.html`)
+*(see previous entries)*
+
+### May 20, 2026 — Registration Year-Scoping (`tournament.js`, `tournaments/index.html`)
+*(see previous entries)*
+
+### May 20, 2026 — Draft Ticker: Snake Draft `slot_to_roster_id` Fix + Linear Fallback (`draft-ticker.js`)
+*(see previous entries)*
+
+### May 20, 2026 — Tournament Public Site Parity (`tournament.js`, `tournaments/index.html`)
+*(see previous entries)*
+
+### May 20, 2026 — Wizard Polish (`tournament.js`, `tournament.css`)
+*(see previous entries)*
+
+### May 14, 2026 — Draft Ticker: Pick-Calculation Bugs Fixed (`draft-ticker.js`)
+*(see previous entries)*
+
+### May 14, 2026 — Custom Playoffs v4, Tab Visibility Fix, players-db.js
+*(see previous entries)*
+
+### May 12, 2026 — Draft Ticker Overhaul, Admin Impersonation, Hallway H2H, Tournament Private Flag
+*(see previous entries)*
+
+---
+
+*⚠️ NEVER run bulk Firebase reset scripts. Fix stale data surgically, one league at a time.*
 
 ---
 

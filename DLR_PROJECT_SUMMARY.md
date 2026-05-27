@@ -1,6 +1,6 @@
 # Dynasty Locker Room (DLR) — Project Summary
 *For use as context in a new Claude chat session*
-*Updated: May 20, 2026 — Decathlon mode, registration year-scoping, wizard polish, snake draft fix, public site parity.*
+*Updated: May 26, 2026 — Salary cap Firebase fixes, tournament UI polish, registration unblocked.*
 
 ---
 
@@ -67,7 +67,7 @@ GitHub Pages (dynastylockerroom.com)
 | `draft-ticker.js` | Global draft ticker — Sleeper-first client architecture. v=6. See Draft Ticker section. |
 | `hallway.js` | Hallway social feature. H2H records across common leagues, all three platforms. |
 | `players-db.js` | Cross-platform player DB. `MAPPINGS_VERSION = "2026-04b"`. |
-| `salary.js` | Salary cap management. |
+| `salary.js` | Salary cap management. `_storageKey = leagueKey` always. `saveSalaryRosters` writes per-team (not bulk set). `reconcileAuctionWins` does fresh Firebase read before checking missing entries. |
 
 ### `tournaments/`
 - `index.html` — Public tournament directory and registration page. Year-scoped duplicate check. `participantMap` pre-flight removed.
@@ -211,6 +211,8 @@ playoffs/{year}/decathlon:
 ### Firebase writes
 - Always `.update()` for merges, never `.set()` on nodes with data to keep
 - Keys cannot contain: `. # $ / [ ]`
+- **Never use `.set()` on objects with all-numeric string keys** — Firebase converts them to array indices, silently corrupting data. Use per-child writes instead: `GMD.child(`path/${key}`).set(data)`
+- `salaryCap/{leagueKey}/rosters` — always write per-team, never as a whole object
 - For large datasets, fetch specific child ref directly
 
 ### CSS/JS versioning
