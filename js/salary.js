@@ -95,11 +95,17 @@ const DLRSalaryCap = (() => {
       ]);
       if (token !== _initToken) return;
 
-      // Restore last-processed timestamp so we don't reprocess old transactions on reload
+      // Restore last-processed tx timestamp from Firebase.
+      // If nothing is stored yet (first deploy), default to NOW so we don't
+      // reprocess historical transactions and overwrite existing salary data.
       try {
         const tsSnap = await GMD.child(`salaryCap/${_storageKey}/lastTxProcessed`).once("value");
-        _lastTxProcessed = tsSnap.val() || 0;
-      } catch(e) { _lastTxProcessed = 0; }
+        _lastTxProcessed = tsSnap.val() || Date.now();
+        // Persist the default so subsequent loads don't reprocess either
+        if (!tsSnap.val()) {
+          GMD.child(`salaryCap/${_storageKey}/lastTxProcessed`).set(_lastTxProcessed).catch(() => {});
+        }
+      } catch(e) { _lastTxProcessed = Date.now(); }
 
       _players = DLRPlayers.all();
       if (Object.keys(_players).length < 100) _players = await DLRPlayers.load();
@@ -343,9 +349,8 @@ const DLRSalaryCap = (() => {
         changed = _clearPlayerSalary(username, playerId) || changed;
       }
       // Adds — set salary based on FAAB bid × multiplier
-      // Note: no "skip if existing" guard here — drops already cleared the salary above,
-      // and the business rule is that re-adds always restart salary from the new bid.
       for (const [playerId, username] of Object.entries(adds)) {
+        if (_getPlayerSalary(username, playerId)) continue; // don't overwrite existing
         const salary = type === "waiver" && faabBid > 0
           ? Math.max(Math.round(faabBid * mult), minSal)
           : minSal;
