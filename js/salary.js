@@ -941,7 +941,38 @@ const DLRSalaryCap = (() => {
         </div>
         <button class="btn-primary" onclick="DLRSalaryCap.saveSettings()">Save Settings</button>
         <div id="sal-settings-status" style="margin-top:var(--space-3);font-size:.82rem;color:var(--color-text-dim);"></div>
+
+        <hr style="margin:var(--space-5) 0;border-color:var(--color-border)"/>
+        <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">Data Recovery</div>
+        <div style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+          Use this if auction salaries were wiped or incorrectly set. Reads all processed auction bids from Firebase
+          and overwrites each player's salary with their winning bid amount. Waiver/FA salaries are not affected.
+        </div>
+        <button class="btn-secondary" id="sal-restore-auction-btn">🔧 Restore Auction Salaries from Bids</button>
+        <div id="sal-restore-status" style="margin-top:var(--space-3);font-size:.82rem;color:var(--color-text-dim);"></div>
       </div>`;
+
+    document.getElementById("sal-restore-auction-btn")?.addEventListener("click", async () => {
+      const btn    = document.getElementById("sal-restore-auction-btn");
+      const status = document.getElementById("sal-restore-status");
+      if (!confirm("This will overwrite all auction player salaries with their original winning bid amounts. Continue?")) return;
+      btn.disabled    = true;
+      btn.textContent = "Restoring…";
+      status.textContent = "";
+      try {
+        const result = await DLRSalaryCap.forceRestoreAuctionSalaries();
+        btn.textContent    = "🔧 Restore Auction Salaries from Bids";
+        btn.disabled       = false;
+        status.textContent = result.changed
+          ? `✓ Restored ${result.count} player${result.count !== 1 ? "s" : ""} at ${new Date().toLocaleTimeString()}`
+          : "✓ No changes needed — all auction salaries already match bid data.";
+        if (result.changed) _render();
+      } catch(e) {
+        btn.textContent = "🔧 Restore Auction Salaries from Bids";
+        btn.disabled    = false;
+        status.textContent = "❌ Restore failed: " + e.message;
+      }
+    });
   }
 
   async function saveSettings() {
@@ -1123,6 +1154,75 @@ const DLRSalaryCap = (() => {
         console.warn("[Salary] reconcileAuctionWins save failed:", e.message);
       }
     }
+  }
+
+  // ── Force-restore auction salaries ────────────────────────
+  // Unlike reconcileAuctionWins (which only fills missing entries), this
+  // unconditionally overwrites every auction player's salary with their
+  // winning bid amount. Use after a bad deploy corrupted salary data.
+  // Returns { changed: bool, count: number }
+  async function forceRestoreAuctionSalaries() {
+    const key = _leagueKey;
+    if (!key || !_rosterData?.length) throw new Error("League not fully loaded — try again in a moment.");
+
+    // Fresh reads of both bids and salary data
+    const [bidSnap, freshSalaryData] = await Promise.all([
+      GMD.child(`auctions/${key}/bids`).once("value"),
+      GMDB.getSalaryRosters(_storageKey).catch(() => ({})),
+    ]);
+    const bids = bidSnap.val();
+    if (!bids) throw new Error(`No auction bid data found at auctions/${key}/bids`);
+
+    // Sync fresh salary data into module state
+    _salaryData = freshSalaryData || {};
+
+    // Build roster_id / ownerId → username map
+    const rosterToUsername = {};
+    (_rosterData || []).forEach(r => {
+      rosterToUsername[String(r.roster_id)] = r.username;
+      if (r.ownerId) rosterToUsername[String(r.ownerId)] = r.username;
+    });
+
+    let count = 0;
+    Object.values(bids).forEach(a => {
+      if (!a.processed || a.cancelled) return;
+      const winnerId = a.winner != null ? String(a.winner) : null;
+      const salary   = Number(a.winningBid || 0);
+      const playerId = a.playerId ? String(a.playerId) : null;
+      if (!winnerId || !salary || !playerId) return;
+
+      const username = rosterToUsername[winnerId];
+      if (!username) {
+        console.warn(`[Salary] forceRestore: no username for winnerId=${winnerId}`);
+        return;
+      }
+
+      if (!_salaryData[username]) _salaryData[username] = { players: [] };
+      const players = _salaryData[username].players || [];
+      const idx     = players.findIndex(p => String(p.playerId) === playerId);
+      const entry   = { playerId, salary, years: 1, holdout: false, auctionWin: true, reconciled: true };
+
+      if (idx >= 0) {
+        // Only overwrite if the stored salary differs from the bid amount
+        if (players[idx].salary !== salary) {
+          console.log(`[Salary] forceRestore: ${a.playerName || playerId} → ${username} ${players[idx].salary} → ${salary}`);
+          players[idx] = { ...players[idx], ...entry };
+          count++;
+        }
+      } else {
+        console.log(`[Salary] forceRestore: ${a.playerName || playerId} → ${username} (missing, adding @ ${salary})`);
+        players.push(entry);
+        count++;
+      }
+      _salaryData[username].players = players;
+    });
+
+    if (count > 0) {
+      await _saveSalaryData();
+      _renderView();
+      console.log(`[Salary] forceRestoreAuctionSalaries: ${count} player(s) restored.`);
+    }
+    return { changed: count > 0, count };
   }
 
   async function savePlayerSalary(pid, username) {
@@ -1441,7 +1541,7 @@ const DLRSalaryCap = (() => {
   return {
     init, preloadCap, reset, setView, setPos, selectTeam,
     isReady,
-    openEditModal, savePlayerSalary, addAuctionWin, reconcileAuctionWins,
+    openEditModal, savePlayerSalary, addAuctionWin, reconcileAuctionWins, forceRestoreAuctionSalaries,
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
     getCapData, getTeamSalaryEntries,
