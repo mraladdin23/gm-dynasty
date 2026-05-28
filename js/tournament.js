@@ -1341,7 +1341,8 @@ const DLRTournament = (() => {
       <div class="trn-admin-mgmt-tabs">
         ${[["registrants", "📋 Registrants" + (pendingCount ? ` <span class="trn-tab-count">${pendingCount}</span>` : "")],
            ["participants", "👥 Participants"],
-           ["divisions",    "🗂 Divisions"]].map(([id, label]) => `
+           ["divisions",    "🗂 Divisions"],
+           ["donations",    "💰 Donations"]].map(([id, label]) => `
           <button class="trn-admin-mgmt-tab${_activeAdminMgmtTab===id?" trn-admin-mgmt-tab--active":""}"
             data-mgmt="${id}">${label}</button>`).join("")}
       </div>
@@ -1426,6 +1427,7 @@ const DLRTournament = (() => {
       case "registrants":  return _renderRegistrantsTab(tid, t, container);
       case "participants": return _renderParticipantsTab(tid, t, container);
       case "divisions":    return _renderDivisionsAdminTab(tid, t, container, year);
+      case "donations":    return _renderDonationsAdminTab(tid, t, container, year);
       default:             return _renderRegistrantsTab(tid, t, container);
     }
   }
@@ -9085,8 +9087,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     // ── Lapsed player report ───────────────────────────────
-    document.getElementById("trn-lapsed-report-btn")?.addEventListener("click", () => {
-      _openLapsedPlayersModal(tid, t, regs);
+    document.getElementById("trn-lapsed-report-btn")?.addEventListener("click", async () => {
+      // Always fetch fresh registrations so newly approved entries are included
+      const freshSnap = await _tRegsRef(tid).once("value");
+      const freshRegs = freshSnap.val() || {};
+      _openLapsedPlayersModal(tid, t, freshRegs);
     });
 
     // ── Division Select Email ──────────────────────────────
@@ -10341,6 +10346,392 @@ Good luck this season!
     }
 
     _renderAll();
+  }
+
+  // ── Donations Admin Tab ────────────────────────────────
+  // Tracks donation/entry-fee payments per approved registrant per year.
+  // Firebase path:
+  //   tournaments/{tid}/donations/{year}/{rid}/
+  //     entries: [{amount, method, note, paidAt}]
+  //     total:   <number>  ← denormalized sum
+  //
+  // Year donation config stored at:
+  //   tournaments/{tid}/playoffs/{year}/donationConfig/
+  //     { defaultAmount, label, methods: [...] }
+  async function _renderDonationsAdminTab(tid, t, container, year) {
+    const yr = String(year || _tournamentYear || new Date().getFullYear());
+    container.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading donations…</div>`;
+
+    const po     = _playoffForYear(t, yr) || {};
+    const config = po.donationConfig || {};
+    const defaultAmount = Number(config.defaultAmount || 0);
+    const label         = config.label || "Donation / Entry Fee";
+    const methods       = config.methods?.length ? config.methods : ["PayPal","Venmo","Cash","Zelle","Other"];
+
+    // Parallel fetch: registrations + division assignments + donation records
+    const [regSnap, divSnap, donSnap] = await Promise.all([
+      _tRegsRef(tid).once("value"),
+      GMD.child(`tournaments/${tid}/playoffs/${yr}/divisions`).once("value"),
+      GMD.child(`tournaments/${tid}/donations/${yr}`).once("value"),
+    ]);
+
+    const regsObj  = regSnap.val()  || {};
+    const divsObj  = divSnap.val()  || {};
+    const donsObj  = donSnap.val()  || {};
+
+    // Build rid → division name map
+    const ridToDivision = {};
+    Object.entries(divsObj).forEach(([, div]) => {
+      Object.keys(div.memberIds || {}).forEach(rid => {
+        ridToDivision[rid] = div.name || "—";
+      });
+    });
+
+    // Only show approved registrants
+    const approved = Object.entries(regsObj)
+      .filter(([, r]) => (r.status || "").toLowerCase() === "approved")
+      .map(([rid, r]) => ({ rid, ...r }))
+      .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""));
+
+    // Aggregate stats
+    const totalCollected = Object.values(donsObj).reduce((s, d) => s + (d.total || 0), 0);
+    const paidCount      = approved.filter(r => donsObj[r.rid]?.total > 0).length;
+    const unpaidCount    = approved.length - paidCount;
+    const expectedTotal  = defaultAmount ? defaultAmount * approved.length : null;
+
+    function _donRef(rid) {
+      return GMD.child(`tournaments/${tid}/donations/${yr}/${rid}`);
+    }
+
+    function _renderAll() {
+      container.innerHTML = `
+        <!-- Config strip -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:var(--space-3);margin-bottom:var(--space-3)">
+          <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
+            <div class="trn-stat-card" style="min-width:90px;text-align:center">
+              <div class="trn-stat-value" style="color:var(--color-green,#22c55e)">$${totalCollected.toFixed(2)}</div>
+              <div class="trn-stat-label">Collected</div>
+            </div>
+            <div class="trn-stat-card" style="min-width:90px;text-align:center">
+              <div class="trn-stat-value">${paidCount}</div>
+              <div class="trn-stat-label">Paid</div>
+            </div>
+            <div class="trn-stat-card trn-stat-card--${unpaidCount > 0 ? "warn" : "ok"}" style="min-width:90px;text-align:center">
+              <div class="trn-stat-value">${unpaidCount}</div>
+              <div class="trn-stat-label">Unpaid</div>
+            </div>
+            ${expectedTotal ? `
+            <div class="trn-stat-card" style="min-width:90px;text-align:center">
+              <div class="trn-stat-value">$${expectedTotal.toFixed(2)}</div>
+              <div class="trn-stat-label">Expected</div>
+            </div>` : ""}
+          </div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" id="trn-don-config-btn">⚙ Config</button>
+            <button class="btn-secondary btn-sm" id="trn-don-export-btn">⬇ Export CSV</button>
+          </div>
+        </div>
+
+        <!-- Default amount banner -->
+        ${defaultAmount ? `
+          <div style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            Default ${_esc(label)}: <strong>$${defaultAmount.toFixed(2)}</strong> ·
+            Methods: ${_esc(methods.join(", "))}
+          </div>` : `
+          <div style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+            No default amount set — all entries are custom. <button class="btn-ghost btn-sm" id="trn-don-config-btn2" style="margin-left:4px">Set default →</button>
+          </div>`}
+
+        <!-- Registrant rows -->
+        <div id="trn-don-list">
+          ${!approved.length ? `<div class="trn-empty">No approved registrants yet.</div>` :
+            approved.map(r => {
+              const don      = donsObj[r.rid] || {};
+              const total    = don.total || 0;
+              const entries  = don.entries || [];
+              const isPaid   = total > 0;
+              const division = ridToDivision[r.rid] || "—";
+              return `
+                <div class="trn-section-card" style="margin-bottom:var(--space-2);padding:var(--space-2) var(--space-3)" data-don-rid="${_esc(r.rid)}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+                    <div style="flex:1;min-width:0">
+                      <div style="font-weight:600;font-size:.875rem">
+                        ${isPaid ? "✅" : "⚠️"} ${_esc(r.displayName || r.teamName || r.rid)}
+                        ${division !== "—" ? `<span style="font-size:.75rem;color:var(--color-text-dim);margin-left:var(--space-2)">${_esc(division)}</span>` : ""}
+                      </div>
+                      <div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">
+                        ${_esc(r.email || "no email")}
+                        ${expectedTotal && total < defaultAmount ? `
+                          <span style="color:var(--color-orange);margin-left:var(--space-2)">
+                            $${total.toFixed(2)} / $${defaultAmount.toFixed(2)}
+                          </span>` : isPaid ? `
+                          <span style="color:var(--color-green,#22c55e);margin-left:var(--space-2)">
+                            $${total.toFixed(2)} paid
+                          </span>` : `
+                          <span style="color:var(--color-text-dim);margin-left:var(--space-2)">
+                            $0 — unpaid
+                          </span>`}
+                      </div>
+                    </div>
+                    <div style="display:flex;gap:var(--space-1);flex-shrink:0">
+                      <button class="btn-primary btn-sm" data-don-add="${_esc(r.rid)}"
+                        data-don-name="${_esc(r.displayName || r.teamName || r.rid)}">
+                        ➕ Add Payment
+                      </button>
+                      ${entries.length ? `
+                        <button class="btn-ghost btn-sm" data-don-history="${_esc(r.rid)}">
+                          📋 ${entries.length}
+                        </button>` : ""}
+                    </div>
+                  </div>
+                </div>`;
+            }).join("")}
+        </div>
+      `;
+
+      // Wire config buttons
+      ["trn-don-config-btn","trn-don-config-btn2"].forEach(id => {
+        document.getElementById(id)?.addEventListener("click", () =>
+          _openDonationConfigModal(tid, yr, config, methods, async (newConfig) => {
+            try {
+              await GMD.child(`tournaments/${tid}/playoffs/${yr}/donationConfig`).set(newConfig);
+              // Update local t reference
+              if (!_tournaments[tid]) _tournaments[tid] = t;
+              if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
+              if (!_tournaments[tid].playoffs[yr]) _tournaments[tid].playoffs[yr] = {};
+              _tournaments[tid].playoffs[yr].donationConfig = newConfig;
+              showToast("Donation config saved ✓");
+              // Re-render with new config
+              _renderDonationsAdminTab(tid, _tournaments[tid], container, yr);
+            } catch(e) { showToast("Save failed: " + e.message, "error"); }
+          })
+        );
+      });
+
+      // Wire export
+      document.getElementById("trn-don-export-btn")?.addEventListener("click", () => {
+        const headers = ["displayName","email","division","totalPaid","lastPaymentDate","entries"];
+        const rows = approved.map(r => {
+          const don     = donsObj[r.rid] || {};
+          const total   = don.total || 0;
+          const entries = don.entries || [];
+          const lastPaid = entries.length
+            ? new Date(entries[entries.length-1].paidAt).toLocaleDateString()
+            : "";
+          const entryStr = entries.map(e =>
+            `${e.method||"?"} $${Number(e.amount||0).toFixed(2)} ${e.note ? "("+e.note+")" : ""} ${new Date(e.paidAt).toLocaleDateString()}`
+          ).join(" | ");
+          return [r.displayName||r.teamName||r.rid, r.email||"", ridToDivision[r.rid]||"",
+            total.toFixed(2), lastPaid, entryStr]
+            .map(v => `"${String(v).replace(/"/g,'""')}"`).join(",");
+        });
+        const csv  = [headers.join(","), ...rows].join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href = url;
+        a.download = `donations_${yr}_${(t.meta?.name||tid).replace(/\s+/g,"_")}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("Donations CSV exported ✓");
+      });
+
+      // Wire add-payment buttons
+      container.querySelectorAll("[data-don-add]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const rid  = btn.dataset.donAdd;
+          const name = btn.dataset.donName;
+          _openDonationEntryModal(null, name, defaultAmount, label, methods, async (entry) => {
+            try {
+              const existing  = donsObj[rid] || { entries: [], total: 0 };
+              const entries   = existing.entries || [];
+              entries.push(entry);
+              const newTotal  = entries.reduce((s, e) => s + Number(e.amount || 0), 0);
+              await _donRef(rid).set({ entries, total: newTotal });
+              donsObj[rid] = { entries, total: newTotal };
+              showToast(`Payment recorded for ${name} ✓`);
+              _renderAll();
+            } catch(e) { showToast("Save failed: " + e.message, "error"); }
+          });
+        });
+      });
+
+      // Wire history buttons
+      container.querySelectorAll("[data-don-history]").forEach(btn => {
+        const rid = btn.dataset.donHistory;
+        btn.addEventListener("click", () => {
+          const r       = approved.find(r => r.rid === rid) || {};
+          const don     = donsObj[rid] || {};
+          const entries = don.entries || [];
+          _openDonationHistoryModal(rid, r.displayName || r.teamName || rid, entries, don.total || 0, label,
+            async (updatedEntries) => {
+              const newTotal = updatedEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+              await _donRef(rid).set(updatedEntries.length ? { entries: updatedEntries, total: newTotal } : null);
+              donsObj[rid] = updatedEntries.length ? { entries: updatedEntries, total: newTotal } : {};
+              showToast("Payment history updated ✓");
+              _renderAll();
+            }
+          );
+        });
+      });
+    }
+
+    _renderAll();
+  }
+
+  // ── Donation config modal ──────────────────────────────
+  function _openDonationConfigModal(tid, yr, existing, existingMethods, onSave) {
+    const cfg = existing || {};
+    _showModal(`
+      <div class="modal-header">
+        <h3>⚙ Donation Config — ${_esc(yr)}</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body">
+        <div class="form-group">
+          <label>Label (e.g. "Entry Fee", "Donation")</label>
+          <input type="text" id="trn-doncfg-label" value="${_esc(cfg.label || "Entry Fee")}" />
+        </div>
+        <div class="form-group">
+          <label>Default Amount ($) — leave 0 for variable/custom per person</label>
+          <input type="number" id="trn-doncfg-amount" min="0" step="0.01" value="${cfg.defaultAmount || 0}"
+            style="width:120px" />
+        </div>
+        <div class="form-group">
+          <label>Payment Methods (comma-separated)</label>
+          <input type="text" id="trn-doncfg-methods"
+            value="${_esc((existingMethods || ["PayPal","Venmo","Cash","Zelle","Other"]).join(", "))}" />
+          <span class="field-hint">e.g. PayPal, Venmo, Cash, Zelle, Other</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="trn-doncfg-save-btn">💾 Save</button>
+      </div>
+    `);
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-doncfg-save-btn")?.addEventListener("click", () => {
+      const label         = document.getElementById("trn-doncfg-label")?.value.trim() || "Entry Fee";
+      const defaultAmount = parseFloat(document.getElementById("trn-doncfg-amount")?.value) || 0;
+      const methodsRaw    = document.getElementById("trn-doncfg-methods")?.value || "";
+      const methods       = methodsRaw.split(",").map(s => s.trim()).filter(Boolean);
+      _closeModal();
+      onSave({ label, defaultAmount, methods });
+    });
+  }
+
+  // ── Donation entry modal (add a single payment) ────────
+  function _openDonationEntryModal(existingEntry, personName, defaultAmount, label, methods, onSave) {
+    const e = existingEntry || {};
+    _showModal(`
+      <div class="modal-header">
+        <h3>${existingEntry ? "Edit" : "Add"} Payment — ${_esc(personName)}</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body">
+        <div class="form-group">
+          <label>${_esc(label)} Amount ($)</label>
+          <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+            <input type="number" id="trn-donentry-amount" min="0" step="0.01"
+              value="${e.amount != null ? e.amount : (defaultAmount || "")}"
+              style="width:120px" placeholder="0.00" />
+            ${defaultAmount ? `
+              <button class="btn-ghost btn-sm" id="trn-donentry-use-default">
+                Use default ($${Number(defaultAmount).toFixed(2)})
+              </button>` : ""}
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Payment Method</label>
+          <select id="trn-donentry-method" style="width:100%">
+            ${methods.map(m => `<option value="${_esc(m)}" ${e.method===m?"selected":""}>${_esc(m)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Note (optional)</label>
+          <input type="text" id="trn-donentry-note" value="${_esc(e.note || "")}"
+            placeholder="e.g. partial payment, split with spouse…" />
+        </div>
+        <div class="form-group">
+          <label>Date Paid</label>
+          <input type="date" id="trn-donentry-date"
+            value="${e.paidAt ? new Date(e.paidAt).toISOString().slice(0,10) : new Date().toISOString().slice(0,10)}" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="trn-donentry-save-btn">💾 Save Payment</button>
+      </div>
+    `);
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-donentry-use-default")?.addEventListener("click", () => {
+      const inp = document.getElementById("trn-donentry-amount");
+      if (inp) inp.value = defaultAmount;
+    });
+    document.getElementById("trn-donentry-save-btn")?.addEventListener("click", () => {
+      const amount = parseFloat(document.getElementById("trn-donentry-amount")?.value);
+      if (!amount || amount <= 0) { showToast("Enter a valid amount", "error"); return; }
+      const method  = document.getElementById("trn-donentry-method")?.value  || "Other";
+      const note    = document.getElementById("trn-donentry-note")?.value.trim() || "";
+      const dateVal = document.getElementById("trn-donentry-date")?.value;
+      const paidAt  = dateVal ? new Date(dateVal).getTime() : Date.now();
+      _closeModal();
+      onSave({ amount, method, note: note || null, paidAt });
+    });
+  }
+
+  // ── Donation history modal (view + delete entries) ─────
+  function _openDonationHistoryModal(rid, personName, entries, total, label, onUpdate) {
+    const fmt = (ts) => ts ? new Date(ts).toLocaleDateString() : "—";
+    function _renderRows() {
+      return entries.map((e, idx) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);gap:var(--space-2);flex-wrap:wrap">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:.875rem;font-weight:600">$${Number(e.amount||0).toFixed(2)} · ${_esc(e.method||"?")}</div>
+            <div style="font-size:.78rem;color:var(--color-text-dim)">
+              ${fmt(e.paidAt)}${e.note ? ` · ${_esc(e.note)}` : ""}
+            </div>
+          </div>
+          <button class="btn-ghost btn-sm" style="color:var(--color-danger,#ef4444)"
+            data-don-del="${idx}">🗑</button>
+        </div>`).join("");
+    }
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>📋 Payment History — ${_esc(personName)}</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body trn-form-body">
+        <div class="trn-detail-rows" style="margin-bottom:var(--space-3)">
+          <div class="trn-detail-row"><span>Total paid</span><strong>$${total.toFixed(2)}</strong></div>
+          <div class="trn-detail-row"><span>Payments</span><span>${entries.length}</span></div>
+        </div>
+        <div id="trn-donhist-rows">${_renderRows()}</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Close</button>
+      </div>
+    `);
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+
+    function _wireDeletes() {
+      document.querySelectorAll("[data-don-del]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const idx = parseInt(btn.dataset.donDel);
+          const e   = entries[idx];
+          if (!confirm(`Delete $${Number(e.amount||0).toFixed(2)} payment on ${fmt(e.paidAt)}?`)) return;
+          entries.splice(idx, 1);
+          document.getElementById("trn-donhist-rows").innerHTML = _renderRows();
+          _wireDeletes();
+          await onUpdate([...entries]);
+        });
+      });
+    }
+    _wireDeletes();
   }
 
   // ── Write divisions to public node ─────────────────────
