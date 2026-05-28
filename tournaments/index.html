@@ -3109,9 +3109,6 @@
             const divId = btn.dataset.selfjoin;
             const divYr = btn.dataset.divyr;
             await _handleSelfSelectJoin(tid, divId, divYr, divsObj[divId]);
-            // Refresh public data after join
-            const fresh = await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${divYr}`).once("value");
-            if (fresh.val()) allDivsByYear[divYr] = fresh.val();
             _render(divYr);
           });
         });
@@ -3194,7 +3191,52 @@
       // Write the join
       try {
         await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds/${matchRid}`).set(true);
-        alert(`You've been added to ${div.name || "the division"}! 🎉 Check back here to see your division.`);
+
+        // Re-fetch the full admin divisions node and rebuild the public snapshot
+        // so the public site reflects the new member immediately.
+        try {
+          const adminDivSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
+          const adminDivs    = adminDivSnap.val() || {};
+          // Re-fetch all registrations for display names
+          const allRegSnap   = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
+          const allRegs      = allRegSnap.val() || {};
+
+          const pubDivs = {};
+          Object.entries(adminDivs).forEach(([dId, d]) => {
+            if (d.showPublicly === false) return;
+            const memberIds = Object.keys(d.memberIds || {});
+            const members   = memberIds.map(rid => {
+              const r = allRegs[rid] || {};
+              return { displayName: r.displayName || r.teamName || "—", gender: r.gender || null };
+            });
+            pubDivs[dId] = {
+              name:            d.name || "",
+              teamCap:         d.teamCap  || null,
+              maleCap:         d.maleCap  || null,
+              femaleCap:       d.femaleCap || null,
+              enforceTotal:    d.enforceTotal   || false,
+              enforceMale:     d.enforceMale    || false,
+              enforceFemale:   d.enforceFemale  || false,
+              allowSelfSelect: d.allowSelfSelect || false,
+              memberCount:     memberIds.length,
+              members,
+            };
+            if (d.description) pubDivs[dId].description = d.description;
+            // Strip nulls
+            Object.keys(pubDivs[dId]).forEach(k => { if (pubDivs[dId][k] === null) delete pubDivs[dId][k]; });
+          });
+          await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).set(
+            Object.keys(pubDivs).length ? pubDivs : null
+          );
+          // Update local cache so _render uses the fresh data
+          allDivsByYear[yr] = pubDivs;
+        } catch(syncErr) {
+          // Sync failed — fall back to re-reading the public node
+          const fresh = await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).once("value");
+          if (fresh.val()) allDivsByYear[yr] = fresh.val();
+        }
+
+        alert(`You've been added to ${div.name || "the division"}! 🎉`);
       } catch(e) {
         alert("Could not join division. Please contact the commissioner.");
       }
