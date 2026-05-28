@@ -9087,8 +9087,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     // ── Lapsed player report ───────────────────────────────
-    document.getElementById("trn-lapsed-report-btn")?.addEventListener("click", () => {
-      _openLapsedPlayersModal(tid, t, regs);
+    document.getElementById("trn-lapsed-report-btn")?.addEventListener("click", async () => {
+      // Always fetch fresh registrations so newly approved entries are included
+      const freshSnap = await _tRegsRef(tid).once("value");
+      const freshRegs = freshSnap.val() || {};
+      _openLapsedPlayersModal(tid, t, freshRegs);
     });
 
     // ── Division Select Email ──────────────────────────────
