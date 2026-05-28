@@ -10028,6 +10028,7 @@ Questions? Just reply to this email.
           divEntries.forEach(([divId]) => { divsObj[divId].memberIds = updatedMemberIds[divId]; });
           _renderAll();
           showToast(`${placed} registrant${placed!==1?"s":""} randomly assigned ✓`);
+          _writeDivisionsPublic(tid, yr, divsObj, regsObj).catch(() => {});
         } catch(e) { showToast("Random assign failed: " + e.message, "error"); }
       });
 
@@ -10067,6 +10068,7 @@ Questions? Just reply to this email.
             await _divRef(divId).child(`memberIds/${rid}`).remove();
             delete (divsObj[divId].memberIds || {})[rid];
             _renderAll();
+            _writeDivisionsPublic(tid, yr, divsObj, regsObj).catch(() => {});
           } catch(e) { showToast("Remove failed: " + e.message, "error"); }
         });
       });
@@ -10258,6 +10260,7 @@ Questions? Just reply to this email.
           _closeModal();
           _renderAll();
           showToast(`${checked.length} member${checked.length!==1?"s":""} assigned to ${divName} ✓`);
+          _writeDivisionsPublic(tid, yr, divsObj, regsObj).catch(() => {});
         } catch(e) { showToast("Save failed: " + e.message, "error"); }
       });
     }
