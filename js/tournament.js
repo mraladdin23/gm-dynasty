@@ -815,6 +815,7 @@ const DLRTournament = (() => {
       ${adminPills}
       ${_navPill("history",  "Tournament History", _activeTopNav === "history")}
       ${_navPill("players",  "Player Records",     _activeTopNav === "players")}
+      ${_hasNamedDivisions(t) ? _navPill("divisions", "🗂 Divisions", _activeTopNav === "divisions") : ""}
       ${_navPill("chat",     "Chat",               _activeTopNav === "chat")}
     `;
 
@@ -824,6 +825,7 @@ const DLRTournament = (() => {
       showAdmin ? `<option value="admin" ${_activeTopNav==="admin"?"selected":""}>⚙ Admin</option>` : "",
       `<option value="history"  ${_activeTopNav==="history" ?"selected":""}>Tournament History</option>`,
       `<option value="players"  ${_activeTopNav==="players" ?"selected":""}>Player Records</option>`,
+      _hasNamedDivisions(t) ? `<option value="divisions" ${_activeTopNav==="divisions"?"selected":""}>🗂 Divisions</option>` : "",
       `<option value="chat"     ${_activeTopNav==="chat"    ?"selected":""}>Chat</option>`,
     ].join("");
 
@@ -930,12 +932,13 @@ const DLRTournament = (() => {
     if (!body) return;
     body.innerHTML = "";
     switch (_activeTopNav) {
-      case "overview": return _renderOverviewSection(tid, t, body, showAdmin);
-      case "admin":    return showAdmin ? _renderAdminSection(tid, t, body, allYears) : _renderOverviewSection(tid, t, body, showAdmin);
-      case "history":  return _renderHistorySection(tid, t, body, allYears, showAdmin);
-      case "players":  return _renderPlayersTab(tid, t, body);
-      case "chat":     return _renderBoardTab(tid, t, body);
-      default:         return _renderOverviewSection(tid, t, body, showAdmin);
+      case "overview":   return _renderOverviewSection(tid, t, body, showAdmin);
+      case "admin":      return showAdmin ? _renderAdminSection(tid, t, body, allYears) : _renderOverviewSection(tid, t, body, showAdmin);
+      case "history":    return _renderHistorySection(tid, t, body, allYears, showAdmin);
+      case "players":    return _renderPlayersTab(tid, t, body);
+      case "divisions":  return _renderDivisionsUserTab(tid, t, body);
+      case "chat":       return _renderBoardTab(tid, t, body);
+      default:           return _renderOverviewSection(tid, t, body, showAdmin);
     }
   }
 
@@ -2066,6 +2069,22 @@ const DLRTournament = (() => {
   // emails   — array of recipient addresses to BCC
   // subject  — email subject line
   // body     — email body text (plain text, passed as first batch only)
+  // ── Email opt-out helper ───────────────────────────────
+  // Returns a Set of lowercase email addresses for participants
+  // who have emailOptOut: true. Used by all BCC email modals
+  // to silently exclude opted-out addresses.
+  async function _getOptOutEmails(tid) {
+    try {
+      const snap = await _tParticipantsRef(tid).once("value");
+      const participants = snap.val() || {};
+      const set = new Set();
+      Object.values(participants).forEach(p => {
+        if (p.emailOptOut && p.email) set.add(p.email.toLowerCase());
+      });
+      return set;
+    } catch(e) { return new Set(); }
+  }
+
   function _sendBccEmail(adminTo, emails, subject, body) {
     if (!emails.length) { showToast("No recipient email addresses", "error"); return; }
     const BCC   = 50;
@@ -3002,6 +3021,215 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   function _hasDivisions(t) {
     return Object.values(t.leagues || {}).some(b =>
       b && typeof b === "object" && Object.values(b.leagues || {}).some(l => l.division));
+  }
+
+  // Returns true if any playoff year has at least one named division defined
+  function _hasNamedDivisions(t) {
+    const playoffs = t.playoffs || {};
+    return Object.values(playoffs).some(po =>
+      po && typeof po === "object" && Object.keys(po.divisions || {}).length > 0
+    );
+  }
+
+  // ── Divisions tab (logged-in user view) ───────────────
+  // Shows the same division cards as the public site, but with:
+  //   - The user's current division highlighted
+  //   - Self-select Join button if allowSelfSelect is on and they're approved
+  //   - Year pill switcher if multiple years have divisions
+  async function _renderDivisionsUserTab(tid, t, body) {
+    body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading divisions…</div>`;
+
+    const currentUser = _currentUsername; // logged-in DLR username
+    const playoffs    = t.playoffs || {};
+
+    // Find the current open year or latest year with divisions
+    const openYr  = Object.keys(playoffs).find(k => /^\d{4}$/.test(k) && playoffs[k]?.registrationOpen);
+    const allDivYrs = Object.keys(playoffs)
+      .filter(k => /^\d{4}$/.test(k) && Object.keys(playoffs[k]?.divisions || {}).length > 0)
+      .sort((a, b) => b - a);
+
+    if (!allDivYrs.length) {
+      body.innerHTML = `<div class="trn-section-card" style="text-align:center;padding:var(--space-6)">
+        <div style="font-size:1.5rem;margin-bottom:var(--space-2)">🗂</div>
+        <div style="font-weight:600">No divisions set up yet</div>
+        <div style="font-size:.85rem;color:var(--color-text-dim);margin-top:var(--space-2)">Check back soon.</div>
+      </div>`;
+      return;
+    }
+
+    let activeYear = openYr && allDivYrs.includes(openYr) ? openYr : allDivYrs[0];
+
+    // Find the current user's registration rid for the active year
+    async function _getUserRid(yr) {
+      try {
+        const snap = await _tRegsRef(tid).once("value");
+        const regs = snap.val() || {};
+        const entry = Object.entries(regs).find(([, r]) =>
+          String(r.year) === String(yr) &&
+          (r.status || "").toLowerCase() === "approved" &&
+          (r.sleeperUsername === currentUser || r.dlrUsername === currentUser ||
+           (r.displayName || "").toLowerCase() === (currentUser || "").toLowerCase())
+        );
+        return entry ? entry[0] : null;
+      } catch(e) { return null; }
+    }
+
+    async function _render(yr) {
+      const divsObj  = playoffs[yr]?.divisions || {};
+      const divEntries = Object.entries(divsObj);
+
+      if (!divEntries.length) {
+        body.innerHTML = `<div class="trn-empty">No divisions for ${yr}.</div>`;
+        return;
+      }
+
+      // Find which division (if any) the user is currently in
+      const userRid    = await _getUserRid(yr);
+      let   userDivId  = null;
+      if (userRid) {
+        for (const [dId, d] of divEntries) {
+          if (Object.keys(d.memberIds || {}).includes(userRid)) {
+            userDivId = dId; break;
+          }
+        }
+      }
+
+      // Fetch all registration display names for member chips
+      let regsObj = {};
+      try {
+        const snap = await _tRegsRef(tid).once("value");
+        regsObj = snap.val() || {};
+      } catch(e) {}
+
+      const yearToggle = allDivYrs.length > 1 ? `
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)">
+          ${allDivYrs.map(y => `
+            <button class="trn-year-pill${String(y)===String(yr)?" trn-year-pill--active":""}"
+              data-divyr="${_esc(String(y))}">${_esc(String(y))}</button>`).join("")}
+        </div>` : "";
+
+      // User status banner
+      const userBanner = userDivId
+        ? `<div style="padding:var(--space-3) var(--space-4);margin-bottom:var(--space-3);background:rgba(var(--color-primary-rgb,99,102,241),.08);border:1px solid rgba(var(--color-primary-rgb,99,102,241),.25);border-radius:var(--radius);font-size:.875rem">
+            ✅ You are in <strong>${_esc(divsObj[userDivId]?.name || userDivId)}</strong> for ${_esc(yr)}.
+          </div>`
+        : userRid
+          ? `<div style="padding:var(--space-3) var(--space-4);margin-bottom:var(--space-3);background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.3);border-radius:var(--radius);font-size:.875rem">
+              ⚠️ You're registered for ${_esc(yr)} but haven't joined a division yet.
+              ${divEntries.some(([,d]) => d.allowSelfSelect) ? " Select one below." : " Contact the commissioner."}
+            </div>`
+          : "";
+
+      body.innerHTML = yearToggle + userBanner + divEntries.map(([divId, div]) => {
+        const members    = Object.entries(div.memberIds || {});
+        const cap        = div.teamCap || 0;
+        const filled     = members.length;
+        const pct        = cap ? Math.min(100, Math.round(filled / cap * 100)) : 0;
+        const isFull     = cap && div.enforceTotal && filled >= cap;
+        const isUserDiv  = divId === userDivId;
+        const canSelf    = div.allowSelfSelect && userRid && !isUserDiv;
+
+        // Build member display list
+        const memberNames = members.map(([rid]) => {
+          const r = regsObj[rid] || {};
+          return `<span class="trn-div-person" style="font-size:.8rem;cursor:default">
+            ${_esc(r.displayName || r.teamName || rid)}
+            ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}">${(r.gender||"").charAt(0)}</span>` : ""}
+          </span>`;
+        }).join("");
+
+        // M/F counts
+        const mCount = members.filter(([rid]) => (regsObj[rid]?.gender||"").toLowerCase().startsWith("m")).length;
+        const fCount = members.filter(([rid]) => (regsObj[rid]?.gender||"").toLowerCase().startsWith("f")).length;
+
+        return `
+          <div class="trn-section-card" style="margin-bottom:var(--space-3)${isUserDiv ? ";border-color:var(--color-primary);border-width:2px" : ""}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-2);flex-wrap:wrap">
+              <div>
+                <strong style="font-size:.95rem">
+                  ${isUserDiv ? "✅ " : ""}${_esc(div.name || "Division")}
+                </strong>
+                ${isUserDiv ? `<span class="trn-dlr-badge" style="margin-left:var(--space-2)">Your Division</span>` : ""}
+                ${div.description ? `<span style="font-size:.8rem;color:var(--color-text-dim);margin-left:var(--space-2)">${_esc(div.description)}</span>` : ""}
+              </div>
+              ${canSelf && !isFull ? `
+                <button class="btn-primary btn-sm trn-div-join-btn"
+                  data-divid="${_esc(divId)}" data-yr="${_esc(yr)}">
+                  🙋 Join Division
+                </button>` : isFull && !isUserDiv ? `
+                <span style="font-size:.8rem;font-weight:600;color:var(--color-orange);padding:var(--space-1) var(--space-2);background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);border-radius:var(--radius)">
+                  Division Full
+                </span>` : ""}
+            </div>
+
+            <!-- Fill meter -->
+            <div style="margin:var(--space-2) 0">
+              <div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:3px">
+                <span>${filled}${cap ? `/${cap} teams` : " teams"}</span>
+                <span style="color:var(--color-text-dim)">
+                  ${(div.maleCap || div.femaleCap) ? `M: ${mCount}${div.maleCap?`/${div.maleCap}`:""} · F: ${fCount}${div.femaleCap?`/${div.femaleCap}`:""}` : ""}
+                </span>
+              </div>
+              ${cap ? `<div style="height:6px;background:var(--color-border);border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:${isFull?"var(--color-orange)":"var(--color-primary)"};transition:width .3s"></div>
+              </div>` : ""}
+            </div>
+
+            <!-- Members -->
+            ${memberNames ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--space-2)">${memberNames}</div>` : ""}
+          </div>`;
+      }).join("");
+
+      // Wire year pills
+      body.querySelectorAll("[data-divyr]").forEach(btn => {
+        btn.addEventListener("click", () => { activeYear = btn.dataset.divyr; _render(activeYear); });
+      });
+
+      // Wire join buttons
+      body.querySelectorAll(".trn-div-join-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const divId = btn.dataset.divid;
+          const yr2   = btn.dataset.yr;
+          const div   = (playoffs[yr2]?.divisions || {})[divId];
+          if (!div) return;
+
+          // Check if already in another division → offer to move
+          if (userDivId) {
+            const oldName = (playoffs[yr2]?.divisions || {})[userDivId]?.name || userDivId;
+            if (!confirm(`You're currently in ${oldName}. Move to ${div.name || divId}?`)) return;
+            // Remove from old
+            try {
+              await GMD.child(`tournaments/${tid}/playoffs/${yr2}/divisions/${userDivId}/memberIds/${userRid}`).remove();
+            } catch(e) { /* non-fatal */ }
+          }
+
+          // Cap checks
+          if (div.enforceTotal && div.teamCap) {
+            const snap = await GMD.child(`tournaments/${tid}/playoffs/${yr2}/divisions/${divId}/memberIds`).once("value");
+            if (Object.keys(snap.val() || {}).length >= div.teamCap) {
+              showToast(`${div.name || "This division"} is now full.`, "error"); return;
+            }
+          }
+
+          try {
+            await GMD.child(`tournaments/${tid}/playoffs/${yr2}/divisions/${divId}/memberIds/${userRid}`).set(true);
+            // Update local t cache so re-render is instant
+            if (!t.playoffs[yr2].divisions[divId].memberIds) t.playoffs[yr2].divisions[divId].memberIds = {};
+            t.playoffs[yr2].divisions[divId].memberIds[userRid] = true;
+            if (userDivId) delete (t.playoffs[yr2].divisions[userDivId]?.memberIds || {})[userRid];
+            // Auto-publish public node
+            try {
+              const regSnap = await _tRegsRef(tid).once("value");
+              await _writeDivisionsPublic(tid, yr2, playoffs[yr2].divisions, regSnap.val() || {});
+            } catch(e) { /* non-fatal */ }
+            showToast(`You've joined ${div.name || "the division"} ✓`);
+            _render(yr2);
+          } catch(e) { showToast("Could not join division: " + e.message, "error"); }
+        });
+      });
+    }
+
+    await _render(activeYear);
   }
   function _hasConferences(t) {
     return Object.values(t.leagues || {}).some(b =>
@@ -6860,18 +7088,52 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         _toggleAutoRegister(tid, btn.dataset.toggleAuto, participants[btn.dataset.toggleAuto])
       )
     );
+
+    // ── Email opt-out toggle ───────────────────────────────
+    body.querySelectorAll("[data-toggle-optout]").forEach(btn =>
+      btn.addEventListener("click", async () => {
+        const pid = btn.dataset.toggleOptout;
+        const p   = participants[pid];
+        if (!p) return;
+        const newVal = !p.emailOptOut;
+        try {
+          await _tParticipantsRef(tid).child(pid).update({ emailOptOut: newVal });
+          p.emailOptOut = newVal;
+          // Re-render just this row
+          const row = body.querySelector(`[data-pid="${pid}"]`);
+          if (row) row.outerHTML = _renderParticipantRow(tid, pid, p);
+          // Re-wire the new row's buttons
+          body.querySelector(`[data-toggle-optout="${pid}"]`)?.addEventListener("click", async () => {
+            const newVal2 = !p.emailOptOut;
+            await _tParticipantsRef(tid).child(pid).update({ emailOptOut: newVal2 });
+            p.emailOptOut = newVal2;
+            const row2 = body.querySelector(`[data-pid="${pid}"]`);
+            if (row2) row2.outerHTML = _renderParticipantRow(tid, pid, p);
+          });
+          body.querySelector(`[data-view-participant="${pid}"]`)?.addEventListener("click", () =>
+            _openParticipantDetail(tid, pid, p, t)
+          );
+          body.querySelector(`[data-toggle-auto="${pid}"]`)?.addEventListener("click", () =>
+            _toggleAutoRegister(tid, pid, p)
+          );
+          showToast(newVal ? `${p.displayName || pid} opted out of emails` : `${p.displayName || pid} re-enabled for emails`);
+        } catch(e) { showToast("Update failed: " + e.message, "error"); }
+      })
+    );
   }
 
   function _renderParticipantRow(tid, pid, p) {
     const searchText = [p.displayName, p.email, p.sleeperUsername, p.teamName, p.dlrUsername]
       .filter(Boolean).join(" ").toLowerCase();
     const yearsStr = Array.isArray(p.years) ? p.years.join(", ") : (p.years || "");
+    const optedOut = !!p.emailOptOut;
     return `
       <div class="trn-reg-row trn-participant-row ${p.dlrLinked ? "trn-participant--linked" : ""}"
            data-pid="${_esc(pid)}" data-search="${_esc(searchText)}"
            data-linked="${p.dlrLinked ? "1" : "0"}" data-auto="${p.autoRegister ? "1" : "0"}">
         <div class="trn-reg-main">
           <div class="trn-reg-name">
+            ${optedOut ? `<span title="Email opt-out" style="color:var(--color-text-dim)">🚫</span> ` : ""}
             ${_esc(p.displayName || p.teamName || "Unknown")}
             ${p.dlrLinked
               ? `<span class="trn-dlr-badge">DLR @${_esc(p.dlrUsername || "")}</span>`
@@ -6881,9 +7143,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             ${p.email           ? `${_esc(p.email)} &middot; ` : ""}
             ${p.sleeperUsername ? `Sleeper: ${_esc(p.sleeperUsername)} &middot; ` : ""}
             ${yearsStr          ? `Years: ${_esc(yearsStr)}` : ""}
+            ${optedOut          ? `<span style="color:var(--color-orange);font-weight:600"> · Email opted out</span>` : ""}
           </div>
         </div>
         <div class="trn-reg-actions">
+          <button class="btn-ghost btn-sm ${optedOut ? "trn-optout-on" : ""}"
+                  data-toggle-optout="${_esc(pid)}"
+                  title="${optedOut ? "Email opted out — click to re-enable" : "Click to opt out of emails"}"
+                  style="${optedOut ? "color:var(--color-orange)" : "color:var(--color-text-dim)"}">
+            ${optedOut ? "🚫" : "✉"}
+          </button>
           <button class="btn-ghost btn-sm ${p.autoRegister ? "trn-auto-on" : ""}"
                   data-toggle-auto="${_esc(pid)}"
                   title="${p.autoRegister ? "Auto-register ON" : "Enable auto-register"}">🔁</button>
@@ -6916,6 +7185,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <span>${p.autoRegister ? "Enabled" : "Disabled"}</span>
           </label>
         </div>
+        <div class="trn-detail-row">
+          <span>Email opt-out</span>
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
+            <input type="checkbox" id="trn-p-optout" ${p.emailOptOut ? "checked" : ""} />
+            <span style="${p.emailOptOut ? "color:var(--color-orange);font-weight:600" : ""}">${p.emailOptOut ? "🚫 Opted out — excluded from all BCC emails" : "Receiving emails"}</span>
+          </label>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" id="trn-modal-cancel">Close</button>
@@ -6932,9 +7208,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       window.open("mailto:" + encodeURIComponent(p.email) + "?subject=" + subject + "&body=" + body, "_blank");
     });
     document.getElementById("trn-save-participant-btn")?.addEventListener("click", async () => {
-      const autoReg = document.getElementById("trn-p-auto")?.checked;
+      const autoReg  = document.getElementById("trn-p-auto")?.checked;
+      const optOut   = document.getElementById("trn-p-optout")?.checked;
       try {
-        await _tParticipantsRef(tid).child(pid).update({ autoRegister: autoReg });
+        await _tParticipantsRef(tid).child(pid).update({ autoRegister: autoReg, emailOptOut: optOut });
         showToast("Saved");
         _closeModal();
         const snap = await _tRef(tid).once("value");
@@ -9082,8 +9359,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     );
 
     // ── League invite email launcher ──────────────────────
-    document.getElementById("trn-send-invite-btn")?.addEventListener("click", () => {
-      _openLeagueInviteModal(tid, t, approved.map(([, r]) => r));
+    document.getElementById("trn-send-invite-btn")?.addEventListener("click", async () => {
+      await _openLeagueInviteModal(tid, t, approved.map(([, r]) => r));
     });
 
     // ── Lapsed player report ───────────────────────────────
@@ -9280,15 +9557,17 @@ This marks all registrations that have no year as belonging to ${targetYear}. Ru
   // ── League Invite Email Modal ──────────────────────────
   // Opens the user's email client with approved registrants in BCC.
   // Splits into batches of 50 to avoid URL length limits.
-  function _openLeagueInviteModal(tid, t, approvedRegs) {
+  async function _openLeagueInviteModal(tid, t, approvedRegs) {
     const meta = t.meta || {};
     const adminEmail = meta.adminEmail || "";
     const regYear    = _tournamentYear || new Date().getFullYear();
     const tourName   = meta.name || "Tournament";
 
-    // Filter to registrants with email addresses
-    const withEmail  = approvedRegs.filter(r => r.email);
+    // Fetch opt-out list and filter
+    const optOutEmails = await _getOptOutEmails(tid);
+    const withEmail  = approvedRegs.filter(r => r.email && !optOutEmails.has(r.email.toLowerCase()));
     const noEmail    = approvedRegs.filter(r => !r.email);
+    const optedOut   = approvedRegs.filter(r => r.email && optOutEmails.has(r.email.toLowerCase()));
 
     _showModal(`
       <div class="modal-header">
@@ -9300,6 +9579,7 @@ This marks all registrations that have no year as belonging to ${targetYear}. Ru
           <div class="trn-detail-row"><span>Approved registrants</span><span>${approvedRegs.length}</span></div>
           <div class="trn-detail-row"><span>With email address</span><span>${withEmail.length}</span></div>
           ${noEmail.length ? `<div class="trn-detail-row" style="color:var(--color-orange)"><span>Missing email</span><span>${noEmail.length}</span></div>` : ""}
+          ${optedOut.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Opted out — excluded</span><span>${optedOut.length}</span></div>` : ""}
         </div>
 
         <div class="form-group">
@@ -9651,8 +9931,9 @@ Good luck this season!
       else         lapsed.push(p);
     });
 
-    const lapsedWithEmail = lapsed.filter(p => p.email);
+    const lapsedWithEmail = lapsed.filter(p => p.email && !p.emailOptOut);
     const lapsedNoEmail   = lapsed.filter(p => !p.email);
+    const lapsedOptedOut  = lapsed.filter(p => p.email && p.emailOptOut);
 
     _showModal(`
       <div class="modal-header">
@@ -9666,6 +9947,7 @@ Good luck this season!
           <div class="trn-detail-row" style="color:var(--color-orange)"><span>Not yet registered for ${_esc(curYear)}</span><span>${lapsed.length}</span></div>
           <div class="trn-detail-row" style="color:var(--color-green,#22c55e)"><span>Already registered for ${_esc(curYear)}</span><span>${alreadyReg.length}</span></div>
           ${lapsedNoEmail.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Lapsed but no email on file</span><span>${lapsedNoEmail.length}</span></div>` : ""}
+          ${lapsedOptedOut.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Opted out — excluded from email</span><span>${lapsedOptedOut.length}</span></div>` : ""}
         </div>
 
         ${lapsed.length ? `
@@ -9774,8 +10056,10 @@ If you have any questions, just reply to this email.
     );
 
     const unassigned   = approvedRegs.filter(r => !assignedRids.has(r.rid));
-    const withEmail    = unassigned.filter(r => r.email);
+    const optOutEmails = await _getOptOutEmails(tid);
+    const withEmail    = unassigned.filter(r => r.email && !optOutEmails.has(r.email.toLowerCase()));
     const withoutEmail = unassigned.filter(r => !r.email);
+    const optedOut     = unassigned.filter(r => r.email && optOutEmails.has(r.email.toLowerCase()));
     const pubUrl       = `https://dynastylockerroom.com/tournaments/?t=${tid}`;
 
     _showModal(`
@@ -9789,6 +10073,7 @@ If you have any questions, just reply to this email.
           <div class="trn-detail-row" style="color:var(--color-green,#22c55e)"><span>Already in a division</span><span>${assignedRids.size}</span></div>
           <div class="trn-detail-row" style="color:var(--color-orange)"><span>No division yet</span><span>${unassigned.length}</span></div>
           ${withoutEmail.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>No email on file</span><span>${withoutEmail.length}</span></div>` : ""}
+          ${optedOut.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Opted out — excluded</span><span>${optedOut.length}</span></div>` : ""}
         </div>
 
         ${unassigned.length ? `
@@ -10076,7 +10361,7 @@ Questions? Just reply to this email.
       // Send invite to division
       container.querySelectorAll("[data-div-invite]").forEach(btn => {
         const divId = btn.dataset.divInvite;
-        btn.addEventListener("click", () => _openDivInviteModal(tid, t, yr, divId, divsObj[divId], regsObj));
+        btn.addEventListener("click", async () => _openDivInviteModal(tid, t, yr, divId, divsObj[divId], regsObj));
       });
     }
 
@@ -10266,12 +10551,14 @@ Questions? Just reply to this email.
     }
 
     // Division invite email modal — pre-fills from template, allows override
-    function _openDivInviteModal(tid, t, yr, divId, div, regsObj) {
-      const divName   = div?.name || divId;
-      const memberIds = Object.keys(div?.memberIds || {});
+    async function _openDivInviteModal(tid, t, yr, divId, div, regsObj) {
+      const divName    = div?.name || divId;
+      const memberIds  = Object.keys(div?.memberIds || {});
       const memberRegs = memberIds.map(rid => regsObj[rid]).filter(Boolean);
-      const withEmail  = memberRegs.filter(r => r.email);
+      const optOutEmails = await _getOptOutEmails(tid);
+      const withEmail  = memberRegs.filter(r => r.email && !optOutEmails.has(r.email.toLowerCase()));
       const noEmail    = memberRegs.filter(r => !r.email);
+      const optedOut   = memberRegs.filter(r => r.email && optOutEmails.has(r.email.toLowerCase()));
       const meta       = t.meta || {};
       const tourName   = meta.name || "Tournament";
       const tpl        = div?.template || {};
@@ -10286,6 +10573,7 @@ Questions? Just reply to this email.
             <div class="trn-detail-row"><span>Division members</span><span>${memberRegs.length}</span></div>
             <div class="trn-detail-row"><span>With email</span><span>${withEmail.length}</span></div>
             ${noEmail.length ? `<div class="trn-detail-row" style="color:var(--color-orange)"><span>Missing email</span><span>${noEmail.length}</span></div>` : ""}
+            ${optedOut.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>Opted out — excluded</span><span>${optedOut.length}</span></div>` : ""}
           </div>
           <div class="form-group">
             <label>Your Email (To:)</label>
