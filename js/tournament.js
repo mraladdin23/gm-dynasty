@@ -6978,10 +6978,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   function _renderParticipantsTab(tid, t, body) {
     const participants = t.participants || {};
-    const pList = Object.entries(participants);
+    const pList    = Object.entries(participants);
     const linked   = pList.filter(([, p]) => p.dlrLinked);
     const unlinked = pList.filter(([, p]) => !p.dlrLinked);
     const autoReg  = pList.filter(([, p]) => p.autoRegister);
+    const optedOut = pList.filter(([, p]) => p.emailOptOut);
 
     body.innerHTML = `
       <div class="trn-reg-toolbar">
@@ -6990,6 +6991,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span style="color:var(--color-green)">${linked.length} DLR linked</span> &middot;
           ${unlinked.length} unlinked &middot;
           ${autoReg.length} auto-register
+          ${optedOut.length ? ` &middot; <span style="color:var(--color-orange)">🚫 ${optedOut.length} opted out</span>` : ""}
         </span>
         <div style="display:flex;gap:var(--space-2)">
           <button class="btn-primary btn-sm" id="trn-auto-sync-participants-btn" title="Pull usernames from all linked leagues and upsert into participant list">⚡ Sync from Leagues</button>
@@ -7009,6 +7011,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <option value="linked">DLR Linked</option>
             <option value="unlinked">Not Linked</option>
             <option value="auto">Auto-Register</option>
+            <option value="optedout">🚫 Opted Out</option>
           </select>
         </div>
         <div id="trn-participants-list">
@@ -7064,14 +7067,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const q      = (document.getElementById("trn-participants-search")?.value || "").toLowerCase();
       const filter = document.getElementById("trn-participants-filter")?.value || "all";
       document.querySelectorAll(".trn-participant-row").forEach(row => {
-        const text     = row.dataset.search || "";
-        const isLinked = row.dataset.linked === "1";
-        const isAuto   = row.dataset.auto   === "1";
+        const text       = row.dataset.search   || "";
+        const isLinked   = row.dataset.linked   === "1";
+        const isAuto     = row.dataset.auto     === "1";
+        const isOptedOut = row.dataset.optedout === "1";
         const matchQ = !q || text.includes(q);
         const matchF = filter === "all"
-          || (filter === "linked"   && isLinked)
-          || (filter === "unlinked" && !isLinked)
-          || (filter === "auto"     && isAuto);
+          || (filter === "linked"    && isLinked)
+          || (filter === "unlinked"  && !isLinked)
+          || (filter === "auto"      && isAuto)
+          || (filter === "optedout"  && isOptedOut);
         row.style.display = (matchQ && matchF) ? "" : "none";
       });
     };
@@ -7130,7 +7135,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     return `
       <div class="trn-reg-row trn-participant-row ${p.dlrLinked ? "trn-participant--linked" : ""}"
            data-pid="${_esc(pid)}" data-search="${_esc(searchText)}"
-           data-linked="${p.dlrLinked ? "1" : "0"}" data-auto="${p.autoRegister ? "1" : "0"}">
+           data-linked="${p.dlrLinked ? "1" : "0"}" data-auto="${p.autoRegister ? "1" : "0"}"
+           data-optedout="${p.emailOptOut ? "1" : "0"}">
         <div class="trn-reg-main">
           <div class="trn-reg-name">
             ${optedOut ? `<span title="Email opt-out" style="color:var(--color-text-dim)">🚫</span> ` : ""}
