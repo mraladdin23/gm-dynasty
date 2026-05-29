@@ -2845,6 +2845,7 @@
     }
 
 
+    let _isSubmitting = false; // module-level guard against double-submit
     function renderRegisterTab(body) {
       const t      = _currentT;
       const form   = t.registrationForm || {};
@@ -2903,8 +2904,12 @@
     }
 
     async function submitPublicRegistration(fields, custom, form) {
-      const errEl = document.getElementById("pub-reg-error");
+      // ── Guard: disable immediately to block double-tap/double-submit ──
+      if (_isSubmitting) return;
+      _isSubmitting = true;
       const btn   = document.getElementById("pub-reg-submit");
+      const errEl = document.getElementById("pub-reg-error");
+      if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
 
       // Helper: find the right success container.
       // New nav: register section renders into pub-section-body.
@@ -2917,6 +2922,7 @@
       const _showError = (msg) => {
         if (errEl) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
         if (btn)   { btn.disabled = false; btn.textContent = "Submit Registration"; }
+        _isSubmitting = false;
       };
 
       const entry = {
@@ -2933,11 +2939,7 @@
         if (!val && ["displayName", "email"].includes(f)) {
           return _showError((f === "displayName" ? "Display Name" : "Email Address") + " is required.");
         }
-        if (f === "email" && val) {
-          entry[f] = val.toLowerCase(); // always store email lowercase for consistent lookup
-        } else {
-          entry[f] = val || null;
-        }
+        entry[f] = val || null;
       }
       for (let i = 0; i < custom.length; i++) {
         const q   = custom[i];
@@ -2971,12 +2973,15 @@
         if (dup2) entry._isDuplicate = true; // flag for admin — do not block
       } catch(e) { /* non-fatal */ }
 
-      // ── Disable button and clear any previous error ────
-      if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
+      // ── Submit ────────────────────────────────────────────
       if (errEl) errEl.classList.add("hidden");
 
       try {
-        const rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        // Use crypto.randomUUID if available for guaranteed uniqueness,
+        // fall back to a longer random suffix to prevent same-millisecond collisions
+        const rid = typeof crypto?.randomUUID === "function"
+          ? crypto.randomUUID().replace(/-/g, "").slice(0, 20)
+          : Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
         entry.year = _regYear; // tag every registration with the open year for future scoped checks
         await _pubDb.ref("gmd/tournaments/" + _currentTid + "/registrations/" + rid).set(entry);
 
@@ -3002,6 +3007,7 @@
               </p>
             </div>`;
         }
+        _isSubmitting = false; // allow re-use if user navigates back
       } catch(err) {
         // Friendly messages for known Firebase error codes
         const code = (err.code || err.message || "").toLowerCase();
@@ -3013,7 +3019,7 @@
         } else {
           friendlyMsg = "Submission failed. Please try again or contact the tournament admin.";
         }
-        _showError(friendlyMsg);
+        _showError(friendlyMsg); // also resets _isSubmitting
       }
     }
 
@@ -3139,7 +3145,7 @@
         const entry = Object.entries(regs).find(([, r]) =>
           (r.email || "").toLowerCase() === norm &&
           (r.status || "").toLowerCase() === "approved" &&
-          (!yr || !r.year || String(r.year) === String(yr))
+          (!yr || String(r.year) === String(yr))
         );
         if (!entry) {
           alert("No approved registration found for that email address in this year's tournament. Please contact the commissioner.");
