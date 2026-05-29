@@ -2933,7 +2933,11 @@
         if (!val && ["displayName", "email"].includes(f)) {
           return _showError((f === "displayName" ? "Display Name" : "Email Address") + " is required.");
         }
-        entry[f] = val || null;
+        if (f === "email" && val) {
+          entry[f] = val.toLowerCase(); // always store email lowercase for consistent lookup
+        } else {
+          entry[f] = val || null;
+        }
       }
       for (let i = 0; i < custom.length; i++) {
         const q   = custom[i];
@@ -3135,7 +3139,7 @@
         const entry = Object.entries(regs).find(([, r]) =>
           (r.email || "").toLowerCase() === norm &&
           (r.status || "").toLowerCase() === "approved" &&
-          (!yr || String(r.year) === String(yr))
+          (!yr || !r.year || String(r.year) === String(yr))
         );
         if (!entry) {
           alert("No approved registration found for that email address in this year's tournament. Please contact the commissioner.");

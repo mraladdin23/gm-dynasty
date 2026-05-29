@@ -91,7 +91,7 @@
         <div class="form-group">
           <label for="reg-username">Choose a Username</label>
           <input type="text" id="reg-username" placeholder="your_dlr_handle" maxlength="20" autocomplete="username" />
-          <span class="field-hint">Letters, numbers, underscores. This is your GM identity.</span>
+          <span class="field-hint">Letters, numbers, underscores only. 3–20 characters.</span>
         </div>
         <div class="form-group">
           <label for="reg-email">Email</label>
@@ -99,11 +99,14 @@
         </div>
         <div class="form-group">
           <label for="reg-password">Password</label>
-          <input type="password" id="reg-password" placeholder="Min 8 characters" autocomplete="new-password" />
+          <input type="password" id="reg-password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <span class="field-hint">At least 8 characters. Mix of letters and numbers recommended.</span>
+          <div id="reg-password-strength" style="margin-top:4px;font-size:.78rem;display:none"></div>
         </div>
         <div class="form-group">
           <label for="reg-password2">Confirm Password</label>
           <input type="password" id="reg-password2" placeholder="Repeat password" autocomplete="new-password" />
+          <div id="reg-password-match" style="margin-top:4px;font-size:.78rem;display:none"></div>
         </div>
         <div id="register-error" class="auth-error hidden"></div>
         <button id="register-btn" class="btn-primary">Claim My Locker</button>
@@ -1079,6 +1082,80 @@
           btn.textContent = "Send Reset Link";
         }
       });
+      // ── Password strength + match validation ──────────────
+      // Runs client-side before Auth.register so users see clear
+      // feedback before any Firebase call is made.
+      (function() {
+        const pwdEl    = document.getElementById("reg-password");
+        const pwd2El   = document.getElementById("reg-password2");
+        const strengthEl = document.getElementById("reg-password-strength");
+        const matchEl    = document.getElementById("reg-password-match");
+        const regBtn     = document.getElementById("register-btn");
+        const regErrEl   = document.getElementById("register-error");
+
+        function _pwdStrength(pw) {
+          if (!pw) return null;
+          let score = 0;
+          if (pw.length >= 8)  score++;
+          if (pw.length >= 12) score++;
+          if (/[A-Z]/.test(pw)) score++;
+          if (/[0-9]/.test(pw)) score++;
+          if (/[^A-Za-z0-9]/.test(pw)) score++;
+          if (score <= 1) return { label: "Weak",   color: "#ef4444" };
+          if (score <= 3) return { label: "Fair",   color: "#f97316" };
+          return              { label: "Strong", color: "#22c55e" };
+        }
+
+        pwdEl?.addEventListener("input", function() {
+          const s = _pwdStrength(this.value);
+          if (!s || !this.value) { strengthEl.style.display = "none"; return; }
+          strengthEl.style.display = "";
+          strengthEl.textContent   = "Strength: " + s.label;
+          strengthEl.style.color   = s.color;
+          // Also re-check match
+          if (pwd2El?.value) pwd2El.dispatchEvent(new Event("input"));
+        });
+
+        pwd2El?.addEventListener("input", function() {
+          if (!this.value) { matchEl.style.display = "none"; return; }
+          matchEl.style.display = "";
+          const match = this.value === pwdEl?.value;
+          matchEl.textContent = match ? "✓ Passwords match" : "✗ Passwords don't match";
+          matchEl.style.color = match ? "#22c55e" : "#ef4444";
+        });
+
+        // Intercept register button — validate before Auth.register fires
+        // app.js also wires this button; we use capture phase so we run first
+        regBtn?.addEventListener("click", function(e) {
+          const pw  = pwdEl?.value  || "";
+          const pw2 = pwd2El?.value || "";
+
+          function _showRegError(msg) {
+            if (!regErrEl) return;
+            regErrEl.textContent = msg;
+            regErrEl.classList.remove("hidden");
+          }
+          function _clearRegError() {
+            if (regErrEl) regErrEl.classList.add("hidden");
+          }
+
+          _clearRegError();
+
+          if (pw.length < 8) {
+            _showRegError("Password must be at least 8 characters.");
+            pwdEl?.focus();
+            e.stopImmediatePropagation();
+            return;
+          }
+          if (pw !== pw2) {
+            _showRegError("Passwords don't match — please re-enter.");
+            pwd2El?.focus();
+            e.stopImmediatePropagation();
+            return;
+          }
+        }, true); // capture phase — runs before app.js handler
+      })();
+
     })();
   </script>
 
