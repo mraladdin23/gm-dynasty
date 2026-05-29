@@ -24,6 +24,11 @@ const Auth = (() => {
     const usernameError = GMDB.validateUsername(username);
     if (usernameError) throw new Error(usernameError);
 
+    // Client-side password gate — catches issues before the Firebase call
+    if (!password || password.length < 8) {
+      throw new Error("Password must be at least 8 characters.");
+    }
+
     console.log("[Auth] register — checking username availability:", username);
     const taken = await GMDB.usernameExists(username);
     console.log("[Auth] register — username taken?", taken);
@@ -213,7 +218,7 @@ const Auth = (() => {
       case "auth/too-many-requests":
         return "Too many failed attempts. Try again in a few minutes.";
       case "auth/weak-password":
-        return "Password must be at least 6 characters.";
+        return "Password must be at least 8 characters.";
       case "auth/network-request-failed":
         return "Network error. Check your connection and try again.";
       default:
