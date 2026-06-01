@@ -10229,7 +10229,7 @@ Questions? Just reply to this email.
           </div>` : ""}
       `;
 
-      _wireDivAdminEvents(divEntries, approvedRegs, regsObj);
+      _wireDivAdminEvents(divEntries, approvedRegs, regsObj, multiDivRids, orphanRids, ridDivMap);
     }
 
     function _renderDivCard(divId, div, approvedRegs, regsObj, ridDivMap, orphanRids) {
@@ -10294,7 +10294,10 @@ Questions? Just reply to this email.
         </div>`;
     }
 
-    function _wireDivAdminEvents(divEntries, approvedRegs, regsObj) {
+    function _wireDivAdminEvents(divEntries, approvedRegs, regsObj, multiDivRids, orphanRids, ridDivMap) {
+      multiDivRids = multiDivRids || [];
+      orphanRids   = orphanRids   || [];
+      ridDivMap    = ridDivMap    || {};
       // Fix multi-division: remove from all but the last-joined division
       document.getElementById("trn-div-fix-multi-btn")?.addEventListener("click", async () => {
         if (!multiDivRids.length) return;
