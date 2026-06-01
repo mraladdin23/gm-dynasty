@@ -10204,6 +10204,8 @@ Questions? Just reply to this email.
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <button class="btn-secondary btn-sm" id="trn-div-add-btn">＋ New Division</button>
             <button class="btn-secondary btn-sm" id="trn-div-random-all-btn" title="Randomly distribute all unassigned registrants across existing divisions">🎲 Random Assign All</button>
+            <button class="btn-secondary btn-sm" id="trn-div-export-btn" title="Export all assigned registrants with division, names, and platform IDs">⬇ Export CSV</button>
+            <button class="btn-secondary btn-sm" id="trn-div-gender-btn" title="Show gender breakdown across all registrants">👥 Gender Summary</button>
             <button class="btn-secondary btn-sm" id="trn-div-publish-btn" title="Publish division list to public site">🌐 Publish to Public</button>
           </div>
         </div>
@@ -10298,7 +10300,131 @@ Questions? Just reply to this email.
       multiDivRids = multiDivRids || [];
       orphanRids   = orphanRids   || [];
       ridDivMap    = ridDivMap    || {};
-      // Fix multi-division: remove from all but the last-joined division
+      // ── Export CSV ─────────────────────────────────────────
+      document.getElementById("trn-div-export-btn")?.addEventListener("click", () => {
+        const tourName = t.meta?.name || tid;
+        const headers  = ["division","displayName","teamName","email","gender",
+                          "sleeperUsername","mflEmail","yahooUsername","dlrUsername","status","year"];
+        const rows     = [];
+
+        // Assigned registrants — one row per person with their division
+        Object.entries(divsObj).forEach(([divId, div]) => {
+          const divName = div.name || divId;
+          Object.keys(div.memberIds || {}).forEach(rid => {
+            const r = regsObj[rid];
+            if (!r) return; // skip orphans
+            rows.push([
+              divName,
+              r.displayName  || r.teamName || "",
+              r.teamName     || "",
+              r.email        || "",
+              r.gender       || "",
+              r.sleeperUsername || "",
+              r.mflEmail     || "",
+              r.yahooUsername || "",
+              r.dlrUsername  || "",
+              r.status       || "",
+              r.year         || "",
+            ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+          });
+        });
+
+        // Unassigned approved registrants at the bottom
+        const assignedRids = new Set(Object.values(divsObj).flatMap(d => Object.keys(d.memberIds || {})));
+        approvedRegs.filter(r => !assignedRids.has(r.rid)).forEach(r => {
+          rows.push([
+            "UNASSIGNED",
+            r.displayName  || r.teamName || "",
+            r.teamName     || "",
+            r.email        || "",
+            r.gender       || "",
+            r.sleeperUsername || "",
+            r.mflEmail     || "",
+            r.yahooUsername || "",
+            r.dlrUsername  || "",
+            r.status       || "",
+            r.year         || "",
+          ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+        });
+
+        if (!rows.length) { showToast("No registrants to export", "error"); return; }
+        const csv  = [headers.join(","), ...rows].join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = `divisions_${yr}_${tourName.replace(/\s+/g, "_")}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("Division roster CSV exported ✓");
+      });
+
+      // ── Gender Summary ──────────────────────────────────────
+      document.getElementById("trn-div-gender-btn")?.addEventListener("click", () => {
+        // All approved registrants (whether assigned to a division or not)
+        const allApproved = approvedRegs;
+        const total   = allApproved.length;
+        const males   = allApproved.filter(r => (r.gender || "").toLowerCase().startsWith("m"));
+        const females = allApproved.filter(r => (r.gender || "").toLowerCase().startsWith("f"));
+        const other   = allApproved.filter(r => {
+          const g = (r.gender || "").toLowerCase();
+          return g && !g.startsWith("m") && !g.startsWith("f");
+        });
+        const noGender = allApproved.filter(r => !r.gender);
+
+        // Per-division breakdown
+        const divBreakdown = Object.entries(divsObj).map(([divId, div]) => {
+          const mIds    = Object.keys(div.memberIds || {});
+          const divRegs = mIds.map(rid => regsObj[rid]).filter(Boolean);
+          const m = divRegs.filter(r => (r.gender||"").toLowerCase().startsWith("m")).length;
+          const f = divRegs.filter(r => (r.gender||"").toLowerCase().startsWith("f")).length;
+          const o = divRegs.filter(r => { const g=(r.gender||"").toLowerCase(); return g&&!g.startsWith("m")&&!g.startsWith("f"); }).length;
+          const u = divRegs.filter(r => !r.gender).length;
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:.85rem">
+              <span style="font-weight:600">${_esc(div.name || divId)}</span>
+              <span style="color:var(--color-text-dim)">
+                <span style="color:var(--color-primary)">M: ${m}</span> ·
+                <span style="color:#ec4899">F: ${f}</span>
+                ${o ? ` · Other: ${o}` : ""}
+                ${u ? ` · <span style="opacity:.6">No gender: ${u}</span>` : ""}
+                · Total: ${divRegs.length}
+              </span>
+            </div>`;
+        }).join("");
+
+        _showModal(`
+          <div class="modal-header">
+            <h3>👥 Gender Summary — ${_esc(yr)}</h3>
+            <button class="modal-close" id="trn-modal-close">✕</button>
+          </div>
+          <div class="modal-body trn-form-body">
+            <div class="trn-detail-rows" style="margin-bottom:var(--space-4)">
+              <div class="trn-detail-row"><span>Total approved registrants</span><strong>${total}</strong></div>
+              <div class="trn-detail-row" style="color:var(--color-primary)"><span>Male</span><strong>${males.length}</strong></div>
+              <div class="trn-detail-row" style="color:#ec4899"><span>Female</span><strong>${females.length}</strong></div>
+              ${other.length ? `<div class="trn-detail-row"><span>Other</span><strong>${other.length}</strong></div>` : ""}
+              ${noGender.length ? `<div class="trn-detail-row" style="color:var(--color-text-dim)"><span>No gender on file</span><strong>${noGender.length}</strong></div>` : ""}
+            </div>
+            ${divBreakdown ? `
+              <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">By Division</div>
+              ${divBreakdown}` : ""}
+            ${noGender.length ? `
+              <div style="margin-top:var(--space-4)">
+                <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-dim);margin-bottom:var(--space-2)">No Gender on File</div>
+                ${noGender.map(r => `
+                  <div style="font-size:.82rem;padding:2px 0;color:var(--color-text-dim)">
+                    ${_esc(r.displayName || r.teamName || r.rid)} · ${_esc(r.email || "no email")}
+                  </div>`).join("")}
+              </div>` : ""}
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="trn-modal-cancel">Close</button>
+          </div>
+        `);
+        document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+        document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+      });
       document.getElementById("trn-div-fix-multi-btn")?.addEventListener("click", async () => {
         if (!multiDivRids.length) return;
         const names = multiDivRids.map(([rid]) => regsObj[rid]?.displayName || rid).join(", ");
