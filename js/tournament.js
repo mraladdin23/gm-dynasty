@@ -10179,9 +10179,28 @@ Questions? Just reply to this email.
       const totalAssigned = new Set(divEntries.flatMap(([, d]) => Object.keys(d.memberIds || {})));
       const unassigned    = approvedRegs.filter(r => !totalAssigned.has(r.rid));
 
+      // Pre-compute diagnostic data
+      const ridDivMap = {}; // rid -> [divId, ...]
+      Object.entries(divsObj).forEach(([dId, d]) => {
+        Object.keys(d.memberIds || {}).forEach(rid => {
+          if (!ridDivMap[rid]) ridDivMap[rid] = [];
+          ridDivMap[rid].push(dId);
+        });
+      });
+      const multiDivRids  = Object.entries(ridDivMap).filter(([, divs]) => divs.length > 1);
+      const orphanRids    = Object.keys(ridDivMap).filter(rid => !regsObj[rid]);
+
       container.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);flex-wrap:wrap;gap:var(--space-2)">
-          <span style="font-size:.85rem;color:var(--color-text-dim)">${approvedRegs.length} approved · ${totalAssigned.size} assigned · ${unassigned.length} unassigned</span>
+          <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+            <span style="font-size:.85rem;color:var(--color-text-dim)">${approvedRegs.length} approved · ${totalAssigned.size} assigned · ${unassigned.length} unassigned</span>
+            ${multiDivRids.length ? `
+              <span style="color:var(--color-orange);font-size:.82rem;font-weight:600">⚠️ ${multiDivRids.length} in multiple divisions</span>
+              <button class="btn-ghost btn-sm" id="trn-div-fix-multi-btn" style="color:var(--color-orange)">Fix</button>` : ""}
+            ${orphanRids.length ? `
+              <span style="color:var(--color-text-dim);font-size:.82rem">🗑 ${orphanRids.length} orphaned</span>
+              <button class="btn-ghost btn-sm" id="trn-div-clean-orphans-btn">Clean</button>` : ""}
+          </div>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <button class="btn-secondary btn-sm" id="trn-div-add-btn">＋ New Division</button>
             <button class="btn-secondary btn-sm" id="trn-div-random-all-btn" title="Randomly distribute all unassigned registrants across existing divisions">🎲 Random Assign All</button>
@@ -10192,7 +10211,7 @@ Questions? Just reply to this email.
         ${!divEntries.length ? `<div class="trn-empty">No divisions yet. Click "+ New Division" to create one.</div>` : ""}
 
         <div id="trn-div-admin-list">
-          ${divEntries.map(([divId, div]) => _renderDivCard(divId, div, approvedRegs, regsObj)).join("")}
+          ${divEntries.map(([divId, div]) => _renderDivCard(divId, div, approvedRegs, regsObj, ridDivMap, orphanRids)).join("")}
         </div>
 
         ${unassigned.length ? `
@@ -10213,7 +10232,10 @@ Questions? Just reply to this email.
       _wireDivAdminEvents(divEntries, approvedRegs, regsObj);
     }
 
-    function _renderDivCard(divId, div, approvedRegs, regsObj) {
+    function _renderDivCard(divId, div, approvedRegs, regsObj, ridDivMap, orphanRids) {
+      ridDivMap   = ridDivMap   || {};
+      orphanRids  = orphanRids  || [];
+      const orphanSet = new Set(orphanRids);
       const members   = Object.keys(div.memberIds || {});
       const memberRegs = members.map(rid => ({ rid, ...(regsObj[rid] || {}) }));
       const maleCount  = memberRegs.filter(r => (r.gender || "").toLowerCase().startsWith("m")).length;
@@ -10256,19 +10278,66 @@ Questions? Just reply to this email.
           <!-- Members -->
           ${memberRegs.length ? `
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--space-2)">
-              ${memberRegs.map(r => `
-                <div class="trn-div-person" style="font-size:.78rem;cursor:default">
-                  ${_esc(r.displayName || r.teamName || r.rid)}
-                  ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}">${(r.gender||"").charAt(0)}</span>` : ""}
-                  <button data-div-remove="${_esc(divId)}" data-rid="${_esc(r.rid)}"
-                    style="background:none;border:none;cursor:pointer;color:var(--color-text-dim);padding:0 0 0 4px;font-size:.7rem"
-                    title="Remove from division">✕</button>
-                </div>`).join("")}
+              ${memberRegs.map(r => {
+                const isOrphan = orphanSet.has(r.rid);
+                const isMulti  = (ridDivMap[r.rid] || []).length > 1;
+                return `
+                  <div class="trn-div-person" style="font-size:.78rem;cursor:default${isOrphan ? ";opacity:.5" : ""}${isMulti ? ";border-color:var(--color-orange)" : ""}">
+                    ${isOrphan ? "🗑 " : ""}${isMulti ? "⚠️ " : ""}${_esc(r.displayName || r.teamName || (isOrphan ? "orphaned" : r.rid))}
+                    ${r.gender ? `<span class="trn-gender-${(r.gender||"").charAt(0).toLowerCase()}">${(r.gender||"").charAt(0)}</span>` : ""}
+                    <button data-div-remove="${_esc(divId)}" data-rid="${_esc(r.rid)}"
+                      style="background:none;border:none;cursor:pointer;color:var(--color-text-dim);padding:0 0 0 4px;font-size:.7rem"
+                      title="Remove from division">✕</button>
+                  </div>`;
+              }).join("")}
             </div>` : `<div style="font-size:.8rem;color:var(--color-text-dim);margin-top:var(--space-2)">No members yet.</div>`}
         </div>`;
     }
 
     function _wireDivAdminEvents(divEntries, approvedRegs, regsObj) {
+      // Fix multi-division: remove from all but the last-joined division
+      document.getElementById("trn-div-fix-multi-btn")?.addEventListener("click", async () => {
+        if (!multiDivRids.length) return;
+        const names = multiDivRids.map(([rid]) => regsObj[rid]?.displayName || rid).join(", ");
+        if (!confirm(`Fix ${multiDivRids.length} registrant${multiDivRids.length!==1?"s":""} in multiple divisions?\n\n${names}\n\nEach person will be kept in the division they appear in last alphabetically and removed from all others.`)) return;
+        try {
+          const writes = [];
+          for (const [rid, divIds] of multiDivRids) {
+            // Keep the last one alphabetically as a deterministic choice
+            const keep   = [...divIds].sort().pop();
+            const remove = divIds.filter(d => d !== keep);
+            remove.forEach(dId => {
+              writes.push(_divRef(dId).child(`memberIds/${rid}`).remove());
+              delete (divsObj[dId]?.memberIds || {})[rid];
+            });
+          }
+          await Promise.all(writes);
+          _renderAll();
+          _writeDivisionsPublic(tid, yr, divsObj, regsObj).catch(() => {});
+          showToast(`Fixed ${multiDivRids.length} duplicate division assignment${multiDivRids.length!==1?"s":""} ✓`);
+        } catch(e) { showToast("Fix failed: " + e.message, "error"); }
+      });
+
+      // Clean orphaned rids from all divisions
+      document.getElementById("trn-div-clean-orphans-btn")?.addEventListener("click", async () => {
+        if (!orphanRids.length) return;
+        if (!confirm(`Remove ${orphanRids.length} orphaned entry${orphanRids.length!==1?"s":""} from divisions?\n\nThese are division slots with no matching registration (likely from deleted or duplicate registrations).`)) return;
+        try {
+          const writes = [];
+          for (const rid of orphanRids) {
+            const divIds = ridDivMap[rid] || [];
+            divIds.forEach(dId => {
+              writes.push(_divRef(dId).child(`memberIds/${rid}`).remove());
+              delete (divsObj[dId]?.memberIds || {})[rid];
+            });
+          }
+          await Promise.all(writes);
+          _renderAll();
+          _writeDivisionsPublic(tid, yr, divsObj, regsObj).catch(() => {});
+          showToast(`Removed ${orphanRids.length} orphaned entry${orphanRids.length!==1?"s":""} ✓`);
+        } catch(e) { showToast("Clean failed: " + e.message, "error"); }
+      });
+
       // New division
       document.getElementById("trn-div-add-btn")?.addEventListener("click", () => {
         _openDivEditModal(null, null);

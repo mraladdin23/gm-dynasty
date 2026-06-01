@@ -2846,6 +2846,7 @@
 
 
     let _isSubmitting = false; // module-level guard against double-submit
+    let _isJoining    = false; // module-level guard against double-tap division join
     function renderRegisterTab(body) {
       const t      = _currentT;
       const form   = t.registrationForm || {};
@@ -3068,6 +3069,8 @@
           return;
         }
 
+        const hasSelfSelect = divEntries.some(([,d]) => d.allowSelfSelect && !(d.teamCap && d.enforceTotal && (d.memberCount || (d.members||[]).length) >= d.teamCap));
+
         const yearToggle = allDivYrs.length > 1 ? `
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)">
             ${allDivYrs.map(y => `
@@ -3075,12 +3078,23 @@
                 data-divyr="${esc(String(y))}">${esc(String(y))}</button>`).join("")}
           </div>` : "";
 
-        body.innerHTML = yearToggle + divEntries.map(([divId, div]) => {
+        // Self-select call-to-action banner
+        const selfSelectBanner = hasSelfSelect ? `
+          <div style="padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);background:rgba(var(--color-primary-rgb,99,102,241),.08);border:1px solid rgba(var(--color-primary-rgb,99,102,241),.3);border-radius:var(--radius);display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+            <div>
+              <div style="font-weight:600;font-size:.9rem">🗂 Division selection is open!</div>
+              <div style="font-size:.8rem;color:var(--color-text-dim);margin-top:2px">Click "Join Division" on any open division below to claim your spot.</div>
+            </div>
+          </div>` : "";
+
+        body.innerHTML = yearToggle + selfSelectBanner + divEntries.map(([divId, div]) => {
           const members   = div.members || [];
+          // Filter out any orphaned entries (displayName = "—" only, no gender) from public display
+          const validMembers = members.filter(m => m.displayName && m.displayName !== "—");
           const cap       = div.teamCap || 0;
-          const mCount    = members.filter(m => (m.gender||"").toLowerCase().startsWith("m")).length;
-          const fCount    = members.filter(m => (m.gender||"").toLowerCase().startsWith("f")).length;
-          const filled    = div.memberCount || members.length;
+          const mCount    = validMembers.filter(m => (m.gender||"").toLowerCase().startsWith("m")).length;
+          const fCount    = validMembers.filter(m => (m.gender||"").toLowerCase().startsWith("f")).length;
+          const filled    = div.memberCount || validMembers.length;
           const pct       = cap ? Math.min(100, Math.round(filled / cap * 100)) : 0;
           const isFull    = cap && div.enforceTotal && filled >= cap;
           const canSelf   = div.allowSelfSelect;
@@ -3093,7 +3107,7 @@
                   ${div.description ? `<span style="font-size:.8rem;color:var(--color-text-dim);margin-left:var(--space-2)">${esc(div.description)}</span>` : ""}
                 </div>
                 ${canSelf && !isFull ? `
-                  <button class="btn-primary btn-sm" data-selfjoin="${esc(divId)}" data-divyr="${esc(yr)}">
+                  <button class="btn-primary btn-sm trn-div-selfjoin-btn" data-selfjoin="${esc(divId)}" data-divyr="${esc(yr)}">
                     🙋 Join Division
                   </button>` : isFull ? `
                   <span style="font-size:.8rem;font-weight:600;color:var(--color-orange);padding:var(--space-1) var(--space-2);background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);border-radius:var(--radius)">
@@ -3114,12 +3128,12 @@
                 </div>` : ""}
               </div>
 
-              <!-- Member list -->
-              ${members.length ? `
+              <!-- Member list — only show resolved names -->
+              ${validMembers.length ? `
                 <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--space-2)">
-                  ${members.map(m => `
+                  ${validMembers.map(m => `
                     <div class="trn-div-person" style="font-size:.8rem;cursor:default">
-                      ${esc(m.displayName || "—")}
+                      ${esc(m.displayName)}
                       ${m.gender ? `<span class="trn-gender-${(m.gender||"").charAt(0).toLowerCase()}">${(m.gender||"").charAt(0)}</span>` : ""}
                     </div>`).join("")}
                 </div>` : ""}
@@ -3128,18 +3142,20 @@
 
         // Wire year pills
         body.querySelectorAll("[data-divyr]").forEach(btn => {
-          if (!btn.dataset.selfjoin) { // skip join buttons which also have data-divyr
+          if (!btn.classList.contains("trn-div-selfjoin-btn")) {
             btn.addEventListener("click", () => { activeYear = btn.dataset.divyr; _render(activeYear); });
           }
         });
 
-        // Wire self-select join buttons
-        body.querySelectorAll("[data-selfjoin]").forEach(btn => {
-          btn.addEventListener("click", async () => {
-            const divId = btn.dataset.selfjoin;
-            const divYr = btn.dataset.divyr;
-            await _handleSelfSelectJoin(tid, divId, divYr, divsObj[divId]);
-            _render(divYr);
+        // Wire join buttons — inline modal instead of prompt()
+        body.querySelectorAll(".trn-div-selfjoin-btn").forEach(btn => {
+          btn.addEventListener("click", () => {
+            if (_isJoining) return;
+            const divId  = btn.dataset.selfjoin;
+            const divYr  = btn.dataset.divyr;
+            const divObj = divsObj[divId];
+            if (!divObj) return;
+            _openDivJoinModal(tid, divId, divYr, divObj);
           });
         });
       }
@@ -3147,12 +3163,70 @@
       _render(activeYear);
     }
 
-    // Self-select join — asks for the registrant's email to look them up,
-    // checks caps if enforced, then writes their rid into the division.
-    async function _handleSelfSelectJoin(tid, divId, yr, div) {
-      const email = prompt("Enter the email address you registered with to join this division:");
-      if (!email) return;
-      const norm = email.trim().toLowerCase();
+    // ── Inline division join modal ─────────────────────────
+    function _openDivJoinModal(tid, divId, yr, div) {
+      document.getElementById("trn-join-modal-overlay")?.remove();
+      const overlay = document.createElement("div");
+      overlay.id    = "trn-join-modal-overlay";
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px";
+      overlay.innerHTML = `
+        <div style="background:var(--color-surface,#1e1e2e);border:1px solid var(--color-border,rgba(255,255,255,.1));border-radius:12px;padding:24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0;font-size:1rem;font-weight:700">🙋 Join ${esc(div.name || "Division")}</h3>
+            <button id="trn-join-close" style="background:none;border:none;cursor:pointer;color:var(--color-text-dim);font-size:1.2rem;padding:4px">✕</button>
+          </div>
+          <p style="font-size:.85rem;color:var(--color-text-dim);margin:0 0 16px">
+            Enter the email address you used when registering for this tournament.
+          </p>
+          <div style="margin-bottom:12px">
+            <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:6px">Registration Email</label>
+            <input type="email" id="trn-join-email" placeholder="your@email.com" autocomplete="email"
+              style="width:100%;padding:8px 12px;border:1px solid var(--color-border,rgba(255,255,255,.15));border-radius:8px;background:var(--color-bg,#12121e);color:var(--color-text,#fff);font-size:.9rem;box-sizing:border-box" />
+          </div>
+          <div id="trn-join-error" style="display:none;padding:8px 12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.82rem;color:#f87171;margin-bottom:12px"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="trn-join-cancel" style="padding:8px 16px;border:1px solid var(--color-border,rgba(255,255,255,.15));border-radius:8px;background:transparent;color:var(--color-text,#fff);cursor:pointer;font-size:.875rem">Cancel</button>
+            <button id="trn-join-submit" style="padding:8px 16px;border:none;border-radius:8px;background:var(--color-primary,#6366f1);color:#fff;cursor:pointer;font-size:.875rem;font-weight:600">Join Division</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      const emailEl  = overlay.querySelector("#trn-join-email");
+      const errorEl  = overlay.querySelector("#trn-join-error");
+      const submitEl = overlay.querySelector("#trn-join-submit");
+
+      const _close = () => { overlay.remove(); _isJoining = false; };
+      const _err   = (msg) => {
+        errorEl.textContent = msg;
+        errorEl.style.display = "";
+        submitEl.disabled = false;
+        submitEl.textContent = "Join Division";
+        _isJoining = false;
+      };
+
+      overlay.querySelector("#trn-join-close")?.addEventListener("click", _close);
+      overlay.querySelector("#trn-join-cancel")?.addEventListener("click", _close);
+      overlay.addEventListener("click", e => { if (e.target === overlay) _close(); });
+      setTimeout(() => emailEl?.focus(), 50);
+
+      submitEl.addEventListener("click", async () => {
+        if (_isJoining) return;
+        const email = (emailEl?.value || "").trim();
+        if (!email) { _err("Please enter your registration email."); return; }
+        if (!email.includes("@") || !email.includes(".")) { _err("That doesn't look like a valid email address."); return; }
+        _isJoining = true;
+        submitEl.disabled = true;
+        submitEl.textContent = "Looking up…";
+        errorEl.style.display = "none";
+        await _handleSelfSelectJoin(tid, divId, yr, div, email.toLowerCase(), _close, _err);
+      });
+
+      emailEl?.addEventListener("keydown", e => { if (e.key === "Enter") submitEl.click(); });
+    }
+
+    // Self-select join — now receives email directly from modal
+    // onSuccess and onError callbacks handle UI state
+    async function _handleSelfSelectJoin(tid, divId, yr, div, norm, onSuccess, onError) {
 
       // Look up their registration
       let matchRid = null, matchReg = null;
@@ -3162,72 +3236,98 @@
         const entry = Object.entries(regs).find(([, r]) =>
           (r.email || "").toLowerCase() === norm &&
           (r.status || "").toLowerCase() === "approved" &&
-          (!yr || String(r.year) === String(yr))
+          (!yr || !r.year || String(r.year) === String(yr))
         );
         if (!entry) {
-          alert("No approved registration found for that email address in this year's tournament. Please contact the commissioner.");
+          onError("No approved registration found for that email address. Please check for typos or contact the tournament commissioner.");
           return;
         }
         [matchRid, matchReg] = entry;
       } catch(e) {
-        alert("Could not look up registration. Please try again or contact the commissioner.");
+        onError("Could not look up registration — please check your connection and try again.");
         return;
       }
 
-      // Check if already in a division this year
+      // Check if already in a division this year — NEVER silently swallow this
+      let alreadyInDivId = null;
       try {
         const divSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
         const allDivs = divSnap.val() || {};
         for (const [dId, d] of Object.entries(allDivs)) {
           if (Object.keys(d.memberIds || {}).includes(matchRid)) {
-            const dName = d.name || dId;
-            if (dId === divId) { alert(`You are already in ${dName}.`); return; }
-            if (!confirm(`You are currently in ${dName}. Move to ${div.name || divId}?`)) return;
-            // Remove from old division
-            await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${dId}/memberIds/${matchRid}`).remove();
+            alreadyInDivId = dId;
             break;
           }
         }
-      } catch(e) { /* non-fatal — proceed */ }
+      } catch(e) {
+        // Read failed — ABORT rather than risk adding to multiple divisions
+        onError("Could not verify your current division assignment. Please try again.");
+        return;
+      }
+
+      if (alreadyInDivId) {
+        const allDivs2 = (await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value")).val() || {};
+        const oldName  = allDivs2[alreadyInDivId]?.name || alreadyInDivId;
+        if (alreadyInDivId === divId) {
+          onError(`You're already in ${oldName}. No change needed.`);
+          return;
+        }
+        // Show move confirmation inline in the modal
+        onError(`You're currently in "${oldName}". Submitting will move you to "${div.name || divId}". Click Join Division again to confirm.`);
+        // On second click, proceed with move
+        // We set a flag on the overlay so second click knows it's a confirmed move
+        const overlay = document.getElementById("trn-join-modal-overlay");
+        if (!overlay) return;
+        if (!overlay.dataset.confirmMove) {
+          overlay.dataset.confirmMove = alreadyInDivId;
+          return;
+        }
+        // Second click — do the move
+        try {
+          await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${alreadyInDivId}/memberIds/${matchRid}`).remove();
+        } catch(e) { /* non-fatal — proceed with add */ }
+      }
 
       // Cap enforcement checks
       if (div.enforceTotal && div.teamCap) {
-        const currentSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds`).once("value");
-        const currentCount = Object.keys(currentSnap.val() || {}).length;
-        if (currentCount >= div.teamCap) {
-          alert(`Sorry — ${div.name || "this division"} is now full. Please contact the commissioner.`);
-          return;
-        }
+        try {
+          const currentSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds`).once("value");
+          const currentCount = Object.keys(currentSnap.val() || {}).length;
+          if (currentCount >= div.teamCap) {
+            onError(`Sorry — ${div.name || "this division"} is now full. Please contact the commissioner.`);
+            return;
+          }
+        } catch(e) { /* non-fatal — proceed */ }
       }
-      if ((div.enforceMale || div.enforceFemale) && matchReg.gender) {
-        const currentSnap  = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds`).once("value");
-        const memberIds    = Object.keys(currentSnap.val() || {});
-        const regSnap      = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
-        const regsAll      = regSnap.val() || {};
-        const memberRegs   = memberIds.map(rid => regsAll[rid]).filter(Boolean);
-        const mCount       = memberRegs.filter(r => (r.gender||"").toLowerCase().startsWith("m")).length;
-        const fCount       = memberRegs.filter(r => (r.gender||"").toLowerCase().startsWith("f")).length;
-        const g            = matchReg.gender.toLowerCase();
-        if (g.startsWith("m") && div.enforceMale && div.maleCap && mCount >= div.maleCap) {
-          alert(`Sorry — the male spots in ${div.name||"this division"} are full. Please contact the commissioner.`);
-          return;
-        }
-        if (g.startsWith("f") && div.enforceFemale && div.femaleCap && fCount >= div.femaleCap) {
-          alert(`Sorry — the female spots in ${div.name||"this division"} are full. Please contact the commissioner.`);
-          return;
-        }
+      if ((div.enforceMale || div.enforceFemale) && matchReg?.gender) {
+        try {
+          const currentSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds`).once("value");
+          const memberIds   = Object.keys(currentSnap.val() || {});
+          const regSnap     = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
+          const regsAll     = regSnap.val() || {};
+          const memberRegs  = memberIds.map(rid => regsAll[rid]).filter(Boolean);
+          const mCount      = memberRegs.filter(r => (r.gender||"").toLowerCase().startsWith("m")).length;
+          const fCount      = memberRegs.filter(r => (r.gender||"").toLowerCase().startsWith("f")).length;
+          const g           = matchReg.gender.toLowerCase();
+          if (g.startsWith("m") && div.enforceMale && div.maleCap && mCount >= div.maleCap) {
+            onError(`Sorry — the male spots in ${div.name||"this division"} are full. Please contact the commissioner.`);
+            return;
+          }
+          if (g.startsWith("f") && div.enforceFemale && div.femaleCap && fCount >= div.femaleCap) {
+            onError(`Sorry — the female spots in ${div.name||"this division"} are full. Please contact the commissioner.`);
+            return;
+          }
+        } catch(e) { /* non-fatal */ }
       }
 
       // Write the join
       try {
         await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds/${matchRid}`).set(true);
 
-        // Re-fetch the full admin divisions node and rebuild the public snapshot
-        // so the public site reflects the new member immediately.
+        // Rebuild public snapshot
         try {
           const adminDivSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
           const adminDivs    = adminDivSnap.val() || {};
-          // Re-fetch all registrations for display names
           const allRegSnap   = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
           const allRegs      = allRegSnap.val() || {};
 
@@ -3237,12 +3337,14 @@
             const memberIds = Object.keys(d.memberIds || {});
             const members   = memberIds.map(rid => {
               const r = allRegs[rid] || {};
-              return { displayName: r.displayName || r.teamName || "—", gender: r.gender || null };
-            });
+              const name = r.displayName || r.teamName || null;
+              if (!name) return null; // skip orphaned rids from public display
+              return { displayName: name, gender: r.gender || null };
+            }).filter(Boolean);
             pubDivs[dId] = {
               name:            d.name || "",
-              teamCap:         d.teamCap  || null,
-              maleCap:         d.maleCap  || null,
+              teamCap:         d.teamCap   || null,
+              maleCap:         d.maleCap   || null,
               femaleCap:       d.femaleCap || null,
               enforceTotal:    d.enforceTotal   || false,
               enforceMale:     d.enforceMale    || false,
@@ -3252,23 +3354,23 @@
               members,
             };
             if (d.description) pubDivs[dId].description = d.description;
-            // Strip nulls
             Object.keys(pubDivs[dId]).forEach(k => { if (pubDivs[dId][k] === null) delete pubDivs[dId][k]; });
           });
           await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).set(
             Object.keys(pubDivs).length ? pubDivs : null
           );
-          // Update local cache so _render uses the fresh data
           allDivsByYear[yr] = pubDivs;
         } catch(syncErr) {
-          // Sync failed — fall back to re-reading the public node
           const fresh = await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).once("value");
           if (fresh.val()) allDivsByYear[yr] = fresh.val();
         }
 
-        alert(`You've been added to ${div.name || "the division"}! 🎉`);
+        onSuccess();
+        // Re-render divisions tab with updated data
+        const divBody = document.getElementById("pub-section-body");
+        if (divBody) renderDivisionsTab(divBody);
       } catch(e) {
-        alert("Could not join division. Please contact the commissioner.");
+        onError("Could not join division. Please try again or contact the commissioner.");
       }
     }
 
