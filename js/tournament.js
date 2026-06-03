@@ -17944,8 +17944,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       } else {
         el.innerHTML = _renderContent(tabId);
       }
-      // Guard: _wcWireBracketButtons is defined later in this closure
-      if (typeof _wcWireBracketButtons === "function") _wcWireBracketButtons();
+      // _wcWireBracketButtons is a hoisted function declaration — always safe to call
+      _wcWireBracketButtons();
     };
 
     // ── Decathlon: Combined Standings ───────────────────────────────────────────
@@ -18230,7 +18230,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     });
 
     // ── World Cup bracket wiring ─────────────────────────────────────────────
-    const _wcWireBracketButtons = () => {
+    function _wcWireBracketButtons() {
 
       // ── Refresh standings button — explicit fetch + re-render ────────────
       document.getElementById("trn-wc-refresh-standings")?.addEventListener("click", async () => {
@@ -18525,7 +18525,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         } catch(e) { showToast("Score refresh failed: "+e.message, "error"); }
         finally { if (btn) { btn.disabled=false; btn.textContent="↺ Update Scores"; } }
       });
-    };
+    }
     _wcWireBracketButtons();
     // Shared snapshot builder — single source of truth for both manual + auto publish
     const _buildPlayoffSnapshot = () => {
