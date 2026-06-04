@@ -15837,7 +15837,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Non-WC modes: gate playoff tab behind regular season completion ───────
     // Admins always see the full tab so they can configure it during the season.
-    if (mode !== "worldcup" && mode !== "decathlon" && !isAdmin && !_playoffsUnderway(t, po, activeY)) {
+    // Also bypass if playoffs are published — finalRankings or published flag means season is done.
+    const playoffsPublished = !!(po.published || po.finalRankings);
+    if (mode !== "worldcup" && mode !== "decathlon" && !isAdmin && !playoffsPublished && !_playoffsUnderway(t, po, activeY)) {
       const startWeek = po.startWeek;
       body.innerHTML = `
         <div class="trn-empty" style="padding:var(--space-8) 0">
@@ -19536,11 +19538,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         // from t.playoffs[year].finalRankings without re-simulation or pub fetches
         await GMD.child(`tournaments/${tid}/playoffs/${activeY}/finalRankings`).set(finalRankings);
 
+        // Write published flag so the regular-season gate knows playoffs are done
+        await GMD.child(`tournaments/${tid}/playoffs/${activeY}/published`).set(true);
+
         // Update local t so analytics tabs see it immediately without re-loading
         if (!_tournaments[tid])                                _tournaments[tid] = {};
         if (!_tournaments[tid].playoffs)                       _tournaments[tid].playoffs = {};
         if (!_tournaments[tid].playoffs[activeY])              _tournaments[tid].playoffs[activeY] = {};
         _tournaments[tid].playoffs[activeY].finalRankings = finalRankings;
+        _tournaments[tid].playoffs[activeY].published     = true;
 
         showToast("Playoffs published ✓");
       } catch(e) { showToast("Publish failed: "+e.message, "error"); }
