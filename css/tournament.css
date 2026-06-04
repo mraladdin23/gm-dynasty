@@ -4393,6 +4393,113 @@
   padding: var(--space-4) 0 var(--space-2);
 }
 
+/* ── Scores ranked view ──────────────────────────────────── */
+
+.trn-wmu-score-list {
+  margin-top: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.trn-wmu-score-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  transition: background .15s;
+}
+
+.trn-wmu-score-row:last-child {
+  border-bottom: none;
+}
+
+.trn-wmu-score-row:hover {
+  background: var(--color-surface-hover, rgba(255,255,255,.03));
+}
+
+.trn-wmu-score-row--me {
+  background: rgba(99,102,241,.07);
+  border-left: 3px solid var(--color-primary, #6366f1);
+}
+
+.trn-wmu-score-row--first {
+  background: rgba(212,175,55,.07);
+  border-left: 3px solid var(--color-gold, #d4af37);
+}
+
+.trn-wmu-score-row--last {
+  opacity: .7;
+}
+
+.trn-wmu-score-rank {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  width: 24px;
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.trn-wmu-score-name {
+  font-size: .84rem;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trn-wmu-score-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.trn-wmu-score-tag {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  padding: 1px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.trn-wmu-score-pts {
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--color-text);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: right;
+}
+
+.trn-wmu-score-pts--top {
+  color: var(--color-gold, #d4af37);
+}
+
+.trn-wmu-score-pts--bot {
+  color: var(--color-text-dim);
+}
+
+@media (max-width: 600px) {
+  .trn-wmu-score-tag { display: none; }
+  .trn-wmu-score-meta { display: none; }
+  .trn-wmu-score-row { padding: 7px 10px; gap: var(--space-2); }
+}
+
 @media (max-width: 600px) {
   .trn-wmu-grid { grid-template-columns: 1fr; }
 }

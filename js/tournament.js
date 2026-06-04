@@ -757,6 +757,7 @@ const DLRTournament = (() => {
     _weeklyMuWeek   = null;
     _weeklyMuFilter = "all";
     _weeklyMuPage   = 1;
+    _weeklyMuView   = "matchups";
 
     // Reload fresh from Firebase
     let snap;
@@ -970,6 +971,7 @@ const DLRTournament = (() => {
         _weeklyMuWeek   = null;
         _weeklyMuFilter = "all";
         _weeklyMuPage   = 1;
+    _weeklyMuView   = "matchups";
         container.querySelectorAll(".trn-year-pill[data-yr]").forEach(b =>
           b.classList.toggle("trn-year-pill--active", Number(b.dataset.yr) === yr));
         onChange(yr);
@@ -12669,14 +12671,17 @@ Good luck this season!
   let _weeklyMuWeek   = null;
   let _weeklyMuFilter = "all";
   let _weeklyMuPage   = 1;
+  let _weeklyMuView   = "matchups"; // "matchups" | "scores"
   let _weeklyMuCache  = {};
-  const WEEKLY_MU_PAGE_SIZE = 20;
+  let _weeklyMuT      = null; // holds current t for scores view
+  const WEEKLY_MU_PAGE_SIZE = 25;
 
   // ── Message Board state ────────────────────────────────────────────────────
   let _boardUnsub    = null;
   let _boardMessages = [];
 
   async function _renderAnalyticsMatchups(tid, t, body) {
+    _weeklyMuT            = t; // store for scores view _isMyTeam lookup
     const meta         = t.meta || {};
     const playoffWeek  = meta.playoffStartWeek || null;
     const standingsCache = t.standingsCache || {};
@@ -13100,6 +13105,16 @@ Good luck this season!
             </select>
           </div>
         </div>
+        <div style="display:flex;align-items:center;gap:var(--space-2)">
+          <button class="btn-ghost btn-sm" id="trn-wmu-view-matchups"
+            style="${_weeklyMuView==="matchups"?"font-weight:700;color:var(--color-primary)":""}">
+            ⚔️ Matchups
+          </button>
+          <button class="btn-ghost btn-sm" id="trn-wmu-view-scores"
+            style="${_weeklyMuView==="scores"?"font-weight:700;color:var(--color-primary)":""}">
+            📊 Scores
+          </button>
+        </div>
         <button class="btn-secondary btn-sm" id="trn-wmu-refresh-btn">↺ Refresh</button>
       </div>
       <div id="trn-wmu-content">
@@ -13109,6 +13124,7 @@ Good luck this season!
     document.getElementById("trn-wmu-week-sel")?.addEventListener("change", function() {
       _weeklyMuWeek = parseInt(this.value);
       _weeklyMuPage = 1;
+      _weeklyMuView   = "matchups";
       const ck = `${year}_${_weeklyMuWeek}`;
       delete _weeklyMuCache[ck];
       _loadWeeklyMatchups(tid, t, leagueList, year);
@@ -13116,6 +13132,17 @@ Good luck this season!
     document.getElementById("trn-wmu-filter-sel")?.addEventListener("change", function() {
       _weeklyMuFilter = this.value;
       _weeklyMuPage   = 1;
+      _weeklyMuView   = "matchups";
+      _renderWeeklyMatchupsContent(leagueList, year);
+    });
+    document.getElementById("trn-wmu-view-matchups")?.addEventListener("click", () => {
+      _weeklyMuView = "matchups";
+      _weeklyMuPage = 1;
+      _renderWeeklyMatchupsContent(leagueList, year);
+    });
+    document.getElementById("trn-wmu-view-scores")?.addEventListener("click", () => {
+      _weeklyMuView = "scores";
+      _weeklyMuPage = 1;
       _renderWeeklyMatchupsContent(leagueList, year);
     });
     document.getElementById("trn-wmu-refresh-btn")?.addEventListener("click", () => {
@@ -13303,7 +13330,74 @@ Good luck this season!
       return;
     }
 
-    const totalPages = Math.ceil(matchups.length / WEEKLY_MU_PAGE_SIZE);
+    // ── Scores ranked view ─────────────────────────────────────────────────
+    if (_weeklyMuView === "scores") {
+      // Flatten all team scores from filtered matchups, sorted high → low
+      const rows = [];
+      const myKeys = _findMyKeys(_weeklyMuT || {});
+      matchups.forEach(m => {
+        [m.home, m.away].forEach(side => {
+          rows.push({
+            name:       side.name,
+            score:      side.score || 0,
+            leagueName: m.leagueName || "",
+            leagueId:   m.leagueId  || "",
+            conference: m.conference || "",
+            division:   m.division   || "",
+            platform:   m.platform   || "",
+            isMe:       _isMyTeam(side.name, myKeys),
+          });
+        });
+      });
+      rows.sort((a, b) => b.score - a.score);
+
+      const PAGE = WEEKLY_MU_PAGE_SIZE; // 25
+      const totalPages = Math.ceil(rows.length / PAGE);
+      _weeklyMuPage    = Math.max(1, Math.min(_weeklyMuPage, totalPages));
+      const pageRows   = rows.slice((_weeklyMuPage - 1) * PAGE, _weeklyMuPage * PAGE);
+      const startRank  = (_weeklyMuPage - 1) * PAGE + 1;
+
+      const platBadge  = { sleeper: "💤", mfl: "⚙️", yahoo: "🟣" };
+
+      const tableRows = pageRows.map((r, i) => {
+        const rank    = startRank + i;
+        const isFirst = rank === 1;
+        const isLast  = rank === rows.length;
+        return `
+          <div class="trn-wmu-score-row${r.isMe ? " trn-wmu-score-row--me" : ""}${isFirst ? " trn-wmu-score-row--first" : ""}${isLast ? " trn-wmu-score-row--last" : ""}">
+            <span class="trn-wmu-score-rank">${rank}</span>
+            <span class="trn-wmu-score-name">
+              ${_esc(r.name)}${r.isMe ? ' <span class="trn-you-badge">you</span>' : ""}
+            </span>
+            <span class="trn-wmu-score-meta">
+              ${r.division   ? `<span class="trn-wmu-score-tag">🗂 ${_esc(r.division)}</span>`   : ""}
+              ${r.conference ? `<span class="trn-wmu-score-tag">📂 ${_esc(r.conference)}</span>` : ""}
+              <span class="trn-wmu-score-tag">${platBadge[r.platform] || ""} ${_esc(r.leagueName)}</span>
+            </span>
+            <span class="trn-wmu-score-pts${isFirst ? " trn-wmu-score-pts--top" : isLast ? " trn-wmu-score-pts--bot" : ""}">
+              ${r.score.toFixed(2)}
+            </span>
+          </div>`;
+      }).join("");
+
+      const paginationHtml = totalPages > 1 ? `
+        <div class="trn-wmu-pagination">
+          <button class="draft-toggle-btn" id="trn-wmu-prev" ${_weeklyMuPage <= 1 ? "disabled" : ""}>‹ Prev</button>
+          <span style="font-size:.82rem;color:var(--color-text-dim)">Page ${_weeklyMuPage} of ${totalPages} · ${rows.length} scores</span>
+          <button class="draft-toggle-btn" id="trn-wmu-next" ${_weeklyMuPage >= totalPages ? "disabled" : ""}>Next ›</button>
+        </div>` : "";
+
+      el.innerHTML = `
+        <div class="trn-az-meta">Week ${_weeklyMuWeek} · ${rows.length} scores</div>
+        <div class="trn-wmu-score-list">${tableRows}</div>
+        ${paginationHtml}`;
+
+      document.getElementById("trn-wmu-prev")?.addEventListener("click", () => { _weeklyMuPage--; _renderWeeklyMatchupsContent(leagueList, year); });
+      document.getElementById("trn-wmu-next")?.addEventListener("click", () => { _weeklyMuPage++; _renderWeeklyMatchupsContent(leagueList, year); });
+      return;
+    }
+
+    // ── Matchups view (default) ────────────────────────────────────────────
     _weeklyMuPage    = Math.max(1, Math.min(_weeklyMuPage, totalPages));
     const pageSlice  = matchups.slice((_weeklyMuPage - 1) * WEEKLY_MU_PAGE_SIZE, _weeklyMuPage * WEEKLY_MU_PAGE_SIZE);
 
