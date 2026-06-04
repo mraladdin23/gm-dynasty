@@ -13398,6 +13398,7 @@ Good luck this season!
     }
 
     // ── Matchups view (default) ────────────────────────────────────────────
+    const totalPages  = Math.ceil(matchups.length / WEEKLY_MU_PAGE_SIZE);
     _weeklyMuPage    = Math.max(1, Math.min(_weeklyMuPage, totalPages));
     const pageSlice  = matchups.slice((_weeklyMuPage - 1) * WEEKLY_MU_PAGE_SIZE, _weeklyMuPage * WEEKLY_MU_PAGE_SIZE);
 
