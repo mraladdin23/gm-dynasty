@@ -20615,6 +20615,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     runDiscovery,
     _expandTrnMatchup,
     diagnoseDecathlon,
+    getTournamentName: (tid) => _tournaments[tid]?.meta?.name || null,
   };
 
 })();
