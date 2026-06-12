@@ -1326,11 +1326,37 @@ function _openGlobalNotifModal() {
       <div class="global-auc-league-name" style="cursor:default">🏟 Tournament Boards (${boardTotal} unread)</div>`;
     for (const [chatKey, count] of Object.entries(_trnBoardUnread || {})) {
       if (!count) continue;
-      const tid  = chatKey.split("_")[0];
-      html += `<div class="global-auc-row" onclick="document.getElementById('global-notif-modal').classList.add('hidden');DLRNav.go('tournament');setTimeout(()=>{if(typeof _openTournamentView==='function')_openTournamentView('${_escHtml(tid)}');},150)">
+      // chatKey format: {tid}_{year} — split on last underscore to handle tids with underscores
+      const lastUnderscore = chatKey.lastIndexOf("_");
+      const tid  = lastUnderscore > 0 ? chatKey.slice(0, lastUnderscore) : chatKey;
+      // Look up tournament name from DLRTournament if loaded
+      const trnName = (typeof DLRTournament !== "undefined" && DLRTournament.getTournamentName?.(tid))
+        || "Tournament Board";
+      const safeTid = _escHtml(tid);
+      html += `<div class="global-auc-row" onclick="
+        document.getElementById('global-notif-modal').classList.add('hidden');
+        (function() {
+          var tid = '${safeTid}';
+          function _tryOpen(attempts) {
+            if (typeof _openTournamentView === 'function') {
+              DLRNav.go('tournament');
+              setTimeout(function() {
+                if (typeof _openTournamentView === 'function') {
+                  _openTournamentView(tid, 'chat');
+                } else if (attempts > 0) {
+                  setTimeout(function() { _tryOpen(attempts - 1); }, 200);
+                }
+              }, 200);
+            } else {
+              DLRNav.go('tournament');
+              setTimeout(function() { _tryOpen(attempts - 1); }, 300);
+            }
+          }
+          _tryOpen(5);
+        })()">
         <div style="flex:1">
-          <div style="font-weight:600;font-size:.88rem">🏟 Tournament Board</div>
-          <div class="dim" style="font-size:.72rem">${count} unread message${count !== 1 ? "s" : ""}</div>
+          <div style="font-weight:600;font-size:.88rem">🏟 ${_escHtml(trnName)}</div>
+          <div class="dim" style="font-size:.72rem">${count} unread message${count !== 1 ? "s" : ""} on the board</div>
         </div>
         <span style="color:var(--color-text-dim);font-size:.8rem">→</span>
       </div>`;
