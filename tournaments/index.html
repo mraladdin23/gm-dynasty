@@ -599,11 +599,140 @@
                    class="btn-secondary btn-sm">✉ Contact Commissioner</a>
               </div>` : ""}
           </div>`;
+        _renderStatusCheckerCard(document.getElementById("pub-section-body"), true);
         return;
       }
 
       // Registration is open — render the form inline
       renderRegisterTab(body);
+      _renderStatusCheckerCard(body, false);
+    }
+
+    // ── "Check Your Status" card ─────────────────────────────
+    // Lets anyone (logged in or not) enter their registration email and see:
+    //  - registration status (pending / approved / not found)
+    //  - division assignment if approved and divisions exist
+    //  - whether self-select is currently available to them
+    // Appended into the register section, after the form or in place of it
+    // when registration is closed.
+    function _renderStatusCheckerCard(body, isStandalone) {
+      if (!body) return;
+      const card = document.createElement("div");
+      card.className = "trn-section-card";
+      card.style.marginTop = "var(--space-4)";
+      card.innerHTML = `
+        <div class="trn-section-card-title">🔍 Check Your Registration Status</div>
+        <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+          Enter the email address you used to register to see your status and division (if assigned).
+        </p>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:flex-start">
+          <input type="email" id="pub-status-email" placeholder="your@email.com"
+            style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--color-border);border-radius:var(--radius,8px);background:var(--color-bg);color:var(--color-text);font-size:.875rem;box-sizing:border-box" />
+          <button class="btn-primary btn-sm" id="pub-status-check-btn">Check Status</button>
+        </div>
+        <div id="pub-status-result" style="margin-top:var(--space-3)"></div>
+      `;
+      body.appendChild(card);
+
+      const emailEl  = card.querySelector("#pub-status-email");
+      const resultEl = card.querySelector("#pub-status-result");
+      const btnEl    = card.querySelector("#pub-status-check-btn");
+
+      const _runCheck = async () => {
+        const email = (emailEl.value || "").trim().toLowerCase();
+        if (!email || !email.includes("@") || !email.includes(".")) {
+          resultEl.innerHTML = `<div style="padding:8px 12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.82rem;color:#f87171">Please enter a valid email address.</div>`;
+          return;
+        }
+        btnEl.disabled = true;
+        btnEl.textContent = "Checking…";
+        resultEl.innerHTML = "";
+
+        try {
+          const tid = _currentTid;
+          const regSnap = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
+          const regs = regSnap.val() || {};
+          const matches = Object.entries(regs).filter(([, r]) => (r.email || "").toLowerCase() === email);
+
+          if (!matches.length) {
+            resultEl.innerHTML = `
+              <div style="padding:10px 14px;background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.3);border-radius:8px;font-size:.85rem">
+                ❌ No registration found for that email.<br>
+                <span style="font-size:.78rem;color:var(--color-text-dim)">
+                  Double-check for typos, or you may have registered with a different email address.
+                  ${_currentT?.adminEmail ? `Contact the commissioner if you believe this is an error.` : ""}
+                </span>
+              </div>`;
+            return;
+          }
+
+          // Sort by year desc, show most recent first
+          matches.sort(([, a], [, b]) => String(b.year||0).localeCompare(String(a.year||0)));
+
+          // Fetch division data for the most recent registration's year
+          const rows = [];
+          for (const [rid, r] of matches) {
+            const yr = r.year || "";
+            const status = (r.status || "pending").toLowerCase();
+            let statusBadge, statusColor;
+            if (status === "approved") { statusBadge = "✅ Approved"; statusColor = "#22c55e"; }
+            else if (status === "rejected") { statusBadge = "❌ Not Approved"; statusColor = "#ef4444"; }
+            else { statusBadge = "⏳ Pending Review"; statusColor = "#f59e0b"; }
+
+            let divisionLine = "";
+            if (status === "approved" && yr) {
+              try {
+                const divSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
+                const allDivs = divSnap.val() || {};
+                let foundDiv = null;
+                for (const [, d] of Object.entries(allDivs)) {
+                  if (Object.keys(d.memberIds || {}).includes(rid)) { foundDiv = d; break; }
+                }
+                if (foundDiv) {
+                  divisionLine = `<div style="margin-top:6px;font-size:.85rem">🗂 Division: <strong>${esc(foundDiv.name || "—")}</strong></div>`;
+                } else {
+                  const anySelfSelect = Object.values(allDivs).some(d => d.allowSelfSelect);
+                  divisionLine = anySelfSelect
+                    ? `<div style="margin-top:6px;font-size:.85rem;color:var(--color-orange)">🗂 No division yet — <a href="#" data-status-goto-divisions style="color:var(--color-primary)">choose yours on the Divisions tab →</a></div>`
+                    : `<div style="margin-top:6px;font-size:.85rem;color:var(--color-text-dim)">🗂 Division not yet assigned. The commissioner will assign divisions soon.</div>`;
+                }
+              } catch(e) { /* non-fatal */ }
+            }
+
+            rows.push(`
+              <div style="padding:10px 14px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:8px;margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+                  <strong style="font-size:.9rem">${esc(r.displayName || r.teamName || "—")}</strong>
+                  <span style="font-size:.82rem;font-weight:600;color:${statusColor}">${statusBadge}</span>
+                </div>
+                ${yr ? `<div style="font-size:.78rem;color:var(--color-text-dim);margin-top:2px">Year: ${esc(String(yr))}</div>` : ""}
+                ${divisionLine}
+              </div>`);
+          }
+
+          resultEl.innerHTML = rows.join("");
+
+          // Wire "go to divisions" link
+          resultEl.querySelector("[data-status-goto-divisions]")?.addEventListener("click", (e) => {
+            e.preventDefault();
+            _activePubNav = "divisions";
+            document.querySelectorAll(".trn-top-nav-pill[data-pubnav]").forEach(b =>
+              b.classList.toggle("trn-top-nav-pill--active", b.dataset.pubnav === "divisions"));
+            const sel = document.getElementById("pub-top-nav-select");
+            if (sel) sel.value = "divisions";
+            renderPubSection(Object.keys(_currentT?.playoffs || {}).filter(k => /^\d{4}$/.test(k)));
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          });
+        } catch(e) {
+          resultEl.innerHTML = `<div style="padding:8px 12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.82rem;color:#f87171">Could not check status right now — please try again.</div>`;
+        } finally {
+          btnEl.disabled = false;
+          btnEl.textContent = "Check Status";
+        }
+      };
+
+      btnEl.addEventListener("click", _runCheck);
+      emailEl.addEventListener("keydown", e => { if (e.key === "Enter") _runCheck(); });
     }
 
     // ── Public Season Summary (shown on Overview) ─────────
@@ -2953,7 +3082,11 @@
         if (!val && ["displayName", "email"].includes(f)) {
           return _showError((f === "displayName" ? "Display Name" : "Email Address") + " is required.");
         }
-        entry[f] = val || null;
+        if (f === "email" && val) {
+          entry[f] = val.toLowerCase(); // always store email lowercase for consistent lookup
+        } else {
+          entry[f] = val || null;
+        }
       }
       for (let i = 0; i < custom.length; i++) {
         const q   = custom[i];

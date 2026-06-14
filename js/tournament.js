@@ -83,6 +83,16 @@ const DLRTournament = (() => {
   function _tScoringRef(tid)    { return GMD.child(`tournaments/${tid}/scoringSettings`); }
   function _tLeaguesRef(tid) { return GMD.child(`tournaments/${tid}/leagues`); }
   function _tRolesRef(tid)   { return GMD.child(`tournaments/${tid}/roles`); }
+
+  // Case-insensitive role lookup — usernames may be stored with different
+  // casing than _currentUsername depending on how they were entered when
+  // granted. Always use this instead of t.roles?.[_currentUsername] directly.
+  function _myRole(t) {
+    const roles = t?.roles || {};
+    const me    = (_currentUsername || "").toLowerCase();
+    const match = Object.keys(roles).find(u => u.toLowerCase() === me);
+    return match ? roles[match]?.role : null;
+  }
   function _tRegsRef(tid)    { return GMD.child(`tournaments/${tid}/registrations`); }
   function _tFormRef(tid)    { return GMD.child(`tournaments/${tid}/registrationForm`); }
   function _tBoardRef(tid, year) {
@@ -111,8 +121,8 @@ const DLRTournament = (() => {
     _tournaments = {};
     for (const [tid, t] of Object.entries(all)) {
       if (!t || !t.meta) continue;
-      const isAdmin    = t.roles?.[_currentUsername]?.role === "admin";
-      const isSubAdmin = t.roles?.[_currentUsername]?.role === "sub_admin";
+      const isAdmin    = _myRole(t) === "admin";
+      const isSubAdmin = _myRole(t) === "sub_admin";
       const isDiscovered = t.meta.discoveredBy?.[_currentUsername];
       const notDraft      = t.meta.status !== "draft";
       const hasStandings  = t.standingsCache && Object.keys(t.standingsCache).length > 0;
@@ -229,8 +239,8 @@ const DLRTournament = (() => {
       return false;
     });
     const adminEntries = allEntries.filter(([, t]) =>
-      t.roles?.[_currentUsername]?.role === "admin" ||
-      t.roles?.[_currentUsername]?.role === "sub_admin"
+      _myRole(t) === "admin" ||
+      _myRole(t) === "sub_admin"
     );
 
     // Build admin (creator) options from all tournaments
@@ -362,8 +372,7 @@ const DLRTournament = (() => {
       ${pagerHTML}
       <div class="trn-list">
         ${pageEntries.map(([tid, t]) => {
-          const isAdmin = t.roles?.[_currentUsername]?.role === "admin" ||
-                          t.roles?.[_currentUsername]?.role === "sub_admin";
+          const isAdmin = _myRole(t) === "admin" || _myRole(t) === "sub_admin";
           return _renderTournamentRow(tid, t, isManagingTab || isAdmin);
         }).join("")}
       </div>
@@ -771,8 +780,8 @@ const DLRTournament = (() => {
     if (!t) { showToast("Tournament not found", "error"); return; }
     _tournaments[tid] = t;
 
-    const isAdmin    = t.roles?.[_currentUsername]?.role === "admin";
-    const isSubAdmin = t.roles?.[_currentUsername]?.role === "sub_admin";
+    const isAdmin    = _myRole(t) === "admin";
+    const isSubAdmin = _myRole(t) === "sub_admin";
     const canAdmin   = isAdmin || isSubAdmin;
     const showAdmin  = canAdmin && !_viewingAsUser;
     const meta       = t.meta || {};
@@ -8744,7 +8753,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               </div>
               <div class="trn-role-right">
                 <span class="trn-role-badge trn-role-${r.role}">${r.role === "admin" ? "🛡 Admin" : "⚙ Sub-Admin"}</span>
-                ${user !== _currentUsername && r.role !== "admin" ? `
+                ${user.toLowerCase() !== (_currentUsername||"").toLowerCase() ? `
+                  ${r.role === "sub_admin"
+                    ? `<button class="btn-ghost btn-sm" data-promote-role="${_esc(user)}" title="Promote to full Admin">⬆ Make Admin</button>`
+                    : `<button class="btn-ghost btn-sm" data-demote-role="${_esc(user)}" title="Demote to Sub-Admin">⬇ Make Sub-Admin</button>`}
                   <button class="btn-ghost btn-sm" data-remove-role="${_esc(user)}">Remove</button>
                 ` : ""}
               </div>
@@ -8763,6 +8775,28 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     body.querySelectorAll("[data-remove-role]").forEach(btn =>
       btn.addEventListener("click", () => _removeRole(tid, btn.dataset.removeRole))
     );
+    body.querySelectorAll("[data-promote-role]").forEach(btn =>
+      btn.addEventListener("click", () => _changeRole(tid, btn.dataset.promoteRole, "admin"))
+    );
+    body.querySelectorAll("[data-demote-role]").forEach(btn =>
+      btn.addEventListener("click", () => _changeRole(tid, btn.dataset.demoteRole, "sub_admin"))
+    );
+  }
+
+  async function _changeRole(tid, username, newRole) {
+    const label = newRole === "admin" ? "Admin (full access)" : "Sub-Admin";
+    if (!confirm(`Change @${username} to ${label}?`)) return;
+    try {
+      const existing = (_tournaments[tid]?.roles || {})[username] || {};
+      await _tRolesRef(tid).child(username).update({ role: newRole, changedAt: Date.now(), changedBy: _currentUsername });
+      if (!_tournaments[tid].roles) _tournaments[tid].roles = {};
+      _tournaments[tid].roles[username] = { ...existing, role: newRole };
+      showToast(`@${username} is now ${label} ✓`);
+      _openTournamentView(tid);
+      _activeAdminTab = "roles";
+    } catch(err) {
+      showToast("Failed to change role: " + err.message, "error");
+    }
   }
 
   function _openAddRoleModal(tid, t) {
@@ -12686,8 +12720,8 @@ Good luck this season!
     const playoffWeek  = meta.playoffStartWeek || null;
     const standingsCache = t.standingsCache || {};
     const year         = _standingsYear || new Date().getFullYear();
-    const isAdmin      = t.roles?.[_currentUsername]?.role === "admin" ||
-                         t.roles?.[_currentUsername]?.role === "sub_admin";
+    const isAdmin      = _myRole(t) === "admin" ||
+      _myRole(t) === "sub_admin";
 
     // Gather all Sleeper league IDs for this year (matchups are Sleeper-only for now)
     const batches  = t.leagues || {};
@@ -13551,8 +13585,8 @@ Good luck this season!
 
   function _renderBoardTab(tid, t, body) {
     const year    = _tournamentYear || new Date().getFullYear();
-    const isAdmin = t.roles?.[_currentUsername]?.role === "admin" ||
-                    t.roles?.[_currentUsername]?.role === "sub_admin";
+    const isAdmin = _myRole(t) === "admin" ||
+      _myRole(t) === "sub_admin";
 
     const EMOJIS = ['🏈','🏆','🔥','💪','😂','😤','💀','🎉','👀','😮','🤣','😭','💯','🤡','👑','⚡','🎯','🗑️','💰','🤑','😈','🙌','👏','🫡','😎','🥶','🤠','🧠','😅','🫠'];
 
@@ -15926,8 +15960,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Admin detection (respects "View as user" toggle) ─────────────────────
     const isAdmin = (
-      t.roles?.[_currentUsername]?.role === "admin" ||
-      t.roles?.[_currentUsername]?.role === "sub_admin"
+      _myRole(t) === "admin" ||
+      _myRole(t) === "sub_admin"
     ) && !_viewingAsUser;
 
     // ── Non-WC modes: gate playoff tab behind regular season completion ───────
