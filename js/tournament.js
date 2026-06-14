@@ -16738,7 +16738,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return hasAny ? total : null;
           };
 
-          // ── Simulate advancement through previous rounds using actual scores ──
+          // ── Simulate advancement through previous rounds ────────────────
           // Re-order qualifiers so bye teams always come first, then non-byes sorted
           // by seeding metric. This ensures pool.slice(0, poolByes) == bye teams.
           const _byeFirst = (teams) => {
@@ -16747,6 +16747,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return [...byes_, ...rest_];
           };
           let pool = _byeFirst([...qualifiers]);
+
+          // Locked eliminations from prior rounds — written once a round is
+          // computed with real (non-null) score data. Reading these back instead
+          // of re-simulating prevents a later Sleeper API gap (e.g. week 2 returning
+          // 0 matchups once the season has progressed) from corrupting history and
+          // causing an already-eliminated team to reappear as "advancing".
+          const lockedElims = po.pointsRounds?.eliminations || {};
 
           // Build cumulative start weeks for each prior round
           let rCursor = po.startWeek || 0;
@@ -16761,21 +16768,44 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
             const byeSection  = pool.slice(0, rPoolByes);
             const compSection = pool.slice(rPoolByes);
-            const competitors = compSection.length;
-            const advFromComp = r.advanceMethod === "pct"
-              ? Math.round(competitors * (r.advancePct || 50) / 100)
-              : (r.advanceCount || 0);
 
-            // Sort competing section by combined round score (desc), then by pf as tiebreak
-            const sorted = [...compSection].sort((a, b) => {
-              const sa = _weekScore(a, rWeekNum, rWpr) ?? -1;
-              const sb = _weekScore(b, rWeekNum, rWpr) ?? -1;
-              if (sb !== sa) return sb - sa;
-              return (b.pf||0) - (a.pf||0);
-            });
+            const lockedForRound = lockedElims[ri];
+            if (lockedForRound && Object.keys(lockedForRound).length) {
+              // Use the locked record — filter out eliminated teams, keep the rest.
+              // Order doesn't matter here: the next round (or this round's own
+              // scoring below) re-sorts by its own week's score.
+              const survivors = compSection.filter(tm => !lockedForRound[_teamKey(tm)]);
+              pool = [...byeSection, ...survivors];
+            } else {
+              // No locked record for this round yet — fall back to live simulation
+              // using whatever score data is currently available.
+              const competitors = compSection.length;
+              const advFromComp = r.advanceMethod === "pct"
+                ? Math.round(competitors * (r.advancePct || 50) / 100)
+                : (r.advanceCount || 0);
 
-            // Next pool = byes + top advFromComp competitive scorers
-            pool = [...byeSection, ...sorted.slice(0, advFromComp)];
+              // Sort competing section by combined round score (desc), then by pf as tiebreak
+              const sorted = [...compSection].sort((a, b) => {
+                const sa = _weekScore(a, rWeekNum, rWpr) ?? -1;
+                const sb = _weekScore(b, rWeekNum, rWpr) ?? -1;
+                if (sb !== sa) return sb - sa;
+                return (b.pf||0) - (a.pf||0);
+              });
+
+              // Warn if Sleeper returned no data at all for this round's week —
+              // the pf-based fallback below may not match what was shown live
+              // when this round was actually played.
+              const anyRealScore = compSection.some(tm => _weekScore(tm, rWeekNum, rWpr) != null);
+              if (!anyRealScore) {
+                console.warn(`[Points Rounds] No score data available for round ${ri+1} (week ${rWeekNum}) — ` +
+                  `falling back to season-PF tiebreak for elimination simulation. ` +
+                  `This may not match the result shown when round ${ri+1} was live. ` +
+                  `Consider re-visiting round ${ri+1} while score data is available so it can be locked in.`);
+              }
+
+              // Next pool = byes + top advFromComp competitive scorers
+              pool = [...byeSection, ...sorted.slice(0, advFromComp)];
+            }
           }
 
           // ── Now pool is correct for this round ─────────────────────────
@@ -16812,6 +16842,30 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             return sa - sb;
           });
           const sortedPool = [...byeSection_, ...compSection_];
+
+          // ── Lock in this round's eliminations ───────────────────────────
+          // Only write if every competing team has a real (non-null) week score —
+          // otherwise we'd lock in a result based on incomplete data. Skip the
+          // final round (no "elimination" concept — one champion) and skip if
+          // already locked (write-once).
+          if (!isFinal && !lockedElims[roundIdx]) {
+            const allScored = compSection_.every(tm => tm.wkScore != null);
+            if (allScored && compSection_.length > 0) {
+              const eliminatedTeams = compSection_.slice(advFromComp); // bottom scorers
+              if (eliminatedTeams.length > 0) {
+                const elimMap = {};
+                eliminatedTeams.forEach(tm => { elimMap[_teamKey(tm)] = true; });
+                _tPlayoffsRef(tid, activeY).child(`pointsRounds/eliminations/${roundIdx}`).set(elimMap)
+                  .then(() => {
+                    // Update local cache so subsequent renders in this session see it immediately
+                    if (!po.pointsRounds) po.pointsRounds = {};
+                    if (!po.pointsRounds.eliminations) po.pointsRounds.eliminations = {};
+                    po.pointsRounds.eliminations[roundIdx] = elimMap;
+                  })
+                  .catch(e => console.warn(`[Points Rounds] Failed to lock round ${roundIdx+1} eliminations:`, e.message));
+              }
+            }
+          }
 
           const summary = isByeRound
             ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
@@ -19029,6 +19083,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
             // Simulate pool through previous rounds (each using its own startWk + wpr)
             let pool_ = _byeFirst_([...qualifiers]);
+            const lockedElims_ = po.pointsRounds?.eliminations || {};
             for (let ri = 0; ri < roundIdx; ri++) {
               const r_    = rounds_[ri];
               const rWk_  = _roundStartWeeks_[ri];
@@ -19036,15 +19091,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               const rByes_ = ri === 0 ? byeCount : 0;
               const byeSec_ = pool_.slice(0, rByes_);
               const compSec_ = pool_.slice(rByes_);
-              const adv_ = r_.advanceMethod === "pct"
-                ? Math.round(compSec_.length * (r_.advancePct || 50) / 100)
-                : (r_.advanceCount || 0);
-              const sorted_ = [...compSec_].sort((a, b) => {
-                const sa = _wsCombined_(a, rWk_, rWpr_) ?? -1;
-                const sb = _wsCombined_(b, rWk_, rWpr_) ?? -1;
-                return sb !== sa ? sb - sa : (b.pf||0) - (a.pf||0);
-              });
-              pool_ = [...byeSec_, ...sorted_.slice(0, adv_)];
+
+              const lockedForRound_ = lockedElims_[ri];
+              if (lockedForRound_ && Object.keys(lockedForRound_).length) {
+                // Use the locked record from when this round was actually computed —
+                // avoids re-deriving from possibly-incomplete live score data.
+                const survivors_ = compSec_.filter(tm => !lockedForRound_[_teamKey(tm)]);
+                pool_ = [...byeSec_, ...survivors_];
+              } else {
+                const adv_ = r_.advanceMethod === "pct"
+                  ? Math.round(compSec_.length * (r_.advancePct || 50) / 100)
+                  : (r_.advanceCount || 0);
+                const sorted_ = [...compSec_].sort((a, b) => {
+                  const sa = _wsCombined_(a, rWk_, rWpr_) ?? -1;
+                  const sb = _wsCombined_(b, rWk_, rWpr_) ?? -1;
+                  return sb !== sa ? sb - sa : (b.pf||0) - (a.pf||0);
+                });
+                pool_ = [...byeSec_, ...sorted_.slice(0, adv_)];
+              }
             }
 
             const poolByes_    = roundIdx === 0 ? byeCount : 0;
@@ -20644,11 +20708,65 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     return { yr, po, lgIds: [...lgIds], dec };
   }
 
+  // ── Points Rounds: eliminations diagnostic & reset ───────────────────────
+  // Shows what's currently locked in playoffs/{year}/pointsRounds/eliminations
+  // and which teams are in each round. Call from console:
+  //   await DLRTournament.diagnosePointsRounds('tid', 2025)
+  async function diagnosePointsRounds(tid, year) {
+    const t  = _tournaments[tid];
+    if (!t) { console.log("Unknown tid:", tid); return; }
+    const yr = String(year || Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort().pop());
+    const po = t.playoffs?.[yr];
+    if (!po) { console.log("No playoff config for year", yr); return; }
+    if ((po.mode || "") !== "points_rounds") { console.log("Mode is", po.mode, "— not points_rounds"); return; }
+
+    const rounds = po.pointsRounds?.rounds || [];
+    const elims  = po.pointsRounds?.eliminations || {};
+
+    console.group(`[diagnosePointsRounds] tid=${tid} year=${yr}`);
+    console.log("startWeek:", po.startWeek, "rounds configured:", rounds.length);
+    rounds.forEach((r, i) => {
+      const locked = elims[i];
+      const count  = locked ? Object.keys(locked).length : 0;
+      console.log(`Round ${i+1} (${i===rounds.length-1?"final":`advance ${r.advanceCount ?? r.advancePct+"%"}`}):`,
+        locked ? `🔒 LOCKED — ${count} eliminated` : "⚪ not locked yet (will simulate live)");
+      if (locked) {
+        Object.keys(locked).forEach(k => console.log("   ❌", k));
+      }
+    });
+    console.groupEnd();
+    return { yr, rounds, elims };
+  }
+
+  // Clears the locked elimination record for one round (or all rounds if
+  // roundIdx omitted) so it will be re-simulated/re-locked on next view.
+  // Use this if a round was locked in with incorrect/incomplete data.
+  //   await DLRTournament.resetPointsRoundsElimination('tid', 2025, 1)   // round 2 only
+  //   await DLRTournament.resetPointsRoundsElimination('tid', 2025)      // all rounds
+  async function resetPointsRoundsElimination(tid, year, roundIdx) {
+    const t  = _tournaments[tid];
+    if (!t) { console.log("Unknown tid:", tid); return; }
+    const yr = String(year || Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort().pop());
+    const ref = roundIdx != null
+      ? GMD.child(`tournaments/${tid}/playoffs/${yr}/pointsRounds/eliminations/${roundIdx}`)
+      : GMD.child(`tournaments/${tid}/playoffs/${yr}/pointsRounds/eliminations`);
+    await ref.remove();
+    // Clear local cache too
+    if (t.playoffs?.[yr]?.pointsRounds?.eliminations) {
+      if (roundIdx != null) delete t.playoffs[yr].pointsRounds.eliminations[roundIdx];
+      else t.playoffs[yr].pointsRounds.eliminations = {};
+    }
+    console.log(`[resetPointsRoundsElimination] Cleared ${roundIdx != null ? `round ${roundIdx+1}` : "all rounds"} for ${yr}. ` +
+      `Re-open the round to re-simulate and re-lock with current data.`);
+  }
+
   return {
     init,
     runDiscovery,
     _expandTrnMatchup,
     diagnoseDecathlon,
+    diagnosePointsRounds,
+    resetPointsRoundsElimination,
     getTournamentName: (tid) => _tournaments[tid]?.meta?.name || null,
   };
 
