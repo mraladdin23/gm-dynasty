@@ -38,6 +38,146 @@ const DLRTournament = (() => {
     mflEmail:        "MFL Email Address",
     yahooUsername:   "Yahoo Username"
   };
+
+  // ── Shared Tie-Handling (global, tournament-level setting) ─────────────
+  // Used by Points Rounds, Custom Rounds, World Cup group stage (score-cutoff
+  // ties), and H2H Bracket / World Cup knockout (1v1 match ties).
+  // Setting lives at po.tieHandling = { mode, tiebreakerOrder }
+  //   mode: "eliminate_both" | "eliminate_neither" | "tiebreaker"
+  //   tiebreakerOrder: ["record","pf"]  — only used when mode === "tiebreaker"
+  // Note: H2H 1v1 matches only ever use the tiebreaker chain (a bracket match
+  // can't structurally "eliminate both" or "advance both" without breaking the
+  // bracket shape) — see _resolveH2HTie below.
+  const TIE_HANDLING_LABELS = {
+    eliminate_both:    "🚫 Eliminate Both",
+    eliminate_neither:  "✅ Eliminate Neither",
+    tiebreaker:         "📋 Use Tiebreaker"
+  };
+  const TIEBREAKER_METRIC_LABELS = { record: "Record (W-L)", pf: "Total Points For" };
+
+  // Compares two teams by a single tiebreaker metric. Returns >0 if a is
+  // better (should rank higher / survive), <0 if b is better, 0 if still tied.
+  function _compareByMetric(a, b, metric) {
+    if (metric === "record") return ((a.wins||0)-(a.losses||0)) - ((b.wins||0)-(b.losses||0));
+    if (metric === "pf")     return (a.pf||0) - (b.pf||0);
+    return 0;
+  }
+
+  // Runs a tiebreaker chain against two teams. Returns "a", "b", or null if
+  // every configured metric is exhausted and they're still fully tied.
+  function _runTiebreakerChain(a, b, tiebreakerOrder) {
+    const order = (tiebreakerOrder && tiebreakerOrder.length) ? tiebreakerOrder : ["record", "pf"];
+    for (const metric of order) {
+      const cmp = _compareByMetric(a, b, metric);
+      if (cmp > 0) return "a";
+      if (cmp < 0) return "b";
+    }
+    return null;
+  }
+
+  // ── Score-cutoff tie resolution (Points Rounds, Custom Rounds, World Cup group) ──
+  // Given a score-sorted competing section (descending, best first) and the
+  // number of slots advancing, returns which teams advance vs are eliminated,
+  // correctly handling a tie that straddles the advance/eliminate cutline.
+  // `scoreOf(team)` must return the comparable score used for the sort.
+  // Returns { advancing: [...], eliminated: [...], tieNote: string|null }
+  function _resolveRoundElimination(compSection, advFromComp, tieHandling, scoreOf) {
+    const handling = tieHandling || { mode: "tiebreaker", tiebreakerOrder: ["record", "pf"] };
+    const n = compSection.length;
+
+    if (advFromComp <= 0) return { advancing: [], eliminated: [...compSection], tieNote: null };
+    if (advFromComp >= n) return { advancing: [...compSection], eliminated: [], tieNote: null };
+
+    const cutScore = scoreOf(compSection[advFromComp - 1]);
+    // Identify every team sharing the cutline score (straddling the boundary)
+    const tiedGroup = compSection.filter(tm => scoreOf(tm) === cutScore);
+
+    if (tiedGroup.length <= 1) {
+      // No tie at the cutline — simple slice
+      return { advancing: compSection.slice(0, advFromComp), eliminated: compSection.slice(advFromComp), tieNote: null };
+    }
+
+    // There's a genuine tie straddling the cutline.
+    const clearAdvancing  = compSection.filter(tm => scoreOf(tm) > cutScore);
+    const clearEliminated = compSection.filter(tm => scoreOf(tm) < cutScore);
+    const slotsForTiedGroup = advFromComp - clearAdvancing.length; // how many of the tied group would normally advance
+
+    if (handling.mode === "eliminate_both") {
+      return {
+        advancing: clearAdvancing,
+        eliminated: [...tiedGroup, ...clearEliminated],
+        tieNote: `Tie at cutline (${tiedGroup.length} teams) — all eliminated per tie-handling setting.`
+      };
+    }
+
+    if (handling.mode === "eliminate_neither") {
+      return {
+        advancing: [...clearAdvancing, ...tiedGroup],
+        eliminated: clearEliminated,
+        tieNote: `Tie at cutline (${tiedGroup.length} teams) — all advanced per tie-handling setting; one extra elimination deferred to next round.`,
+        deferredElimination: tiedGroup.length - slotsForTiedGroup
+      };
+    }
+
+    // tiebreaker mode — sort the tied group by the configured chain, resolve
+    // as many as the chain can. Any still-tied after the full chain falls
+    // back to eliminate_neither for that residual sub-group (logged clearly).
+    const order = (handling.tiebreakerOrder && handling.tiebreakerOrder.length) ? handling.tiebreakerOrder : ["record", "pf"];
+    const sortedTied = [...tiedGroup].sort((a, b) => {
+      for (const metric of order) {
+        const cmp = _compareByMetric(b, a, metric); // descending — better team first
+        if (cmp !== 0) return cmp;
+      }
+      return 0;
+    });
+    // Check if the chain actually separated everyone at the boundary we need
+    const boundaryA = sortedTied[slotsForTiedGroup - 1];
+    const boundaryB = sortedTied[slotsForTiedGroup];
+    const stillTiedAtBoundary = boundaryA && boundaryB &&
+      order.every(metric => _compareByMetric(boundaryA, boundaryB, metric) === 0);
+
+    if (!stillTiedAtBoundary) {
+      return {
+        advancing: [...clearAdvancing, ...sortedTied.slice(0, slotsForTiedGroup)],
+        eliminated: [...sortedTied.slice(slotsForTiedGroup), ...clearEliminated],
+        tieNote: `Tie at cutline (${tiedGroup.length} teams) resolved via tiebreaker (${order.join(" → ")}).`
+      };
+    }
+
+    // Chain exhausted, still tied — fall back to eliminate_neither for safety.
+    return {
+      advancing: [...clearAdvancing, ...tiedGroup],
+      eliminated: clearEliminated,
+      tieNote: `Tie at cutline (${tiedGroup.length} teams) could NOT be resolved by tiebreaker (${order.join(" → ")}) — ` +
+        `all advanced as a safety fallback; one extra elimination deferred to next round. Consider requesting a custom tiebreaker via support.`,
+      deferredElimination: tiedGroup.length - slotsForTiedGroup
+    };
+  }
+
+  // ── 1v1 H2H tie resolution (H2H Bracket, World Cup knockout) ───────────
+  // A bracket match must always produce exactly one winner — "eliminate both"
+  // or "eliminate neither" aren't structurally valid for a single 1v1 slot.
+  // Always uses the tiebreaker chain; if fully exhausted, logs clearly and
+  // falls back to team A (first seed / first slot) winning, deterministically,
+  // rather than an unexplained silent default.
+  // Returns { winnerSide: "a"|"b", tieNote: string|null }
+  function _resolveH2HTie(teamA, teamB, scoreA, scoreB, tieHandling) {
+    if (scoreA == null || scoreB == null) return { winnerSide: null, tieNote: null };
+    if (scoreA !== scoreB) return { winnerSide: scoreA > scoreB ? "a" : "b", tieNote: null };
+
+    const order = (tieHandling?.tiebreakerOrder && tieHandling.tiebreakerOrder.length)
+      ? tieHandling.tiebreakerOrder : ["record", "pf"];
+    const result = _runTiebreakerChain(teamA, teamB, order);
+    if (result) {
+      return { winnerSide: result, tieNote: `Tied ${scoreA} - ${scoreB} — resolved via tiebreaker (${order.join(" → ")}).` };
+    }
+    return {
+      winnerSide: "a",
+      tieNote: `Tied ${scoreA} - ${scoreB} — tiebreaker chain (${order.join(" → ")}) fully exhausted, still tied. ` +
+        `Defaulted to higher seed as a safety fallback. Consider requesting a custom tiebreaker via support.`
+    };
+  }
+
   // Optional extra fields
   const OPT_FIELDS = ["teamName", "twitterHandle", "gender"];
   const OPT_FIELD_LABELS = {
@@ -3576,6 +3716,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // ── Section C: Seeding & Byes ─────────────────────────────────────────────
     const showSeeding = mode !== "total_points";
+    // Tie-handling applies to any mode with elimination/advancement semantics —
+    // Points Rounds, Custom Rounds, World Cup (group cutline + knockout ties),
+    // and H2H Bracket (1v1 match ties).
+    const showTieHandling = ["points_rounds","custom_rounds","worldcup","h2h_bracket"].includes(mode);
+    const tieHandling = po.tieHandling || { mode: "tiebreaker", tiebreakerOrder: ["record","pf"] };
+    const isH2HOnlyTie = mode === "h2h_bracket"; // 1v1 matches only ever use tiebreaker
     const sectionSeeding = `
       <div class="trn-pc-section" id="trn-pc-seeding" ${showSeeding?"":'style="display:none"'}>
         ${!showSeeding?`<div class="trn-pc-na-note">Seeding & byes don't apply in Total Points mode.</div>`:`
@@ -3660,6 +3806,41 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                   <button class="trn-yn-btn ${po.h2hReseed ? "" : "trn-yn-btn--active"}" id="trn-h2h-reseed-off">Fixed</button>
                   <button class="trn-yn-btn ${po.h2hReseed ? "trn-yn-btn--active" : ""}" id="trn-h2h-reseed-on">Reseed</button>
                 </div>
+              </span>
+            </div>
+          </div>
+          <!-- Tie handling — any mode with elimination/advancement semantics -->
+          <div id="trn-tie-handling-row" ${showTieHandling?"":'style="display:none"'}>
+            <div class="trn-detail-row">
+              <span style="display:flex;align-items:center;gap:5px">Tie Handling
+                <button class="trn-help-btn" id="trn-tie-handling-help" title="How to handle a tie at the advance/eliminate cutline. Eliminate Both advances one fewer team than normal. Eliminate Neither advances one extra team, with one additional elimination deferred to next round. Tiebreaker uses the order below to pick a winner. For H2H Bracket (1v1 matches), only Tiebreaker applies — a single match must produce exactly one winner.">?</button>
+              </span>
+              <span>
+                <select id="trn-tie-mode"
+                  style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                  <option value="tiebreaker"        ${tieHandling.mode==="tiebreaker"?"selected":""}>${TIE_HANDLING_LABELS.tiebreaker}</option>
+                  <option value="eliminate_both"     ${(tieHandling.mode==="eliminate_both"&&!isH2HOnlyTie)?"selected":""} ${isH2HOnlyTie?"disabled":""}>${TIE_HANDLING_LABELS.eliminate_both}${isH2HOnlyTie?" (n/a — 1v1 match)":""}</option>
+                  <option value="eliminate_neither"  ${(tieHandling.mode==="eliminate_neither"&&!isH2HOnlyTie)?"selected":""} ${isH2HOnlyTie?"disabled":""}>${TIE_HANDLING_LABELS.eliminate_neither}${isH2HOnlyTie?" (n/a — 1v1 match)":""}</option>
+                </select>
+                ${isH2HOnlyTie?`<div style="font-size:.72rem;color:var(--color-text-dim);margin-top:3px">H2H Bracket matches are 1v1 — only Tiebreaker applies.</div>`:""}
+              </span>
+            </div>
+            <div class="trn-detail-row" id="trn-tiebreak-order-row" ${(isH2HOnlyTie || tieHandling.mode==="tiebreaker")?"":'style="display:none"'}>
+              <span style="display:flex;align-items:center;gap:5px">Tiebreaker Order
+                <button class="trn-help-btn" title="Applied in order until the tie is broken. Need a custom tiebreaker (e.g. head-to-head)? Email support and we can add it.">?</button>
+              </span>
+              <span>
+                <select id="trn-tie-metric-1"
+                  style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                  <option value="record" ${(tieHandling.tiebreakerOrder||["record","pf"])[0]==="record"?"selected":""}>${TIEBREAKER_METRIC_LABELS.record}</option>
+                  <option value="pf"     ${(tieHandling.tiebreakerOrder||["record","pf"])[0]==="pf"?"selected":""}>${TIEBREAKER_METRIC_LABELS.pf}</option>
+                </select>
+                <span style="font-size:.75rem;color:var(--color-text-dim);margin:0 4px">then</span>
+                <select id="trn-tie-metric-2"
+                  style="font-size:.82rem;padding:3px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                  <option value="pf"     ${(tieHandling.tiebreakerOrder||["record","pf"])[1]==="pf"?"selected":""}>${TIEBREAKER_METRIC_LABELS.pf}</option>
+                  <option value="record" ${(tieHandling.tiebreakerOrder||["record","pf"])[1]==="record"?"selected":""}>${TIEBREAKER_METRIC_LABELS.record}</option>
+                </select>
               </span>
             </div>
           </div>
@@ -4336,6 +4517,22 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       document.getElementById("trn-start-week-row")?.style.setProperty("display", mode==="total_points"?"none":"");
       document.getElementById("trn-seed-method-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
       document.getElementById("trn-bracket-size-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
+      document.getElementById("trn-tie-handling-row")?.style.setProperty("display",
+        ["points_rounds","custom_rounds","worldcup","h2h_bracket"].includes(mode)?"":"none");
+      // H2H Bracket matches are 1v1 — eliminate_both/eliminate_neither don't apply structurally.
+      // Disable those options live (rather than swapping markup) so this stays correct
+      // even if the mode is changed without a full section re-render.
+      const tieModeSel = document.getElementById("trn-tie-mode");
+      if (tieModeSel) {
+        const isH2HNow = mode === "h2h_bracket";
+        const ebOpt = tieModeSel.querySelector('option[value="eliminate_both"]');
+        const enOpt = tieModeSel.querySelector('option[value="eliminate_neither"]');
+        [ebOpt, enOpt].forEach(opt => { if (opt) opt.disabled = isH2HNow; });
+        if (isH2HNow && tieModeSel.value !== "tiebreaker") {
+          tieModeSel.value = "tiebreaker";
+          document.getElementById("trn-tiebreak-order-row")?.style.setProperty("display", "");
+        }
+      }
       // Decathlon: show its config section option, disable others that don't apply
       const sel2 = document.getElementById("trn-pc-section-select");
       if (sel2) {
@@ -4555,6 +4752,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       document.getElementById("trn-h2h-reseed-on")?.classList.add("trn-yn-btn--active");
       document.getElementById("trn-h2h-reseed-off")?.classList.remove("trn-yn-btn--active");
     });
+    // ── Tie handling: show/hide tiebreaker order row based on selected mode ──
+    document.getElementById("trn-tie-mode")?.addEventListener("change", (e) => {
+      document.getElementById("trn-tiebreak-order-row")?.style.setProperty(
+        "display", e.target.value === "tiebreaker" ? "" : "none");
+    });
 
     document.getElementById("trn-seeding-save")?.addEventListener("click", async () => {
       const seedMethod  = document.getElementById("trn-seed-method")?.value||"record";
@@ -4566,12 +4768,21 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const bracketSize = parseInt(document.getElementById("trn-bracket-size")?.value)||null;
       const h2hReseed   = document.getElementById("trn-h2h-reseed-on")?.classList.contains("trn-yn-btn--active") || false;
       if (bracketSize&&(bracketSize&(bracketSize-1))!==0) { showToast("Bracket size must be a power of 2","error"); return; }
+      const tieModeEl   = document.getElementById("trn-tie-mode");
+      const tieHandlingUpdate = tieModeEl ? {
+        mode: tieModeEl.value || "tiebreaker",
+        tiebreakerOrder: [
+          document.getElementById("trn-tie-metric-1")?.value || "record",
+          document.getElementById("trn-tie-metric-2")?.value || "pf"
+        ]
+      } : null;
       try {
         const updates = {
           seeding: {method:seedMethod},
           byes: {type:byeType, count:byeType!=="none"?byeCount:0, scope:byeScope, method:byeMethod},
           bracketSize,
-          h2hReseed: h2hReseed || null
+          h2hReseed: h2hReseed || null,
+          ...(tieHandlingUpdate ? { tieHandling: tieHandlingUpdate } : {})
         };
         await _poSave(updates); Object.assign(_poLocal(),updates);
         showToast("Byes & seeding saved ✓");
@@ -4644,7 +4855,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
     document.getElementById("trn-pr-save")?.addEventListener("click", async()=>{
       const rounds=_getPRRounds();
-      try { await _poSave({pointsRounds:{rounds}}); Object.assign(_poLocal(),{pointsRounds:{rounds}}); showToast("Rounds saved ✓"); }
+      try {
+        // Use a path-qualified key (not a nested object literal) so this
+        // doesn't replace the whole pointsRounds node and wipe sibling data
+        // like locked eliminations — same class of bug fixed previously in
+        // _writePublicSummary via .update() over .set().
+        await _poSave({ "pointsRounds/rounds": rounds });
+        if (!_poLocal().pointsRounds) _poLocal().pointsRounds = {};
+        Object.assign(_poLocal().pointsRounds, { rounds });
+        showToast("Rounds saved ✓");
+      }
       catch(e) { showToast("Failed","error"); }
     });
 
@@ -16783,6 +17003,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               const advFromComp = r.advanceMethod === "pct"
                 ? Math.round(competitors * (r.advancePct || 50) / 100)
                 : (r.advanceCount || 0);
+              const carriedDeferred = po.pointsRounds?.deferredEliminations?.[ri] || 0;
+              const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
 
               // Sort competing section by combined round score (desc), then by pf as tiebreak
               const sorted = [...compSection].sort((a, b) => {
@@ -16803,8 +17025,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                   `Consider re-visiting round ${ri+1} while score data is available so it can be locked in.`);
               }
 
-              // Next pool = byes + top advFromComp competitive scorers
-              pool = [...byeSection, ...sorted.slice(0, advFromComp)];
+              // Tie-aware advancement using the global tieHandling setting —
+              // mirrors the lock-write logic so a live preview before lock
+              // matches what will actually be locked in.
+              const scoreOfSim = (tm) => _weekScore(tm, rWeekNum, rWpr) ?? tm.pf ?? -1;
+              const simTie = _resolveRoundElimination(sorted, effectiveAdvFromComp, po.tieHandling, scoreOfSim);
+              if (simTie.tieNote) console.warn(`[Points Rounds] Round ${ri+1} (simulated): ${simTie.tieNote}`);
+
+              // Next pool = byes + advancing competitive scorers
+              pool = [...byeSection, ...simTie.advancing];
             }
           }
 
@@ -16851,16 +17080,34 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           if (!isFinal && !lockedElims[roundIdx]) {
             const allScored = compSection_.every(tm => tm.wkScore != null);
             if (allScored && compSection_.length > 0) {
-              const eliminatedTeams = compSection_.slice(advFromComp); // bottom scorers
+              // Account for a deferred elimination carried over from a prior
+              // round's tie (eliminate_neither / exhausted-tiebreaker case) —
+              // one extra team gets eliminated this round to compensate.
+              const carriedDeferred = po.pointsRounds?.deferredEliminations?.[roundIdx] || 0;
+              const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
+
+              const scoreOf = (tm) => blendEnabled ? (tm.bScore ?? tm.wkScore ?? tm.pf) : (tm.wkScore ?? tm.pf);
+              const tieResult = _resolveRoundElimination(compSection_, effectiveAdvFromComp, po.tieHandling, scoreOf);
+              const eliminatedTeams = tieResult.eliminated;
+              if (tieResult.tieNote) console.warn(`[Points Rounds] Round ${roundIdx+1}: ${tieResult.tieNote}`);
+
               if (eliminatedTeams.length > 0) {
                 const elimMap = {};
                 eliminatedTeams.forEach(tm => { elimMap[_teamKey(tm)] = true; });
-                _tPlayoffsRef(tid, activeY).child(`pointsRounds/eliminations/${roundIdx}`).set(elimMap)
+                const writes = { [`pointsRounds/eliminations/${roundIdx}`]: elimMap };
+                if (tieResult.deferredElimination) {
+                  writes[`pointsRounds/deferredEliminations/${roundIdx + 1}`] = tieResult.deferredElimination;
+                }
+                _tPlayoffsRef(tid, activeY).update(writes)
                   .then(() => {
                     // Update local cache so subsequent renders in this session see it immediately
                     if (!po.pointsRounds) po.pointsRounds = {};
                     if (!po.pointsRounds.eliminations) po.pointsRounds.eliminations = {};
                     po.pointsRounds.eliminations[roundIdx] = elimMap;
+                    if (tieResult.deferredElimination) {
+                      if (!po.pointsRounds.deferredEliminations) po.pointsRounds.deferredEliminations = {};
+                      po.pointsRounds.deferredEliminations[roundIdx + 1] = tieResult.deferredElimination;
+                    }
                   })
                   .catch(e => console.warn(`[Points Rounds] Failed to lock round ${roundIdx+1} eliminations:`, e.message));
               }
@@ -17057,9 +17304,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // Derive survivors from round 0; byes advance automatically.
       let survivors = [...r0Byes]; // byes first (highest seeds)
       r0.forEach(m => {
-        const winner = (m.scoreA != null && m.scoreB != null)
-          ? (m.scoreA >= m.scoreB ? m.teamA : m.teamB)
-          : null;
+        let winner = null;
+        if (m.scoreA != null && m.scoreB != null) {
+          const tie = _resolveH2HTie(m.teamA, m.teamB, m.scoreA, m.scoreB, po.tieHandling);
+          if (tie.tieNote) console.warn(`[H2H Bracket] Round 1, ${m.a} vs ${m.b}: ${tie.tieNote}`);
+          winner = tie.winnerSide === "a" ? m.teamA : tie.winnerSide === "b" ? m.teamB : null;
+        }
         if (winner) survivors.push(winner);
       });
       // If reseed, re-sort survivors by record then PF descending.
@@ -17084,9 +17334,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         // Advance winners for next round
         survivors = [];
         rnd.forEach(m => {
-          const winner = (m.scoreA != null && m.scoreB != null)
-            ? (m.scoreA >= m.scoreB ? m.teamA : m.teamB)
-            : null;
+          let winner = null;
+          if (m.scoreA != null && m.scoreB != null) {
+            const tie = _resolveH2HTie(m.teamA, m.teamB, m.scoreA, m.scoreB, po.tieHandling);
+            if (tie.tieNote) console.warn(`[H2H Bracket] Round ${ri+1}, ${m.a} vs ${m.b}: ${tie.tieNote}`);
+            winner = tie.winnerSide === "a" ? m.teamA : tie.winnerSide === "b" ? m.teamB : null;
+          }
           if (winner) survivors.push(winner);
         });
       }
@@ -18003,18 +18256,34 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const isFinalRound = targetRi === bracket.length - 1;
 
         if (targetRnd && lastScoredRi >= 0 && !isFinalRound) {
-          const winners = (bracket[lastScoredRi] || []).map(m =>
-            m.scoreA >= m.scoreB ? m.a : m.b
-          ).filter(Boolean);
+          // Detect ties — don't silently assume a winner. The admin assigns
+          // next-round slots manually in this panel anyway, so a tied match
+          // simply contributes no automatic winner; the admin picks who
+          // advances directly via the dropdowns below.
+          const tiedMatches = [];
+          const winners = (bracket[lastScoredRi] || []).map(m => {
+            if (m.scoreA == null || m.scoreB == null) return null;
+            if (m.scoreA === m.scoreB) { tiedMatches.push(m); return null; }
+            return m.scoreA > m.scoreB ? m.a : m.b;
+          }).filter(Boolean);
+          const tieWarningHTML = tiedMatches.length ? `
+            <div style="padding:8px 12px;margin-bottom:var(--space-2);background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);border-radius:8px;font-size:.78rem">
+              ⚠️ ${tiedMatches.length} tied match${tiedMatches.length>1?"es":""} (${tiedMatches.map(m=>`${_esc(m.a)} ${m.scoreA} - ${m.scoreB} ${_esc(m.b)}`).join(", ")}) —
+              no automatic winner. Please select who advances manually below.
+            </div>` : "";
 
-          if (winners.length > 0) {
+          if (winners.length > 0 || tiedMatches.length > 0) {
+            // Tied teams are still selectable in the dropdowns (admin must pick
+            // manually), just not auto-populated as a "winner."
+            const tiedTeamNames = tiedMatches.flatMap(m => [m.a, m.b]).filter(Boolean);
+            const selectableNames = [...winners, ...tiedTeamNames];
             const nextSlots = targetRnd.map((m, mi) => ({
               a: m.a || "", b: m.b || "", mi
             }));
 
             const _opts = (placed, cur) => {
               let h = `<option value="">— Select winner —</option>`;
-              winners.forEach(name => {
+              selectableNames.forEach(name => {
                 const dis = placed.has(name) && name !== cur;
                 h += `<option value="${_esc(name)}" ${name===cur?"selected":""}${dis?" disabled":""}>${_esc(name)}</option>`;
               });
@@ -18038,11 +18307,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                   ${getRN(lastScoredRi)} complete — assign ${winners.length} winners to ${getRN(targetRi)} matchups. Any winner can go in any slot.
                   ${targetRnd.some(m=>m.a||m.b) ? `<br><span style="color:var(--color-gold,#d4af37)">⚡ Auto-filled from scores — review and save to confirm, or reassign freely.</span>` : ""}
                 </p>
+                ${tieWarningHTML}
                 <div id="trn-wc-next-rows" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3)">${matchupRows}</div>
                 <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
                   <button class="btn-primary btn-sm" id="trn-wc-next-save" data-next-ri="${targetRi}">💾 Save ${getRN(targetRi)} Matchups</button>
                   <button class="btn-secondary btn-sm" id="trn-wc-next-clear" data-clear-ri="${targetRi}">✕ Clear This Round</button>
-                  <span style="font-size:.73rem;color:var(--color-text-dim)">${winners.length} winners → ${nextSlots.length} matchups</span>
+                  <span style="font-size:.73rem;color:var(--color-text-dim)">${selectableNames.length} team${selectableNames.length!==1?"s":""} available → ${nextSlots.length} matchups</span>
                 </div>
               </div>`;
           }
@@ -18683,15 +18953,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
 
           // Auto-advance: for each fully-scored round, fill the next round's slots
-          // with winners — but only if the slot is currently empty.
+          // with winners — but only if the slot is currently empty. Tied matches
+          // are skipped (left empty) rather than silently assigned a winner —
+          // the admin must resolve these manually.
+          let tiedSkipped = 0;
           for (let ri = 0; ri < updBracket.length - 1; ri++) {
             const rnd  = updBracket[ri];
             const next = updBracket[ri + 1];
             const allScored = rnd.every(m => m.a && m.b && m.scoreA !== null && m.scoreB !== null);
             if (!allScored) continue;
             for (let mi = 0; mi < rnd.length; mi++) {
-              const m      = rnd[mi];
-              const winner = m.scoreA >= m.scoreB ? m.a : m.b;
+              const m = rnd[mi];
+              if (m.scoreA === m.scoreB) {
+                tiedSkipped++;
+                console.warn(`[World Cup] Round ${ri+1} tie (${m.a} ${m.scoreA} - ${m.scoreB} ${m.b}) — not auto-advanced. Assign the winner manually below.`);
+                continue;
+              }
+              const winner = m.scoreA > m.scoreB ? m.a : m.b;
               // Each winner feeds a specific slot in the next round:
               // matchup mi feeds: next round matchup floor(mi/2), side a if mi is even, b if odd
               const nextMi   = Math.floor(mi / 2);
@@ -18704,7 +18982,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           await _tPlayoffsRef(tid, activeY).update({ worldcupBracket: updBracket });
           Object.assign(po, { worldcupBracket: updBracket });
-          showToast("Scores updated & winners advanced ✓");
+          showToast(tiedSkipped > 0
+            ? `Scores updated ✓ — ${tiedSkipped} tied match${tiedSkipped>1?"es":""} need manual winner selection below.`
+            : "Scores updated & winners advanced ✓");
           document.getElementById("trn-po-content").innerHTML = _renderContent("wc_bracket");
           _wcWireBracketButtons();
         } catch(e) { showToast("Score refresh failed: "+e.message, "error"); }
@@ -19564,16 +19844,41 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               // and their score in that round (for same-round tie-breaking by PF).
               const elimRound3 = {}; // teamName → {ri, score}
 
-              // Walk all rounds: collect winners and losers
+              // Walk all rounds: collect winners and losers.
+              // IMPORTANT: derive the loser from actual bracket placement (who
+              // is NOT present in the next round's slots) rather than
+              // re-comparing scoreA/scoreB — a tied match's true winner was
+              // already decided by auto-advance (non-tie) or the admin's
+              // manual pick (tie, via the next-round panel), and that
+              // decision lives in the bracket structure itself. Re-deriving
+              // from raw scores here would silently mis-attribute any tie.
               for (let ri = 0; ri < nr3; ri++) {
                 const rnd = wcBracket3[ri] || [];
+                const nextRnd = wcBracket3[ri + 1] || [];
+                const advancedNames = new Set(
+                  nextRnd.flatMap(m => [m.a, m.b]).filter(Boolean).map(n => _sk3(n))
+                );
                 rnd.forEach(m => {
                   if (!m.a || !m.b) return;
                   const hasScore = m.scoreA !== null && m.scoreA !== undefined &&
                                    m.scoreB !== null && m.scoreB !== undefined;
                   if (!hasScore) return;
-                  const loser = m.scoreA >= m.scoreB ? m.b : m.a;
-                  const loserScore = m.scoreA >= m.scoreB ? m.scoreB : m.scoreA;
+                  // Final round has no "next round" to check — fall back to
+                  // score comparison there (a true tie in the championship
+                  // match itself is an edge case not handled by bracket
+                  // placement and would need manual admin resolution upstream).
+                  let loser, loserScore;
+                  if (ri === nr3 - 1 || nextRnd.length === 0) {
+                    if (m.scoreA === m.scoreB) return; // unresolved tie — skip rather than guess
+                    loser = m.scoreA > m.scoreB ? m.b : m.a;
+                    loserScore = m.scoreA > m.scoreB ? m.scoreB : m.scoreA;
+                  } else {
+                    const aAdvanced = advancedNames.has(_sk3(m.a));
+                    const bAdvanced = advancedNames.has(_sk3(m.b));
+                    if (aAdvanced === bAdvanced) return; // both or neither advanced — can't determine, skip
+                    loser = aAdvanced ? m.b : m.a;
+                    loserScore = aAdvanced ? m.scoreB : m.scoreA;
+                  }
                   // Only record first elimination (don't overwrite if already placed)
                   if (!elimRound3[loser]) elimRound3[loser] = { ri, score: loserScore };
                 });
@@ -19586,7 +19891,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               if (lastM?.a && lastM?.b &&
                   lastM.scoreA !== null && lastM.scoreA !== undefined &&
                   lastM.scoreB !== null && lastM.scoreB !== undefined) {
-                champ3 = lastM.scoreA >= lastM.scoreB ? lastM.a : lastM.b;
+                if (lastM.scoreA === lastM.scoreB) {
+                  console.warn(`[World Cup] Championship match tied (${lastM.a} ${lastM.scoreA} - ${lastM.scoreB} ${lastM.b}) — no champion determined. Resolve manually.`);
+                } else {
+                  champ3 = lastM.scoreA > lastM.scoreB ? lastM.a : lastM.b;
+                }
               }
 
               // Place champion first
