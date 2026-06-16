@@ -3499,12 +3499,20 @@
         await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).set(
           Object.keys(pubDivs).length ? pubDivs : null
         );
-        allDivsByYear[yr] = pubDivs;
+        // Update the shared tournament cache (not a local var — this function
+        // doesn't share scope with renderDivisionsTab's allDivsByYear).
+        if (_currentT) {
+          _currentT.divisions = _currentT.divisions || {};
+          _currentT.divisions[yr] = pubDivs;
+        }
       } catch(syncErr) {
         console.warn("[Divisions] Public summary rebuild failed (join still succeeded):", syncErr);
         try {
           const fresh = await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).once("value");
-          if (fresh.val()) allDivsByYear[yr] = fresh.val();
+          if (fresh.val() && _currentT) {
+            _currentT.divisions = _currentT.divisions || {};
+            _currentT.divisions[yr] = fresh.val();
+          }
         } catch(fallbackErr) {
           console.warn("[Divisions] Fallback re-read also failed:", fallbackErr);
         }
