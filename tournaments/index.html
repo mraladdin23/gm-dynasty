@@ -3453,58 +3453,67 @@
         } catch(e) { /* non-fatal */ }
       }
 
-      // Write the join
+      // Write the join — this is the ONLY step that determines join success.
+      // Everything after (public summary rebuild) is best-effort and must
+      // never cause a successful join to be reported as a failure.
       try {
         await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions/${divId}/memberIds/${matchRid}`).set(true);
+      } catch(e) {
+        console.error("[Divisions] Join write failed:", e);
+        onError(`Could not join division: ${e.message || "unknown error"}. Please try again or contact the commissioner.`);
+        return;
+      }
 
-        // Rebuild public snapshot
+      // Rebuild public snapshot — best-effort only, never blocks success.
+      try {
+        const adminDivSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
+        const adminDivs    = adminDivSnap.val() || {};
+        const allRegSnap   = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
+        const allRegs      = allRegSnap.val() || {};
+
+        const pubDivs = {};
+        Object.entries(adminDivs).forEach(([dId, d]) => {
+          if (d.showPublicly === false) return;
+          const memberIds = Object.keys(d.memberIds || {});
+          const members   = memberIds.map(rid => {
+            const r = allRegs[rid] || {};
+            const name = r.displayName || r.teamName || null;
+            if (!name) return null; // skip orphaned rids from public display
+            return { displayName: name, gender: r.gender || null };
+          }).filter(Boolean);
+          pubDivs[dId] = {
+            name:            d.name || "",
+            teamCap:         d.teamCap   || null,
+            maleCap:         d.maleCap   || null,
+            femaleCap:       d.femaleCap || null,
+            enforceTotal:    d.enforceTotal   || false,
+            enforceMale:     d.enforceMale    || false,
+            enforceFemale:   d.enforceFemale  || false,
+            allowSelfSelect: d.allowSelfSelect || false,
+            memberCount:     memberIds.length,
+            members,
+          };
+          if (d.description) pubDivs[dId].description = d.description;
+          Object.keys(pubDivs[dId]).forEach(k => { if (pubDivs[dId][k] === null) delete pubDivs[dId][k]; });
+        });
+        await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).set(
+          Object.keys(pubDivs).length ? pubDivs : null
+        );
+        allDivsByYear[yr] = pubDivs;
+      } catch(syncErr) {
+        console.warn("[Divisions] Public summary rebuild failed (join still succeeded):", syncErr);
         try {
-          const adminDivSnap = await _pubDb.ref(`gmd/tournaments/${tid}/playoffs/${yr}/divisions`).once("value");
-          const adminDivs    = adminDivSnap.val() || {};
-          const allRegSnap   = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
-          const allRegs      = allRegSnap.val() || {};
-
-          const pubDivs = {};
-          Object.entries(adminDivs).forEach(([dId, d]) => {
-            if (d.showPublicly === false) return;
-            const memberIds = Object.keys(d.memberIds || {});
-            const members   = memberIds.map(rid => {
-              const r = allRegs[rid] || {};
-              const name = r.displayName || r.teamName || null;
-              if (!name) return null; // skip orphaned rids from public display
-              return { displayName: name, gender: r.gender || null };
-            }).filter(Boolean);
-            pubDivs[dId] = {
-              name:            d.name || "",
-              teamCap:         d.teamCap   || null,
-              maleCap:         d.maleCap   || null,
-              femaleCap:       d.femaleCap || null,
-              enforceTotal:    d.enforceTotal   || false,
-              enforceMale:     d.enforceMale    || false,
-              enforceFemale:   d.enforceFemale  || false,
-              allowSelfSelect: d.allowSelfSelect || false,
-              memberCount:     memberIds.length,
-              members,
-            };
-            if (d.description) pubDivs[dId].description = d.description;
-            Object.keys(pubDivs[dId]).forEach(k => { if (pubDivs[dId][k] === null) delete pubDivs[dId][k]; });
-          });
-          await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).set(
-            Object.keys(pubDivs).length ? pubDivs : null
-          );
-          allDivsByYear[yr] = pubDivs;
-        } catch(syncErr) {
           const fresh = await _pubDb.ref(`gmd/publicTournaments/${tid}/divisions/${yr}`).once("value");
           if (fresh.val()) allDivsByYear[yr] = fresh.val();
+        } catch(fallbackErr) {
+          console.warn("[Divisions] Fallback re-read also failed:", fallbackErr);
         }
-
-        onSuccess();
-        // Re-render divisions tab with updated data
-        const divBody = document.getElementById("pub-section-body");
-        if (divBody) renderDivisionsTab(divBody);
-      } catch(e) {
-        onError("Could not join division. Please try again or contact the commissioner.");
       }
+
+      // Join succeeded regardless of summary-rebuild outcome above.
+      onSuccess();
+      const divBody = document.getElementById("pub-section-body");
+      if (divBody) renderDivisionsTab(divBody);
     }
 
     // ── Message Board (public) ──────────────────────────────
