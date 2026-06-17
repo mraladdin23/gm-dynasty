@@ -17077,20 +17077,27 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // otherwise we'd lock in a result based on incomplete data. Skip the
           // final round (no "elimination" concept — one champion) and skip if
           // already locked (write-once).
-          if (!isFinal && !lockedElims[roundIdx]) {
+          // This same tie-aware result also drives the badges/cut-line below —
+          // previously the display used a raw positional slice independent of
+          // tie-handling, so a tied team could show "Advances" in this round's
+          // table even though the locked/computed record correctly excluded
+          // them from the next round's pool. Single source of truth now.
+          const scoreOf = (tm) => blendEnabled ? (tm.bScore ?? tm.wkScore ?? tm.pf) : (tm.wkScore ?? tm.pf);
+          const carriedDeferred = po.pointsRounds?.deferredEliminations?.[roundIdx] || 0;
+          const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
+          let displayEliminatedKeys = null; // Set of team keys eliminated, for badge/cut-line display
+
+          if (lockedElims[roundIdx]) {
+            // Already locked — that record is the permanent source of truth.
+            displayEliminatedKeys = new Set(Object.keys(lockedElims[roundIdx]));
+          } else if (!isFinal) {
             const allScored = compSection_.every(tm => tm.wkScore != null);
             if (allScored && compSection_.length > 0) {
-              // Account for a deferred elimination carried over from a prior
-              // round's tie (eliminate_neither / exhausted-tiebreaker case) —
-              // one extra team gets eliminated this round to compensate.
-              const carriedDeferred = po.pointsRounds?.deferredEliminations?.[roundIdx] || 0;
-              const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
-
-              const scoreOf = (tm) => blendEnabled ? (tm.bScore ?? tm.wkScore ?? tm.pf) : (tm.wkScore ?? tm.pf);
               const tieResult = _resolveRoundElimination(compSection_, effectiveAdvFromComp, po.tieHandling, scoreOf);
-              const eliminatedTeams = tieResult.eliminated;
               if (tieResult.tieNote) console.warn(`[Points Rounds] Round ${roundIdx+1}: ${tieResult.tieNote}`);
+              displayEliminatedKeys = new Set(tieResult.eliminated.map(tm => _teamKey(tm)));
 
+              const eliminatedTeams = tieResult.eliminated;
               if (eliminatedTeams.length > 0) {
                 const elimMap = {};
                 eliminatedTeams.forEach(tm => { elimMap[_teamKey(tm)] = true; });
@@ -17114,9 +17121,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             }
           }
 
+          // Actual advancing count may differ from the configured advFromComp
+          // when a tie was resolved via eliminate_both (fewer advance) or
+          // eliminate_neither (more advance, with a deferred elimination next
+          // round). Derive the real boundary from displayEliminatedKeys so the
+          // cut-line divider, header summary, and labels all reflect what
+          // actually happened, not just the configured target.
+          const actualAdvCount = displayEliminatedKeys
+            ? compSection_.length - displayEliminatedKeys.size
+            : advFromComp;
+          const actualEliminated = competitors - actualAdvCount;
+
           const summary = isByeRound
-            ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${advFromComp} advance · ${competitors - advFromComp} eliminated`
-            : `${pool.length} competing · ${advFromComp} advance · ${eliminated} eliminated`;
+            ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${actualAdvCount} advance · ${actualEliminated} eliminated`
+            : `${pool.length} competing · ${actualAdvCount} advance · ${actualEliminated} eliminated`;
 
           // Update the header meta text
           const headerEl = document.querySelector(`#${tableId}`)?.closest(".trn-po-table-wrap")
@@ -17136,7 +17154,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const rows = sortedPool.map((tm, i) => {
             const isByeTeam = isByeRound && i < poolByes;
             const compIdx   = i - poolByes;
-            const isCompAdv = !isByeTeam && compIdx < advFromComp;
+            // Prefer the tie-aware result (displayEliminatedKeys) when available —
+            // falls back to a raw positional check only if scores aren't all in
+            // yet (so there's nothing tie-aware to compute against).
+            const isCompAdv = !isByeTeam && (displayEliminatedKeys
+              ? !displayEliminatedKeys.has(_teamKey(tm))
+              : compIdx < advFromComp);
             const isChamp   = isFinal && i === poolByes;
             const rowCls    = isChamp ? "trn-po-row--champion"
               : isByeTeam ? "trn-po-row--bye-seed"
@@ -17147,7 +17170,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
               : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
               : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-            const cutAfter = !isFinal && !isByeTeam && compIdx === advFromComp - 1;
+            // Cut line now renders at the ACTUAL boundary (after the last
+            // advancing row in sorted order), not the configured advFromComp —
+            // so a tie resolved via eliminate_both/eliminate_neither shows the
+            // divider in the right place instead of mid-tied-group.
+            const cutAfter = !isFinal && !isByeTeam && compIdx === actualAdvCount - 1;
             const wkCell = isByeTeam
               ? `<td class="trn-po-num dim trn-po-col-wk">—</td>${blendEnabled ? `<td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : ""}`
               : blendEnabled
@@ -17155,6 +17182,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                    <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
                    <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
                 : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
+            const tieAdjustedNote = actualAdvCount !== advFromComp
+              ? ` <span style="color:var(--color-text-dim);font-weight:400">(tie-adjusted from ${advFromComp})</span>` : "";
             return `<tr class="${rowCls}">
               <td class="trn-po-rank">${i+1}</td>
               <td class="trn-po-team-name">
@@ -17163,7 +17192,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               </td>
               ${wkCell}
               <td>${badge}</td>
-            </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${advFromComp} advance · ${competitors - advFromComp} eliminated</div></td></tr>` : ""}`;
+            </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${actualAdvCount} advance · ${competitors - actualAdvCount} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
           }).join("");
 
           const table  = document.getElementById(tableId);
