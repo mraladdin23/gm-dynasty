@@ -1669,6 +1669,53 @@
    ══════════════════════════════════════════════════════════ */
 
 /* ── Section nav ─────────────────────────────────────────── */
+.trn-sa-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+/* iOS-style toggle switch for "Include playoffs" */
+.trn-sa-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  font-size: .82rem;
+  color: var(--color-text-dim);
+}
+.trn-sa-toggle-label input[type="checkbox"] { display: none; }
+.trn-sa-toggle-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--color-border);
+  border-radius: var(--radius-pill);
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.trn-sa-toggle-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform var(--transition);
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.trn-sa-toggle-label input:checked ~ .trn-sa-toggle-track {
+  background: var(--color-green, #4ade80);
+}
+.trn-sa-toggle-label input:checked ~ .trn-sa-toggle-track .trn-sa-toggle-thumb {
+  transform: translateX(16px);
+}
+.trn-sa-toggle-text { white-space: nowrap; }
+
+
 .trn-sa-nav {
   display: flex;
   flex-wrap: wrap;
