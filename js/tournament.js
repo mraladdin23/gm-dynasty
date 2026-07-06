@@ -14571,7 +14571,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const year         = _standingsYear || new Date().getFullYear();
     const meta         = t.meta || {};
     const playoffWeek  = meta.playoffStartWeek || null;
-    const maxRegWeek   = playoffWeek ? playoffWeek - 1 : 14;
+    const maxRegWeek   = playoffWeek ? playoffWeek - 1 : 17;
     const standingsCache = t.standingsCache || {};
     const myKeys         = _findMyKeys(t);
     const isAdmin        = _myRole(t) === "admin" || _myRole(t) === "sub_admin";
@@ -14749,16 +14749,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     if (!el) return;
 
     // ── Helpers ─────────────────────────────────────────────────────────────
-    const _isMe = name => _isMyTeam(name, myKeys);
-    const _me   = name => _isMe(name) ? ' <span class="trn-you-badge">you</span>' : "";
-    const _lname = lid => leagueNameMap[String(lid)] || "";
-    const _ord  = n => ["1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th"][n] || `${n+1}th`;
+    const _isMe  = name => _isMyTeam(name, myKeys);
+    const _me    = name => _isMe(name) ? ' <span class="trn-you-badge">you</span>' : "";
+    const _lname = lid  => leagueNameMap[String(lid)] || "";
+    const _ord   = n   => ["1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th"][n] || `${n+1}th`;
 
-    // ── Season PF / PA leaderboards from standingsCache ────────────────────
-    const byPF = [...seasonTeams].sort((a, b) => b.pf - a.pf);
-    const byPA = [...seasonTeams].sort((a, b) => b.pa - a.pa);
-    const top5PF = byPF.slice(0, 5);
-    const top5PA = byPA.slice(0, 5);
+    // Determine whether playoff weeks are present in cached data at all —
+    // only offer the toggle if there's actually something to toggle.
+    const maxWeekInCache  = allMatchups.reduce((mx, m) => Math.max(mx, m.week || 0), 0);
+    const hasPlayoffWeeks = hasMatchupData && maxWeekInCache > maxRegWeek;
+
+    let activeSaSection   = "pf";
+    let includePlayoffs   = false;
+
+    // ── PF / PA card builders (from standingsCache — unaffected by toggle) ──
+    const byPF   = [...seasonTeams].sort((a, b) => b.pf - a.pf);
+    const byPA   = [...seasonTeams].sort((a, b) => b.pa - a.pa);
+    const top10PF = byPF.slice(0, 10);
+    const top10PA = byPA.slice(0, 10);
 
     const pfCard = (tm, i) => `
       <div class="trn-sa-statcard ${_isMe(tm.name) ? "trn-sa-statcard--me" : ""}">
@@ -14778,191 +14786,200 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         <div class="trn-sa-statcard-sub">${tm.wins}–${tm.losses}${tm.ties ? `–${tm.ties}` : ""}</div>
       </div>`;
 
-    // ── Matchup records from weekly data ────────────────────────────────────
-    let blowoutsHtml = "", lowWinHtml = "", highLossHtml = "", highIndivHtml = "", startSitHtml = "";
+    const muCard = (m, label, subtitle) => {
+      const aMeW = _isMe(m.winner.name), aMeL = _isMe(m.loser.name);
+      const lname = _lname(m.leagueId);
+      return `
+        <div class="trn-sa-mucard ${aMeW||aMeL ? "trn-sa-mucard--me" : ""}">
+          ${label ? `<div class="trn-sa-mucard-label">${label}</div>` : ""}
+          <div class="trn-sa-mucard-line trn-sa-mucard-line--win">
+            <span class="trn-sa-mucard-name">${_esc(m.winner.name)}${aMeW ? _me(m.winner.name) : ""}</span>
+            <span class="trn-sa-mucard-score trn-sa-mucard-score--win">${m.winner.score.toFixed(2)}</span>
+          </div>
+          <div class="trn-sa-mucard-line trn-sa-mucard-line--lose">
+            <span class="trn-sa-mucard-name">${_esc(m.loser.name)}${aMeL ? _me(m.loser.name) : ""}</span>
+            <span class="trn-sa-mucard-score trn-sa-mucard-score--lose">${m.loser.score.toFixed(2)}</span>
+          </div>
+          <div class="trn-sa-mucard-footer">
+            <span class="trn-sa-mucard-wk">Wk ${m.week}${m.week > maxRegWeek ? " 🏆" : ""}</span>
+            ${subtitle ? `<span class="trn-sa-mucard-sub">${subtitle}</span>` : ""}
+            ${lname ? `<span class="trn-sa-mucard-league">${_esc(lname)}</span>` : ""}
+          </div>
+        </div>`;
+    };
 
-    if (hasMatchupData) {
-      const enriched = allMatchups.map(m => ({
-        ...m,
-        winner: m.home.score > m.away.score ? m.home : m.away,
-        loser:  m.home.score > m.away.score ? m.away : m.home
-      })).filter(m => m.home.score > 0 || m.away.score > 0);
+    const indivScoreCard = (ts, i) => {
+      const lname = _lname(ts.leagueId);
+      const resultColor = ts.result === "W" ? "var(--color-green,#4ade80)" : "var(--color-red,#ef4444)";
+      const poFlag = ts.week > maxRegWeek ? " 🏆" : "";
+      return `
+        <div class="trn-sa-statcard ${_isMe(ts.name) ? "trn-sa-statcard--me" : ""}">
+          <div class="trn-sa-statcard-rank">${_ord(i)}</div>
+          <div class="trn-sa-statcard-val">${ts.score.toFixed(2)}</div>
+          <div class="trn-sa-statcard-name">${_esc(ts.name)}${_me(ts.name)}</div>
+          ${lname ? `<div class="trn-sa-statcard-league">${_esc(lname)}</div>` : ""}
+          <div class="trn-sa-statcard-sub">
+            Wk ${ts.week}${poFlag} · <span style="color:${resultColor};font-weight:700">${ts.result}</span>
+          </div>
+        </div>`;
+    };
 
-      // Biggest blowouts (by margin)
-      const biggestBlowouts = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 5);
-      // Lowest winning score ("lucky win")
-      const lowestWins = [...enriched].sort((a, b) => a.winner.score - b.winner.score).slice(0, 5);
-      // Highest losing score ("tough luck loss")
-      const highestLosses = [...enriched].sort((a, b) => b.loser.score - a.loser.score).slice(0, 5);
-      // Highest individual scores across all weeks (flat — both sides of every matchup)
-      const allIndivScores = [];
-      enriched.forEach(m => {
-        allIndivScores.push({ name: m.home.name, score: m.home.score, week: m.week, leagueId: m.leagueId, result: m.home.score > m.away.score ? "W" : "L" });
-        allIndivScores.push({ name: m.away.name, score: m.away.score, week: m.week, leagueId: m.leagueId, result: m.away.score > m.home.score ? "W" : "L" });
-      });
-      const highestIndiv = allIndivScores.sort((a, b) => b.score - a.score).slice(0, 5);
+    // ── Compute all matchup-derived sections for a given week filter ────────
+    // Called on initial render and again when the playoff toggle changes.
+    // Returns the full sections[] array so the nav and panel can be rebuilt.
+    const _buildSections = (includePO) => {
+      let blowoutsHtml = "", lowWinHtml = "", highLossHtml = "", highIndivHtml = "", startSitHtml = "";
 
-      const muCard = (m, label, subtitle) => {
-        const aMeW = _isMe(m.winner.name), aMeL = _isMe(m.loser.name);
-        const lname = _lname(m.leagueId);
-        return `
-          <div class="trn-sa-mucard ${aMeW||aMeL ? "trn-sa-mucard--me" : ""}">
-            ${label ? `<div class="trn-sa-mucard-label">${label}</div>` : ""}
-            <div class="trn-sa-mucard-line trn-sa-mucard-line--win">
-              <span class="trn-sa-mucard-name">${_esc(m.winner.name)}${aMeW ? _me(m.winner.name) : ""}</span>
-              <span class="trn-sa-mucard-score trn-sa-mucard-score--win">${m.winner.score.toFixed(2)}</span>
-            </div>
-            <div class="trn-sa-mucard-line trn-sa-mucard-line--lose">
-              <span class="trn-sa-mucard-name">${_esc(m.loser.name)}${aMeL ? _me(m.loser.name) : ""}</span>
-              <span class="trn-sa-mucard-score trn-sa-mucard-score--lose">${m.loser.score.toFixed(2)}</span>
-            </div>
-            <div class="trn-sa-mucard-footer">
-              <span class="trn-sa-mucard-wk">Wk ${m.week}</span>
-              ${subtitle ? `<span class="trn-sa-mucard-sub">${subtitle}</span>` : ""}
-              ${lname ? `<span class="trn-sa-mucard-league">${_esc(lname)}</span>` : ""}
-            </div>
-          </div>`;
-      };
+      if (hasMatchupData) {
+        // Apply playoff filter
+        const filtered = includePO
+          ? allMatchups
+          : allMatchups.filter(m => m.week <= maxRegWeek);
 
-      // Individual score card — reuses trn-sa-statcard, shows week + W/L context
-      const indivScoreCard = (ts, i) => {
-        const lname = _lname(ts.leagueId);
-        const resultColor = ts.result === "W" ? "var(--color-green,#4ade80)" : "var(--color-red,#ef4444)";
-        return `
-          <div class="trn-sa-statcard ${_isMe(ts.name) ? "trn-sa-statcard--me" : ""}">
-            <div class="trn-sa-statcard-rank">${_ord(i)}</div>
-            <div class="trn-sa-statcard-val">${ts.score.toFixed(2)}</div>
-            <div class="trn-sa-statcard-name">${_esc(ts.name)}${_me(ts.name)}</div>
-            ${lname ? `<div class="trn-sa-statcard-league">${_esc(lname)}</div>` : ""}
-            <div class="trn-sa-statcard-sub">
-              Wk ${ts.week} · <span style="color:${resultColor};font-weight:700">${ts.result}</span>
-            </div>
-          </div>`;
-      };
+        const enriched = filtered.map(m => ({
+          ...m,
+          winner: m.home.score > m.away.score ? m.home : m.away,
+          loser:  m.home.score > m.away.score ? m.away : m.home
+        })).filter(m => m.home.score > 0 || m.away.score > 0);
 
-      blowoutsHtml  = biggestBlowouts.map((m, i) => muCard(m, `#${i+1}`, `Δ${m.diff.toFixed(2)}`)).join("");
-      lowWinHtml    = lowestWins.map((m, i)       => muCard(m, `#${i+1}`, `Win: ${m.winner.score.toFixed(2)}`)).join("");
-      highLossHtml  = highestLosses.map((m, i)    => muCard(m, `#${i+1}`, `Loss: ${m.loser.score.toFixed(2)}`)).join("");
-      highIndivHtml = highestIndiv.map((ts, i)    => indivScoreCard(ts, i)).join("");
+        const biggestBlowouts = [...enriched].sort((a, b) => b.diff - a.diff).slice(0, 10);
+        const lowestWins      = [...enriched].sort((a, b) => a.winner.score - b.winner.score).slice(0, 10);
+        const highestLosses   = [...enriched].sort((a, b) => b.loser.score - a.loser.score).slice(0, 10);
 
-      // ── Start/Sit Accuracy (managed leagues only) ────────────────────────
-      // For each team each week: compare actual starters' points vs the
-      // optimal N-starter lineup from their full player pool. Only works
-      // for Sleeper leagues where players_points is populated (managed leagues).
-      // Accuracy = actual starter points / optimal starter points × 100.
-      const teamStartSit = {};  // teamName → { totalActual, totalOptimal, weeks }
-      const rosterPositions = {}; // leagueId → starterSlotCount (from data shape)
-
-      allMatchups.forEach(m => {
-        [m.home, m.away].forEach(side => {
-          if (!side.starters?.length || !Object.keys(side.pp || {}).length) return;
-          // Number of starter slots = number of starter IDs
-          const numStarters = side.starters.length;
-          // Actual points from started players
-          const actualPts = side.starters.reduce((sum, id) => sum + (side.sp?.[id] ?? side.pp?.[id] ?? 0), 0);
-          // Optimal: best numStarters from the full player pool by points
-          const poolScores = Object.entries(side.pp || {})
-            .map(([, pts]) => parseFloat(pts) || 0)
-            .sort((a, b) => b - a);
-          const optimalPts = poolScores.slice(0, numStarters).reduce((s, p) => s + p, 0);
-          if (optimalPts <= 0) return; // no data — skip
-          if (!teamStartSit[side.name]) teamStartSit[side.name] = { totalActual: 0, totalOptimal: 0, weeks: 0 };
-          teamStartSit[side.name].totalActual  += actualPts;
-          teamStartSit[side.name].totalOptimal += optimalPts;
-          teamStartSit[side.name].weeks++;
+        const allIndivScores = [];
+        enriched.forEach(m => {
+          allIndivScores.push({ name: m.home.name, score: m.home.score, week: m.week, leagueId: m.leagueId, result: m.home.score > m.away.score ? "W" : "L" });
+          allIndivScores.push({ name: m.away.name, score: m.away.score, week: m.week, leagueId: m.leagueId, result: m.away.score > m.home.score ? "W" : "L" });
         });
-      });
+        const highestIndiv = allIndivScores.sort((a, b) => b.score - a.score).slice(0, 10);
 
-      const startSitRows = Object.entries(teamStartSit)
-        .map(([name, d]) => ({
-          name,
-          accuracy: d.totalOptimal > 0 ? (d.totalActual / d.totalOptimal) * 100 : 0,
-          actual: d.totalActual,
-          optimal: d.totalOptimal,
-          weeks: d.weeks
-        }))
-        .filter(r => r.weeks >= 3) // require at least 3 weeks of data to show
-        .sort((a, b) => b.accuracy - a.accuracy);
+        blowoutsHtml  = biggestBlowouts.map((m, i) => muCard(m, `#${i+1}`, `Δ${m.diff.toFixed(2)}`)).join("");
+        lowWinHtml    = lowestWins.map((m, i)       => muCard(m, `#${i+1}`, `Win: ${m.winner.score.toFixed(2)}`)).join("");
+        highLossHtml  = highestLosses.map((m, i)    => muCard(m, `#${i+1}`, `Loss: ${m.loser.score.toFixed(2)}`)).join("");
+        highIndivHtml = highestIndiv.map((ts, i)    => indivScoreCard(ts, i)).join("");
 
-      if (startSitRows.length) {
-        const ssBar = (pct, isMe) => {
-          const fill = Math.min(100, Math.max(0, pct));
-          const color = fill >= 90 ? "var(--color-green)" : fill >= 80 ? "var(--color-gold,#d4af37)" : "var(--color-text-dim)";
-          return `<div class="trn-sa-ssbar" style="--fill:${fill}%;--col:${color}">
-            <div class="trn-sa-ssbar-fill" style="width:${fill}%;background:${color}"></div>
-          </div>`;
-        };
-        startSitHtml = `
-          <table class="trn-sa-sstable">
-            <thead><tr>
-              <th class="trn-sa-sstable-rank">#</th>
-              <th>Team</th>
-              <th class="trn-sa-sstable-num">Actual PF</th>
-              <th class="trn-sa-sstable-num">Optimal PF</th>
-              <th class="trn-sa-sstable-num">Accuracy</th>
-              <th class="trn-sa-sstable-bar">Score</th>
-            </tr></thead>
-            <tbody>
-              ${startSitRows.map((r, i) => `
-                <tr class="${_isMe(r.name) ? "trn-az-row--me" : ""}">
-                  <td class="trn-sa-sstable-rank">${i+1}</td>
-                  <td>${_esc(r.name)}${_me(r.name)}</td>
-                  <td class="trn-sa-sstable-num">${r.actual.toFixed(1)}</td>
-                  <td class="trn-sa-sstable-num" style="color:var(--color-text-dim)">${r.optimal.toFixed(1)}</td>
-                  <td class="trn-sa-sstable-num trn-sa-sstable-pct" style="color:${r.accuracy>=90?"var(--color-green)":r.accuracy>=80?"var(--color-gold,#d4af37)":"inherit"}">${r.accuracy.toFixed(1)}%</td>
-                  <td class="trn-sa-sstable-bar">${ssBar(r.accuracy, _isMe(r.name))}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
-          <div class="trn-az-meta" style="margin-top:var(--space-2)">
-            Start/sit accuracy = actual starter points ÷ optimal possible starter points.
-            Only shown for managed Sleeper leagues where roster data is available
-            (min. 3 weeks). Teams with no roster data are excluded.
-          </div>`;
-      } else {
-        startSitHtml = `<div class="trn-az-meta">Start/sit accuracy requires managed Sleeper leagues with full roster data. Not enough data available for ${year}.</div>`;
+        // ── Start/Sit Accuracy ─────────────────────────────────────────────
+        const teamStartSit = {};
+        filtered.forEach(m => {
+          [m.home, m.away].forEach(side => {
+            if (!side.starters?.length || !Object.keys(side.pp || {}).length) return;
+            const numStarters = side.starters.length;
+            const actualPts   = side.starters.reduce((sum, id) => sum + (side.sp?.[id] ?? side.pp?.[id] ?? 0), 0);
+            const poolScores  = Object.entries(side.pp || {})
+              .map(([, pts]) => parseFloat(pts) || 0)
+              .sort((a, b) => b - a);
+            const optimalPts = poolScores.slice(0, numStarters).reduce((s, p) => s + p, 0);
+            if (optimalPts <= 0) return;
+            if (!teamStartSit[side.name]) teamStartSit[side.name] = { totalActual: 0, totalOptimal: 0, weeks: 0 };
+            teamStartSit[side.name].totalActual  += actualPts;
+            teamStartSit[side.name].totalOptimal += optimalPts;
+            teamStartSit[side.name].weeks++;
+          });
+        });
+
+        const startSitRows = Object.entries(teamStartSit)
+          .map(([name, d]) => ({
+            name,
+            accuracy: d.totalOptimal > 0 ? (d.totalActual / d.totalOptimal) * 100 : 0,
+            actual: d.totalActual, optimal: d.totalOptimal, weeks: d.weeks
+          }))
+          .filter(r => r.weeks >= 3)
+          .sort((a, b) => b.accuracy - a.accuracy);
+
+        if (startSitRows.length) {
+          startSitHtml = `
+            <table class="trn-sa-sstable">
+              <thead><tr>
+                <th class="trn-sa-sstable-rank">#</th>
+                <th>Team</th>
+                <th class="trn-sa-sstable-num">Actual PF</th>
+                <th class="trn-sa-sstable-num">Optimal PF</th>
+                <th class="trn-sa-sstable-num">Accuracy</th>
+                <th class="trn-sa-sstable-bar">Score</th>
+              </tr></thead>
+              <tbody>
+                ${startSitRows.map((r, i) => `
+                  <tr class="${_isMe(r.name) ? "trn-az-row--me" : ""}">
+                    <td class="trn-sa-sstable-rank">${i+1}</td>
+                    <td>${_esc(r.name)}${_me(r.name)}</td>
+                    <td class="trn-sa-sstable-num">${r.actual.toFixed(1)}</td>
+                    <td class="trn-sa-sstable-num" style="color:var(--color-text-dim)">${r.optimal.toFixed(1)}</td>
+                    <td class="trn-sa-sstable-num trn-sa-sstable-pct" style="color:${r.accuracy>=90?"var(--color-green)":r.accuracy>=80?"var(--color-gold,#d4af37)":"inherit"}">${r.accuracy.toFixed(1)}%</td>
+                    <td class="trn-sa-sstable-bar"><div class="trn-sa-ssbar"><div class="trn-sa-ssbar-fill" style="width:${Math.min(100,r.accuracy).toFixed(1)}%;background:${r.accuracy>=90?"var(--color-green)":r.accuracy>=80?"var(--color-gold,#d4af37)":"var(--color-text-dim)"}"></div></div></td>
+                  </tr>`).join("")}
+              </tbody>
+            </table>
+            <div class="trn-az-meta" style="margin-top:var(--space-2)">
+              Start/sit accuracy = actual starter points ÷ optimal possible starter points.
+              Only shown for managed Sleeper leagues where roster data is available (min. 3 weeks).
+              ${includePO ? "🏆 Includes playoff weeks." : "Regular season only."}
+            </div>`;
+        } else {
+          startSitHtml = `<div class="trn-az-meta">Start/sit accuracy requires managed Sleeper leagues with full roster data. Not enough data available for ${year}.</div>`;
+        }
       }
-    }
 
+      const matchupCount = hasMatchupData
+        ? (includePO ? allMatchups : allMatchups.filter(m => m.week <= maxRegWeek)).length
+        : 0;
+
+      return {
+        matchupCount,
+        sections: [
+          {
+            id: "pf", icon: "📈", label: "Most Points For",
+            html: seasonTeams.length
+              ? `<div class="trn-sa-statgrid">${top10PF.map(pfCard).join("")}</div>
+                 <div class="trn-az-meta" style="margin-top:var(--space-2)">Regular-season totals from standings — not affected by the playoff toggle.</div>`
+              : `<div class="trn-az-meta">No standings data for ${year}.</div>`
+          },
+          {
+            id: "pa", icon: "🎯", label: "Most Points Against",
+            html: seasonTeams.length
+              ? `<div class="trn-sa-statgrid">${top10PA.map(paCard).join("")}</div>
+                 <div class="trn-az-meta" style="margin-top:var(--space-2)">Regular-season totals from standings — not affected by the playoff toggle.</div>`
+              : `<div class="trn-az-meta">No standings data for ${year}.</div>`
+          },
+          ...(hasMatchupData ? [
+            { id: "blowouts",     icon: "💥", label: "Biggest Blowouts",         html: `<div class="trn-sa-mugrid">${blowoutsHtml}</div>` },
+            { id: "lowest_win",   icon: "🍀", label: "Lowest Winning Scores",     html: `<div class="trn-sa-mugrid">${lowWinHtml}</div>` },
+            { id: "highest_loss", icon: "😤", label: "Highest Losing Scores",     html: `<div class="trn-sa-mugrid">${highLossHtml}</div>` },
+            { id: "high_indiv",   icon: "🔥", label: "Highest Individual Scores", html: `<div class="trn-sa-statgrid">${highIndivHtml}</div>` },
+            { id: "startsit",     icon: "🧠", label: "Start/Sit Accuracy",        html: startSitHtml },
+          ] : []),
+        ]
+      };
+    };
+
+    // ── Initial render ──────────────────────────────────────────────────────
     const noMatchupNotice = !hasMatchupData && numLeagues
-      ? `<div class="trn-az-meta" style="margin-top:var(--space-2);color:var(--color-text-dim)">
+      ? `<div class="trn-az-meta" style="color:var(--color-text-dim)">
            ⚠️ Matchup data unavailable — blowout, win/loss extremes, and start/sit accuracy require Sleeper matchup data.
            Hit ↺ Refresh to try fetching it.
          </div>`
       : !numLeagues
-      ? `<div class="trn-az-meta" style="margin-top:var(--space-2);color:var(--color-text-dim)">
-           ℹ️ No Sleeper leagues for ${year} — matchup-level stats (blowouts, win/loss extremes, start/sit) require Sleeper leagues synced for this season.
+      ? `<div class="trn-az-meta" style="color:var(--color-text-dim)">
+           ℹ️ No Sleeper leagues for ${year} — matchup-level stats require Sleeper leagues synced for this season.
          </div>`
       : "";
 
-    // ── Assemble sections ───────────────────────────────────────────────────
-    const sections = [
-      {
-        id: "pf", icon: "📈", label: "Most Points For (Season)",
-        html: seasonTeams.length
-          ? `<div class="trn-sa-statgrid">${top5PF.map(pfCard).join("")}</div>`
-          : `<div class="trn-az-meta">No standings data for ${year}.</div>`
-      },
-      {
-        id: "pa", icon: "🎯", label: "Most Points Against (Season)",
-        html: seasonTeams.length
-          ? `<div class="trn-sa-statgrid">${top5PA.map(paCard).join("")}</div>`
-          : `<div class="trn-az-meta">No standings data for ${year}.</div>`
-      },
-      ...(hasMatchupData ? [
-        { id: "blowouts",     icon: "💥", label: "Biggest Blowouts",           html: `<div class="trn-sa-mugrid">${blowoutsHtml}</div>` },
-        { id: "lowest_win",   icon: "🍀", label: "Lowest Winning Scores",       html: `<div class="trn-sa-mugrid">${lowWinHtml}</div>` },
-        { id: "highest_loss", icon: "😤", label: "Highest Losing Scores",       html: `<div class="trn-sa-mugrid">${highLossHtml}</div>` },
-        { id: "high_indiv",   icon: "🔥", label: "Highest Individual Scores",   html: `<div class="trn-sa-statgrid">${highIndivHtml}</div>` },
-        { id: "startsit",     icon: "🧠", label: "Start/Sit Accuracy",          html: startSitHtml },
-      ] : []),
-    ];
+    let { sections, matchupCount } = _buildSections(false);
+    activeSaSection = sections[0]?.id || "pf";
 
-    let activeSaSection = sections[0]?.id || "pf";
+    const _metaText = (includePO, mc) =>
+      `${seasonTeams.length} teams · ${maxRegWeek}-week regular season${hasMatchupData ? ` · ${mc} matchups${includePO ? " (incl. playoffs 🏆)" : ""}` : ""}`;
 
     el.innerHTML = `
       ${noMatchupNotice}
-      <div class="trn-az-meta">${seasonTeams.length} teams · ${maxRegWeek}-week regular season${hasMatchupData ? ` · ${allMatchups.length} matchups loaded` : ""}</div>
+      <div class="trn-sa-toolbar">
+        <div class="trn-az-meta" id="trn-sa-meta">${_metaText(false, matchupCount)}</div>
+        ${hasPlayoffWeeks ? `
+          <label class="trn-sa-toggle-label">
+            <input type="checkbox" id="trn-sa-po-chk" />
+            <span class="trn-sa-toggle-track"><span class="trn-sa-toggle-thumb"></span></span>
+            <span class="trn-sa-toggle-text">Include playoffs</span>
+          </label>` : ""}
+      </div>
       <div class="trn-sa-nav" id="trn-sa-nav">
         ${sections.map(s => `
           <button class="trn-sa-nav-btn${s.id === activeSaSection ? " trn-sa-nav-btn--active" : ""}" data-section="${s.id}">
@@ -14973,16 +14990,41 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         ${sections.find(s => s.id === activeSaSection)?.html || ""}
       </div>`;
 
-    document.getElementById("trn-sa-nav")?.addEventListener("click", e => {
-      const btn = e.target.closest("[data-section]");
-      if (!btn) return;
-      activeSaSection = btn.dataset.section;
-      document.querySelectorAll("#trn-sa-nav .trn-sa-nav-btn").forEach(b =>
-        b.classList.toggle("trn-sa-nav-btn--active", b.dataset.section === activeSaSection));
+    // ── Playoff toggle ──────────────────────────────────────────────────────
+    document.getElementById("trn-sa-po-chk")?.addEventListener("change", function() {
+      includePlayoffs = this.checked;
+      const rebuilt = _buildSections(includePlayoffs);
+      sections      = rebuilt.sections;
+      matchupCount  = rebuilt.matchupCount;
+      const metaEl  = document.getElementById("trn-sa-meta");
+      if (metaEl) metaEl.textContent = _metaText(includePlayoffs, matchupCount);
+      const nav = document.getElementById("trn-sa-nav");
+      if (nav) {
+        nav.innerHTML = sections.map(s => `
+          <button class="trn-sa-nav-btn${s.id === activeSaSection ? " trn-sa-nav-btn--active" : ""}" data-section="${s.id}">
+            ${s.icon} ${s.label}
+          </button>`).join("");
+        _wireNav();
+      }
       const panel = document.getElementById("trn-sa-panel");
       if (panel) panel.innerHTML = sections.find(s => s.id === activeSaSection)?.html || "";
     });
+
+    // ── Nav wiring (extracted so toggle can re-wire after nav rebuild) ──────
+    const _wireNav = () => {
+      document.getElementById("trn-sa-nav")?.addEventListener("click", e => {
+        const btn = e.target.closest("[data-section]");
+        if (!btn) return;
+        activeSaSection = btn.dataset.section;
+        document.querySelectorAll("#trn-sa-nav .trn-sa-nav-btn").forEach(b =>
+          b.classList.toggle("trn-sa-nav-btn--active", b.dataset.section === activeSaSection));
+        const panel = document.getElementById("trn-sa-panel");
+        if (panel) panel.innerHTML = sections.find(s => s.id === activeSaSection)?.html || "";
+      });
+    };
+    _wireNav();
   }
+
 
   // ── ANALYTICS: Rosters tab ─────────────────────────────────────────────────
   let _rostersCache = null; // { rows[], fetchedAt, tid }
