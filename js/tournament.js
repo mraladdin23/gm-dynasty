@@ -14572,6 +14572,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const meta         = t.meta || {};
     const playoffWeek  = meta.playoffStartWeek || null;
     const maxRegWeek   = playoffWeek ? playoffWeek - 1 : 17;
+    // Playoff rounds typically run 3 weeks; cap at NFL week 18 as a safety bound.
+    const maxPoWeek    = playoffWeek ? Math.min(playoffWeek + 2, 18) : null;
     const standingsCache = t.standingsCache || {};
     const myKeys         = _findMyKeys(t);
     const isAdmin        = _myRole(t) === "admin" || _myRole(t) === "sub_admin";
@@ -14602,13 +14604,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       await _tAnalyticsRef(tid).child(`seasonMatchups/${year}`).remove().catch(() => {});
       const el2 = document.getElementById("trn-sa-content");
       if (el2) el2.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Refreshing…</div>`;
-      await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, myKeys, isAdmin, standingsCache, document.getElementById("trn-sa-content"));
+      await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, document.getElementById("trn-sa-content"));
     });
 
-    await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, myKeys, isAdmin, standingsCache, document.getElementById("trn-sa-content"));
+    await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, document.getElementById("trn-sa-content"));
   }
 
-  async function _loadAndRenderSeasonAnalysis(tid, t, leagueIds, year, maxRegWeek, myKeys, isAdmin, standingsCache, el) {
+  async function _loadAndRenderSeasonAnalysis(tid, t, leagueIds, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, el) {
     if (!el) return;
 
     // ── Build team name map and league name map from standingsCache ─────────
@@ -14680,7 +14682,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         } catch(e) {}
 
         if (!hasMatchupData) {
-          // Fetch all regular-season weeks from Sleeper in batches
+          // Fetch regular-season weeks only on initial load.
+          // Playoff weeks are fetched lazily when the toggle is turned on
+          // (see the toggle handler in _renderSeasonAnalysisContent).
           el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching ${maxRegWeek} weeks of matchup data…</div>`;
           const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
           for (let wi = 0; wi < weeks.length; wi++) {
@@ -14742,10 +14746,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       }
     }
 
-    _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, leagueIds.length, leagueNameMap, myKeys, year, maxRegWeek);
+    _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, leagueIds.length, leagueNameMap, myKeys, year, maxRegWeek, maxPoWeek, tid, leagueIds);
   }
 
-  function _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, numLeagues, leagueNameMap, myKeys, year, maxRegWeek) {
+  function _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, numLeagues, leagueNameMap, myKeys, year, maxRegWeek, maxPoWeek, tid, leagueIds) {
     if (!el) return;
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -14754,13 +14758,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     const _lname = lid  => leagueNameMap[String(lid)] || "";
     const _ord   = n   => ["1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th"][n] || `${n+1}th`;
 
-    // Determine whether playoff weeks are present in cached data at all —
-    // only offer the toggle if there's actually something to toggle.
-    const maxWeekInCache  = allMatchups.reduce((mx, m) => Math.max(mx, m.week || 0), 0);
-    const hasPlayoffWeeks = hasMatchupData && maxWeekInCache > maxRegWeek;
+    // Show the toggle whenever playoffs are configured — don't gate on whether
+    // playoff data is in cache yet (it's fetched lazily when toggled on).
+    const canTogglePlayoffs = !!maxPoWeek;
 
-    let activeSaSection   = "pf";
-    let includePlayoffs   = false;
+    let activeSaSection = "pf";
+    let includePlayoffs = false;
 
     // ── PF / PA card builders (from standingsCache — unaffected by toggle) ──
     const byPF   = [...seasonTeams].sort((a, b) => b.pf - a.pf);
@@ -14973,7 +14976,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       ${noMatchupNotice}
       <div class="trn-sa-toolbar">
         <div class="trn-az-meta" id="trn-sa-meta">${_metaText(false, matchupCount)}</div>
-        ${hasPlayoffWeeks ? `
+        ${canTogglePlayoffs ? `
           <label class="trn-sa-toggle-label">
             <input type="checkbox" id="trn-sa-po-chk" />
             <span class="trn-sa-toggle-track"><span class="trn-sa-toggle-thumb"></span></span>
@@ -14991,8 +14994,71 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       </div>`;
 
     // ── Playoff toggle ──────────────────────────────────────────────────────
-    document.getElementById("trn-sa-po-chk")?.addEventListener("change", function() {
+    document.getElementById("trn-sa-po-chk")?.addEventListener("change", async function() {
       includePlayoffs = this.checked;
+
+      // If turning on and playoff weeks aren't in allMatchups yet, fetch them now.
+      if (includePlayoffs && maxPoWeek) {
+        const maxWeekInCache = allMatchups.reduce((mx, m) => Math.max(mx, m.week || 0), 0);
+        if (maxWeekInCache <= maxRegWeek && (leagueIds || []).length) {
+          const chk = document.getElementById("trn-sa-po-chk");
+          if (chk) chk.disabled = true;
+          const panel = document.getElementById("trn-sa-panel");
+          if (panel) panel.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching playoff weeks…</div>`;
+
+          const poWeeks = Array.from({ length: maxPoWeek - maxRegWeek }, (_, i) => maxRegWeek + 1 + i);
+          const _sk  = s => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+          // Rebuild the team-name lookup map from allMatchups already in memory
+          // (every reg-season team already has entries we can reuse for name resolution).
+          // Key format: "leagueId:rosterId" → resolved display name
+          const tmNameMap = {};
+          allMatchups.forEach(m => {
+            if (m.leagueId && m.home.rosterId) tmNameMap[`${m.leagueId}:${m.home.rosterId}`] = m.home.name;
+            if (m.leagueId && m.away.rosterId) tmNameMap[`${m.leagueId}:${m.away.rosterId}`] = m.away.name;
+          });
+
+          for (let i = 0; i < leagueIds.length; i += 5) {
+            const batch = leagueIds.slice(i, i + 5);
+            await Promise.allSettled(batch.map(async lid => {
+              for (const wk of poWeeks) {
+                try {
+                  const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${wk}`);
+                  if (!r.ok) continue;
+                  const data = await r.json();
+                  if (!Array.isArray(data)) continue;
+                  const byMid = {};
+                  data.forEach(m => { if (m.matchup_id) (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m); });
+                  Object.values(byMid).forEach(pair => {
+                    if (pair.length !== 2) return;
+                    const [a, b] = pair;
+                    const apts = parseFloat(a.points) || 0;
+                    const bpts = parseFloat(b.points) || 0;
+                    if (apts === 0 && bpts === 0) return;
+                    // Name lookup: try leagueId:rosterId qualified key first
+                    // (same logic as _loadAndRenderSeasonAnalysis's _name helper)
+                    let aName = tmNameMap[`${lid}:${a.roster_id}`] || tmNameMap[String(a.roster_id)] || `Team ${a.roster_id}`;
+                    let bName = tmNameMap[`${lid}:${b.roster_id}`] || tmNameMap[String(b.roster_id)] || `Team ${b.roster_id}`;
+                    allMatchups.push({
+                      week: wk, leagueId: lid,
+                      home: { name: aName, rosterId: String(a.roster_id), score: parseFloat(apts.toFixed(2)), starters: a.starters||[], sp: a.starters_points||{}, pp: a.players_points||{}, players: a.players||[] },
+                      away: { name: bName, rosterId: String(b.roster_id), score: parseFloat(bpts.toFixed(2)), starters: b.starters||[], sp: b.starters_points||{}, pp: b.players_points||{}, players: b.players||[] },
+                      diff: parseFloat(Math.abs(apts - bpts).toFixed(2))
+                    });
+                  });
+                } catch(e) {}
+              }
+            }));
+          }
+          // Persist updated cache including playoff weeks
+          if (tid) {
+            const updated = { matchups: allMatchups, fetchedAt: Date.now() };
+            _seasonAnalysisCache[year] = updated;
+            _tAnalyticsRef(tid).child(`seasonMatchups/${year}`).set(updated).catch(() => {});
+          }
+          if (chk) chk.disabled = false;
+        }
+      }
+
       const rebuilt = _buildSections(includePlayoffs);
       sections      = rebuilt.sections;
       matchupCount  = rebuilt.matchupCount;
@@ -15006,8 +15072,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </button>`).join("");
         _wireNav();
       }
-      const panel = document.getElementById("trn-sa-panel");
-      if (panel) panel.innerHTML = sections.find(s => s.id === activeSaSection)?.html || "";
+      const panel2 = document.getElementById("trn-sa-panel");
+      if (panel2) panel2.innerHTML = sections.find(s => s.id === activeSaSection)?.html || "";
     });
 
     // ── Nav wiring (extracted so toggle can re-wire after nav rebuild) ──────
