@@ -1662,6 +1662,245 @@
 .trn-mu-diff  { font-size: .72rem; color: var(--color-text-dim); white-space: nowrap; }
 .trn-mu-tag   { font-size: .7rem; background: var(--color-accent); color: #fff; padding: 1px 6px; border-radius: var(--radius-pill); white-space: nowrap; }
 
+/* ══════════════════════════════════════════════════════════
+   SEASON ANALYSIS TAB  (trn-sa-*)
+   Mirrors trn-mu-* conventions; keeps visual language
+   consistent with Match Analysis.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Section nav ─────────────────────────────────────────── */
+.trn-sa-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-sa-nav-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.trn-sa-nav-btn:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+.trn-sa-nav-btn--active {
+  background: rgba(240,180,41,.12);
+  border-color: var(--color-gold-dim, var(--color-gold));
+  color: var(--color-gold);
+}
+.trn-sa-panel { min-height: 80px; }
+
+/* ── Season-PF / season-PA stat cards (5-up grid) ─────────── */
+/* Matches trn-mu-card--score shape exactly */
+.trn-sa-statgrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-2);
+}
+.trn-sa-statcard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+.trn-sa-statcard--me {
+  border-color: var(--color-accent, #6366f1);
+  box-shadow: 0 0 0 1px var(--color-accent, #6366f1);
+}
+.trn-sa-statcard--pa { opacity: .92; }
+
+.trn-sa-statcard-rank {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1);
+}
+.trn-sa-statcard-val {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--color-green, #4ade80);
+  line-height: 1.1;
+}
+.trn-sa-statcard-val--pa { color: var(--color-red, #ef4444); }
+
+.trn-sa-statcard-name {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: var(--space-1);
+}
+.trn-sa-statcard-league {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trn-sa-statcard-sub {
+  font-size: .72rem;
+  color: var(--color-text-dim);
+  margin-top: 1px;
+}
+
+/* ── Matchup cards for blowout / win / loss / combined ───── */
+.trn-sa-mugrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-2);
+}
+.trn-sa-mucard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+.trn-sa-mucard--me {
+  border-color: var(--color-accent, #6366f1);
+  box-shadow: 0 0 0 1px var(--color-accent, #6366f1);
+}
+.trn-sa-mucard-label {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1);
+}
+.trn-sa-mucard-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-1);
+  overflow: hidden;
+}
+.trn-sa-mucard-line--win  { padding-top: var(--space-1); }
+.trn-sa-mucard-line--lose { padding-bottom: 2px; }
+.trn-sa-mucard-name {
+  font-size: .8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.trn-sa-mucard-line--win  .trn-sa-mucard-name { font-weight: 700; }
+.trn-sa-mucard-line--lose .trn-sa-mucard-name { color: var(--color-text-dim); }
+.trn-sa-mucard-score {
+  font-size: .82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.trn-sa-mucard-score--win  { color: var(--color-green, #4ade80); }
+.trn-sa-mucard-score--lose { color: var(--color-text-dim); font-weight: 400; }
+.trn-sa-mucard-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+  font-size: .7rem;
+  color: var(--color-text-dim);
+  flex-wrap: wrap;
+}
+.trn-sa-mucard-wk  { color: var(--color-text-dim); }
+.trn-sa-mucard-sub { color: var(--color-gold, #d4af37); font-weight: 700; }
+.trn-sa-mucard-league {
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60px;
+  flex-shrink: 1;
+}
+
+/* ── Start/Sit accuracy table ─────────────────────────────── */
+.trn-sa-sstable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .83rem;
+}
+.trn-sa-sstable thead th {
+  background: var(--color-surface);
+  padding: var(--space-2) var(--space-2);
+  text-align: left;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-text-dim);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.trn-sa-sstable tbody tr:nth-child(even) { background: var(--color-surface-2, var(--color-surface)); }
+.trn-sa-sstable tbody td {
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+.trn-sa-sstable-rank { width: 28px; color: var(--color-text-dim); font-size: .75rem; }
+.trn-sa-sstable-num  { text-align: right; white-space: nowrap; width: 80px; }
+.trn-sa-sstable-pct  { font-weight: 700; }
+.trn-sa-sstable-bar  { width: 120px; padding-left: var(--space-2); }
+
+.trn-sa-ssbar {
+  height: 7px;
+  background: var(--color-border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  position: relative;
+}
+.trn-sa-ssbar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width .3s ease;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .trn-sa-statgrid,
+  .trn-sa-mugrid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 600px) {
+  .trn-sa-statgrid,
+  .trn-sa-mugrid { grid-template-columns: 1fr 1fr; }
+  .trn-sa-statcard-league,
+  .trn-sa-mucard-league { display: none; }
+  .trn-sa-sstable-bar { display: none; }
+}
+@media (max-width: 380px) {
+  .trn-sa-statgrid,
+  .trn-sa-mugrid { grid-template-columns: 1fr; }
+}
+
+
+
 /* ── AI Recap ────────────────────────────────────────── */
 .trn-recap-section { margin-top: var(--space-6); }
 .trn-recap-placeholder {
