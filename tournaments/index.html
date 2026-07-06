@@ -603,9 +603,12 @@
         return;
       }
 
-      // Registration is open — render the form inline
-      renderRegisterTab(body);
+      // Registration is open — show status checker FIRST (prominently), then the form.
+      // Previously the status checker rendered after the form and was easy to
+      // miss, leading people to think they had to re-register instead of
+      // checking their existing status.
       _renderStatusCheckerCard(body, false);
+      renderRegisterTab(body, /*append*/ true);
     }
 
     // ── "Check Your Status" card ─────────────────────────────
@@ -619,11 +622,23 @@
       if (!body) return;
       const card = document.createElement("div");
       card.className = "trn-section-card";
-      card.style.marginTop = "var(--space-4)";
+      // Bolder/highlighted styling — this card moved above the registration
+      // form specifically so it's noticed before people assume they need to
+      // re-register. Accent border + tinted background + larger title make
+      // it visually distinct from a standard section card.
+      card.style.cssText = `
+        margin-bottom: var(--space-4);
+        border: 2px solid var(--color-primary, #6366f1);
+        background: rgba(var(--color-primary-rgb, 99,102,241), .07);
+        box-shadow: 0 0 0 1px rgba(var(--color-primary-rgb, 99,102,241), .15);
+      `;
       card.innerHTML = `
-        <div class="trn-section-card-title">🔍 Check Your Registration Status</div>
-        <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
-          Enter the email address you used to register to see your status and division (if assigned).
+        <div class="trn-section-card-title" style="font-size:1.05rem;display:flex;align-items:center;gap:8px">
+          🔍 Already Registered? Check Your Status Here
+        </div>
+        <p style="font-size:.85rem;color:var(--color-text-dim);margin-bottom:var(--space-3)">
+          Enter the email address you used to register to see your status and division (if assigned) —
+          no need to fill out the form again.
         </p>
         <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:flex-start">
           <input type="email" id="pub-status-email" placeholder="your@email.com"
@@ -676,7 +691,7 @@
             const status = (r.status || "pending").toLowerCase();
             let statusBadge, statusColor;
             if (status === "approved") { statusBadge = "✅ Approved"; statusColor = "#22c55e"; }
-            else if (status === "rejected") { statusBadge = "❌ Not Approved"; statusColor = "#ef4444"; }
+            else if (status === "denied") { statusBadge = "❌ Not Approved"; statusColor = "#ef4444"; }
             else { statusBadge = "⏳ Pending Review"; statusColor = "#f59e0b"; }
 
             let divisionLine = "";
@@ -2998,7 +3013,10 @@
       const label = (f) => STD_LABELS[f] || OPT_LABELS[f] || f;
       const allFlds = ["displayName", "email", ...opts];
 
-      body.innerHTML = `
+      // Uses insertAdjacentHTML (append) rather than body.innerHTML = ... so
+      // this can render after the status-checker card without wiping it out —
+      // status checker is now intentionally shown first (see renderPubRegisterSection).
+      body.insertAdjacentHTML("beforeend", `
         <div class="trn-section-card">
           <div class="trn-section-card-title">Register for ${esc(t.name || "Tournament")} ${_regYear}</div>
           <p style="font-size:.82rem;color:var(--color-text-dim);margin-bottom:var(--space-4)">
@@ -3039,7 +3057,7 @@
           <div class="trn-form-actions">
             <button class="btn-primary" id="pub-reg-submit">Submit Registration</button>
           </div>
-        </div>`;
+        </div>`);
 
       document.getElementById("pub-reg-submit")?.addEventListener("click", () =>
         submitPublicRegistration(allFlds, custom, form)
@@ -3366,14 +3384,27 @@
       try {
         const snap = await _pubDb.ref(`gmd/tournaments/${tid}/registrations`).once("value");
         const regs = snap.val() || {};
-        const entry = Object.entries(regs).find(([, r]) =>
-          (r.email || "").toLowerCase() === norm &&
-          (r.status || "").toLowerCase() === "approved" &&
-          (!yr || !r.year || String(r.year) === String(yr))
+        const allApprovedForEmail = Object.entries(regs).filter(([, r]) =>
+          (r.email || "").trim().toLowerCase() === norm &&
+          (r.status || "").toLowerCase() === "approved"
         );
-        if (!entry) {
+
+        if (!allApprovedForEmail.length) {
           onError("No approved registration found for that email address. Please check for typos or contact the tournament commissioner.");
           return;
+        }
+
+        // Prefer an exact year match — but if none exists (e.g. registration
+        // was tagged under a year that no longer matches what's currently
+        // open/published, a real scenario we've seen with confirmed-approved
+        // users getting blocked here), fall back to their most recent
+        // approved registration rather than hard-failing.
+        let entry = allApprovedForEmail.find(([, r]) => !yr || !r.year || String(r.year) === String(yr));
+        if (!entry) {
+          console.warn(`[Divisions] No exact-year match for ${norm} (target year: ${yr}) — ` +
+            `falling back to most recent approved registration. Run DLRTournament.diagnoseDivisionJoin("${tid}", "${norm}", "${yr}") in console for details.`);
+          allApprovedForEmail.sort(([, a], [, b]) => String(b.year || 0).localeCompare(String(a.year || 0)));
+          entry = allApprovedForEmail[0];
         }
         [matchRid, matchReg] = entry;
       } catch(e) {

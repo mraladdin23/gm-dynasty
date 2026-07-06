@@ -11529,6 +11529,18 @@ Good luck this season!
     regs.forEach(([, r]) => Object.keys(r).forEach(k => allKeys.add(k)));
     const headers = ["rid", ...allKeys];
 
+    // Map custom_N keys to their actual question text, so the export is
+    // readable without breaking re-import (which expects the raw custom_N
+    // key format in the actual header row).
+    const customQuestions = t.meta?.registrationForm?.customQuestions || [];
+    const _questionTextFor = (key) => {
+      const m = /^custom_(\d+)$/.exec(key);
+      if (!m) return "";
+      const q = customQuestions[parseInt(m[1], 10)];
+      return q?.question || "";
+    };
+    const hasCustomCols = headers.some(h => /^custom_\d+$/.test(h));
+
     const rows = regs.map(([rid, r]) =>
       headers.map(h => {
         const val = h === "rid" ? rid : (r[h] ?? "");
@@ -11537,7 +11549,18 @@ Good luck this season!
       }).join(",")
     );
 
-    const csv  = [headers.join(","), ...rows].join("\n");
+    // A leading "# Question:" comment row maps custom_N columns to their
+    // actual question text. Comment lines are already stripped by
+    // _importRegistrantsCSV (filters lines starting with "#"), so this is
+    // purely informational and doesn't affect re-import.
+    const questionRow = hasCustomCols
+      ? "# Question: " + headers.map(h => {
+          const q = _questionTextFor(h);
+          return q ? `"${q.replace(/"/g, '""')}"` : '""';
+        }).join(",")
+      : null;
+
+    const csv  = [questionRow, headers.join(","), ...rows].filter(Boolean).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
@@ -13709,6 +13732,54 @@ Good luck this season!
   // Called onclick from trn-wmu-card--expandable cards.
   // On first tap: populates the .trn-wmu-detail panel using stored starters data.
   // On subsequent taps: just toggles visibility.
+  // ── Shared lineup-side renderer ───────────────────────────────────────────
+  // Used by _expandTrnMatchup (Weekly Matchups card), _expandTrnRow (single-
+  // team table row), and _openLineupModal (bracket modal) — one player-list
+  // renderer so all three contexts render identically.
+  const _POS_COLOR = {
+    QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)",
+    TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)"
+  };
+  function _renderLineupSide(side, players) {
+    const pName = id => {
+      const p = players?.[id];
+      return p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() || id : id;
+    };
+    const pPos = id => {
+      const p = players?.[id];
+      return (p?.position || p?.fantasy_positions?.[0] || "?").toUpperCase();
+    };
+    const starters = side.starters || [];
+    const sp = side.sp || {};
+    const pp = side.pp || {};
+    const bench = (side.players || []).filter(id => !starters.includes(id));
+    let rows = "";
+    starters.forEach(id => {
+      const pts = +(sp[id] ?? pp[id] ?? 0);
+      const pos = pPos(id);
+      const col = _POS_COLOR[pos] || "var(--color-text-dim)";
+      rows += `<div class="trn-wmu-sbs-row">
+        <span class="trn-wmu-sbs-pos" style="color:${col}">${pos}</span>
+        <span class="trn-wmu-sbs-name">${_esc(pName(id))}</span>
+        <span class="trn-wmu-sbs-pts">${pts > 0 ? pts.toFixed(2) : "–"}</span>
+      </div>`;
+    });
+    if (bench.length) {
+      rows += `<div class="trn-wmu-sbs-bench-hdr">Bench</div>`;
+      bench.forEach(id => {
+        const pts = +(pp[id] ?? 0);
+        const pos = pPos(id);
+        const col = _POS_COLOR[pos] || "var(--color-text-dim)";
+        rows += `<div class="trn-wmu-sbs-row trn-wmu-sbs-row--bench">
+          <span class="trn-wmu-sbs-pos dim" style="color:${col}">${pos}</span>
+          <span class="trn-wmu-sbs-name dim">${_esc(pName(id))}</span>
+          <span class="trn-wmu-sbs-pts dim">${pts > 0 ? pts.toFixed(2) : "–"}</span>
+        </div>`;
+      });
+    }
+    return rows || `<div class="trn-wmu-sbs-empty">No lineup data</div>`;
+  }
+
   async function _expandTrnMatchup(card) {
     const detail = card.querySelector(".trn-wmu-detail");
     if (!detail) return;
@@ -13729,65 +13800,18 @@ Good luck this season!
     try {
       const homeData = JSON.parse(detail.dataset.home || "{}");
       const awayData = JSON.parse(detail.dataset.away || "{}");
-
-      // Load DLRPlayers for name resolution (no-op if already warm)
       const players = await DLRPlayers.load();
-      const pName = id => {
-        const p = players?.[id];
-        return p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() || id : id;
-      };
-      const pPos = id => {
-        const p = players?.[id];
-        return (p?.position || p?.fantasy_positions?.[0] || "?").toUpperCase();
-      };
-
-      const POS_COLOR = {
-        QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)",
-        TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)"
-      };
-
-      const renderSide = (side) => {
-        const starters = side.starters || [];
-        const sp = side.sp || {};
-        const pp = side.pp || {};
-        const bench = (side.players || []).filter(id => !starters.includes(id));
-        let rows = "";
-        starters.forEach(id => {
-          const pts = +(sp[id] ?? pp[id] ?? 0);
-          const pos = pPos(id);
-          const col = POS_COLOR[pos] || "var(--color-text-dim)";
-          rows += `<div class="trn-wmu-sbs-row">
-            <span class="trn-wmu-sbs-pos" style="color:${col}">${pos}</span>
-            <span class="trn-wmu-sbs-name">${_esc(pName(id))}</span>
-            <span class="trn-wmu-sbs-pts">${pts > 0 ? pts.toFixed(2) : "–"}</span>
-          </div>`;
-        });
-        if (bench.length) {
-          rows += `<div class="trn-wmu-sbs-bench-hdr">Bench</div>`;
-          bench.forEach(id => {
-            const pts = +(pp[id] ?? 0);
-            const pos = pPos(id);
-            const col = POS_COLOR[pos] || "var(--color-text-dim)";
-            rows += `<div class="trn-wmu-sbs-row trn-wmu-sbs-row--bench">
-              <span class="trn-wmu-sbs-pos dim" style="color:${col}">${pos}</span>
-              <span class="trn-wmu-sbs-name dim">${_esc(pName(id))}</span>
-              <span class="trn-wmu-sbs-pts dim">${pts > 0 ? pts.toFixed(2) : "–"}</span>
-            </div>`;
-          });
-        }
-        return rows || `<div class="trn-wmu-sbs-empty">No lineup data</div>`;
-      };
 
       detail.innerHTML = `
         <div class="trn-wmu-sbs">
           <div class="trn-wmu-sbs-col">
             <div class="trn-wmu-sbs-header">${_esc(homeData.name)}</div>
-            ${renderSide(homeData)}
+            ${_renderLineupSide(homeData, players)}
           </div>
           <div class="trn-wmu-sbs-divider"></div>
           <div class="trn-wmu-sbs-col">
             <div class="trn-wmu-sbs-header">${_esc(awayData.name)}</div>
-            ${renderSide(awayData)}
+            ${_renderLineupSide(awayData, players)}
           </div>
         </div>`;
 
@@ -13795,6 +13819,109 @@ Good luck this season!
 
     } catch(e) {
       detail.innerHTML = `<div class="trn-wmu-sbs-empty" style="color:var(--color-text-dim)">Could not load lineup: ${_esc(e.message)}</div>`;
+    }
+  }
+
+  // ── Single-team lineup expand (Points Rounds / Custom Rounds table rows) ──
+  // Same idea as _expandTrnMatchup but for a single team (no opponent) —
+  // toggles a lineup breakdown panel beneath a table row instead of within
+  // a two-column matchup card. Expects the row to have a sibling
+  // .trn-po-lineup-detail row immediately after it (rendered hidden) and a
+  // data-team attribute holding the same {name,starters,sp,pp,players} shape
+  // _expandTrnMatchup already knows how to render.
+  async function _expandTrnRow(row) {
+    const detailRow = row.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains("trn-po-lineup-detail")) return;
+    const detail = detailRow.querySelector(".trn-po-lineup-detail-inner");
+    if (!detail) return;
+
+    if (row.dataset.detailLoaded === "1") {
+      detailRow.classList.toggle("hidden");
+      const hint = row.querySelector(".trn-po-expand-hint");
+      if (hint) hint.textContent = detailRow.classList.contains("hidden") ? "▾ Lineup" : "▴ Hide";
+      return;
+    }
+
+    detailRow.classList.remove("hidden");
+    const hint = row.querySelector(".trn-po-expand-hint");
+    if (hint) hint.textContent = "▴ Hide";
+
+    try {
+      const teamData = JSON.parse(row.dataset.team || "{}");
+      const players = await DLRPlayers.load();
+      detail.innerHTML = _renderLineupSide(teamData, players);
+      row.dataset.detailLoaded = "1";
+    } catch(e) {
+      detail.innerHTML = `<div class="trn-wmu-sbs-empty" style="color:var(--color-text-dim)">Could not load lineup: ${_esc(e.message)}</div>`;
+    }
+  }
+
+  // ── Bracket lineup modal (H2H Bracket / World Cup) ──────────────────────
+  // H2H Bracket and World Cup use fixed-height (44px) absolute-positioned
+  // cards with connector lines computed from that exact height — an inline
+  // expanding panel would grow the card and break every other card's
+  // connector math. So these open a centered modal instead, reusing the same
+  // .trn-ph-modal-backdrop pattern as the player-career-history modal.
+  // `trigger` is the clicked card element carrying data-home/data-away.
+  async function _openLineupModal(trigger) {
+    let homeData, awayData;
+    try {
+      homeData = JSON.parse(trigger.dataset.home || "{}");
+      awayData = JSON.parse(trigger.dataset.away || "{}");
+    } catch(e) { return; }
+
+    const modalRoot = document.createElement("div");
+    modalRoot.id        = "trn-lineup-modal-root";
+    modalRoot.className = "trn-ph-modal-backdrop";
+    modalRoot.style.display = "flex";
+    modalRoot.innerHTML = `
+      <div class="trn-ph-modal" style="max-width:480px">
+        <div class="trn-ph-modal-header">
+          <span class="trn-ph-modal-title">Lineup Breakdown</span>
+          <button class="modal-close" id="trn-lineup-modal-close">✕</button>
+        </div>
+        <div class="trn-ph-modal-body">
+          <div id="trn-lineup-modal-loading" style="display:flex;justify-content:center;padding:var(--space-3)">
+            <div class="spinner spinner--sm"></div>
+          </div>
+          <div id="trn-lineup-modal-content" class="hidden"></div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modalRoot);
+    document.body.style.overflow = "hidden";
+    const _close = () => { modalRoot.remove(); document.body.style.overflow = ""; };
+    document.getElementById("trn-lineup-modal-close")?.addEventListener("click", _close);
+    modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
+
+    try {
+      const players = await DLRPlayers.load();
+      const contentEl = document.getElementById("trn-lineup-modal-content");
+      const loadingEl = document.getElementById("trn-lineup-modal-loading");
+      if (contentEl) {
+        contentEl.innerHTML = `
+          <div class="trn-wmu-sbs">
+            <div class="trn-wmu-sbs-col">
+              <div class="trn-wmu-sbs-header">${_esc(homeData.name)}</div>
+              ${_renderLineupSide(homeData, players)}
+            </div>
+            <div class="trn-wmu-sbs-divider"></div>
+            <div class="trn-wmu-sbs-col">
+              <div class="trn-wmu-sbs-header">${_esc(awayData.name)}</div>
+              ${_renderLineupSide(awayData, players)}
+            </div>
+          </div>`;
+        contentEl.classList.remove("hidden");
+      }
+      if (loadingEl) loadingEl.style.display = "none";
+    } catch(e) {
+      const contentEl = document.getElementById("trn-lineup-modal-content");
+      const loadingEl = document.getElementById("trn-lineup-modal-loading");
+      if (contentEl) {
+        contentEl.innerHTML = `<div class="trn-wmu-sbs-empty" style="color:var(--color-text-dim)">Could not load lineup: ${_esc(e.message)}</div>`;
+        contentEl.classList.remove("hidden");
+      }
+      if (loadingEl) loadingEl.style.display = "none";
     }
   }
 
@@ -16863,6 +16990,71 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       } catch(e) { return {}; }
     };
 
+    // ── Shared playoff lineup-breakdown helper ──────────────────────────────
+    // _weekMatchupCache already stores the FULL raw Sleeper matchup payload
+    // (starters, starters_points, players, players_points) for every week any
+    // playoff mode has fetched via _fetchWeekScores — it's just never been
+    // surfaced in the UI outside the Weekly Matchups analytics tab. This
+    // reuses that same cache (no new fetching) so Points Rounds, H2H Bracket,
+    // Custom Rounds, and World Cup can all show the same lineup breakdown
+    // that already exists there.
+    //
+    // Returns null if no cached roster-level data exists for this team/week
+    // (e.g. MFL/Yahoo platforms, which don't expose starters/players_points
+    // the way Sleeper does — those teams simply won't get an expand affordance).
+    const _lineupDataFor = (tm, leagueId, week, nameOverride) => {
+      if (!leagueId || !week) return null;
+      const rows = _weekMatchupCache[leagueId + "|" + week];
+      if (!rows || !rows.length) return null;
+      const row = rows.find(r => String(r.roster_id) === String(tm.teamId));
+      if (!row || !row.starters?.length) return null;
+      return {
+        name: nameOverride || _displayName(tm),
+        starters: row.starters || [],
+        sp: row.starters_points || {},
+        pp: row.players_points || {},
+        players: row.players || []
+      };
+    };
+
+    // Single-team variant — for table-row contexts (Points Rounds, Custom
+    // Rounds) where there's no opponent pairing, just one team's score per
+    // row, and no fixed-height layout constraint that a growing panel would
+    // break. Returns hasData:false if no lineup data exists for this team/week.
+    const _playoffExpandRowAttrs = (tm, leagueId, week) => {
+      const data = _lineupDataFor(tm, leagueId, week);
+      if (!data) return { hasData: false, attrs: "", dataAttr: "" };
+      return {
+        hasData: true,
+        attrs: `onclick="DLRTournament._expandTrnRow(this)"`,
+        dataAttr: `data-team='${JSON.stringify(data)}'`
+      };
+    };
+
+    // Two-team variant — for fixed-height bracket card contexts (H2H Bracket,
+    // World Cup) where the absolute-position connector-line math depends on
+    // every card being exactly 44px tall. An inline expanding panel would
+    // grow the card and break that layout, so this opens a centered modal
+    // instead (reuses the same .trn-ph-modal-backdrop pattern as the career
+    // detail modal) rather than expanding in place.
+    // Returns hasData:false if neither side has lineup data (e.g. non-Sleeper
+    // platforms, or the week hasn't been fetched yet).
+    const _playoffLineupModalAttrs = (homeTm, awayTm, homeLid, awayLid, week, homeName, awayName) => {
+      const homeData = _lineupDataFor(homeTm, homeLid, week, homeName);
+      const awayData = _lineupDataFor(awayTm, awayLid, week, awayName);
+      if (!homeData && !awayData) return { hasData: false, attrs: "", dataAttr: "" };
+      const dataHome = JSON.stringify(homeData || { name: homeName || _displayName(homeTm), starters: [], sp: {}, pp: {}, players: [] });
+      const dataAway = JSON.stringify(awayData || { name: awayName || _displayName(awayTm), starters: [], sp: {}, pp: {}, players: [] });
+      return {
+        hasData: true,
+        attrs: `onclick="DLRTournament._openLineupModal(this)"`,
+        // data-* attributes (not inline JSON in onclick) so player names with
+        // quotes/apostrophes can't break the attribute — same pattern used
+        // by _expandTrnMatchup/_expandTrnRow elsewhere in this file.
+        dataAttr: `data-home='${dataHome}' data-away='${dataAway}'`
+      };
+    };
+
     const _renderPointsRound = (roundIdx) => {
       const rounds = po.pointsRounds?.rounds || [];
       const round  = rounds[roundIdx];
@@ -17184,15 +17376,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
             const tieAdjustedNote = actualAdvCount !== advFromComp
               ? ` <span style="color:var(--color-text-dim);font-weight:400">(tie-adjusted from ${advFromComp})</span>` : "";
-            return `<tr class="${rowCls}">
+
+            // Lineup breakdown — byes have no week score for this round, so
+            // skip the expand affordance for them. Uses the shared helper
+            // which reads from the existing matchup cache (no new fetching).
+            const expandInfo = isByeTeam
+              ? { hasData: false }
+              : _playoffExpandRowAttrs(tm, leagueIdByTeamKey[_teamKey(tm)], weekNum);
+
+            return `<tr class="${rowCls}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"
+              ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}>
               <td class="trn-po-rank">${i+1}</td>
               <td class="trn-po-team-name">
                 <div>${_esc(_displayName(tm))}</div>
                 <div class="trn-po-team-sub">${_esc(tm.leagueName||"—")}</div>
               </td>
               ${wkCell}
-              <td>${badge}</td>
-            </tr>${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${actualAdvCount} advance · ${competitors - actualAdvCount} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
+              <td>${badge}${expandInfo.hasData ? `<span class="trn-po-expand-hint">▾ Lineup</span>` : ""}</td>
+            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden"><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${actualAdvCount} advance · ${competitors - actualAdvCount} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
           }).join("");
 
           const table  = document.getElementById(tableId);
@@ -17404,6 +17605,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const cols = bracket.map((rnd, ri) => {
         const n      = rnd.length;
         const totalH = colH(ri, n);
+        const roundWk = _roundStart(ri); // first week of this round, for lineup lookup
         const cards  = rnd.map((m, mi) => {
           const hasA = m.scoreA != null, hasB = m.scoreB != null;
           const winA = hasA && hasB && m.scoreA > m.scoreB;
@@ -17420,7 +17622,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const gap        = hasSibling ? connGap(ri, mi) : 0;
           const isTop      = mi % 2 === 0;
           const connCls    = (ri < nr - 1 && hasSibling) ? (isTop ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
-          return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
+
+          // Lineup breakdown — modal-based (not inline) since this card's
+          // height is load-bearing for the connector-line math above; an
+          // inline panel would grow the card and misalign every sibling.
+          // Only offered once both sides are real teams with scores in.
+          const expandInfo = (m.teamA && m.teamB && hasA && hasB)
+            ? _playoffLineupModalAttrs(m.teamA, m.teamB, leagueIdByTeamKey[_teamKey(m.teamA)], leagueIdByTeamKey[_teamKey(m.teamB)], roundWk)
+            : { hasData: false };
+
+          return `<div class="trn-wc-card ${connCls}${expandInfo.hasData ? " trn-wc-card--expandable" : ""}"
+            ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}
+            style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
             ${tRow(m.a, m.scoreA, winA, winB)}<div class="trn-wc-card-divider"></div>${tRow(m.b, m.scoreB, winB, winA)}
           </div>`;
         }).join("");
@@ -17554,14 +17767,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div class="trn-po-group-title">Group ${gi+1}</div>
               ${scored.map(({name, score}, ti) => {
                 const adv = ti < apg;
-                return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}">
+                // Lineup breakdown — reuses the same shared helper and
+                // _expandTrnRow handler as Points Rounds (works for any row
+                // element, not just <tr>, since it just checks classList/siblings).
+                const tm = teamMap[_skCR(name)];
+                const expandInfo = tm
+                  ? _playoffExpandRowAttrs(tm, leagueIdByTeamKey[_teamKey(tm)], weekNum)
+                  : { hasData: false };
+                return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"
+                  ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}>
                   <span class="trn-po-rank">${ti+1}</span>
                   <span class="trn-po-team-name">${_esc(name)}</span>
                   ${scored.length===2&&score!==null?`<span class="trn-po-badge" style="background:${adv?"rgba(74,222,128,.15)":"rgba(248,113,113,.12)"};color:${adv?"#4ade80":"#f87171"}">${adv?"W":"L"}</span>`:""}
                   <span class="trn-po-pf" style="margin-left:auto">${score!=null?score.toFixed(2):"—"}</span>
                   ${adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
                       :'<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
-                </div>`;
+                  ${expandInfo.hasData ? `<span class="trn-po-expand-hint">▾</span>` : ""}
+                </div>${expandInfo.hasData ? `<div class="trn-po-lineup-detail hidden"><div class="trn-po-lineup-detail-inner"></div></div>` : ""}`;
               }).join("")}
             </div>`;
           }).join("");
@@ -17979,6 +18201,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const ws = startWeekPo + ri * wcWPR;
         return `<span class="trn-po-week-tag" style="font-size:.68rem">${wcWPR>1?`Wks ${ws}–${ws+wcWPR-1}`:`Wk ${ws}`}</span>`;
       };
+      // First week of round ri — used for lineup-breakdown lookups.
+      const _roundWk = (ri) => startWeekPo ? (startWeekPo + ri * wcWPR) : null;
 
       // ── Always pre-fetch group-stage scores so _wcQualified has real data ──
       // This runs async and re-renders the bracket tab once scores are loaded.
@@ -18039,7 +18263,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // ── Viewer (non-admin): read-only bracket ───────────────
       if (!isAdmin) {
         if (!bracket.length) return `<div class="trn-po-empty">Bracket not yet available. Check back after group stage ends.</div>`;
-        return `<div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, false)}</div>`;
+        return `<div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, false, _wcTeamInfoMap, _roundWk)}</div>`;
       }
 
       // ── Admin: show setup or locked view ────────────────
@@ -18054,7 +18278,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <button class="btn-secondary btn-xs" id="trn-wc-score-refresh">↺ Update Scores</button>
             </div>
           </div>
-          <div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, true)}</div>`;
+          <div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, true, _wcTeamInfoMap, _roundWk)}</div>`;
       }
 
       // ── Unseeded: Round 1 setup UI ───────────────────────
@@ -18162,7 +18386,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // cardH = matchup card height. pairG = gap between adjacent R0 cards in the same pair.
     // Inter-pair gap = 2*pairG so groups look separate.
     // Every subsequent round card is centred exactly between its two feeder cards.
-    const _renderWCBracketCanvas = (bracket, numRounds, getRoundName, _weekTag, isAdmin) => {
+    const _renderWCBracketCanvas = (bracket, numRounds, getRoundName, _weekTag, isAdmin, wcTeamInfoMap, roundWeekFn) => {
       if (!bracket.length) return "";
       const nr    = bracket.length;
       const cardH = 44;  // px — matchup card height
@@ -18195,6 +18419,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const cols = bracket.map((rnd, ri) => {
         const n      = (rnd||[]).length;
         const totalH = colH(ri, n);
+        const roundWk = roundWeekFn ? roundWeekFn(ri) : null;
 
         const cards = (rnd||[]).map((m, mi) => {
           const hasScoreA = m.scoreA !== null && m.scoreA !== undefined;
@@ -18225,7 +18450,20 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const connCls = (ri < nr - 1 && hasSibling)
             ? (isTopOfPair ? "trn-wc-card--conn-top" : "trn-wc-card--conn-bot") : "";
 
-          return `<div class="trn-wc-card ${connCls}" style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
+          // Lineup breakdown — World Cup bracket only stores plain name
+          // strings (m.a/m.b), so resolve each side to {teamId,leagueId}
+          // via the team-info map built from standingsCache. Modal-based
+          // (not inline) for the same reason as H2H Bracket: this card's
+          // fixed height is load-bearing for the connector-line math.
+          const infoA = wcTeamInfoMap && m.a ? wcTeamInfoMap[_skWC(m.a)] : null;
+          const infoB = wcTeamInfoMap && m.b ? wcTeamInfoMap[_skWC(m.b)] : null;
+          const expandInfo = (infoA && infoB && hasScoreA && hasScoreB && roundWk)
+            ? _playoffLineupModalAttrs({teamId: infoA.teamId}, {teamId: infoB.teamId}, infoA.leagueId, infoB.leagueId, roundWk, m.a, m.b)
+            : { hasData: false };
+
+          return `<div class="trn-wc-card ${connCls}${expandInfo.hasData ? " trn-wc-card--expandable" : ""}"
+              ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}
+              style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
               ${selRow("a", m.a)}<div class="trn-wc-card-divider"></div>${selRow("b", m.b)}
             </div>`;
         }).join("");
@@ -21098,13 +21336,70 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       `Re-open the round to re-simulate and re-lock with current data.`);
   }
 
+  // ── Diagnose division-join failures ─────────────────────────────────────
+  // Checks every condition the public division-join lookup requires
+  // (email match, status==="approved", year match) against a specific
+  // registrant, so a "could not find your registration" report can be
+  // traced to the exact failing condition instead of guessing.
+  //   await DLRTournament.diagnoseDivisionJoin('tid', 'someone@email.com', 2025)
+  async function diagnoseDivisionJoin(tid, email, divYear) {
+    const norm = (email || "").trim().toLowerCase();
+    if (!norm) { console.log("Provide an email address."); return; }
+    console.group(`[diagnoseDivisionJoin] tid=${tid} email=${norm} divYear=${divYear}`);
+
+    const regSnap = await GMD.child(`tournaments/${tid}/registrations`).once("value");
+    const regs = regSnap.val() || {};
+    const matches = Object.entries(regs).filter(([, r]) => (r.email || "").trim().toLowerCase() === norm);
+
+    if (!matches.length) {
+      console.log(`❌ No registration found with email "${norm}" at all (case-insensitive, trimmed). ` +
+        `Check for typos, extra whitespace, or a different email used at signup.`);
+      console.groupEnd();
+      return;
+    }
+
+    console.log(`Found ${matches.length} registration(s) matching this email:`);
+    matches.forEach(([rid, r]) => {
+      const statusOk = (r.status || "").toLowerCase() === "approved";
+      const yearOk   = !divYear || !r.year || String(r.year) === String(divYear);
+      console.log(
+        `  rid=${rid}\n` +
+        `    status: "${r.status}" ${statusOk ? "✅ approved" : "❌ NOT approved (must be exactly \"approved\")"}\n` +
+        `    year:   "${r.year}" ${yearOk ? "✅ matches divYear" : `❌ MISMATCH — registration year "${r.year}" ≠ division year "${divYear}"`}\n` +
+        `    would pass join lookup: ${statusOk && yearOk ? "✅ YES" : "❌ NO"}`
+      );
+    });
+
+    // Cross-check: is this rid actually present in any division's memberIds
+    // for the given year? (confirms whether a past join attempt already
+    // succeeded, even if the user thinks it failed)
+    if (divYear) {
+      const divSnap = await GMD.child(`tournaments/${tid}/playoffs/${divYear}/divisions`).once("value");
+      const allDivs = divSnap.val() || {};
+      matches.forEach(([rid]) => {
+        const foundIn = Object.entries(allDivs).find(([, d]) => Object.keys(d.memberIds || {}).includes(rid));
+        console.log(foundIn
+          ? `  rid=${rid} is currently a member of division "${foundIn[1]?.name || foundIn[0]}" for ${divYear}.`
+          : `  rid=${rid} is NOT currently in any division for ${divYear}.`);
+      });
+    }
+
+    console.log(`\nNote: the join lookup also requires the division's own divYr (passed from the button the user clicked) ` +
+      `to match registration.year exactly. If the user is viewing a different year tab than they registered under, ` +
+      `re-run this with the year shown on the page they were actually on.`);
+    console.groupEnd();
+  }
+
   return {
     init,
     runDiscovery,
     _expandTrnMatchup,
+    _expandTrnRow,
+    _openLineupModal,
     diagnoseDecathlon,
     diagnosePointsRounds,
     resetPointsRoundsElimination,
+    diagnoseDivisionJoin,
     getTournamentName: (tid) => _tournaments[tid]?.meta?.name || null,
   };
 
