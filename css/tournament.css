@@ -4945,6 +4945,57 @@
   padding: var(--space-2);
 }
 
+/* ── Single-team lineup expand (Points Rounds / Custom Rounds rows) ──
+   Reuses .trn-wmu-sbs-* tokens for the actual player list (set above);
+   these are just the row-level affordance + container styles, since the
+   single-team layout has no opponent column to mirror trn-wmu-card. */
+.trn-po-row--expandable { cursor: pointer; }
+.trn-po-row--expandable:hover td { background: var(--color-surface-hover, rgba(255,255,255,.03)); }
+.trn-po-group-row.trn-po-row--expandable:hover { background: var(--color-surface-hover, rgba(255,255,255,.03)); }
+
+.trn-po-expand-hint {
+  font-size: .68rem;
+  color: var(--color-text-dim);
+  margin-left: var(--space-2);
+  white-space: nowrap;
+}
+
+.trn-po-lineup-detail td { padding: 0; border-bottom: 1px solid var(--color-border); }
+.trn-po-lineup-detail-inner {
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) + 28px);
+  background: var(--color-surface-2, var(--color-surface));
+}
+/* Custom Rounds group rows aren't <tr>/<td> — style the inner div directly */
+.trn-po-group-row + .trn-po-lineup-detail {
+  border-bottom: 1px solid var(--color-border);
+}
+.trn-po-group-row + .trn-po-lineup-detail .trn-po-lineup-detail-inner {
+  padding: var(--space-2) var(--space-2) var(--space-2) calc(var(--space-2) + 20px);
+}
+.trn-po-group-row + .trn-po-lineup-detail:last-child {
+  border-bottom: none;
+}
+
+/* ── Bracket card expandable state (H2H Bracket / World Cup) ──────────
+   These cards have a fixed 44px height that the connector-line math
+   depends on (see .trn-wc-card--conn-top/bot), so lineup detail opens in
+   a modal (.trn-lineup-modal-* below) instead of expanding the card —
+   this class only adds a hover affordance, never changes card height. */
+.trn-wc-card--expandable { cursor: pointer; }
+.trn-wc-card--expandable:hover {
+  border-color: var(--color-primary, #6366f1);
+  box-shadow: 0 0 0 1px var(--color-primary, #6366f1);
+}
+
+/* ── Bracket lineup modal ──────────────────────────────────────────────
+   Reuses .trn-ph-modal-backdrop / .trn-ph-modal from the player-career
+   modal for the container, and .trn-wmu-sbs-* for the lineup grid —
+   only the loading-state wrapper below is new. */
+#trn-lineup-modal-loading .spinner--sm {
+  width: 22px;
+  height: 22px;
+}
+
 /* ═══════════════════════════════════════════════════════════
    T-REDESIGN — New Top-Level Nav + History Sub-Nav + Wizard
    ═══════════════════════════════════════════════════════════ */
