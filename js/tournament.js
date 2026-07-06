@@ -14562,10 +14562,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // Match Analysis). Sources:
   //   - standingsCache      → season PF, PA, record (no API calls)
   //   - Sleeper matchups API → week-by-week matchup data for blowouts,
-  //                            lowest win, highest loss, start/sit accuracy
+  //                            lowest win, highest loss, highest individual scores
   // Cache key: analyticsCache/seasonMatchups/{year}
   // All matchup data is fetched once and cached; refresh button clears it.
-  let _seasonAnalysisCache = {};  // { year: { matchups[], fetchedAt } }
+  let _seasonAnalysisCache = {};  // { "tid_year": { matchups[], fetchedAt } }
 
   async function _renderAnalyticsSeasonAnalysis(tid, t, body) {
     const year         = _standingsYear || new Date().getFullYear();
@@ -14600,7 +14600,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       </div>`;
 
     document.getElementById("trn-sa-refresh-btn")?.addEventListener("click", async () => {
-      delete _seasonAnalysisCache[year];
+      const ck = `${tid}_${year}`;
+      delete _seasonAnalysisCache[ck];
       await _tAnalyticsRef(tid).child(`seasonMatchups/${year}`).remove().catch(() => {});
       const el2 = document.getElementById("trn-sa-content");
       if (el2) el2.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Refreshing…</div>`;
@@ -14664,8 +14665,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     let hasMatchupData = false;
 
     if (leagueIds.length) {
-      // Check memory cache first
-      const cached = _seasonAnalysisCache[year];
+      // Cache key includes tid so switching between tournaments never serves
+      // one tournament's matchup data to another with the same year.
+      const ck = `${tid}_${year}`;
+      const cached = _seasonAnalysisCache[ck];
       if (cached && (Date.now() - cached.fetchedAt) < 600000) {
         allMatchups = cached.matchups;
         hasMatchupData = true;
@@ -14677,7 +14680,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           if (fb?.matchups?.length && (Date.now() - (fb.fetchedAt || 0)) < 3600000) {
             allMatchups = fb.matchups;
             hasMatchupData = true;
-            _seasonAnalysisCache[year] = fb;
+            _seasonAnalysisCache[ck] = fb;
           }
         } catch(e) {}
 
@@ -14712,18 +14715,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                     const bName = _name(lid, String(b.roster_id), null);
                     allMatchups.push({
                       week: wk, leagueId: lid,
-                      home: {
-                        name: aName, rosterId: String(a.roster_id),
-                        score: parseFloat(apts.toFixed(2)),
-                        starters: a.starters || [], sp: a.starters_points || {},
-                        pp: a.players_points || {}, players: a.players || []
-                      },
-                      away: {
-                        name: bName, rosterId: String(b.roster_id),
-                        score: parseFloat(bpts.toFixed(2)),
-                        starters: b.starters || [], sp: b.starters_points || {},
-                        pp: b.players_points || {}, players: b.players || []
-                      },
+                      home: { name: aName, rosterId: String(a.roster_id), score: parseFloat(apts.toFixed(2)) },
+                      away: { name: bName, rosterId: String(b.roster_id), score: parseFloat(bpts.toFixed(2)) },
                       diff: parseFloat(Math.abs(apts - bpts).toFixed(2))
                     });
                   });
@@ -14739,7 +14732,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           hasMatchupData = allMatchups.length > 0;
           if (hasMatchupData) {
             const payload = { matchups: allMatchups, fetchedAt: Date.now() };
-            _seasonAnalysisCache[year] = payload;
+            _seasonAnalysisCache[ck] = payload;
             _tAnalyticsRef(tid).child(`seasonMatchups/${year}`).set(payload).catch(() => {});
           }
         }
@@ -14831,7 +14824,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // Called on initial render and again when the playoff toggle changes.
     // Returns the full sections[] array so the nav and panel can be rebuilt.
     const _buildSections = (includePO) => {
-      let blowoutsHtml = "", lowWinHtml = "", highLossHtml = "", highIndivHtml = "", startSitHtml = "";
+      let blowoutsHtml = "", lowWinHtml = "", highLossHtml = "", highIndivHtml = "";
 
       if (hasMatchupData) {
         // Apply playoff filter
@@ -14860,66 +14853,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         lowWinHtml    = lowestWins.map((m, i)       => muCard(m, `#${i+1}`, `Win: ${m.winner.score.toFixed(2)}`)).join("");
         highLossHtml  = highestLosses.map((m, i)    => muCard(m, `#${i+1}`, `Loss: ${m.loser.score.toFixed(2)}`)).join("");
         highIndivHtml = highestIndiv.map((ts, i)    => indivScoreCard(ts, i)).join("");
-
-        // ── Start/Sit Accuracy ─────────────────────────────────────────────
-        const teamStartSit = {};
-        filtered.forEach(m => {
-          [m.home, m.away].forEach(side => {
-            if (!side.starters?.length || !Object.keys(side.pp || {}).length) return;
-            const numStarters = side.starters.length;
-            const actualPts   = side.starters.reduce((sum, id) => sum + (side.sp?.[id] ?? side.pp?.[id] ?? 0), 0);
-            const poolScores  = Object.entries(side.pp || {})
-              .map(([, pts]) => parseFloat(pts) || 0)
-              .sort((a, b) => b - a);
-            const optimalPts = poolScores.slice(0, numStarters).reduce((s, p) => s + p, 0);
-            if (optimalPts <= 0) return;
-            if (!teamStartSit[side.name]) teamStartSit[side.name] = { totalActual: 0, totalOptimal: 0, weeks: 0 };
-            teamStartSit[side.name].totalActual  += actualPts;
-            teamStartSit[side.name].totalOptimal += optimalPts;
-            teamStartSit[side.name].weeks++;
-          });
-        });
-
-        const startSitRows = Object.entries(teamStartSit)
-          .map(([name, d]) => ({
-            name,
-            accuracy: d.totalOptimal > 0 ? (d.totalActual / d.totalOptimal) * 100 : 0,
-            actual: d.totalActual, optimal: d.totalOptimal, weeks: d.weeks
-          }))
-          .filter(r => r.weeks >= 3)
-          .sort((a, b) => b.accuracy - a.accuracy);
-
-        if (startSitRows.length) {
-          startSitHtml = `
-            <table class="trn-sa-sstable">
-              <thead><tr>
-                <th class="trn-sa-sstable-rank">#</th>
-                <th>Team</th>
-                <th class="trn-sa-sstable-num">Actual PF</th>
-                <th class="trn-sa-sstable-num">Optimal PF</th>
-                <th class="trn-sa-sstable-num">Accuracy</th>
-                <th class="trn-sa-sstable-bar">Score</th>
-              </tr></thead>
-              <tbody>
-                ${startSitRows.map((r, i) => `
-                  <tr class="${_isMe(r.name) ? "trn-az-row--me" : ""}">
-                    <td class="trn-sa-sstable-rank">${i+1}</td>
-                    <td>${_esc(r.name)}${_me(r.name)}</td>
-                    <td class="trn-sa-sstable-num">${r.actual.toFixed(1)}</td>
-                    <td class="trn-sa-sstable-num" style="color:var(--color-text-dim)">${r.optimal.toFixed(1)}</td>
-                    <td class="trn-sa-sstable-num trn-sa-sstable-pct" style="color:${r.accuracy>=90?"var(--color-green)":r.accuracy>=80?"var(--color-gold,#d4af37)":"inherit"}">${r.accuracy.toFixed(1)}%</td>
-                    <td class="trn-sa-sstable-bar"><div class="trn-sa-ssbar"><div class="trn-sa-ssbar-fill" style="width:${Math.min(100,r.accuracy).toFixed(1)}%;background:${r.accuracy>=90?"var(--color-green)":r.accuracy>=80?"var(--color-gold,#d4af37)":"var(--color-text-dim)"}"></div></div></td>
-                  </tr>`).join("")}
-              </tbody>
-            </table>
-            <div class="trn-az-meta" style="margin-top:var(--space-2)">
-              Start/sit accuracy = actual starter points ÷ optimal possible starter points.
-              Only shown for managed Sleeper leagues where roster data is available (min. 3 weeks).
-              ${includePO ? "🏆 Includes playoff weeks." : "Regular season only."}
-            </div>`;
-        } else {
-          startSitHtml = `<div class="trn-az-meta">Start/sit accuracy requires managed Sleeper leagues with full roster data. Not enough data available for ${year}.</div>`;
-        }
       }
 
       const matchupCount = hasMatchupData
@@ -14948,7 +14881,6 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             { id: "lowest_win",   icon: "🍀", label: "Lowest Winning Scores",     html: `<div class="trn-sa-mugrid">${lowWinHtml}</div>` },
             { id: "highest_loss", icon: "😤", label: "Highest Losing Scores",     html: `<div class="trn-sa-mugrid">${highLossHtml}</div>` },
             { id: "high_indiv",   icon: "🔥", label: "Highest Individual Scores", html: `<div class="trn-sa-statgrid">${highIndivHtml}</div>` },
-            { id: "startsit",     icon: "🧠", label: "Start/Sit Accuracy",        html: startSitHtml },
           ] : []),
         ]
       };
@@ -14957,7 +14889,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // ── Initial render ──────────────────────────────────────────────────────
     const noMatchupNotice = !hasMatchupData && numLeagues
       ? `<div class="trn-az-meta" style="color:var(--color-text-dim)">
-           ⚠️ Matchup data unavailable — blowout, win/loss extremes, and start/sit accuracy require Sleeper matchup data.
+           ⚠️ Matchup data unavailable — blowout and win/loss extremes require Sleeper matchup data.
            Hit ↺ Refresh to try fetching it.
          </div>`
       : !numLeagues
@@ -15052,7 +14984,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // Persist updated cache including playoff weeks
           if (tid) {
             const updated = { matchups: allMatchups, fetchedAt: Date.now() };
-            _seasonAnalysisCache[year] = updated;
+            _seasonAnalysisCache[`${tid}_${year}`] = updated;
             _tAnalyticsRef(tid).child(`seasonMatchups/${year}`).set(updated).catch(() => {});
           }
           if (chk) chk.disabled = false;
