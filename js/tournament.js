@@ -6852,12 +6852,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span>League Batches (${totalLeagues} leagues${yearFilter ? ` · ${yearFilter}` : " · all years"})</span>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             ${yearFilter ? `<button class="btn-ghost btn-sm" id="trn-leagues-show-all-btn">Show All Years</button>` : ""}
-            <select id="trn-sync-year-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-              <option value="">All years</option>
-              ${[...new Set(realBatches.map(([, b]) => b.year).filter(Boolean))].sort((a,b)=>b-a).map(y =>
-                `<option value="${y}">${y}</option>`
-              ).join("")}
-            </select>
             <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
             <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
           </div>
@@ -6919,10 +6913,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     `;
 
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
-    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => {
-      const selYear = document.getElementById("trn-sync-year-sel")?.value;
-      _syncStandings(tid, t, selYear ? parseInt(selYear) : null);
-    });
+    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
     document.getElementById("trn-leagues-show-all-btn")?.addEventListener("click", () => {
       // Could be called from wizard (#wiz-leagues-container) or admin panel (_getTabBody())
       const b = document.getElementById("wiz-leagues-container") || _getTabBody();
@@ -7251,6 +7242,58 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const autoReg  = pList.filter(([, p]) => p.autoRegister);
     const optedOut = pList.filter(([, p]) => p.emailOptOut);
 
+    const PAGE_SIZE = 100;
+    let currentPage   = 1;
+    let currentQ      = "";
+    let currentFilter = "all";
+
+    // Build flat search index once — avoids DOM querySelectorAll on 8100 nodes
+    const searchIndex = pList.map(([pid, p]) => ({
+      pid, p,
+      text: [p.displayName, p.email, p.sleeperUsername, p.teamName, p.dlrUsername]
+        .filter(Boolean).join(" ").toLowerCase()
+    }));
+
+    const _filtered = () => searchIndex.filter(({ p, text }) => {
+      const matchQ = !currentQ || text.includes(currentQ);
+      const matchF = currentFilter === "all"
+        || (currentFilter === "linked"   && p.dlrLinked)
+        || (currentFilter === "unlinked" && !p.dlrLinked)
+        || (currentFilter === "auto"     && p.autoRegister)
+        || (currentFilter === "optedout" && p.emailOptOut);
+      return matchQ && matchF;
+    });
+
+    const _renderPage = () => {
+      const all        = _filtered();
+      const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+      currentPage      = Math.min(currentPage, totalPages);
+      const slice      = all.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+      const listEl  = document.getElementById("trn-participants-list");
+      const countEl = document.getElementById("trn-participants-page-count");
+      if (!listEl) return;
+
+      listEl.innerHTML = slice.length
+        ? slice.map(({ pid, p }) => _renderParticipantRow(tid, pid, p)).join("")
+        : `<div style="padding:var(--space-4);text-align:center;color:var(--color-text-dim)">No participants match this search.</div>`;
+
+      if (countEl) {
+        const start = all.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
+        const end   = Math.min(currentPage * PAGE_SIZE, all.length);
+        countEl.textContent = all.length ? `Showing ${start}\u2013${end} of ${all.length}` : "0 results";
+      }
+
+      const prevBtn = document.getElementById("trn-page-prev");
+      const nextBtn = document.getElementById("trn-page-next");
+      const infoEl  = document.getElementById("trn-page-info");
+      if (prevBtn) prevBtn.disabled = currentPage <= 1;
+      if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+      if (infoEl)  infoEl.textContent = `Page ${currentPage} / ${totalPages}`;
+
+      _wireParticipantRows(tid, participants, listEl);
+    };
+
     body.innerHTML = `
       <div class="trn-reg-toolbar">
         <span class="trn-reg-count">
@@ -7258,13 +7301,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span style="color:var(--color-green)">${linked.length} DLR linked</span> &middot;
           ${unlinked.length} unlinked &middot;
           ${autoReg.length} auto-register
-          ${optedOut.length ? ` &middot; <span style="color:var(--color-orange)">🚫 ${optedOut.length} opted out</span>` : ""}
+          ${optedOut.length ? ` &middot; <span style="color:var(--color-orange)">&#128683; ${optedOut.length} opted out</span>` : ""}
         </span>
         <div style="display:flex;gap:var(--space-2)">
-          <button class="btn-primary btn-sm" id="trn-auto-sync-participants-btn" title="Pull usernames from all linked leagues and upsert into participant list">⚡ Sync from Leagues</button>
+          <button class="btn-primary btn-sm" id="trn-auto-sync-participants-btn" title="Pull usernames from all linked leagues and upsert into participant list">&#9889; Sync from Leagues</button>
           <button class="btn-primary btn-sm" id="trn-import-participants-btn">Import CSV</button>
           <button class="btn-secondary btn-sm" id="trn-export-participants-btn">Export CSV</button>
-          <button class="btn-ghost btn-sm" id="trn-template-participants-btn" title="Download a blank CSV template with the correct column names">⬇ Template</button>
+          <button class="btn-ghost btn-sm" id="trn-template-participants-btn" title="Download a blank CSV template with the correct column names">&#11015; Template</button>
         </div>
       </div>
       <input type="file" id="trn-participants-csv-input" accept=".csv" style="display:none" />
@@ -7278,15 +7321,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <option value="linked">DLR Linked</option>
             <option value="unlinked">Not Linked</option>
             <option value="auto">Auto-Register</option>
-            <option value="optedout">🚫 Opted Out</option>
+            <option value="optedout">&#128683; Opted Out</option>
           </select>
+          <span id="trn-participants-page-count" style="font-size:.8rem;color:var(--color-text-dim);white-space:nowrap"></span>
         </div>
-        <div id="trn-participants-list">
-          ${pList.map(([pid, p]) => _renderParticipantRow(tid, pid, p)).join("")}
+        <div id="trn-participants-list"></div>
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-3)">
+          <button class="btn-secondary btn-sm" id="trn-page-prev">&#8592; Prev</button>
+          <span id="trn-page-info" style="font-size:.82rem;color:var(--color-text-dim)"></span>
+          <button class="btn-secondary btn-sm" id="trn-page-next">Next &#8594;</button>
         </div>
       ` : `
         <div class="trn-empty">
-          <div class="trn-empty-icon">👥</div>
+          <div class="trn-empty-icon">&#128101;</div>
           <div class="trn-empty-title">No participants yet</div>
           <div class="trn-empty-sub">Import a CSV of historical participants to build your tournament database.</div>
         </div>
@@ -7298,71 +7345,55 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           Must have a header row with these column names (case-insensitive):<br>
           <code style="font-size:.78rem;display:block;margin:var(--space-2) 0;padding:var(--space-2) var(--space-3);background:var(--color-bg);border-radius:var(--radius-sm);border:1px solid var(--color-border)">displayName, email, sleeperUsername, mflEmail, yahooUsername, teamName, twitterHandle, gender, years</code>
           <strong>displayName</strong> and <strong>email</strong> are the most important. Platform columns (<strong>sleeperUsername</strong>, <strong>mflEmail</strong>, <strong>yahooUsername</strong>) are used to auto-link participants to their DLR accounts.<br>
-          <strong>years</strong> — pipe-separated list of years this person has competed, e.g. <code>2022|2023|2024</code><br>
+          <strong>years</strong> &#8212; pipe-separated list of years this person has competed, e.g. <code>2022|2023|2024</code><br>
           All columns are optional except displayName. Download the template to get started.
         </div>
       </div>
     `;
 
-    document.getElementById("trn-auto-sync-participants-btn")?.addEventListener("click", () =>
-      _autoSyncParticipants(tid, t)
-    );
-    document.getElementById("trn-import-participants-btn")?.addEventListener("click", () =>
-      document.getElementById("trn-participants-csv-input")?.click()
-    );
-    document.getElementById("trn-participants-csv-input")?.addEventListener("change", async e => {
-      const file = e.target.files?.[0];
-      if (file) await _importParticipantsCSV(tid, file);
+    _renderPage();
+
+    document.getElementById("trn-participants-search")?.addEventListener("input", e => {
+      currentQ = e.target.value.toLowerCase(); currentPage = 1; _renderPage();
     });
-    document.getElementById("trn-export-participants-btn")?.addEventListener("click", () =>
-      _exportParticipantsCSV(t)
-    );
+    document.getElementById("trn-participants-filter")?.addEventListener("change", e => {
+      currentFilter = e.target.value; currentPage = 1; _renderPage();
+    });
+    document.getElementById("trn-page-prev")?.addEventListener("click", () => {
+      if (currentPage > 1) { currentPage--; _renderPage(); }
+    });
+    document.getElementById("trn-page-next")?.addEventListener("click", () => {
+      if (currentPage < Math.ceil(_filtered().length / PAGE_SIZE)) { currentPage++; _renderPage(); }
+    });
+
+    document.getElementById("trn-auto-sync-participants-btn")?.addEventListener("click", () => _autoSyncParticipants(tid, t));
+    document.getElementById("trn-import-participants-btn")?.addEventListener("click", () => document.getElementById("trn-participants-csv-input")?.click());
+    document.getElementById("trn-participants-csv-input")?.addEventListener("change", async e => {
+      const file = e.target.files?.[0]; if (file) await _importParticipantsCSV(tid, file);
+    });
+    document.getElementById("trn-export-participants-btn")?.addEventListener("click", () => _exportParticipantsCSV(t));
     document.getElementById("trn-template-participants-btn")?.addEventListener("click", () => {
-      const headers = "displayName,email,sleeperUsername,mflEmail,yahooUsername,teamName,twitterHandle,gender,years";
-      const example = "Jane Smith,jane@example.com,janesmith,,,,@janesmith,Female,2023|2024";
-      const csv  = headers + "\n" + example + "\n";
+      const csv  = "displayName,email,sleeperUsername,mflEmail,yahooUsername,teamName,twitterHandle,gender,years\nJane Smith,jane@example.com,janesmith,,,,@janesmith,Female,2023|2024\n";
       const blob = new Blob([csv], { type: "text/csv" });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
-      a.href     = url;
-      a.download = "participants_template.csv";
-      a.click();
+      a.href = url; a.download = "participants_template.csv"; a.click();
       URL.revokeObjectURL(url);
     });
+  }
 
-    const searchAndFilter = () => {
-      const q      = (document.getElementById("trn-participants-search")?.value || "").toLowerCase();
-      const filter = document.getElementById("trn-participants-filter")?.value || "all";
-      document.querySelectorAll(".trn-participant-row").forEach(row => {
-        const text       = row.dataset.search   || "";
-        const isLinked   = row.dataset.linked   === "1";
-        const isAuto     = row.dataset.auto     === "1";
-        const isOptedOut = row.dataset.optedout === "1";
-        const matchQ = !q || text.includes(q);
-        const matchF = filter === "all"
-          || (filter === "linked"    && isLinked)
-          || (filter === "unlinked"  && !isLinked)
-          || (filter === "auto"      && isAuto)
-          || (filter === "optedout"  && isOptedOut);
-        row.style.display = (matchQ && matchF) ? "" : "none";
-      });
-    };
-    document.getElementById("trn-participants-search")?.addEventListener("input", searchAndFilter);
-    document.getElementById("trn-participants-filter")?.addEventListener("change", searchAndFilter);
-
-    body.querySelectorAll("[data-view-participant]").forEach(btn =>
+  function _wireParticipantRows(tid, participants, listEl) {
+    listEl.querySelectorAll("[data-view-participant]").forEach(btn =>
       btn.addEventListener("click", () =>
-        _openParticipantDetail(tid, btn.dataset.viewParticipant, participants[btn.dataset.viewParticipant], t)
+        _openParticipantDetail(tid, btn.dataset.viewParticipant, participants[btn.dataset.viewParticipant], { participants })
       )
     );
-    body.querySelectorAll("[data-toggle-auto]").forEach(btn =>
+    listEl.querySelectorAll("[data-toggle-auto]").forEach(btn =>
       btn.addEventListener("click", () =>
         _toggleAutoRegister(tid, btn.dataset.toggleAuto, participants[btn.dataset.toggleAuto])
       )
     );
-
-    // ── Email opt-out toggle ───────────────────────────────
-    body.querySelectorAll("[data-toggle-optout]").forEach(btn =>
+    listEl.querySelectorAll("[data-toggle-optout]").forEach(btn =>
       btn.addEventListener("click", async () => {
         const pid = btn.dataset.toggleOptout;
         const p   = participants[pid];
@@ -7371,28 +7402,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         try {
           await _tParticipantsRef(tid).child(pid).update({ emailOptOut: newVal });
           p.emailOptOut = newVal;
-          // Re-render just this row
-          const row = body.querySelector(`[data-pid="${pid}"]`);
-          if (row) row.outerHTML = _renderParticipantRow(tid, pid, p);
-          // Re-wire the new row's buttons
-          body.querySelector(`[data-toggle-optout="${pid}"]`)?.addEventListener("click", async () => {
-            const newVal2 = !p.emailOptOut;
-            await _tParticipantsRef(tid).child(pid).update({ emailOptOut: newVal2 });
-            p.emailOptOut = newVal2;
-            const row2 = body.querySelector(`[data-pid="${pid}"]`);
-            if (row2) row2.outerHTML = _renderParticipantRow(tid, pid, p);
-          });
-          body.querySelector(`[data-view-participant="${pid}"]`)?.addEventListener("click", () =>
-            _openParticipantDetail(tid, pid, p, t)
-          );
-          body.querySelector(`[data-toggle-auto="${pid}"]`)?.addEventListener("click", () =>
-            _toggleAutoRegister(tid, pid, p)
-          );
-          showToast(newVal ? `${p.displayName || pid} opted out of emails` : `${p.displayName || pid} re-enabled for emails`);
-        } catch(e) { showToast("Update failed: " + e.message, "error"); }
+          const row = listEl.querySelector(`[data-pid="${pid}"]`);
+          if (row) {
+            row.outerHTML = _renderParticipantRow(tid, pid, p);
+            listEl.querySelector(`[data-toggle-optout="${pid}"]`)?.addEventListener("click", async () => {
+              await _tParticipantsRef(tid).child(pid).update({ emailOptOut: !p.emailOptOut });
+              p.emailOptOut = !p.emailOptOut;
+            });
+          }
+        } catch(e) { showToast("Failed to update opt-out", "error"); }
       })
     );
   }
+
 
   function _renderParticipantRow(tid, pid, p) {
     const searchText = [p.displayName, p.email, p.sleeperUsername, p.teamName, p.dlrUsername]
@@ -8544,7 +8566,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Sync standings ─────────────────────────────────────
-  async function _syncStandings(tid, t, yearFilter) {
+  async function _syncStandings(tid, t) {
     const batches = t.leagues || {};
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
     const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
@@ -8553,8 +8575,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const toSync = [];
     for (const [batchId, batch] of realBatches) {
-      // If a specific year was selected, skip batches for other years
-      if (yearFilter && batch.year && String(batch.year) !== String(yearFilter)) continue;
       for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
         toSync.push({
           leagueId,
@@ -8568,17 +8588,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
     }
 
-    if (!toSync.length) {
-      showToast(`No leagues found for ${yearFilter || "selected year"}`, "info");
-      return;
-    }
-
     const total = toSync.length;
     let done = 0;
     const btn = document.getElementById("trn-sync-standings-btn");
-    const yearLabel = yearFilter ? ` (${yearFilter})` : "";
     const setP = (msg) => { if (btn) { btn.disabled = true; btn.textContent = msg; } };
-    setP(`Syncing${yearLabel} 0/${total}...`);
+    setP("Syncing 0/" + total + "...");
 
     const sleepers = toSync.filter(l => l.platform === "sleeper");
     const mfls     = toSync.filter(l => l.platform === "mfl");
@@ -8623,7 +8637,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now() };
         }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
-      done++; setP(`Syncing${yearLabel} ${done}/${total}...`);
+      done++; setP("Syncing " + done + "/" + total + "...");
     }));
 
     // MFL — 3 at a time, 300ms gap
@@ -8637,7 +8651,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           console.warn("[Standings] MFL", l.leagueId, e.message);
           syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
         }
-        done++; setP(`Syncing${yearLabel} ${done}/${total}...`);
+        done++; setP("Syncing " + done + "/" + total + "...");
       }));
       if (i + 3 < mfls.length) await new Promise(r => setTimeout(r, 300));
     }
@@ -8659,7 +8673,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             console.warn("[Standings] Yahoo", l.leagueId, e.message);
             syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
           }
-          done++; setP(`Syncing${yearLabel} ${done}/${total}...`);
+          done++; setP("Syncing " + done + "/" + total + "...");
         }));
         if (i + 2 < yahoos.length) await new Promise(r => setTimeout(r, 600));
       }
@@ -8680,7 +8694,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _syncScoringSettings(tid, toSync, activeYear).catch(e =>
         console.warn("[tournament.js] Scoring settings sync failed:", e));
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
-      showToast(`Standings synced${yearLabel} — ${Object.keys(cacheUpdates).length}/${total} leagues`);
+      showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
       _writePublicSummary(tid, _tournaments[tid]);
       // Show cross-platform warning banner if anything was skipped/failed,
       // or if scoring settings differ across platforms
@@ -9856,92 +9870,12 @@ This marks all registrations that have no year as belonging to ${targetYear}. Ru
         reviewedBy: _currentUsername
       });
       showToast(`Registration ${status} ✓`);
-
-      // When approving, immediately cross-reference the registration against
-      // the participants list and update/create a matching participant record,
-      // then re-run DLR matching for any new links.
-      if (status === "approved") {
-        _syncApprovedRegistration(tid, rid).catch(e =>
-          console.warn("[AutoSync] Registration approval sync failed:", e.message));
-      }
-
       // Re-render registrants tab — it will fetch fresh from _tRegsRef directly
       const body = (_getTabBody());
       if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
     } catch(err) {
       showToast("Failed to update status", "error");
     }
-  }
-
-  // Called when a single registration is approved. Reads the registration,
-  // finds or creates the matching participant, fills in any missing fields,
-  // and re-runs DLR matching so the participant is linked immediately.
-  async function _syncApprovedRegistration(tid, rid) {
-    const [regSnap, participantsSnap] = await Promise.all([
-      _tRegsRef(tid).child(rid).once("value"),
-      _tParticipantsRef(tid).once("value")
-    ]);
-    const reg          = regSnap.val();
-    const participants = participantsSnap.val() || {};
-    if (!reg) return;
-
-    const suKey = (reg.sleeperUsername || "").toLowerCase();
-    const meKey = (reg.mflEmail        || "").toLowerCase();
-    const yuKey = (reg.yahooUsername   || "").toLowerCase();
-    const emKey = (reg.email           || "").toLowerCase();
-
-    // Find an existing participant by any matching identity key
-    let matchPid = null;
-    for (const [pid, p] of Object.entries(participants)) {
-      if (suKey && (p.sleeperUsername || "").toLowerCase() === suKey) { matchPid = pid; break; }
-      if (meKey && (p.mflEmail        || "").toLowerCase() === meKey) { matchPid = pid; break; }
-      if (yuKey && (p.yahooUsername   || "").toLowerCase() === yuKey) { matchPid = pid; break; }
-      if (emKey && (p.email           || "").toLowerCase() === emKey) { matchPid = pid; break; }
-    }
-
-    const patch = {};
-    if (matchPid) {
-      // Update existing participant with registration data (fill missing fields only)
-      const existing = participants[matchPid];
-      if (!existing.displayName   && reg.displayName)   patch.displayName   = reg.displayName;
-      if (!existing.email         && reg.email)         patch.email         = reg.email;
-      if (!existing.gender        && reg.gender)        patch.gender        = reg.gender;
-      if (!existing.twitterHandle && reg.twitterHandle) patch.twitterHandle = reg.twitterHandle;
-      if (!existing.sleeperUsername && suKey)           patch.sleeperUsername = suKey;
-      if (!existing.mflEmail        && meKey)           patch.mflEmail        = meKey;
-      if (!existing.yahooUsername   && yuKey)           patch.yahooUsername   = yuKey;
-      if (Object.keys(patch).length) {
-        await _tParticipantsRef(tid).child(matchPid).update(patch);
-        console.log(`[AutoSync] Updated participant ${matchPid} from approved registration ${rid}`);
-      }
-    } else {
-      // No existing participant — create one from the registration
-      const newPid = _genId();
-      await _tParticipantsRef(tid).child(newPid).set({
-        displayName:     reg.displayName     || null,
-        email:           reg.email           || null,
-        gender:          reg.gender          || null,
-        twitterHandle:   reg.twitterHandle   || null,
-        sleeperUsername: suKey               || null,
-        mflEmail:        meKey               || null,
-        yahooUsername:   yuKey               || null,
-        sleeperUserId:   null,
-        sleeperDisplayName: null,
-        teamName:        null,
-        years:           [],
-        dlrLinked:       false,
-        autoRegister:    false,
-        syncedAt:        Date.now(),
-      });
-      matchPid = newPid;
-      console.log(`[AutoSync] Created participant ${newPid} from approved registration ${rid}`);
-    }
-
-    // Re-run DLR matching for this tournament so the new/updated participant
-    // gets linked if a DLR account exists for them.
-    const freshSnap    = await _tParticipantsRef(tid).once("value");
-    const allParticipants = freshSnap.val() || {};
-    await _matchParticipantsToDLR(tid, allParticipants);
   }
 
   // ── League Invite Email Modal ──────────────────────────
