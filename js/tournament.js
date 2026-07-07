@@ -6852,6 +6852,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span>League Batches (${totalLeagues} leagues${yearFilter ? ` · ${yearFilter}` : " · all years"})</span>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             ${yearFilter ? `<button class="btn-ghost btn-sm" id="trn-leagues-show-all-btn">Show All Years</button>` : ""}
+            <select id="trn-sync-year-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+              <option value="">All years</option>
+              ${[...new Set(realBatches.map(([, b]) => b.year).filter(Boolean))].sort((a,b)=>b-a).map(y =>
+                `<option value="${y}">${y}</option>`
+              ).join("")}
+            </select>
             <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
             <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
           </div>
@@ -6913,7 +6919,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     `;
 
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
-    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
+    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => {
+      const selYear = document.getElementById("trn-sync-year-sel")?.value;
+      _syncStandings(tid, t, selYear ? parseInt(selYear) : null);
+    });
     document.getElementById("trn-leagues-show-all-btn")?.addEventListener("click", () => {
       // Could be called from wizard (#wiz-leagues-container) or admin panel (_getTabBody())
       const b = document.getElementById("wiz-leagues-container") || _getTabBody();
@@ -8535,7 +8544,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Sync standings ─────────────────────────────────────
-  async function _syncStandings(tid, t) {
+  async function _syncStandings(tid, t, yearFilter) {
     const batches = t.leagues || {};
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
     const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
@@ -8544,6 +8553,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const toSync = [];
     for (const [batchId, batch] of realBatches) {
+      // If a specific year was selected, skip batches for other years
+      if (yearFilter && batch.year && String(batch.year) !== String(yearFilter)) continue;
       for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
         toSync.push({
           leagueId,
@@ -8557,11 +8568,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
     }
 
+    if (!toSync.length) {
+      showToast(`No leagues found for ${yearFilter || "selected year"}`, "info");
+      return;
+    }
+
     const total = toSync.length;
     let done = 0;
     const btn = document.getElementById("trn-sync-standings-btn");
+    const yearLabel = yearFilter ? ` (${yearFilter})` : "";
     const setP = (msg) => { if (btn) { btn.disabled = true; btn.textContent = msg; } };
-    setP("Syncing 0/" + total + "...");
+    setP(`Syncing${yearLabel} 0/${total}...`);
 
     const sleepers = toSync.filter(l => l.platform === "sleeper");
     const mfls     = toSync.filter(l => l.platform === "mfl");
@@ -8606,7 +8623,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now() };
         }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
-      done++; setP("Syncing " + done + "/" + total + "...");
+      done++; setP(`Syncing${yearLabel} ${done}/${total}...`);
     }));
 
     // MFL — 3 at a time, 300ms gap
@@ -8620,7 +8637,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           console.warn("[Standings] MFL", l.leagueId, e.message);
           syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
         }
-        done++; setP("Syncing " + done + "/" + total + "...");
+        done++; setP(`Syncing${yearLabel} ${done}/${total}...`);
       }));
       if (i + 3 < mfls.length) await new Promise(r => setTimeout(r, 300));
     }
@@ -8642,7 +8659,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             console.warn("[Standings] Yahoo", l.leagueId, e.message);
             syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
           }
-          done++; setP("Syncing " + done + "/" + total + "...");
+          done++; setP(`Syncing${yearLabel} ${done}/${total}...`);
         }));
         if (i + 2 < yahoos.length) await new Promise(r => setTimeout(r, 600));
       }
@@ -8663,7 +8680,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _syncScoringSettings(tid, toSync, activeYear).catch(e =>
         console.warn("[tournament.js] Scoring settings sync failed:", e));
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
-      showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
+      showToast(`Standings synced${yearLabel} — ${Object.keys(cacheUpdates).length}/${total} leagues`);
       _writePublicSummary(tid, _tournaments[tid]);
       // Show cross-platform warning banner if anything was skipped/failed,
       // or if scoring settings differ across platforms
@@ -9839,12 +9856,92 @@ This marks all registrations that have no year as belonging to ${targetYear}. Ru
         reviewedBy: _currentUsername
       });
       showToast(`Registration ${status} ✓`);
+
+      // When approving, immediately cross-reference the registration against
+      // the participants list and update/create a matching participant record,
+      // then re-run DLR matching for any new links.
+      if (status === "approved") {
+        _syncApprovedRegistration(tid, rid).catch(e =>
+          console.warn("[AutoSync] Registration approval sync failed:", e.message));
+      }
+
       // Re-render registrants tab — it will fetch fresh from _tRegsRef directly
       const body = (_getTabBody());
       if (body) _renderRegistrantsTab(tid, _tournaments[tid], body);
     } catch(err) {
       showToast("Failed to update status", "error");
     }
+  }
+
+  // Called when a single registration is approved. Reads the registration,
+  // finds or creates the matching participant, fills in any missing fields,
+  // and re-runs DLR matching so the participant is linked immediately.
+  async function _syncApprovedRegistration(tid, rid) {
+    const [regSnap, participantsSnap] = await Promise.all([
+      _tRegsRef(tid).child(rid).once("value"),
+      _tParticipantsRef(tid).once("value")
+    ]);
+    const reg          = regSnap.val();
+    const participants = participantsSnap.val() || {};
+    if (!reg) return;
+
+    const suKey = (reg.sleeperUsername || "").toLowerCase();
+    const meKey = (reg.mflEmail        || "").toLowerCase();
+    const yuKey = (reg.yahooUsername   || "").toLowerCase();
+    const emKey = (reg.email           || "").toLowerCase();
+
+    // Find an existing participant by any matching identity key
+    let matchPid = null;
+    for (const [pid, p] of Object.entries(participants)) {
+      if (suKey && (p.sleeperUsername || "").toLowerCase() === suKey) { matchPid = pid; break; }
+      if (meKey && (p.mflEmail        || "").toLowerCase() === meKey) { matchPid = pid; break; }
+      if (yuKey && (p.yahooUsername   || "").toLowerCase() === yuKey) { matchPid = pid; break; }
+      if (emKey && (p.email           || "").toLowerCase() === emKey) { matchPid = pid; break; }
+    }
+
+    const patch = {};
+    if (matchPid) {
+      // Update existing participant with registration data (fill missing fields only)
+      const existing = participants[matchPid];
+      if (!existing.displayName   && reg.displayName)   patch.displayName   = reg.displayName;
+      if (!existing.email         && reg.email)         patch.email         = reg.email;
+      if (!existing.gender        && reg.gender)        patch.gender        = reg.gender;
+      if (!existing.twitterHandle && reg.twitterHandle) patch.twitterHandle = reg.twitterHandle;
+      if (!existing.sleeperUsername && suKey)           patch.sleeperUsername = suKey;
+      if (!existing.mflEmail        && meKey)           patch.mflEmail        = meKey;
+      if (!existing.yahooUsername   && yuKey)           patch.yahooUsername   = yuKey;
+      if (Object.keys(patch).length) {
+        await _tParticipantsRef(tid).child(matchPid).update(patch);
+        console.log(`[AutoSync] Updated participant ${matchPid} from approved registration ${rid}`);
+      }
+    } else {
+      // No existing participant — create one from the registration
+      const newPid = _genId();
+      await _tParticipantsRef(tid).child(newPid).set({
+        displayName:     reg.displayName     || null,
+        email:           reg.email           || null,
+        gender:          reg.gender          || null,
+        twitterHandle:   reg.twitterHandle   || null,
+        sleeperUsername: suKey               || null,
+        mflEmail:        meKey               || null,
+        yahooUsername:   yuKey               || null,
+        sleeperUserId:   null,
+        sleeperDisplayName: null,
+        teamName:        null,
+        years:           [],
+        dlrLinked:       false,
+        autoRegister:    false,
+        syncedAt:        Date.now(),
+      });
+      matchPid = newPid;
+      console.log(`[AutoSync] Created participant ${newPid} from approved registration ${rid}`);
+    }
+
+    // Re-run DLR matching for this tournament so the new/updated participant
+    // gets linked if a DLR account exists for them.
+    const freshSnap    = await _tParticipantsRef(tid).once("value");
+    const allParticipants = freshSnap.val() || {};
+    await _matchParticipantsToDLR(tid, allParticipants);
   }
 
   // ── League Invite Email Modal ──────────────────────────
