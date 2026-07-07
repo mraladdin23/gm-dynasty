@@ -6852,12 +6852,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span>League Batches (${totalLeagues} leagues${yearFilter ? ` · ${yearFilter}` : " · all years"})</span>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             ${yearFilter ? `<button class="btn-ghost btn-sm" id="trn-leagues-show-all-btn">Show All Years</button>` : ""}
-            <select id="trn-sync-year-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
-              <option value="">All years</option>
-              ${[...new Set(realBatches.map(([, b]) => b.year).filter(Boolean))].sort((a,b)=>b-a).map(y =>
-                `<option value="${y}">${y}</option>`
-              ).join("")}
-            </select>
             <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
             <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
           </div>
@@ -6919,10 +6913,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     `;
 
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
-    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => {
-      const selYear = document.getElementById("trn-sync-year-sel")?.value;
-      _syncStandings(tid, t, selYear ? parseInt(selYear) : null);
-    });
+    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
     document.getElementById("trn-leagues-show-all-btn")?.addEventListener("click", () => {
       // Could be called from wizard (#wiz-leagues-container) or admin panel (_getTabBody())
       const b = document.getElementById("wiz-leagues-container") || _getTabBody();
@@ -8575,7 +8566,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Sync standings ─────────────────────────────────────
-  async function _syncStandings(tid, t, yearFilter) {
+  async function _syncStandings(tid, t) {
     const batches = t.leagues || {};
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
     const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
@@ -8584,8 +8575,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const toSync = [];
     for (const [batchId, batch] of realBatches) {
-      // Skip batches for other years when a specific year is selected
-      if (yearFilter && batch.year && String(batch.year) !== String(yearFilter)) continue;
       for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
         toSync.push({
           leagueId,
@@ -8599,29 +8588,24 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
     }
 
-    if (!toSync.length) {
-      showToast(`No leagues found${yearFilter ? ` for ${yearFilter}` : ""}`, "info");
-      return;
-    }
-
     const total = toSync.length;
     let done = 0;
     const btn = document.getElementById("trn-sync-standings-btn");
-    const yearLabel = yearFilter ? ` (${yearFilter})` : "";
     const setP = (msg) => { if (btn) { btn.disabled = true; btn.textContent = msg; } };
-    setP(`Syncing${yearLabel} 0/${total}…`);
+    setP("Syncing 0/" + total + "...");
 
     const sleepers = toSync.filter(l => l.platform === "sleeper");
     const mfls     = toSync.filter(l => l.platform === "mfl");
     const yahoos   = toSync.filter(l => l.platform === "yahoo");
     const cacheUpdates = {};
-    const syncWarnings = [];
+    const syncWarnings = []; // { platform, message } accumulated during sync
 
+    // Cache key: year_leagueId prevents cross-year collision for same leagueId
     const ck = (l) => l.year + "_" + l.leagueId;
     const playoffWeek = t.meta?.playoffStartWeek || null;
-    const medianWins  = !!(t.meta?.medianWins);
 
     // Sleeper — parallel
+    const medianWins = !!(t.meta?.medianWins);
     await Promise.allSettled(sleepers.map(async (l) => {
       try {
         const data = await _fetchSleeperStandings(l.leagueId, playoffWeek);
@@ -8631,22 +8615,29 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             const delta = _computeMedianWins(weeklyScores);
             teams = teams.map(tm => {
               const d = delta[tm.teamId] || { medWins: 0, medLosses: 0 };
-              return { ...tm, wins: tm.wins + d.medWins, losses: tm.losses + d.medLosses };
+              return {
+                ...tm,
+                wins:   tm.wins   + d.medWins,
+                losses: tm.losses + d.medLosses
+              };
             });
           }
+          // Build champion object: playoff winner if bracket ran, otherwise reg season leader
           let champion = null;
           if (playoffWinnerRosterId) {
             const winnerTeam = teams.find(tm => String(tm.teamId) === playoffWinnerRosterId);
             if (winnerTeam) champion = { ...winnerTeam, isPlayoffChampion: true };
           }
           if (!champion) {
-            const regChamp = [...teams].sort((a,b) => (b.wins||0)-(a.wins||0) || (b.pf||0)-(a.pf||0))[0];
+            // Fallback: regular season leader (most wins, then PF)
+            const regChamp = [...teams].sort((a,b) =>
+              (b.wins||0)-(a.wins||0) || (b.pf||0)-(a.pf||0))[0];
             if (regChamp) champion = { ...regChamp, isPlayoffChampion: false };
           }
           cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now() };
         }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
-      done++; setP(`Syncing${yearLabel} ${done}/${total}…`);
+      done++; setP("Syncing " + done + "/" + total + "...");
     }));
 
     // MFL — 3 at a time, 300ms gap
@@ -8655,12 +8646,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         try {
           const data = await _fetchMFLStandings(l.leagueId, l.year);
           if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
-          else syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" returned no data.` });
+          else syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" returned no data — MFL may require authentication via the worker.` });
         } catch(e) {
           console.warn("[Standings] MFL", l.leagueId, e.message);
           syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
         }
-        done++; setP(`Syncing${yearLabel} ${done}/${total}…`);
+        done++; setP("Syncing " + done + "/" + total + "...");
       }));
       if (i + 3 < mfls.length) await new Promise(r => setTimeout(r, 300));
     }
@@ -8669,7 +8660,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
     if (yahoos.length && !yahooToken) {
       showToast("Yahoo standings skipped — connect Yahoo in your profile first", "info");
-      syncWarnings.push({ platform: "yahoo", message: `${yahoos.length} Yahoo league${yahoos.length !== 1 ? "s" : ""} skipped — connect Yahoo first.` });
+      syncWarnings.push({ platform: "yahoo", message: `${yahoos.length} Yahoo league${yahoos.length !== 1 ? "s" : ""} skipped — connect Yahoo in your profile first.` });
       done += yahoos.length;
     } else {
       for (let i = 0; i < yahoos.length; i += 2) {
@@ -8677,57 +8668,44 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           try {
             const data = await _fetchYahooStandings(l.leagueId, yahooToken);
             if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
-            else syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" returned no data.` });
+            else syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" returned no data — Yahoo token may be expired.` });
           } catch(e) {
             console.warn("[Standings] Yahoo", l.leagueId, e.message);
             syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
           }
-          done++; setP(`Syncing${yearLabel} ${done}/${total}…`);
+          done++; setP("Syncing " + done + "/" + total + "...");
         }));
         if (i + 2 < yahoos.length) await new Promise(r => setTimeout(r, 600));
       }
     }
 
     if (!Object.keys(cacheUpdates).length) {
-      if (btn) { btn.disabled = false; btn.textContent = "↺ Sync Standings"; }
+      if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
       showToast("No standings data retrieved", "error");
       return;
     }
 
     try {
-      // ── Chunked writes: 50 leagues per write to stay well under 10MB ────────
-      // Each standings entry contains full teams[] arrays, so even 50 leagues
-      // can be 200-500KB. 50 is a safe upper bound for any league size.
-      const entries     = Object.entries(cacheUpdates);
-      const CHUNK       = 50;
-      const totalChunks = Math.ceil(entries.length / CHUNK);
-      console.log(`[Standings] Writing ${entries.length} leagues in ${totalChunks} chunk(s)`);
-
-      for (let ci = 0; ci < entries.length; ci += CHUNK) {
-        const chunkNum = Math.floor(ci / CHUNK) + 1;
-        setP(`Writing${yearLabel} ${chunkNum}/${totalChunks}…`);
-        await _tStandingsRef(tid).update(Object.fromEntries(entries.slice(ci, ci + CHUNK)));
-      }
-
+      await _tStandingsRef(tid).update(cacheUpdates);
       const snap = await _tRef(tid).once("value");
       _tournaments[tid] = snap.val();
-
-      const activeYear = yearFilter || toSync[0]?.year || new Date().getFullYear();
+      // Sync scoring settings (fire-and-forget, non-blocking)
+      const activeYear = toSync[0]?.year || new Date().getFullYear();
       _syncScoringSettings(tid, toSync, activeYear).catch(e =>
         console.warn("[tournament.js] Scoring settings sync failed:", e));
-
-      if (btn) { btn.disabled = false; btn.textContent = "↺ Sync Standings"; }
-      showToast(`Standings synced${yearLabel} — ${entries.length}/${total} leagues`);
+      if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
+      showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
       _writePublicSummary(tid, _tournaments[tid]);
-
-      const scoringDiffs = _getScoringDiffs(_tournaments[tid], activeYear);
+      // Show cross-platform warning banner if anything was skipped/failed,
+      // or if scoring settings differ across platforms
+      const scoringDiffs = _getScoringDiffs(_tournaments[tid], toSync[0]?.year || new Date().getFullYear());
       if (syncWarnings.length || scoringDiffs.length) {
         _showSyncWarningBanner(syncWarnings, scoringDiffs);
       }
       const body = (_getTabBody());
       if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
     } catch(err) {
-      if (btn) { btn.disabled = false; btn.textContent = "↺ Sync Standings"; }
+      if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
       showToast("Failed to save: " + err.message, "error");
     }
   }
@@ -12028,10 +12006,23 @@ Good luck this season!
       const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
       const mflCreds   = _getMFLCreds();
 
-      // Fetch missing leagues in batches of 3
+      // Fetch missing leagues in batches of 3, writing to Firebase as each
+      // batch completes rather than accumulating everything for one giant write.
+      // For a first-load of 400 leagues, a single write would be 20-50 MB —
+      // well over Firebase's 10 MB limit. Writing 3 leagues at a time (~50-150 KB
+      // per write) distributes the load and also means partial progress is saved
+      // if the user navigates away mid-sync.
       const results = {};
+      const totalToFetch = toFetch.length;
+
+      if (totalToFetch > 0) {
+        body.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Loading draft data… 0/${totalToFetch}</div>`;
+      }
+
       for (let i = 0; i < toFetch.length; i += 3) {
         const batch = toFetch.slice(i, i + 3);
+        const batchResults = {};
+
         await Promise.allSettled(batch.map(async l => {
           try {
             const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
@@ -12048,7 +12039,7 @@ Good luck this season!
             if (!r.ok) return;
             const data = await r.json();
             if (data.picks) {
-              results[l.cacheKey] = {
+              batchResults[l.cacheKey] = {
                 ...l,
                 picks:             data.picks,
                 slot_to_roster_id: data.slot_to_roster_id || null,
@@ -12059,15 +12050,26 @@ Good luck this season!
             }
           } catch(e) { console.warn("[Draft] fetch error", l.leagueId, e.message); }
         }));
+
+        // Write this batch to Firebase immediately — don't accumulate everything
+        if (Object.keys(batchResults).length) {
+          Object.assign(results, batchResults);
+          _tAnalyticsRef(tid).child("drafts").update(batchResults).catch(e =>
+            console.warn("[Draft] Firebase write error (batch):", e.message)
+          );
+        }
+
+        // Update progress in the loading indicator
+        const fetched = Math.min(i + 3, totalToFetch);
+        const loadEl = body.querySelector(".trn-az-loading");
+        if (loadEl) loadEl.innerHTML = `<div class="spinner"></div> Loading draft data… ${fetched}/${totalToFetch}`;
+
         if (i + 3 < toFetch.length) await new Promise(r => setTimeout(r, 200));
       }
 
-      // Merge with cached, persist new to Firebase
+      // Merge with cached
       const allCached = { ...cached, ...results };
-      _draftForceRefresh = false; // clear force-refresh flag
-      if (Object.keys(results).length) {
-        await _tAnalyticsRef(tid).child("drafts").update(results).catch(() => {});
-      }
+      _draftForceRefresh = false;
 
       // Build team name map from standingsCache — keyed as "{leagueId}:{teamId}" to
       // prevent roster_id collisions across leagues (each league reuses IDs 1–12).
