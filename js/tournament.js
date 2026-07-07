@@ -7809,6 +7809,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Deduplicate using dedupKey
       const seen         = new Set();
       const dedupedTeams = rawTeams.filter(tm => {
+        if (!tm) return false;
         const key = tm.dedupKey || tm.sleeperUsername || tm.mflEmail || tm.yahooUsername;
         if (!key || seen.has(key)) return false;
         seen.add(key);
@@ -7848,24 +7849,35 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                  || null;
 
         if (pid) {
-          const existing = existingParticipants[pid];
-          const patch    = {};
-          if (!existing.sleeperUserId        && tm.sleeperUserId)        patch.sleeperUserId        = tm.sleeperUserId;
-          if (!existing.sleeperUsername      && tm.sleeperUsername)      patch.sleeperUsername      = tm.sleeperUsername;
-          if (!existing.sleeperDisplayName   && tm.sleeperDisplayName)   patch.sleeperDisplayName   = tm.sleeperDisplayName;
-          if (!existing.mflEmail             && tm.mflEmail)             patch.mflEmail             = tm.mflEmail;
-          if (!existing.yahooUsername        && tm.yahooUsername)        patch.yahooUsername        = tm.yahooUsername;
-          if (!existing.teamName             && tm.teamName)             patch.teamName             = tm.teamName;
-          const platformDisplay = tm.displayName || tm.sleeperDisplayName || tm.teamName;
-          if (!existing.displayName && platformDisplay) patch.displayName = platformDisplay;
-          if (reg) {
-            if (!existing.displayName   && reg.displayName)   patch.displayName   = reg.displayName;
-            if (!existing.email         && reg.email)         patch.email         = reg.email;
-            if (!existing.gender        && reg.gender)        patch.gender        = reg.gender;
-            if (!existing.twitterHandle && reg.twitterHandle) patch.twitterHandle = reg.twitterHandle;
+          // The pid may have been created within this same sync run (registered
+          // into the lookup maps by the else-branch below). In that case it
+          // lives in `updates`, not yet in `existingParticipants`. Read from
+          // whichever source actually has it; if neither, fall through to create.
+          const existing = existingParticipants[pid] || updates[pid];
+          if (!existing) {
+            // pid came from a stale lookup — treat as new
+            pid = null;
+          } else {
+            const patch    = {};
+            if (!existing.sleeperUserId        && tm.sleeperUserId)        patch.sleeperUserId        = tm.sleeperUserId;
+            if (!existing.sleeperUsername      && tm.sleeperUsername)      patch.sleeperUsername      = tm.sleeperUsername;
+            if (!existing.sleeperDisplayName   && tm.sleeperDisplayName)   patch.sleeperDisplayName   = tm.sleeperDisplayName;
+            if (!existing.mflEmail             && tm.mflEmail)             patch.mflEmail             = tm.mflEmail;
+            if (!existing.yahooUsername        && tm.yahooUsername)        patch.yahooUsername        = tm.yahooUsername;
+            if (!existing.teamName             && tm.teamName)             patch.teamName             = tm.teamName;
+            const platformDisplay = tm.displayName || tm.sleeperDisplayName || tm.teamName;
+            if (!existing.displayName && platformDisplay) patch.displayName = platformDisplay;
+            if (reg) {
+              if (!existing.displayName   && reg.displayName)   patch.displayName   = reg.displayName;
+              if (!existing.email         && reg.email)         patch.email         = reg.email;
+              if (!existing.gender        && reg.gender)        patch.gender        = reg.gender;
+              if (!existing.twitterHandle && reg.twitterHandle) patch.twitterHandle = reg.twitterHandle;
+            }
+            if (Object.keys(patch).length) { updates[pid] = { ...existing, ...patch }; updatedCount++; }
           }
-          if (Object.keys(patch).length) { updates[pid] = { ...existing, ...patch }; updatedCount++; }
-        } else {
+        }
+        // Separate if (not else if) so the pid=null fallthrough above creates a new record
+        if (!pid) {
           pid = _genId();
           updates[pid] = {
             displayName:        reg?.displayName    || tm.displayName || tm.sleeperDisplayName || tm.teamName || null,
