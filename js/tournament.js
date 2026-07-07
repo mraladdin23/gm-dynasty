@@ -545,7 +545,7 @@ const DLRTournament = (() => {
 
   function _renderTournamentCard(tid, t, isAdmin = false) {
     const meta   = t.meta || {};
-    const status = meta.status || "draft";
+    const status = _effectiveStatus(t);
     const leagueCount = t.leagues ? Object.keys(t.leagues).length : 0;
     const regCount    = t.registrations ? Object.keys(t.registrations).length : 0;
 
@@ -594,9 +594,25 @@ const DLRTournament = (() => {
     return "total_points";
   }
 
+  // Returns the true tournament status, accounting for the case where the
+  // wizard sets playoffs/{year}/registrationOpen=true without also updating
+  // meta.status (_changeStatus does both correctly; the wizard step 4 only
+  // did the playoffs write, leaving meta.status stuck at "draft").
+  // If meta.status is still "draft" but any year has registrationOpen=true,
+  // return "registration_open" so the card, row, and public summary reflect reality.
+  function _effectiveStatus(t) {
+    const raw = t.meta?.status || "draft";
+    if (raw !== "draft") return raw;
+    const po = t.playoffs || {};
+    const hasRegOpen = Object.keys(po)
+      .filter(k => /^\d{4}$/.test(k))
+      .some(y => po[y]?.registrationOpen);
+    return hasRegOpen ? "registration_open" : raw;
+  }
+
   function _renderTournamentRow(tid, t, isAdmin = false) {
     const meta        = t.meta || {};
-    const status      = meta.status || "draft";
+    const status      = _effectiveStatus(t);
     const leagueCount = t.leagues ? Object.keys(t.leagues).length : 0;
     const regCount    = t.registrations ? Object.keys(t.registrations).length : 0;
     const mode        = _tMode(t);
@@ -2049,6 +2065,13 @@ const DLRTournament = (() => {
         if (!_tournaments[tid].playoffs) _tournaments[tid].playoffs = {};
         if (!_tournaments[tid].playoffs[_wizardYear]) _tournaments[tid].playoffs[_wizardYear] = {};
         _tournaments[tid].playoffs[_wizardYear].registrationOpen = regOpen;
+        // Also update meta.status so tournament card stays in sync.
+        // Previously only _changeStatus did this; the wizard omitted it,
+        // leaving meta.status as "draft" even after registration opened.
+        if (regOpen && _tournaments[tid]?.meta?.status === "draft") {
+          await _tMetaRef(tid).update({ status: "registration_open" });
+          if (_tournaments[tid].meta) _tournaments[tid].meta.status = "registration_open";
+        }
       }
 
       if (step === 7) {
@@ -7647,7 +7670,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   async function _autoSyncParticipants(tid, t) {
     const btn = document.getElementById("trn-auto-sync-participants-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "⏳ Syncing…"; }
+    const _setBtn = (txt) => { if (btn) { btn.disabled = !!txt; btn.textContent = txt || "⚡ Sync from Leagues"; } };
+    _setBtn("⏳ Preparing…");
 
     try {
       const batches = t.leagues || {};
@@ -7659,24 +7683,39 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return;
       }
 
-      // Collect raw team records from all leagues across all platforms
-      const rawTeams = []; // { platform, leagueId, teamName, sleeperUsername, mflEmail, yahooUsername, sleeperDisplayName }
-
+      // ── Build flat task list: one entry per league across all batches ───────
+      const tasks = [];
       for (const [, batch] of realBatches) {
         const platform = (batch.platform || "sleeper").toLowerCase();
         const year     = batch.year || new Date().getFullYear();
-
         for (const [leagueId] of Object.entries(batch.leagues || {})) {
+          tasks.push({ platform, year, leagueId });
+        }
+      }
+
+      const totalLeagues = tasks.length;
+      const rawTeams     = [];
+      let   doneCount    = 0;
+
+      // ── Fetch all leagues in parallel batches of 20 ────────────────────────
+      // Sleeper's public API handles 20 concurrent easily; MFL/Yahoo will
+      // naturally be slower within their own slots — the batch size keeps
+      // us from opening 1380 connections simultaneously.
+      const BATCH_SIZE = 20;
+
+      for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+        const chunk = tasks.slice(i, i + BATCH_SIZE);
+
+        await Promise.allSettled(chunk.map(async ({ platform, year, leagueId }) => {
           try {
             if (platform === "sleeper") {
-              // Fetch users + rosters in parallel
               const [rU, rR] = await Promise.all([
                 fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`).then(r => r.ok ? r.json() : []),
                 fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`).then(r => r.ok ? r.json() : [])
               ]);
-              const usersArr  = Array.isArray(rU) ? rU : [];
+              const usersArr   = Array.isArray(rU) ? rU : [];
               const rostersArr = Array.isArray(rR) ? rR : [];
-              const userMap = {};
+              const userMap    = {};
               usersArr.forEach(u => { if (u.user_id) userMap[u.user_id] = u; });
               rostersArr.forEach(r => {
                 const u = userMap[r.owner_id];
@@ -7685,9 +7724,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                   platform:           "sleeper",
                   dedupKey:           u.user_id,
                   sleeperUserId:      u.user_id      || null,
-                  // Use username if set, otherwise fall back to display_name (lowercased).
-                  // DLR stores either platforms/sleeper/sleeperUsername or /displayName —
-                  // both are lowercased display_name variants when no formal username exists.
                   sleeperUsername:    (u.username || u.display_name || "").toLowerCase() || null,
                   sleeperDisplayName: u.display_name || u.username || null,
                   teamName:           (u.metadata?.team_name || u.display_name || u.username || "").trim() || null,
@@ -7697,8 +7733,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               });
 
             } else if (platform === "mfl") {
-              // Use MFL franchise list to get emails/names
-              const url = `https://api.myfantasyleague.com/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
+              const url   = `https://api.myfantasyleague.com/${year}/export?TYPE=league&L=${leagueId}&JSON=1`;
               const lData = await fetch(url, { headers: { "User-Agent": "DynastyLockerRoom/1.0" } })
                 .then(r => r.ok ? r.json() : null).catch(() => null);
               const frArr = lData?.league?.franchises?.franchise || [];
@@ -7708,10 +7743,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 rawTeams.push({
                   platform:           "mfl",
                   dedupKey:           email || f.id || f.name || "",
-                  sleeperUserId:      null,
-                  sleeperUsername:    null,
-                  sleeperDisplayName: null,
-                  // team name is the best human-readable identity for MFL
+                  sleeperUserId:      null, sleeperUsername: null, sleeperDisplayName: null,
                   displayName:        f.name || email || null,
                   teamName:           f.name || f.id  || null,
                   mflEmail:           email,
@@ -7720,23 +7752,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               });
 
             } else if (platform === "yahoo") {
-              // Yahoo requires auth token — read from Firebase user tokens
               const yahooToken = await _getYahooAccessToken().catch(() => null);
-              if (!yahooToken) continue;
+              if (!yahooToken) return;
               const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/yahoo/leagueBundle", {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ access_token: yahooToken, league_key: leagueId })
+                body:    JSON.stringify({ access_token: yahooToken, league_key: leagueId })
               }).then(r => r.ok ? r.json() : null).catch(() => null);
               (r?.teams || []).forEach(tm => {
                 const nick = tm.managerNickname ? tm.managerNickname.toLowerCase() : null;
                 rawTeams.push({
                   platform:           "yahoo",
                   dedupKey:           nick || tm.teamKey || tm.name || "",
-                  sleeperUserId:      null,
-                  sleeperUsername:    null,
-                  sleeperDisplayName: null,
-                  // nickname is the best identity for Yahoo; fall back to team name
+                  sleeperUserId:      null, sleeperUsername: null, sleeperDisplayName: null,
                   displayName:        tm.managerNickname || tm.name || null,
                   teamName:           tm.name || null,
                   mflEmail:           null,
@@ -7746,8 +7774,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             }
           } catch(e) {
             console.warn(`[AutoSync] Failed league ${leagueId} (${platform}):`, e.message);
+          } finally {
+            doneCount++;
           }
-        }
+        }));
+
+        // Live progress on the button after each batch of 20 completes
+        _setBtn(`⏳ Fetching… ${doneCount}/${totalLeagues}`);
       }
 
       if (!rawTeams.length) {
@@ -7755,13 +7788,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         return;
       }
 
-      console.log(`[AutoSync] ${rawTeams.length} raw team records from ${realBatches.length} batch(es)`);
+      _setBtn(`⏳ Processing ${rawTeams.length} records…`);
+      console.log(`[AutoSync] ${rawTeams.length} raw records from ${totalLeagues} leagues`);
 
-      // ── Fresh read of current participants from Firebase (not stale snapshot) ──
-      const existingSnap = await _tParticipantsRef(tid).once("value");
+      // ── Fresh read of current participants ─────────────────────────────────
+      const existingSnap        = await _tParticipantsRef(tid).once("value");
       const existingParticipants = existingSnap.val() || {};
 
-      // Build lookup maps from existing participants — all three platform keys + sleeperUserId
       const bySleeperUser   = {};
       const bySleeperUserId = {};
       const byMflEmail      = {};
@@ -7773,22 +7806,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]       = pid;
       });
 
-      // Deduplicate raw teams across leagues using dedupKey (user_id for Sleeper, email/id for MFL)
-      const seen = new Set();
+      // Deduplicate using dedupKey
+      const seen         = new Set();
       const dedupedTeams = rawTeams.filter(tm => {
         const key = tm.dedupKey || tm.sleeperUsername || tm.mflEmail || tm.yahooUsername;
-        if (!key) return false;
-        if (seen.has(key)) return false;
+        if (!key || seen.has(key)) return false;
         seen.add(key);
         return true;
       });
 
-      console.log(`[AutoSync] ${Object.keys(existingParticipants).length} existing participants in Firebase`);
-      console.log(`[AutoSync] ${dedupedTeams.length} unique teams after dedup (from ${rawTeams.length} raw)`);
-      console.log(`[AutoSync] Sample dedupKeys:`, dedupedTeams.slice(0,3).map(t => t.dedupKey || t.sleeperUsername));
+      console.log(`[AutoSync] ${Object.keys(existingParticipants).length} existing, ${dedupedTeams.length} unique after dedup`);
 
-      // Build registration lookup by platform username for cross-referencing
-      const registrations = t.registrations || {};
+      // Registration cross-reference
+      const registrations    = t.registrations || {};
       const regBySleeperUser = {};
       const regByMflEmail    = {};
       const regByYahooUser   = {};
@@ -7806,48 +7836,38 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const meKey = tm.mflEmail?.toLowerCase();
         const yuKey = tm.yahooUsername?.toLowerCase();
 
-        // Find existing participant — check all identity keys independently
         let pid = null;
         if (tm.sleeperUserId)  pid = bySleeperUserId[tm.sleeperUserId] || null;
         if (!pid && suKey)     pid = bySleeperUser[suKey]   || null;
         if (!pid && meKey)     pid = byMflEmail[meKey]      || null;
         if (!pid && yuKey)     pid = byYahooUser[yuKey]     || null;
 
-        // Find matching registration for extra data
         const reg = (suKey && regBySleeperUser[suKey])
                  || (meKey && regByMflEmail[meKey])
                  || (yuKey && regByYahooUser[yuKey])
                  || null;
 
         if (pid) {
-          // Update — only fill missing fields
           const existing = existingParticipants[pid];
-          const patch = {};
-          if (!existing.sleeperUserId   && tm.sleeperUserId)   patch.sleeperUserId   = tm.sleeperUserId;
-          if (!existing.sleeperUsername && tm.sleeperUsername) patch.sleeperUsername = tm.sleeperUsername;
-          if (!existing.sleeperDisplayName && tm.sleeperDisplayName) patch.sleeperDisplayName = tm.sleeperDisplayName;
-          if (!existing.mflEmail        && tm.mflEmail)        patch.mflEmail        = tm.mflEmail;
-          if (!existing.yahooUsername   && tm.yahooUsername)   patch.yahooUsername   = tm.yahooUsername;
-          if (!existing.teamName        && tm.teamName)        patch.teamName        = tm.teamName;
-          // Fill displayName from platform identity if still missing
+          const patch    = {};
+          if (!existing.sleeperUserId        && tm.sleeperUserId)        patch.sleeperUserId        = tm.sleeperUserId;
+          if (!existing.sleeperUsername      && tm.sleeperUsername)      patch.sleeperUsername      = tm.sleeperUsername;
+          if (!existing.sleeperDisplayName   && tm.sleeperDisplayName)   patch.sleeperDisplayName   = tm.sleeperDisplayName;
+          if (!existing.mflEmail             && tm.mflEmail)             patch.mflEmail             = tm.mflEmail;
+          if (!existing.yahooUsername        && tm.yahooUsername)        patch.yahooUsername        = tm.yahooUsername;
+          if (!existing.teamName             && tm.teamName)             patch.teamName             = tm.teamName;
           const platformDisplay = tm.displayName || tm.sleeperDisplayName || tm.teamName;
           if (!existing.displayName && platformDisplay) patch.displayName = platformDisplay;
-          // Pull in registration data if not already on participant
           if (reg) {
-            if (!existing.displayName    && reg.displayName)    patch.displayName    = reg.displayName;
-            if (!existing.email          && reg.email)          patch.email          = reg.email;
-            if (!existing.gender         && reg.gender)         patch.gender         = reg.gender;
-            if (!existing.twitterHandle  && reg.twitterHandle)  patch.twitterHandle  = reg.twitterHandle;
+            if (!existing.displayName   && reg.displayName)   patch.displayName   = reg.displayName;
+            if (!existing.email         && reg.email)         patch.email         = reg.email;
+            if (!existing.gender        && reg.gender)        patch.gender        = reg.gender;
+            if (!existing.twitterHandle && reg.twitterHandle) patch.twitterHandle = reg.twitterHandle;
           }
-          if (Object.keys(patch).length) {
-            updates[pid] = { ...existing, ...patch };
-            updatedCount++;
-          }
+          if (Object.keys(patch).length) { updates[pid] = { ...existing, ...patch }; updatedCount++; }
         } else {
-          // Create new participant record
           pid = _genId();
-          const newP = {
-            // Priority: registration form > platform display name > team name
+          updates[pid] = {
             displayName:        reg?.displayName    || tm.displayName || tm.sleeperDisplayName || tm.teamName || null,
             teamName:           tm.teamName         || null,
             email:              reg?.email          || tm.mflEmail    || null,
@@ -7863,9 +7883,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             autoRegister:       false,
             syncedAt:           Date.now(),
           };
-          updates[pid] = newP;
           newCount++;
-          // Register for lookups so later dedup entries in same batch don't duplicate
           if (tm.sleeperUserId)  bySleeperUserId[tm.sleeperUserId] = pid;
           if (suKey) bySleeperUser[suKey] = pid;
           if (meKey) byMflEmail[meKey]    = pid;
@@ -7873,35 +7891,32 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         }
       }
 
-      console.log(`[AutoSync] ${newCount} new, ${updatedCount} updated, ${Object.keys(updates).length} total in updates`);
+      console.log(`[AutoSync] ${newCount} new, ${updatedCount} updated`);
 
       if (!Object.keys(updates).length) {
-        // Nothing new to write — run DLR match on existing participants
         const matchResult = await _matchParticipantsToDLR(tid, existingParticipants);
         const { newMatches = 0, alreadyLinked = 0, total = 0 } = matchResult || {};
-        if (newMatches > 0) {
-          showToast(`${newMatches} participant${newMatches !== 1 ? "s" : ""} linked to DLR ✓`);
-        } else {
-          showToast(
-            alreadyLinked === total && total > 0
-              ? `All ${total} participants already up to date ✓`
-              : `Up to date — no new DLR matches found`,
-            "info"
-          );
-        }
+        showToast(
+          newMatches > 0          ? `${newMatches} participant${newMatches !== 1 ? "s" : ""} linked to DLR ✓`
+          : alreadyLinked === total && total > 0 ? `All ${total} participants already up to date ✓`
+          : "Up to date — no new changes", "info"
+        );
       } else {
-        // Write all updates via single Firebase update (atomic, avoids partial writes)
+        // ── Chunked Firebase writes: 200 records per write to stay under 10 MB ─
+        const entries       = Object.entries(updates);
+        const WRITE_CHUNK   = 200;
+        const totalChunks   = Math.ceil(entries.length / WRITE_CHUNK);
         const participantsRef = _tParticipantsRef(tid);
-        console.log(`[AutoSync] Writing ${Object.keys(updates).length} participant records to Firebase…`);
-        try {
-          await participantsRef.update(updates);
-          console.log("[AutoSync] Firebase write succeeded");
-        } catch(writeErr) {
-          console.error("[AutoSync] Firebase write failed:", writeErr.message, writeErr);
-          throw writeErr; // re-throw so outer catch handles it
+
+        console.log(`[AutoSync] Writing ${entries.length} records in ${totalChunks} chunk(s)`);
+
+        for (let ci = 0; ci < entries.length; ci += WRITE_CHUNK) {
+          const chunkNum = Math.floor(ci / WRITE_CHUNK) + 1;
+          _setBtn(`⏳ Writing ${chunkNum}/${totalChunks}…`);
+          await participantsRef.update(Object.fromEntries(entries.slice(ci, ci + WRITE_CHUNK)));
         }
 
-        // Run DLR match against all (existing + newly synced)
+        _setBtn("⏳ Matching DLR accounts…");
         const allForMatch = { ...existingParticipants, ...updates };
         const matchResult = await _matchParticipantsToDLR(tid, allForMatch);
         const { newMatches = 0 } = matchResult || {};
@@ -7913,17 +7928,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         showToast(`Synced: ${parts.length ? parts.join(", ") : "no changes"} ✓`);
       }
 
-      // Single authoritative reload + re-render
-      const freshSnap = await _tRef(tid).once("value");
+      // Reload + re-render participants tab
+      const freshSnap   = await _tRef(tid).once("value");
       _tournaments[tid] = freshSnap.val();
-      const body = (_getTabBody());
+      const body        = _getTabBody();
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
 
     } catch(err) {
       showToast("Sync failed: " + err.message, "error");
       console.error("[AutoSync]", err);
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = "⚡ Sync from Leagues"; }
+      _setBtn(null);
     }
   }
 
@@ -21480,7 +21495,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const summary = {
         name:              meta.name         || "",
         tagline:           meta.tagline      || "",
-        status:            meta.status       || "draft",
+        status:            _effectiveStatus(t),
         regType:           meta.regType      || "open",
         rankBy:            meta.rankBy       || "record",
         bio:               meta.bio          || "",
