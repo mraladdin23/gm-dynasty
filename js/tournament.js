@@ -7127,8 +7127,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       await _tLeaguesRef(tid).child(batchId).set(batch);
       showToast(`${parsed.length} league${parsed.length !== 1 ? "s" : ""} imported ✓`);
       _closeModal();
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      const snap = await _tLeaguesRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].leagues = snap.val();
       _openTournamentView(tid);
       _activeAdminTab = "leagues";
     } catch(err) {
@@ -7189,8 +7190,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         await _tLeaguesRef(tid).child(batchId).update(updates);
         showToast("Conferences saved ✓");
         _closeModal();
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
+        const snap = await _tLeaguesRef(tid).once("value");
+        if (!_tournaments[tid]) _tournaments[tid] = {};
+        _tournaments[tid].leagues = snap.val();
         _openTournamentView(tid);
         _activeAdminTab = "leagues";
       } catch(err) {
@@ -7204,8 +7206,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     try {
       await _tLeaguesRef(tid).child(batchId).remove();
       showToast("Batch removed ✓");
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      const snap = await _tLeaguesRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].leagues = snap.val();
       _openTournamentView(tid);
       _activeAdminTab = "leagues";
     } catch(err) {
@@ -7219,8 +7222,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     try {
       await _tLeaguesRef(tid).child(lid).remove();
       showToast("League removed ✓");
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      const snap = await _tLeaguesRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].leagues = snap.val();
       _openTournamentView(tid);
       _activeAdminTab = "leagues";
     } catch(err) {
@@ -7509,8 +7513,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         await _tParticipantsRef(tid).child(pid).update({ autoRegister: autoReg, emailOptOut: optOut });
         showToast("Saved");
         _closeModal();
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
+        // Surgical: patch only the changed participant in local cache
+        if (_tournaments[tid]?.participants?.[pid]) {
+          _tournaments[tid].participants[pid].autoRegister = autoReg;
+          _tournaments[tid].participants[pid].emailOptOut  = optOut;
+        }
         const body = (_getTabBody());
         if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
       } catch(err) { showToast("Failed to save", "error"); }
@@ -7522,8 +7529,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     try {
       await _tParticipantsRef(tid).child(pid).update({ autoRegister: newVal });
       showToast(newVal ? "Auto-register enabled" : "Auto-register disabled");
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      // Surgical: flip single field in local cache — no full re-read needed
+      if (_tournaments[tid]?.participants?.[pid]) _tournaments[tid].participants[pid].autoRegister = newVal;
       const body = (_getTabBody());
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
     } catch(err) { showToast("Failed to update", "error"); }
@@ -7598,9 +7605,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Save to Firebase
       await _tParticipantsRef(tid).update(updates);
 
-      // Refresh local cache immediately so the tab re-renders with saved data
-      const freshSnap = await _tRef(tid).once("value");
-      _tournaments[tid] = freshSnap.val();
+      // Surgical: re-read only participants sub-path
+      const freshSnap = await _tParticipantsRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].participants = freshSnap.val();
       const tabBody = (_getTabBody());
       if (tabBody && (_activeAdminMgmtTab === "participants" || _activeAdminTab === "participants")) {
         _renderParticipantsTab(tid, _tournaments[tid], tabBody);
@@ -7971,9 +7979,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         showToast(`Synced: ${parts.length ? parts.join(", ") : "no changes"} ✓`);
       }
 
-      // Reload + re-render participants tab
-      const freshSnap   = await _tRef(tid).once("value");
-      _tournaments[tid] = freshSnap.val();
+      // Surgical: re-read only participants sub-path
+      const freshSnap   = await _tParticipantsRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].participants = freshSnap.val();
       const body        = _getTabBody();
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
 
@@ -8640,20 +8649,30 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       done++; setP("Syncing " + done + "/" + total + "...");
     }));
 
-    // MFL — 3 at a time, 300ms gap
-    for (let i = 0; i < mfls.length; i += 3) {
-      await Promise.allSettled(mfls.slice(i, i + 3).map(async (l) => {
+    // MFL — 5 at a time, 400ms gap between batches.
+    // MFL's public API handles ~5 concurrent requests safely; more risks 429s.
+    // Each batch writes to Firebase immediately rather than accumulating everything,
+    // so large MFL tournaments never produce a single oversized write at the end.
+    for (let i = 0; i < mfls.length; i += 5) {
+      const mflBatch = {};
+      await Promise.allSettled(mfls.slice(i, i + 5).map(async (l) => {
         try {
           const data = await _fetchMFLStandings(l.leagueId, l.year);
-          if (data) cacheUpdates[ck(l)] = { ...l, ...data, lastSynced: Date.now() };
+          if (data) { mflBatch[ck(l)] = { ...l, ...data, lastSynced: Date.now() }; }
           else syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" returned no data — MFL may require authentication via the worker.` });
         } catch(e) {
           console.warn("[Standings] MFL", l.leagueId, e.message);
           syncWarnings.push({ platform: "mfl", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
         }
-        done++; setP("Syncing " + done + "/" + total + "...");
+        done++; setP(`Syncing${yearLabel || ""} ${done}/${total}...`);
       }));
-      if (i + 3 < mfls.length) await new Promise(r => setTimeout(r, 300));
+      // Write this MFL batch to Firebase immediately — don't wait for the end
+      if (Object.keys(mflBatch).length) {
+        Object.assign(cacheUpdates, mflBatch);
+        _tStandingsRef(tid).update(mflBatch).catch(e =>
+          console.warn("[Standings] MFL batch write:", e.message));
+      }
+      if (i + 5 < mfls.length) await new Promise(r => setTimeout(r, 400));
     }
 
     // Yahoo — 2 at a time, 600ms gap
@@ -8686,9 +8705,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     }
 
     try {
-      await _tStandingsRef(tid).update(cacheUpdates);
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      // Surgical: merge updated standingsCache into local cache — no full re-read
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      if (!_tournaments[tid].standingsCache) _tournaments[tid].standingsCache = {};
+      Object.assign(_tournaments[tid].standingsCache, cacheUpdates);
       // Sync scoring settings (fire-and-forget, non-blocking)
       const activeYear = toSync[0]?.year || new Date().getFullYear();
       _syncScoringSettings(tid, toSync, activeYear).catch(e =>
@@ -9147,8 +9167,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         await _tRolesRef(tid).child(user).set(roleData);
         showToast(`@${user} added as ${role === "admin" ? "Admin" : "Sub-Admin"} ✓`);
         _closeModal();
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
+        const snap = await GMD.child(`tournaments/${tid}/roles`).once("value");
+        if (!_tournaments[tid]) _tournaments[tid] = {};
+        _tournaments[tid].roles = snap.val();
         _openTournamentView(tid);
         _activeAdminTab = "roles";
       } catch(err) {
@@ -9163,8 +9184,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     try {
       await _tRolesRef(tid).child(username).remove();
       showToast(`@${username} removed ✓`);
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      const snap = await GMD.child(`tournaments/${tid}/roles`).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].roles = snap.val();
       _openTournamentView(tid);
       _activeAdminTab = "roles";
     } catch(err) {
@@ -9495,8 +9517,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         }
       });
       showToast("Registration form saved ✓");
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      // Surgical: only meta changed
+      const snap = await _tMetaRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].meta = snap.val();
     } catch(err) {
       showToast("Failed to save form", "error");
     }
@@ -11704,8 +11728,10 @@ Good luck this season!
 
       await _tRegsRef(tid).update(updates);
       showToast(`${count} registration${count !== 1 ? "s" : ""} imported ✓`);
-      const snap = await _tRef(tid).once("value");
-      _tournaments[tid] = snap.val();
+      // Surgical: re-read only registrations, not full tournament
+      const snap = await _tRegsRef(tid).once("value");
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].registrations = snap.val();
       _openTournamentView(tid);
       _activeAdminTab = "registrations";
     } catch(err) {
@@ -11772,8 +11798,10 @@ Good luck this season!
         await _tMetaRef(tid).update(updates);
         showToast("Tournament updated ✓");
         _closeModal();
-        const snap = await _tRef(tid).once("value");
-        _tournaments[tid] = snap.val();
+        // Surgical: only meta changed
+        const snap = await _tMetaRef(tid).once("value");
+        if (!_tournaments[tid]) _tournaments[tid] = {};
+        _tournaments[tid].meta = snap.val();
         _writePublicSummary(tid, _tournaments[tid]);
         _openTournamentView(tid);
       } catch(err) {
@@ -13115,15 +13143,40 @@ Good luck this season!
     if (!el) return;
     const ck = `${year}_${_matchupsWeek}`;
 
-    // Check memory cache (scores always present here since we built it this session)
+    // 1. Memory cache (5-min TTL, fastest)
     if (_matchupsCache[ck] && (Date.now() - _matchupsCache[ck].fetchedAt) < 300000) {
       _renderMatchupsContent(tid, t, el, _matchupsCache[ck].matchups, year, isAdmin);
       return;
     }
 
-    // Skip Firebase cache entirely for matchups — stale data may have wrong/missing
-    // diff and combined values. Always fetch fresh from Sleeper (fast, public API).
-    // Firebase is only used to store for the recap feature, not as a read cache.
+    // 2. For completed (past) weeks — use Firebase cache.
+    //    Scores for finished weeks are immutable; no need to re-fetch 400 leagues
+    //    from Sleeper every time someone views an old week. diff/combined values
+    //    are stripped from cache and recomputed at render time, so stale computed
+    //    values are never a concern.
+    //    Only the current live week bypasses Firebase and always hits Sleeper.
+    const _maxScoredWeek = (() => {
+      let max = 0;
+      Object.values(t.standingsCache || {}).forEach(lc => {
+        if (lc.year && parseInt(lc.year) !== parseInt(year)) return;
+        const w = lc.teams?.[0]?.weekScores?.length || 0;
+        if (w > max) max = w;
+      });
+      return max;
+    })();
+    const isCompletedWeek = _matchupsWeek < _maxScoredWeek;
+
+    if (isCompletedWeek) {
+      try {
+        const fbSnap = await _tAnalyticsRef(tid).child(`weeklyHighlights/${ck}`).once("value");
+        const fbData = fbSnap.val();
+        if (fbData?.matchups?.length) {
+          _matchupsCache[ck] = { matchups: fbData.matchups, fetchedAt: fbData.fetchedAt || Date.now() };
+          _renderMatchupsContent(tid, t, el, fbData.matchups, year, isAdmin);
+          return;
+        }
+      } catch(e) { /* Firebase read failed — fall through to Sleeper */ }
+    }
 
     el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching week ${_matchupsWeek} matchups…</div>`;
 
@@ -13160,7 +13213,6 @@ Good luck this season!
             if (!m.matchup_id) return;
             (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m);
           });
-          console.log(`[Matchups] ${lid} week ${_matchupsWeek}: ${data.length} entries, ${Object.keys(byMid).length} matchups`);
           Object.values(byMid).forEach(pair => {
             if (pair.length !== 2) return;
             const [a, b] = pair;
@@ -21385,9 +21437,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const rid = _genId();
       await _tRegsRef(tid).child(rid).set(entry);
 
-      // Update public registration count using fresh data
-      const freshForPub = await _tRef(tid).once("value");
-      _tournaments[tid] = freshForPub.val();
+      // Update public registration count — patch registrations in local cache
+      // rather than re-reading the full tournament node (which includes all standings).
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      if (!_tournaments[tid].registrations) _tournaments[tid].registrations = {};
+      _tournaments[tid].registrations[rid] = entry;
       _writePublicSummary(tid, _tournaments[tid]);
 
       // If auto-register, also save preference on the participant record if one exists
