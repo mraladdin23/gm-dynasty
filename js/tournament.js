@@ -6852,6 +6852,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           <span>League Batches (${totalLeagues} leagues${yearFilter ? ` · ${yearFilter}` : " · all years"})</span>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             ${yearFilter ? `<button class="btn-ghost btn-sm" id="trn-leagues-show-all-btn">Show All Years</button>` : ""}
+            <select id="trn-sync-year-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" title="Select a year to sync only that year's leagues">
+              <option value="">All years</option>
+              ${[...new Set(allRealBatches.map(([, b]) => b.year).filter(Boolean))].sort((a,b)=>b-a).map(y =>
+                `<option value="${y}"${String(y) === String(_tournamentYear) ? " selected" : ""}>${y}</option>`
+              ).join("")}
+            </select>
             <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
             <button class="btn-primary btn-sm" id="trn-add-batch-btn">+ Add Batch</button>
           </div>
@@ -6913,7 +6919,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     `;
 
     document.getElementById("trn-add-batch-btn")?.addEventListener("click", () => _openAddBatchModal(tid, t));
-    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => _syncStandings(tid, t));
+    document.getElementById("trn-sync-standings-btn")?.addEventListener("click", () => {
+      const sel = document.getElementById("trn-sync-year-sel")?.value;
+      _syncStandings(tid, t, sel ? parseInt(sel) : null);
+    });
     document.getElementById("trn-leagues-show-all-btn")?.addEventListener("click", () => {
       // Could be called from wizard (#wiz-leagues-container) or admin panel (_getTabBody())
       const b = document.getElementById("wiz-leagues-container") || _getTabBody();
@@ -8575,20 +8584,48 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Sync standings ─────────────────────────────────────
-  async function _syncStandings(tid, t) {
+  async function _syncStandings(tid, t, yearFilter) {
     const batches = t.leagues || {};
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
     const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
 
     if (!realBatches.length) { showToast("No league batches to sync", "info"); return; }
 
+    // Existing standingsCache — used to detect completed leagues that don't
+    // need re-fetching. A league with leagueStatus === "complete" has its
+    // season permanently finished; its data is immutable and can be reused
+    // indefinitely without re-syncing.
+    const existingCache = t.standingsCache || {};
+    const ck = (l) => `${l.year}_${l.leagueId}`;
+
+    const currentYear = new Date().getFullYear();
+    const yearLabel   = yearFilter ? ` (${yearFilter})` : "";
+
     const toSync = [];
+    let skippedComplete = 0;
+
     for (const [batchId, batch] of realBatches) {
+      // If a specific year was selected, skip all other years
+      if (yearFilter && batch.year && String(batch.year) !== String(yearFilter)) continue;
+
       for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
+        const leagueYear  = batch.year || currentYear;
+        const cacheEntry  = existingCache[`${leagueYear}_${leagueId}`];
+        const isComplete  = cacheEntry?.leagueStatus === "complete";
+        const isPriorYear = leagueYear < currentYear;
+
+        // Skip if: already marked complete OR prior year with cached data.
+        // Prior-year leagues that aren't yet marked "complete" in cache
+        // (e.g. synced before the season ended) will still be re-fetched
+        // on the current year's sync — but for a selected prior year they'll
+        // be skipped if there's already data, since their season is over.
+        if (isComplete) { skippedComplete++; continue; }
+        if (isPriorYear && cacheEntry?.teams?.length && !yearFilter) { skippedComplete++; continue; }
+
         toSync.push({
           leagueId,
           platform:   batch.platform  || "sleeper",
-          year:       batch.year      || new Date().getFullYear(),
+          year:       leagueYear,
           batchId,
           conference: l.conference    || null,
           division:   l.division      || null,
@@ -8597,11 +8634,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
     }
 
+    if (!toSync.length) {
+      const msg = yearFilter
+        ? `No leagues to sync for ${yearFilter} — all may already be complete.`
+        : "All leagues are already up to date.";
+      showToast(msg, "info");
+      return;
+    }
+
     const total = toSync.length;
     let done = 0;
     const btn = document.getElementById("trn-sync-standings-btn");
     const setP = (msg) => { if (btn) { btn.disabled = true; btn.textContent = msg; } };
-    setP("Syncing 0/" + total + "...");
+    setP(`Syncing${yearLabel} 0/${total}…${skippedComplete ? ` (${skippedComplete} complete, skipped)` : ""}`);
 
     const sleepers = toSync.filter(l => l.platform === "sleeper");
     const mfls     = toSync.filter(l => l.platform === "mfl");
@@ -8610,7 +8655,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const syncWarnings = []; // { platform, message } accumulated during sync
 
     // Cache key: year_leagueId prevents cross-year collision for same leagueId
-    const ck = (l) => l.year + "_" + l.leagueId;
     const playoffWeek = t.meta?.playoffStartWeek || null;
 
     // Sleeper — parallel
@@ -8646,7 +8690,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now() };
         }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
-      done++; setP("Syncing " + done + "/" + total + "...");
+      done++; setP(`Syncing${yearLabel} ${done}/${total}…`);
     }));
 
     // MFL — 5 at a time, 400ms gap between batches.
@@ -8692,7 +8736,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             console.warn("[Standings] Yahoo", l.leagueId, e.message);
             syncWarnings.push({ platform: "yahoo", message: `League "${l.leagueName || l.leagueId}" failed: ${e.message}` });
           }
-          done++; setP("Syncing " + done + "/" + total + "...");
+          done++; setP(`Syncing${yearLabel} ${done}/${total}…`);
         }));
         if (i + 2 < yahoos.length) await new Promise(r => setTimeout(r, 600));
       }
@@ -8714,7 +8758,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _syncScoringSettings(tid, toSync, activeYear).catch(e =>
         console.warn("[tournament.js] Scoring settings sync failed:", e));
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
-      showToast("Standings synced — " + Object.keys(cacheUpdates).length + "/" + total + " leagues");
+      showToast(`Standings synced${yearLabel} — ${Object.keys(cacheUpdates).length}/${total} leagues${skippedComplete ? `, ${skippedComplete} skipped (complete)` : ""}`);
       _writePublicSummary(tid, _tournaments[tid]);
       // Show cross-platform warning banner if anything was skipped/failed,
       // or if scoring settings differ across platforms
@@ -12011,23 +12055,23 @@ Good luck this season!
       const batches   = t.leagues || {};
       const isBatch   = (v) => v && typeof v === "object" && v.leagues !== undefined;
       const toFetch   = [];
+      const currentYear = new Date().getFullYear();
 
       for (const [, batch] of Object.entries(batches)) {
         if (!isBatch(batch)) continue;
+        const batchYear = batch.year || currentYear;
         for (const [leagueId, l] of Object.entries(batch.leagues || {})) {
-          const ck       = `${batch.year}_${leagueId}`;
+          const ck       = `${batchYear}_${leagueId}`;
           const existing = cached[ck];
-          // Bypass cache if:
-          //   1. No existing cache entry
-          //   2. Cache entry shows draft is still in progress
-          //   3. Cache is older than 24h
-          //   4. User manually refreshed (_draftForceRefresh flag set)
-          const isActiveDraft   = existing?.draft_status === "drafting";
-          const cacheAge        = Date.now() - (existing?.fetchedAt || 0);
-          const cacheExpired    = cacheAge > 86400000;
-          const hasPickData     = existing?.picks?.length;
-          if (!_draftForceRefresh && !isActiveDraft && hasPickData && !cacheExpired) continue;
-          toFetch.push({ leagueId, platform: batch.platform, year: batch.year, leagueName: l.name || leagueId, cacheKey: ck });
+          const isActiveDraft = existing?.draft_status === "drafting";
+          const hasPickData   = existing?.picks?.length;
+          // Completed drafts are permanently immutable — never re-fetch them.
+          // Only re-fetch if: actively drafting, no data yet, or force-refresh.
+          if (!_draftForceRefresh && !isActiveDraft && hasPickData) continue;
+          // For prior years, only fetch if there's no cached data at all.
+          // Don't re-fetch prior-year drafts even on force-refresh — they're done.
+          if (batchYear < currentYear && hasPickData) continue;
+          toFetch.push({ leagueId, platform: batch.platform, year: batchYear, leagueName: l.name || leagueId, cacheKey: ck });
         }
       }
 
