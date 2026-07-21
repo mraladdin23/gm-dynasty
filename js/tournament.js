@@ -196,6 +196,8 @@ const DLRTournament = (() => {
   // ── State ──────────────────────────────────────────────
   let _currentUsername    = null;
   let _tournaments        = {};
+  let _tournamentLoadedAt = {}; // { tid: timestamp } — when full node was last read
+  const _TOURNAMENT_CACHE_TTL = 5 * 60 * 1000; // 5 min — re-read full node at most once per 5 min
   let _activeTournamentId = null;
 
   // New top-level nav state — five sections for admin, four for user
@@ -887,8 +889,8 @@ const DLRTournament = (() => {
     const scVals = Object.values(t.standingsCache || {});
     const currentYear = new Date().getFullYear();
 
-    // 0. Current calendar year always wins if it has any playoff config at all
-    if (years.includes(String(currentYear)) || years.includes(currentYear)) return currentYear;
+    // 0. Always prefer current calendar year if it's a configured playoff year
+    if (years.some(y => Number(y) === currentYear)) return currentYear;
 
     // 1. Most recent year that has standings but is NOT yet published (active season)
     const active = years.find(y => {
@@ -918,11 +920,10 @@ const DLRTournament = (() => {
     const container = document.getElementById("view-tournament");
     if (!container) return;
 
-    // Reset per-tournament analytics caches — but only wipe _draftCache when
-    // actually switching tournaments. Wiping it on every tab/year navigation
-    // forces a Firebase re-read of 400+ leagues every time, even when nothing
-    // has changed. The in-session memory cache (_draftCache.tid === tid guard)
-    // handles stale data for the same tournament within a session.
+    // Only wipe _draftCache when actually switching tournaments.
+    // Clearing it on every tab/year navigation forces a full Firebase re-read
+    // of 400+ leagues every time — the tid guard in _renderAnalyticsDraft
+    // handles staleness within a session.
     if (switchingTournament) _draftCache = null;
     _matchupsCache  = {};
     _recapCache     = {};
@@ -934,18 +935,39 @@ const DLRTournament = (() => {
     _weeklyMuPage   = 1;
     _weeklyMuView   = "matchups";
 
-    // Reload fresh from Firebase
-    let snap;
-    try {
-      snap = await _tRef(tid).once("value");
-    } catch(err) {
-      showToast("Failed to load tournament", "error");
-      return;
-    }
-    const t = snap.val();
-    if (!t) { showToast("Tournament not found", "error"); return; }
-    _tournaments[tid] = t;
+    // ── Cache guard ────────────────────────────────────────────────────────────
+    // Re-reading the full tournament node on every navigation is the primary
+    // cause of slow loads for large tournaments. For a 1409-league tournament,
+    // gmd/tournaments/{tid} is 20-50 MB (standingsCache + analyticsCache +
+    // participants). We only re-read if:
+    //   1. We don't have the data yet, OR
+    //   2. We're switching to a different tournament, OR
+    //   3. The cached copy is older than 5 minutes
+    // Within a session the surgical patches (fix1a-1l from the performance
+    // audit) keep _tournaments[tid] up to date after each write, so a
+    // stale full re-read is never needed for routine tab navigation.
+    const cacheAge = Date.now() - (_tournamentLoadedAt[tid] || 0);
+    const needsFullRead = !_tournaments[tid] || switchingTournament || cacheAge > _TOURNAMENT_CACHE_TTL;
 
+    const t0 = performance.now();
+    if (needsFullRead) {
+      let snap;
+      try {
+        snap = await _tRef(tid).once("value");
+      } catch(err) {
+        showToast("Failed to load tournament", "error");
+        return;
+      }
+      const t = snap.val();
+      if (!t) { showToast("Tournament not found", "error"); return; }
+      _tournaments[tid] = t;
+      _tournamentLoadedAt[tid] = Date.now();
+      console.log(`[DLR] Full tournament read: ${(performance.now() - t0).toFixed(0)}ms (${tid})`);
+    } else {
+      console.log(`[DLR] Using cached tournament data (${Math.round(cacheAge/1000)}s old) (${tid})`);
+    }
+
+    const t = _tournaments[tid];
     const isAdmin    = _myRole(t) === "admin";
     const isSubAdmin = _myRole(t) === "sub_admin";
     const canAdmin   = isAdmin || isSubAdmin;
@@ -1136,9 +1158,7 @@ const DLRTournament = (() => {
         const yr = Number(btn.dataset.yr);
         _tournamentYear = yr;
         _standingsYear  = yr;
-        // Invalidate year-specific caches — but NOT _draftCache, which spans
-        // all years and is already guarded by _draftCache.tid === tid.
-        // Wiping it here forces a full Firebase re-read on every year pill click.
+        // Invalidate year-specific caches — NOT _draftCache (spans all years, tid-guarded)
         _matchupsCache = {};
         _recapCache    = {};
         _rostersCache  = null;
@@ -1185,7 +1205,7 @@ const DLRTournament = (() => {
     }).join("");
 
     const donationHtml = donationLinks.filter(l => l.url).map(l =>
-      `<a href="${_esc(l.url)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn" style="display:inline-block;max-width:100%;word-break:break-all;white-space:normal;box-sizing:border-box">💰 ${_esc(l.label||"Donate / Entry Fee")}</a>`
+      `<a href="${_esc(l.url)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">💰 ${_esc(l.label||"Donate / Entry Fee")}</a>`
     ).join("");
 
     // Rules (latest year)
@@ -1420,7 +1440,8 @@ const DLRTournament = (() => {
     // Sync global year state
     _tournamentYear = year;
     _standingsYear  = year;
-    // Invalidate year-specific caches — but NOT _draftCache (see _wireYearPills)
+    // Invalidate year-specific caches
+    // Invalidate year-specific caches — NOT _draftCache (spans all years, tid-guarded)
     _matchupsCache = {}; _recapCache = {}; _rostersCache = null;
     _matchupsWeek = null; _weeklyMuCache = {}; _weeklyMuWeek = null;
 
@@ -21069,7 +21090,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       ${meta.donationLink ? `
         <div class="trn-section-card trn-info-donation">
           <div class="trn-section-card-title">Support the Tournament</div>
-          <a href="${_esc(meta.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn" style="display:inline-block;max-width:100%;word-break:break-all;white-space:normal;box-sizing:border-box">
+          <a href="${_esc(meta.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">
             💰 Donate / Entry Fee
           </a>
         </div>
@@ -22052,6 +22073,90 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     console.groupEnd();
   }
 
+  // ── Performance diagnostic ───────────────────────────────────────────────
+  // Run in browser console to understand what's making a tournament slow to load.
+  //   DLRTournament.diagPerf('tid')
+  async function diagPerf(tid) {
+    console.group(`[diagPerf] tid=${tid}`);
+    const t0 = performance.now();
+
+    // 1. How old is the local cache?
+    const cacheAge = tid ? (Date.now() - (_tournamentLoadedAt[tid] || 0)) : null;
+    console.log(`Local cache age: ${cacheAge !== null ? Math.round(cacheAge/1000) + "s" : "no cache"}`);
+    console.log(`Cache TTL: ${_TOURNAMENT_CACHE_TTL/1000}s — next full read in ${cacheAge !== null ? Math.max(0, Math.round((_TOURNAMENT_CACHE_TTL - cacheAge)/1000)) : 0}s`);
+
+    // 2. Measure full tournament node read size + time
+    console.log("Reading full tournament node…");
+    const t1 = performance.now();
+    const snap = await GMD.child(`tournaments/${tid}`).once("value");
+    const readMs = performance.now() - t1;
+    const raw  = JSON.stringify(snap.val() || {});
+    const kb   = (raw.length / 1024).toFixed(1);
+    const mb   = (raw.length / 1024 / 1024).toFixed(2);
+    console.log(`Full read: ${readMs.toFixed(0)}ms, size: ${kb} KB (${mb} MB)`);
+
+    // 3. Sub-node sizes
+    const t = snap.val() || {};
+    const subNodes = {
+      standingsCache: t.standingsCache,
+      analyticsCache: t.analyticsCache,
+      participants:   t.participants,
+      registrations:  t.registrations,
+      leagues:        t.leagues,
+      playoffs:       t.playoffs,
+      meta:           t.meta,
+    };
+    console.group("Sub-node sizes:");
+    Object.entries(subNodes).forEach(([key, val]) => {
+      const sz = (JSON.stringify(val || {}).length / 1024).toFixed(1);
+      console.log(`  ${key}: ${sz} KB`);
+    });
+    console.groupEnd();
+
+    // 4. League counts
+    const batches = t.leagues || {};
+    const isBatch = v => v && typeof v === "object" && v.leagues !== undefined;
+    const byYear = {};
+    let totalLeagues = 0;
+    Object.values(batches).forEach(b => {
+      if (!isBatch(b)) return;
+      const yr = b.year || "?";
+      byYear[yr] = (byYear[yr] || 0) + Object.keys(b.leagues || {}).length;
+      totalLeagues += Object.keys(b.leagues || {}).length;
+    });
+    console.log(`Total leagues: ${totalLeagues}`);
+    Object.entries(byYear).sort((a,b) => b[0]-a[0]).forEach(([yr, n]) =>
+      console.log(`  ${yr}: ${n} leagues`));
+
+    // 5. Draft cache coverage
+    const draftSnap = await GMD.child(`tournaments/${tid}/analyticsCache/drafts`).once("value");
+    const drafts = draftSnap.val() || {};
+    const draftKeys = Object.keys(drafts);
+    const complete  = draftKeys.filter(k => drafts[k]?.draft_status === "complete").length;
+    const drafting  = draftKeys.filter(k => drafts[k]?.draft_status === "drafting").length;
+    const noPicks   = draftKeys.filter(k => !drafts[k]?.picks?.length).length;
+    const draftKb   = (JSON.stringify(drafts).length / 1024).toFixed(1);
+    console.log(`Draft cache: ${draftKeys.length} entries (${draftKb} KB) — ${complete} complete, ${drafting} active, ${noPicks} no picks`);
+    console.log(`Uncached leagues (need fetch): ${totalLeagues - draftKeys.length}`);
+
+    // 6. Standings cache coverage
+    const scKeys    = Object.keys(t.standingsCache || {});
+    const scByYear  = {};
+    scKeys.forEach(k => { const yr = k.split("_")[0]; scByYear[yr] = (scByYear[yr]||0)+1; });
+    console.log(`Standings cache: ${scKeys.length} entries`);
+    Object.entries(scByYear).sort((a,b) => b[0]-a[0]).forEach(([yr, n]) =>
+      console.log(`  ${yr}: ${n} leagues cached`));
+
+    console.log(`\nTotal diag time: ${(performance.now() - t0).toFixed(0)}ms`);
+    console.log("\nRecommendations:");
+    if (parseFloat(mb) > 5) console.warn(`  ⚠️ Full tournament node is ${mb} MB — navigating to this tournament always downloads this much data on cache miss.`);
+    if (totalLeagues - draftKeys.length > 50) console.warn(`  ⚠️ ${totalLeagues - draftKeys.length} leagues have no draft cache — first Draft tab open will fetch all of these.`);
+    if (drafting > 0) console.log(`  ℹ️ ${drafting} active drafts — these will always re-fetch when Draft tab opens.`);
+    if (parseFloat(mb) <= 5) console.log("  ✅ Tournament node size is reasonable.");
+    console.groupEnd();
+    return { readMs, kb, mb, totalLeagues, draftCoverage: draftKeys.length, cacheAge };
+  }
+
   return {
     init,
     runDiscovery,
@@ -22062,6 +22167,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     diagnosePointsRounds,
     resetPointsRoundsElimination,
     diagnoseDivisionJoin,
+    diagPerf,
     getTournamentName: (tid) => _tournaments[tid]?.meta?.name || null,
   };
 
