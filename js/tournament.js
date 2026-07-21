@@ -12136,6 +12136,8 @@ Good luck this season!
   let _draftSearch    = "";    // team search for board/card
   let _draftListPage  = 1;     // pagination for board list view
   let _draftBoardMode = "grid"; // "grid" | "list" for board view
+  let _adpBoardTeamCount = 12;  // virtual snake-grid column count for the ADP board
+  let _adpBoardMinPicks  = 1;   // minimum times a player must've been drafted to appear on the ADP board
   let _draftPollInterval = null; // live poll during active drafts
 
   async function _renderAnalyticsDraft(tid, t, body) {
@@ -12465,6 +12467,83 @@ Good luck this season!
       .flatMap(lc => lc.normalizedPicks || []);
   }
 
+  // ── Draft data export ───────────────────────────────────
+  function _csvCell(v) {
+    if (Array.isArray(v)) v = v.join("|");
+    return `"${String(v ?? "").replace(/"/g, '""')}"`;
+  }
+  function _downloadCSVBlob(headers, rows, filename) {
+    const csv  = [headers.join(","), ...rows.map(r => r.map(_csvCell).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function _exportDraftPicksCSV(picks, byLeague, t) {
+    if (!picks.length) { showToast("No picks to export", "info"); return; }
+    const leagueNameOf = (leagueId) => Object.values(byLeague || {}).find(l => l.leagueId === leagueId)?.leagueName || leagueId;
+    const headers = ["overall","round","pick","player","position","nflTeam","manager","league","cost"];
+    const rows = [...picks].sort((a, b) => a.overall - b.overall).map(p => ([
+      p.overall, p.round, p.pick, p.name, p.position, p.nflTeam, p.teamName, leagueNameOf(p.leagueId), p.cost ?? ""
+    ]));
+    _downloadCSVBlob(headers, rows, "draft_picks_" + (t.meta?.name || "tournament").replace(/\s+/g, "_") + ".csv");
+  }
+  function _exportADPCSV(adp, t) {
+    if (!adp.length) { showToast("No ADP data to export", "info"); return; }
+    const headers = ["rank","player","position","adp","count","min","max","p25","p75"];
+    const rows = adp.map((p, i) => ([
+      i + 1, p.name, p.position, p.adp.toFixed(2), p.count, p.min, p.max, p.p25, p.p75
+    ]));
+    _downloadCSVBlob(headers, rows, "adp_" + (t.meta?.name || "tournament").replace(/\s+/g, "_") + ".csv");
+  }
+
+  // ── Draft stats ticker ──────────────────────────────────
+  // Persistent summary bar shown above all Draft tab views (ADP/Board/Card/ADP Board).
+  function _computeDraftStats(picks, leagues, adp) {
+    const totalPicks    = picks.length;
+    const totalLeagues  = leagues.length;
+    const completed     = leagues.filter(l => l.draft_status === "complete").length;
+    const inProgress    = leagues.filter(l => l.draft_status === "drafting").length;
+    const posCounts     = {};
+    picks.forEach(p => { const pos = p.position || "?"; posCounts[pos] = (posCounts[pos] || 0) + 1; });
+    return { totalPicks, totalLeagues, completed, inProgress, uniquePlayers: adp.length, posCounts };
+  }
+  function _renderDraftStatsBar(picks, leagues, adp) {
+    const s = _computeDraftStats(picks, leagues, adp);
+    const POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DEF"];
+    const posPills = POS_ORDER.filter(p => s.posCounts[p]).map(p =>
+      `<span class="trn-draft-stat-pill" style="border-color:${(POS_COLOR[p]||"#9ca3af")}55;color:${POS_COLOR[p]||"#9ca3af"}">${p} ${s.posCounts[p]}</span>`
+    ).join("");
+    const statusLine = s.inProgress
+      ? `${s.completed} complete · ${s.inProgress} drafting live`
+      : `${s.completed} complete`;
+    return `
+      <div class="trn-draft-stats-bar">
+        <div class="trn-draft-stats-main">
+          <div class="trn-draft-stat-big">
+            <span class="trn-draft-stat-num">${s.totalPicks.toLocaleString()}</span>
+            <span class="trn-draft-stat-label">picks made</span>
+          </div>
+          <div class="trn-draft-stat-sep"></div>
+          <div class="trn-draft-stat-small">
+            <span class="trn-draft-stat-num">${s.totalLeagues}</span> leagues · ${statusLine}
+          </div>
+          <div class="trn-draft-stat-sep"></div>
+          <div class="trn-draft-stat-small">
+            <span class="trn-draft-stat-num">${s.uniquePlayers}</span> unique players
+          </div>
+          <div class="trn-draft-stat-pills">${posPills}</div>
+        </div>
+        <div class="trn-draft-stats-actions">
+          <button class="btn-secondary btn-sm" id="trn-draft-export-picks-btn">⬇ Export Picks CSV</button>
+          <button class="btn-secondary btn-sm" id="trn-draft-export-adp-btn">⬇ Export ADP CSV</button>
+        </div>
+      </div>`;
+  }
+
   function _renderDraftView(tid, t, body, cache) {
     // Recompute picks/adp for the currently selected year from the full byLeague.
     // byLeague stores ALL years so switching year tabs is instant — no re-fetch.
@@ -12513,19 +12592,30 @@ Good luck this season!
 
     const selStyle = "font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)";
     const POS_LIST = ["QB","RB","WR","TE","K","DEF"];
+    const TEAM_COUNT_OPTS = [8, 10, 12, 14];
+    const MIN_PICKS_OPTS  = [1, 2, 3, 5, 10];
 
     body.innerHTML = `
+      ${_renderDraftStatsBar(picks, leagues, adp)}
       <div class="trn-az-toolbar">
         <div class="trn-az-view-pills">
-          <button class="trn-az-pill ${_draftView === "adp"   ? "active" : ""}" data-view="adp">📊 ADP</button>
-          <button class="trn-az-pill ${_draftView === "board" ? "active" : ""}" data-view="board">📋 Board</button>
-          <button class="trn-az-pill ${_draftView === "card"  ? "active" : ""}" data-view="card">🃏 Card</button>
+          <button class="trn-az-pill ${_draftView === "adp"      ? "active" : ""}" data-view="adp">📊 ADP</button>
+          <button class="trn-az-pill ${_draftView === "adpboard" ? "active" : ""}" data-view="adpboard">🗂 ADP Board</button>
+          <button class="trn-az-pill ${_draftView === "board"    ? "active" : ""}" data-view="board">📋 Board</button>
+          <button class="trn-az-pill ${_draftView === "card"     ? "active" : ""}" data-view="card">🃏 Card</button>
         </div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
           ${_draftView === "adp" ? `
             <select id="trn-draft-pos-filter" style="${selStyle}">
               <option value="all" ${_draftPosFilter === "all" ? "selected" : ""}>All Positions</option>
               ${POS_LIST.map(p => `<option value="${p}" ${_draftPosFilter === p ? "selected" : ""}>${p}</option>`).join("")}
+            </select>` : ""}
+          ${_draftView === "adpboard" ? `
+            <select id="trn-adpboard-teams-sel" style="${selStyle}">
+              ${TEAM_COUNT_OPTS.map(n => `<option value="${n}" ${_adpBoardTeamCount === n ? "selected" : ""}>${n}-team layout</option>`).join("")}
+            </select>
+            <select id="trn-adpboard-min-sel" style="${selStyle}">
+              ${MIN_PICKS_OPTS.map(n => `<option value="${n}" ${_adpBoardMinPicks === n ? "selected" : ""}>Min ${n} pick${n===1?"":"s"}</option>`).join("")}
             </select>` : ""}
           ${_draftView === "board" ? `
             <select id="trn-draft-league-sel" style="${selStyle}">
@@ -12548,6 +12638,9 @@ Good luck this season!
       </div>
       <div id="trn-draft-content"></div>
     `;
+
+    document.getElementById("trn-draft-export-picks-btn")?.addEventListener("click", () => _exportDraftPicksCSV(picks, byLeague, t));
+    document.getElementById("trn-draft-export-adp-btn")?.addEventListener("click", () => _exportADPCSV(adp, t));
 
     body.querySelectorAll(".trn-az-pill").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -12580,6 +12673,14 @@ Good luck this season!
     document.getElementById("trn-draft-league-sel")?.addEventListener("change", function() {
       _draftLeague = this.value;
       _draftListPage = 1;
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
+    });
+    document.getElementById("trn-adpboard-teams-sel")?.addEventListener("change", function() {
+      _adpBoardTeamCount = parseInt(this.value) || 12;
+      _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
+    });
+    document.getElementById("trn-adpboard-min-sel")?.addEventListener("change", function() {
+      _adpBoardMinPicks = parseInt(this.value) || 1;
       _renderDraftContent(document.getElementById("trn-draft-content"), cache, t);
     });
     document.getElementById("trn-draft-pos-filter")?.addEventListener("change", function() {
@@ -12615,6 +12716,8 @@ Good luck this season!
 
     if (_draftView === "adp") {
       _renderDraftADP(el, adp, t);
+    } else if (_draftView === "adpboard") {
+      _renderDraftADPBoard(el, adp, t);
     } else if (_draftView === "board") {
       // Always use a specific leagueEntry — "all" falls back to the first available
       const leagueEntry = byLeague[_draftLeague]
@@ -12719,6 +12822,206 @@ Good luck this season!
       _draftListPage = Math.min(totalPages, _draftListPage + 1);
       _renderDraftADP(el, adp, t);
     });
+  }
+
+  // ── ADP Draftboard (grid) ──────────────────────────────
+  // Lays the tournament-wide ADP list out as a virtual N-team snake draft
+  // grid (SFB16-style) — rank 1 = pick 1.01, rank 2 = pick 1.02, etc, wrapped
+  // into rounds with standard snake column reversal every other round. This
+  // doesn't reflect any real draft; it's a visual re-sorting of ADP data.
+  function _buildADPBoardPicks(adp, teamCount, minPicks) {
+    const eligible = adp.filter(p => p.count >= minPicks);
+    return eligible.map((p, i) => {
+      const overall    = i + 1;
+      const round      = Math.ceil(overall / teamCount);
+      const posInRound = overall - (round - 1) * teamCount;
+      const reversed   = (round % 2 === 0);
+      const slot       = reversed ? (teamCount - posInRound + 1) : posInRound;
+      return { ...p, overall, round, pick: slot };
+    });
+  }
+
+  function _renderDraftADPBoard(el, adp, t) {
+    const N    = _adpBoardTeamCount;
+    const minP = _adpBoardMinPicks;
+    const virtualPicks = _buildADPBoardPicks(adp, N, minP);
+    if (!virtualPicks.length) {
+      el.innerHTML = `<div class="trn-empty">No players meet the minimum pick threshold. Try lowering it.</div>`;
+      return;
+    }
+    const rounds = Math.max(...virtualPicks.map(p => p.round), 1);
+    const byRoundSlot = {};
+    virtualPicks.forEach(p => {
+      if (!byRoundSlot[p.round]) byRoundSlot[p.round] = {};
+      byRoundSlot[p.round][p.pick] = p;
+    });
+
+    let boardHTML = "";
+    for (let round = 1; round <= rounds; round++) {
+      boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
+      for (let slot = 1; slot <= N; slot++) {
+        const pk = byRoundSlot[round]?.[slot];
+        if (pk) {
+          const col   = POS_COLOR[pk.position] || "#9ca3af";
+          const rawPick = _draftCache?.picks?.find(x => x.playerId === pk.playerId);
+          const nfl   = rawPick?.nflTeam || "FA";
+          const nameParts = (pk.name || "Unknown").trim().split(/\s+/);
+          const shortName = nameParts.length > 1
+            ? nameParts[0].charAt(0) + ". " + nameParts.slice(1).join(" ")
+            : pk.name;
+          const clickFn = pk.playerId
+            ? `DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pk.name)}')`
+            : "";
+          boardHTML += `
+            <div class="draft-pick draft-pick--filled"
+              ${clickFn ? `onclick="${clickFn}" style="cursor:pointer;background:${col}18;border-color:${col}40"` : `style="background:${col}18;border-color:${col}40"`}
+              title="${_esc(pk.name)} · ${pk.position} · ADP ${pk.adp.toFixed(1)} · drafted in ${pk.count} league${pk.count === 1 ? "" : "s"}">
+              <div class="draft-pick-num">${pk.overall}</div>
+              <div class="draft-pick-player">
+                <div class="draft-pick-name">${_esc(shortName)} <span class="draft-pick-pos-team">${pk.position} · ${nfl}</span></div>
+              </div>
+              <div class="draft-pick-team">ADP ${pk.adp.toFixed(1)}</div>
+            </div>`;
+        } else {
+          boardHTML += `<div class="draft-pick draft-pick--empty"><div class="draft-pick-num">${(round - 1) * N + slot}</div></div>`;
+        }
+      }
+      boardHTML += `</div></div>`;
+    }
+
+    el.innerHTML = `
+      <div class="trn-az-meta">${virtualPicks.length} players · min ${minP} pick${minP === 1 ? "" : "s"} · ${N}-team snake layout</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-2)">
+        <button class="btn-primary btn-sm" id="trn-adpboard-download-btn">⬇ Download Board (PNG)</button>
+      </div>
+      <div class="trn-az-section draft-board-scroll"><div class="draft-board">${boardHTML}</div></div>`;
+
+    document.getElementById("trn-adpboard-download-btn")?.addEventListener("click", () =>
+      _downloadADPBoard(virtualPicks, N, rounds, minP, t)
+    );
+  }
+
+  async function _downloadADPBoard(virtualPicks, N, rounds, minP, t) {
+    try {
+      const hex2rgba = (hex, a = 1) => {
+        const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r},${g},${b},${a})`;
+      };
+      const DPR      = 2;
+      const CELL_W   = 132;
+      const CELL_H   = 58;
+      const ROWNUM_W = 30;
+      const HDR_H    = 74;
+      const COLHDR_H = 24;
+      const PAD      = 12;
+      const FTR_H    = 22;
+      const W = PAD * 2 + ROWNUM_W + N * CELL_W;
+      const H = HDR_H + COLHDR_H + rounds * CELL_H + FTR_H;
+
+      const canvas = document.createElement("canvas");
+      canvas.width  = W * DPR;
+      canvas.height = H * DPR;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(DPR, DPR);
+
+      const C = {
+        bg: "#0f1923", header: "#0d2340", gridHdr: "#101a26", rowGutter: "#0d1622",
+        emptyCell: "#141e2c", emptyBorder: "#26364d",
+        text: "#e2e8f0", muted: "#8aa3c2", gold: "#f0b429",
+        POS: { QB: "#b89ffe", RB: "#18e07a", WR: "#00d4ff", TE: "#ffc94d", K: "#9ca3af", DEF: "#9ca3af" }
+      };
+
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+
+      // Header
+      ctx.fillStyle = C.header;
+      ctx.fillRect(0, 0, W, HDR_H);
+      ctx.fillStyle = C.gold;
+      ctx.fillRect(0, HDR_H - 2, W, 2);
+      ctx.fillStyle = C.text;
+      ctx.font = `700 24px 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif`;
+      ctx.fillText((t.meta?.name || "TOURNAMENT").toUpperCase() + " · ADP DRAFTBOARD", PAD, 32);
+      ctx.fillStyle = C.muted;
+      ctx.font = `500 12px 'Barlow', system-ui, sans-serif`;
+      ctx.fillText(`Minimum ${minP} pick${minP === 1 ? "" : "s"} · ${N}-team snake layout · dynastylockerroom.com`, PAD, 54);
+
+      // Column headers
+      let y = HDR_H;
+      ctx.fillStyle = C.gridHdr;
+      ctx.fillRect(0, y, W, COLHDR_H);
+      ctx.fillStyle = C.muted;
+      ctx.font = `700 11px 'Barlow', system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      for (let c = 1; c <= N; c++) {
+        ctx.fillText(String(c), PAD + ROWNUM_W + (c - 0.5) * CELL_W, y + 16);
+      }
+      ctx.textAlign = "left";
+      y += COLHDR_H;
+
+      const byRoundSlot = {};
+      virtualPicks.forEach(p => {
+        if (!byRoundSlot[p.round]) byRoundSlot[p.round] = {};
+        byRoundSlot[p.round][p.pick] = p;
+      });
+
+      for (let round = 1; round <= rounds; round++) {
+        const rowY = y + (round - 1) * CELL_H;
+        // Row number gutter
+        ctx.fillStyle = C.rowGutter;
+        ctx.fillRect(0, rowY, PAD + ROWNUM_W, CELL_H);
+        ctx.fillStyle = C.muted;
+        ctx.font = `600 11px 'Barlow', system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(String(round), (PAD + ROWNUM_W) / 2, rowY + CELL_H / 2 + 4);
+        ctx.textAlign = "left";
+
+        for (let slot = 1; slot <= N; slot++) {
+          const cx = PAD + ROWNUM_W + (slot - 1) * CELL_W;
+          const pk = byRoundSlot[round]?.[slot];
+          if (pk) {
+            const col = C.POS[pk.position] || "#9ca3af";
+            ctx.fillStyle = hex2rgba(col, 0.18);
+            ctx.fillRect(cx + 2, rowY + 2, CELL_W - 4, CELL_H - 4);
+            ctx.strokeStyle = hex2rgba(col, 0.5);
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cx + 2, rowY + 2, CELL_W - 4, CELL_H - 4);
+
+            const nameParts = (pk.name || "Unknown").trim().split(/\s+/);
+            const shortName = nameParts.length > 1
+              ? nameParts[0].charAt(0) + " " + nameParts.slice(1).join(" ")
+              : pk.name;
+            ctx.fillStyle = C.text;
+            ctx.font = `700 11px 'Barlow', system-ui, sans-serif`;
+            ctx.fillText(shortName, cx + 8, rowY + 18);
+            ctx.fillStyle = col;
+            ctx.font = `600 10px 'Barlow', system-ui, sans-serif`;
+            ctx.fillText(`${pk.position} · ADP ${pk.adp.toFixed(1)}`, cx + 8, rowY + 32);
+            ctx.fillStyle = C.muted;
+            ctx.font = `500 9px 'Barlow', system-ui, sans-serif`;
+            ctx.fillText(`#${pk.overall} · ${pk.count}× drafted`, cx + 8, rowY + 46);
+          } else {
+            ctx.fillStyle = C.emptyCell;
+            ctx.fillRect(cx + 2, rowY + 2, CELL_W - 4, CELL_H - 4);
+            ctx.strokeStyle = C.emptyBorder;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cx + 2, rowY + 2, CELL_W - 4, CELL_H - 4);
+          }
+        }
+      }
+
+      ctx.fillStyle = C.muted;
+      ctx.font = `500 10px 'Barlow', system-ui, sans-serif`;
+      ctx.fillText("Generated by Dynasty Locker Room", PAD, H - 8);
+
+      const url = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "adp_draftboard_" + (t.meta?.name || "tournament").replace(/\s+/g, "_") + ".png";
+      a.click();
+    } catch(e) {
+      showToast("Failed to generate board image: " + e.message, "error");
+    }
   }
 
   // _renderDraftBoard: renders the draft board in grid or list mode.
