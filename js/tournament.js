@@ -12195,19 +12195,16 @@ Good luck this season!
       const pMap = _buildParticipantTeamMap(t);
       const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
       const byLeague = {};
-      let   allPicks = [];
 
-      const activeYear = _tournamentYear || new Date().getFullYear();
+      // Build byLeague for ALL years — not just the currently selected year.
+      // picks/adp are computed per-year at render time (_buildDraftPicksForYear)
+      // so switching years never needs a re-fetch, just a re-aggregation.
       for (const [ck, lc] of Object.entries(allCached)) {
         if (!lc.picks?.length) continue;
-        // Only include picks for the currently selected year
-        if (lc.year && parseInt(lc.year) !== parseInt(activeYear)) continue;
         const platform   = lc.platform || "sleeper";
-        // leagueId embedded in cacheKey is "{year}_{leagueId}" — extract it
         const lcLeagueId = String(lc.leagueId || ck.replace(/^\d+_/, "") || "");
 
         const normalized = lc.picks.map(p => {
-          // Resolve teamName: qualified key first, then bare key, then raw pick name
           const qualKey = lcLeagueId ? `${lcLeagueId}:${p.teamId}` : String(p.teamId);
           let teamName = teamMap[qualKey] || teamMap[String(p.teamId)] || p.teamName || String(p.teamId);
           const key = _sk(teamName);
@@ -12268,10 +12265,11 @@ Good luck this season!
           draft_type:        lc.draft_type        || null,
           draft_status:      lc.draft_status      || "complete"
         };
-        allPicks = allPicks.concat(normalized);
       }
 
-      if (!allPicks.length) {
+      // Store byLeague for ALL years in cache. picks/adp are derived per-year
+      // at render time so switching year tabs never requires a re-fetch.
+      if (!Object.keys(byLeague).length) {
         body.innerHTML = `
           <div class="trn-empty">
             <div class="trn-empty-icon">📋</div>
@@ -12285,7 +12283,12 @@ Good luck this season!
         });
         return;
       }
-      const adp = _computeADP(allPicks);
+
+      // Compute picks/adp for the current year now (for initial render),
+      // but store the full byLeague in cache so year changes are instant.
+      const activeYear = _tournamentYear || new Date().getFullYear();
+      const allPicks   = _buildDraftPicksForYear(byLeague, activeYear);
+      const adp        = _computeADP(allPicks);
       _draftCache = { picks: allPicks, adp, byLeague, fetchedAt: Date.now(), tid, _t: t };
       _renderDraftView(tid, t, body, _draftCache);
       // Sync ADP to public node in the background — non-blocking
@@ -12379,9 +12382,30 @@ Good luck this season!
     }, 15000); // poll every 15 seconds
   }
 
+  // Aggregates normalizedPicks from byLeague filtered to a specific year.
+  // Called at initial cache build and on every year tab switch so the
+  // picks/adp always reflect the currently selected year without re-fetching.
+  function _buildDraftPicksForYear(byLeague, year) {
+    const yr = parseInt(year);
+    return Object.values(byLeague)
+      .filter(lc => !lc.year || parseInt(lc.year) === yr)
+      .flatMap(lc => lc.normalizedPicks || []);
+  }
+
   function _renderDraftView(tid, t, body, cache) {
-    const { picks, adp, byLeague } = cache;
-    const leagues = Object.values(byLeague).filter(l => l.normalizedPicks?.length);
+    // Recompute picks/adp for the currently selected year from the full byLeague.
+    // byLeague stores ALL years so switching year tabs is instant — no re-fetch.
+    const activeYear = _tournamentYear || new Date().getFullYear();
+    const yearPicks  = _buildDraftPicksForYear(cache.byLeague, activeYear);
+    const yearAdp    = yearPicks.length !== cache.picks.length ? _computeADP(yearPicks) : cache.adp;
+
+    // Surface year-filtered picks/adp for this render while keeping the
+    // full-year byLeague intact in the cache for future year switches.
+    const picks  = yearPicks;
+    const adp    = yearAdp;
+    const byLeague = cache.byLeague;
+    const leagues = Object.values(byLeague)
+      .filter(l => l.normalizedPicks?.length && (!l.year || parseInt(l.year) === parseInt(activeYear)));
 
     // Build unique team list from all picks, with league name for disambiguation
     const teamSet = {};
@@ -12510,7 +12534,11 @@ Good luck this season!
 
   function _renderDraftContent(el, cache, t) {
     if (!el) return;
-    const { picks, adp, byLeague } = cache;
+    // Recompute for current year — byLeague spans all years so this is cheap
+    const activeYear = _tournamentYear || new Date().getFullYear();
+    const picks      = _buildDraftPicksForYear(cache.byLeague, activeYear);
+    const adp        = _computeADP(picks);
+    const { byLeague } = cache;
 
     if (_draftView === "adp") {
       _renderDraftADP(el, adp, t);
