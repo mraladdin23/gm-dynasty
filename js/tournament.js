@@ -883,8 +883,13 @@ const DLRTournament = (() => {
   // ── Resolve default year for Tournament History ────────
   // Priority: active season (has standings + not published) > latest completed > reg-open future
   function _resolveDefaultYear(t) {
-    const years = _playoffYears(t).sort((a, b) => b - a); // desc strings
+    const years = _playoffYears(t).sort((a, b) => b - a); // desc
     const scVals = Object.values(t.standingsCache || {});
+    const currentYear = new Date().getFullYear();
+
+    // 0. Current calendar year always wins if it has any playoff config at all
+    if (years.includes(String(currentYear)) || years.includes(currentYear)) return currentYear;
+
     // 1. Most recent year that has standings but is NOT yet published (active season)
     const active = years.find(y => {
       const hasStandings = scVals.some(e => String(e.year) === String(y));
@@ -908,12 +913,17 @@ const DLRTournament = (() => {
   }
 
   async function _openTournamentView(tid, navSection) {
+    const switchingTournament = _activeTournamentId !== tid;
     _activeTournamentId = tid;
     const container = document.getElementById("view-tournament");
     if (!container) return;
 
-    // Reset per-tournament analytics caches
-    _draftCache     = null;
+    // Reset per-tournament analytics caches — but only wipe _draftCache when
+    // actually switching tournaments. Wiping it on every tab/year navigation
+    // forces a Firebase re-read of 400+ leagues every time, even when nothing
+    // has changed. The in-session memory cache (_draftCache.tid === tid guard)
+    // handles stale data for the same tournament within a session.
+    if (switchingTournament) _draftCache = null;
     _matchupsCache  = {};
     _recapCache     = {};
     _rostersCache   = null;
@@ -1126,8 +1136,9 @@ const DLRTournament = (() => {
         const yr = Number(btn.dataset.yr);
         _tournamentYear = yr;
         _standingsYear  = yr;
-        // Invalidate year-specific caches
-        _draftCache    = null;
+        // Invalidate year-specific caches — but NOT _draftCache, which spans
+        // all years and is already guarded by _draftCache.tid === tid.
+        // Wiping it here forces a full Firebase re-read on every year pill click.
         _matchupsCache = {};
         _recapCache    = {};
         _rostersCache  = null;
@@ -1174,7 +1185,7 @@ const DLRTournament = (() => {
     }).join("");
 
     const donationHtml = donationLinks.filter(l => l.url).map(l =>
-      `<a href="${_esc(l.url)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">💰 ${_esc(l.label||"Donate / Entry Fee")}</a>`
+      `<a href="${_esc(l.url)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn" style="display:inline-block;max-width:100%;word-break:break-all;white-space:normal;box-sizing:border-box">💰 ${_esc(l.label||"Donate / Entry Fee")}</a>`
     ).join("");
 
     // Rules (latest year)
@@ -1409,8 +1420,8 @@ const DLRTournament = (() => {
     // Sync global year state
     _tournamentYear = year;
     _standingsYear  = year;
-    // Invalidate year-specific caches
-    _draftCache = null; _matchupsCache = {}; _recapCache = {}; _rostersCache = null;
+    // Invalidate year-specific caches — but NOT _draftCache (see _wireYearPills)
+    _matchupsCache = {}; _recapCache = {}; _rostersCache = null;
     _matchupsWeek = null; _weeklyMuCache = {}; _weeklyMuWeek = null;
 
     const content = document.getElementById("trn-history-content");
@@ -6855,7 +6866,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <select id="trn-sync-year-sel" style="font-size:.82rem;padding:3px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)" title="Select a year to sync only that year's leagues">
               <option value="">All years</option>
               ${[...new Set(allRealBatches.map(([, b]) => b.year).filter(Boolean))].sort((a,b)=>b-a).map(y =>
-                `<option value="${y}"${String(y) === String(_tournamentYear) ? " selected" : ""}>${y}</option>`
+                `<option value="${y}"${String(y) === String(new Date().getFullYear()) ? " selected" : ""}>${y}</option>`
               ).join("")}
             </select>
             <button class="btn-secondary btn-sm" id="trn-sync-standings-btn">↺ Sync Standings</button>
@@ -21058,7 +21069,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       ${meta.donationLink ? `
         <div class="trn-section-card trn-info-donation">
           <div class="trn-section-card-title">Support the Tournament</div>
-          <a href="${_esc(meta.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn">
+          <a href="${_esc(meta.donationLink)}" target="_blank" rel="noopener" class="btn-primary trn-donation-btn" style="display:inline-block;max-width:100%;word-break:break-all;white-space:normal;box-sizing:border-box">
             💰 Donate / Entry Fee
           </a>
         </div>
