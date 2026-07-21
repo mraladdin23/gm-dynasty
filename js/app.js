@@ -1016,8 +1016,11 @@ function _startNotifMonitor(profile) {
   _notifListeners.push(() => stickyRef.off("child_added", stickyHandler));
 
   // ── 2. Tournament message boards ───────────────────────
-  // Watch boards for tournaments where user is a participant or admin
-  GMD.child("tournaments").once("value").then(snap => {
+  // Watch boards for tournaments where user is a participant or admin.
+  // Reads gmd/tournamentIndex — a slim, shape-compatible mirror of
+  // gmd/tournaments (see tournament.js _buildIndexPayload) — instead of the
+  // full tree, since a single tournament node can run 20-50MB.
+  GMD.child("tournamentIndex").once("value").then(snap => {
     const all = snap.val() || {};
     for (const [tid, t] of Object.entries(all)) {
       if (!t?.meta) continue;

@@ -241,6 +241,67 @@ const DLRTournament = (() => {
     const key = year ? `${tid}_${year}` : tid;
     return GMD.child(`tournamentChats/${key}`);
   }
+  function _tIndexRef(tid)   { return GMD.child(`tournamentIndex/${tid}`); }
+
+  // ── Lightweight tournament index ────────────────────────
+  // gmd/tournaments/{tid} can be 20-50MB (standingsCache + analyticsCache +
+  // participants). Reading the ENTIRE tournaments parent (as the landing
+  // list, notif monitor, and discovery scan used to do) meant downloading
+  // every tournament's full payload just to check a few small fields.
+  // gmd/tournamentIndex/{tid} is a shape-compatible slim mirror — same keys
+  // (meta/roles/leagues/registrations/playoffs/participants) so _myRole(),
+  // _tMode(), _effectiveStatus(), and the row renderers work on it
+  // unmodified — but with only the scalar fields those call sites need.
+  // Kept in sync by _writeTournamentIndex(), called from _writePublicSummary
+  // (covers meta/leagues/participants/playoffs changes) plus the handful of
+  // role-only and discovery-only write sites that don't go through it.
+  function _buildIndexPayload(t) {
+    const meta = t?.meta || {};
+    const leagueCount = t?.leagues ? Object.keys(t.leagues).length : 0;
+    const regCount    = t?.registrations ? Object.keys(t.registrations).length : 0;
+    const leagueIds   = Object.values(t?.leagues || {}).map(l => String(l?.leagueId || "")).filter(Boolean);
+
+    const playoffs = {};
+    Object.entries(t?.playoffs || {}).forEach(([yr, cfg]) => {
+      if (!/^\d{4}$/.test(yr)) return;
+      playoffs[yr] = { mode: cfg?.mode || null, registrationOpen: !!cfg?.registrationOpen };
+    });
+
+    // Only linked participants matter for "my tournaments" / notif matching.
+    const participants = {};
+    Object.entries(t?.participants || {}).forEach(([pid, p]) => {
+      if (p?.dlrLinked && p?.dlrUsername) {
+        participants[pid] = { dlrLinked: true, dlrUsername: p.dlrUsername };
+      }
+    });
+
+    return {
+      meta: {
+        name:         meta.name || "",
+        tagline:      meta.tagline || "",
+        createdBy:    meta.createdBy || "",
+        status:       meta.status || "draft",
+        discoveredBy: meta.discoveredBy || null
+      },
+      roles: t?.roles || null,
+      leagues: Object.fromEntries(leagueIds.map((lid, i) => [lid || `l${i}`, { leagueId: lid }])),
+      registrations: Object.fromEntries(Array.from({ length: regCount }, (_, i) => [`r${i}`, true])),
+      playoffs,
+      participants,
+      standingsCache: (t?.standingsCache && Object.keys(t.standingsCache).length) ? { _has: true } : null
+    };
+  }
+
+  async function _writeTournamentIndex(tid, t) {
+    try {
+      const payload = _buildIndexPayload(t);
+      // Strip nulls to keep the node compact.
+      Object.keys(payload).forEach(k => { if (payload[k] == null) delete payload[k]; });
+      await _tIndexRef(tid).set(payload);
+    } catch(e) {
+      console.warn("[Tournament] index write failed:", e.message);
+    }
+  }
 
   function _genId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -253,8 +314,14 @@ const DLRTournament = (() => {
   }
 
   // ── Load all tournaments visible to this user ──────────
+  // Reads gmd/tournamentIndex (slim, shape-compatible mirror — see
+  // _buildIndexPayload) instead of the full gmd/tournaments tree, which can
+  // run 20-50MB per tournament. _tournaments[tid] here holds index-shaped
+  // stub data for landing-list rendering only; _openTournamentView() does
+  // its own full read (with its existing cache-guard) the first time a
+  // specific tournament is opened, same as before.
   async function _loadTournaments() {
-    const snap = await GMD.child("tournaments").once("value");
+    const snap = await GMD.child("tournamentIndex").once("value");
     const all  = snap.val() || {};
     // User sees tournaments where:
     //   - they are admin/sub-admin, OR
@@ -302,9 +369,10 @@ const DLRTournament = (() => {
   // Pass in the user's leagues object from Firebase
   async function runDiscovery(username, userLeagues) {
     try {
-      const snap = await GMD.child("tournaments").once("value");
+      const snap = await GMD.child("tournamentIndex").once("value");
       const all  = snap.val() || {};
       const updates = {};
+      const matchedTids = [];
 
       for (const [tid, t] of Object.entries(all)) {
         if (!t?.meta || !t?.leagues) continue;
@@ -323,12 +391,14 @@ const DLRTournament = (() => {
 
         if (matched) {
           updates[`tournaments/${tid}/meta/discoveredBy/${username}`] = true;
+          updates[`tournamentIndex/${tid}/meta/discoveredBy/${username}`] = true;
+          matchedTids.push(tid);
         }
       }
 
       if (Object.keys(updates).length) {
         await GMD.update(updates);
-        console.log(`[Tournament] Auto-discovered ${Object.keys(updates).length} tournament(s) for ${username}`);
+        console.log(`[Tournament] Auto-discovered ${matchedTids.length} tournament(s) for ${username}`);
       }
     } catch(err) {
       console.warn("[Tournament] Discovery error:", err.message);
@@ -9169,6 +9239,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       await _tRolesRef(tid).child(username).update({ role: newRole, changedAt: Date.now(), changedBy: _currentUsername });
       if (!_tournaments[tid].roles) _tournaments[tid].roles = {};
       _tournaments[tid].roles[username] = { ...existing, role: newRole };
+      _writeTournamentIndex(tid, _tournaments[tid]).catch(() => {});
       showToast(`@${username} is now ${label} ✓`);
       _openTournamentView(tid);
       _activeAdminTab = "roles";
@@ -9246,6 +9317,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const snap = await GMD.child(`tournaments/${tid}/roles`).once("value");
         if (!_tournaments[tid]) _tournaments[tid] = {};
         _tournaments[tid].roles = snap.val();
+        _writeTournamentIndex(tid, _tournaments[tid]).catch(() => {});
         _openTournamentView(tid);
         _activeAdminTab = "roles";
       } catch(err) {
@@ -9263,6 +9335,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const snap = await GMD.child(`tournaments/${tid}/roles`).once("value");
       if (!_tournaments[tid]) _tournaments[tid] = {};
       _tournaments[tid].roles = snap.val();
+      _writeTournamentIndex(tid, _tournaments[tid]).catch(() => {});
       _openTournamentView(tid);
       _activeAdminTab = "roles";
     } catch(err) {
@@ -21693,6 +21766,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // Respect private flag — remove from public listing rather than writing
       if (meta.isPrivate) {
         await GMD.child("publicTournaments/" + tid).remove();
+        _writeTournamentIndex(tid, t).catch(() => {});
         return;
       }
       const regs  = t.registrations || {};
@@ -21799,6 +21873,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       };
 
       await GMD.child("publicTournaments/" + tid).update(summary);
+      _writeTournamentIndex(tid, t).catch(() => {});
 
       // Surgical per-year writes: only touch the specific sub-keys we own,
       // never overwriting the rich published snapshot written by the publish button.
@@ -22185,6 +22260,27 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     return { readMs, kb, mb, totalLeagues, draftCoverage: draftKeys.length, cacheAge };
   }
 
+  // ── One-time migration: backfill gmd/tournamentIndex ───
+  // Run once from the browser console after deploy: DLRTournament.rebuildTournamentIndex()
+  // Reads the full tournaments tree ONE time (accepted one-off cost) and
+  // writes the slim index for every existing tournament, so the landing
+  // list / notif monitor / discovery scan never have to do that full read
+  // again. New/edited tournaments stay in sync automatically going forward
+  // via _writeTournamentIndex() at each write site.
+  async function rebuildTournamentIndex() {
+    console.log("[Tournament] Rebuilding tournamentIndex — this does one full read of gmd/tournaments...");
+    const snap = await GMD.child("tournaments").once("value");
+    const all  = snap.val() || {};
+    const tids = Object.keys(all);
+    let done = 0;
+    for (const tid of tids) {
+      await _writeTournamentIndex(tid, all[tid]);
+      done++;
+    }
+    console.log(`[Tournament] Rebuilt index for ${done}/${tids.length} tournament(s) ✓`);
+    return { rebuilt: done, total: tids.length };
+  }
+
   return {
     init,
     runDiscovery,
@@ -22196,6 +22292,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     resetPointsRoundsElimination,
     diagnoseDivisionJoin,
     diagPerf,
+    rebuildTournamentIndex,
     getTournamentName: (tid) => _tournaments[tid]?.meta?.name || null,
   };
 
