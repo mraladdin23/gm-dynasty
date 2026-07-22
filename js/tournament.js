@@ -12207,6 +12207,30 @@ Good luck this season!
   let _adpBoardMinPicks  = 1;   // minimum times a player must've been drafted to appear on the ADP board
   let _draftPollInterval = null; // live poll during active drafts
 
+  // Lightweight team-name fetch — just users+rosters, no scoring/matchup data.
+  // Used as a fallback so the Draft tab can resolve team names without
+  // depending on standingsCache having been synced for this league yet.
+  async function _fetchSleeperTeamNames(leagueId) {
+    try {
+      const [rU, rR] = await Promise.all([
+        fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users"),
+        fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters")
+      ]);
+      if (!rU.ok || !rR.ok) return null;
+      const users   = await rU.json();
+      const rosters = await rR.json();
+      const nameByUser = {};
+      (users || []).forEach(u => {
+        nameByUser[u.user_id] = (u.metadata?.team_name || "").trim() || (u.display_name || u.username || u.user_id || "").trim();
+      });
+      const out = {};
+      (rosters || []).forEach(r => {
+        if (nameByUser[r.owner_id]) out[String(r.roster_id)] = nameByUser[r.owner_id];
+      });
+      return Object.keys(out).length ? out : null;
+    } catch(e) { return null; }
+  }
+
   async function _renderAnalyticsDraft(tid, t, body) {
     await DLRPlayers.load().catch(() => {});
 
@@ -12271,17 +12295,27 @@ Good luck this season!
 
         await Promise.allSettled(batch.map(async l => {
           try {
-            const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                leagueId:   l.leagueId,
-                platform:   l.platform,
-                year:       l.year,
-                yahooToken: l.platform === "yahoo" ? yahooToken : undefined,
-                mflCookie:  l.platform === "mfl"   ? mflCreds?.cookie : undefined
-              })
-            });
+            const [r, freshTeamNames] = await Promise.all([
+              fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  leagueId:   l.leagueId,
+                  platform:   l.platform,
+                  year:       l.year,
+                  yahooToken: l.platform === "yahoo" ? yahooToken : undefined,
+                  mflCookie:  l.platform === "mfl"   ? mflCreds?.cookie : undefined
+                })
+              }),
+              // Team names used to be resolved purely from standingsCache, which
+              // meant a newly added or not-yet-synced league showed raw roster
+              // IDs instead of names — breaking "my team" auto-detection for the
+              // draft card until an admin manually re-ran Sync Standings. Fetch
+              // Sleeper's own users+rosters directly so team names are available
+              // independent of standings sync state. Cheap: only runs for
+              // leagues actually being fetched fresh, cached into Firebase after.
+              l.platform === "sleeper" ? _fetchSleeperTeamNames(l.leagueId) : Promise.resolve(null)
+            ]);
             if (!r.ok) return;
             const data = await r.json();
             if (data.picks) {
@@ -12291,6 +12325,7 @@ Good luck this season!
                 slot_to_roster_id: data.slot_to_roster_id || null,
                 draft_type:        data.draft_type        || null,
                 draft_status:      data.draft_status      || "complete",
+                freshTeamNames:    freshTeamNames          || null,
                 fetchedAt:         Date.now()
               };
             }
@@ -12341,6 +12376,17 @@ Good luck this season!
       // Build byLeague for ALL years — not just the currently selected year.
       // picks/adp are computed per-year at render time (_buildDraftPicksForYear)
       // so switching years never needs a re-fetch, just a re-aggregation.
+      // Fresh conference/division tags, keyed by leagueId — read directly from
+      // t.leagues rather than the picks cache, so editing conferences later
+      // (or picks being served from cache) never shows stale division tags.
+      const leagueTagMap = {};
+      Object.values(batches).forEach(b => {
+        if (!isBatch(b)) return;
+        Object.entries(b.leagues || {}).forEach(([lid, l]) => {
+          leagueTagMap[lid] = { conference: l.conference || null, division: l.division || null };
+        });
+      });
+
       for (const [ck, lc] of Object.entries(allCached)) {
         if (!lc.picks?.length) continue;
         const platform   = lc.platform || "sleeper";
@@ -12348,7 +12394,8 @@ Good luck this season!
 
         const normalized = lc.picks.map(p => {
           const qualKey = lcLeagueId ? `${lcLeagueId}:${p.teamId}` : String(p.teamId);
-          let teamName = teamMap[qualKey] || teamMap[String(p.teamId)] || p.teamName || String(p.teamId);
+          let teamName = teamMap[qualKey] || teamMap[String(p.teamId)]
+            || lc.freshTeamNames?.[String(p.teamId)] || p.teamName || String(p.teamId);
           const key = _sk(teamName);
           if (pMap[key]) teamName = pMap[key].displayName;
 
@@ -12400,12 +12447,15 @@ Good luck this season!
         }).filter(p => p.teamId && p.teamId !== "undefined" && p.teamId !== "null");
 
         console.log(`[Draft] ${ck}: ${normalized.length} picks, platform=${platform}, sample:`, normalized[0]);
+        const tags = leagueTagMap[lcLeagueId] || {};
         byLeague[ck] = {
           ...lc,
           normalizedPicks:   normalized,
           slot_to_roster_id: lc.slot_to_roster_id || null,
           draft_type:        lc.draft_type        || null,
-          draft_status:      lc.draft_status      || "complete"
+          draft_status:      lc.draft_status      || "complete",
+          conference:        tags.conference || null,
+          division:          tags.division   || null
         };
       }
 
@@ -12567,6 +12617,55 @@ Good luck this season!
     _downloadCSVBlob(headers, rows, "adp_" + (t.meta?.name || "tournament").replace(/\s+/g, "_") + ".csv");
   }
 
+  // ── Draft pace by division/conference ──────────────────
+  // "Fastest" / "slowest" here means total picks made so far, not time —
+  // i.e. which group of leagues has progressed furthest through their
+  // drafts. Groups by division if any league has one tagged, else by
+  // conference, matching the same hasConf/hasDiv precedence used elsewhere.
+  function _computeDraftPaceByGroup(leagues) {
+    const hasDiv  = leagues.some(l => l.division);
+    const hasConf = leagues.some(l => l.conference);
+    const groupKey = hasDiv ? "division" : hasConf ? "conference" : null;
+    if (!groupKey) return { groupLabel: null, groups: [] };
+
+    const byGroup = {};
+    leagues.forEach(l => {
+      const g = l[groupKey] || "Unassigned";
+      if (!byGroup[g]) byGroup[g] = { name: g, picks: 0, leagues: 0 };
+      byGroup[g].picks   += l.normalizedPicks?.length || 0;
+      byGroup[g].leagues += 1;
+    });
+    const groups = Object.values(byGroup).sort((a, b) => b.picks - a.picks);
+    return { groupLabel: groupKey === "division" ? "Division" : "Conference", groups };
+  }
+
+  function _renderDraftPaceCard(leagues) {
+    const { groupLabel, groups } = _computeDraftPaceByGroup(leagues);
+    if (!groupLabel || groups.length < 2) return "";
+    const maxPicks = Math.max(...groups.map(g => g.picks), 1);
+    const rows = groups.map((g, i) => {
+      const pct = Math.round((g.picks / maxPicks) * 100);
+      const tag = i === 0 ? `<span style="color:var(--color-primary);font-weight:600">🏃 Fastest</span>`
+        : i === groups.length - 1 ? `<span style="color:var(--color-text-dim)">🐢 Slowest</span>` : "";
+      return `
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:6px">
+          <div style="width:120px;font-size:.8rem;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(g.name)}</div>
+          <div style="flex:1;height:16px;background:var(--color-border);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:var(--color-primary)"></div>
+          </div>
+          <div style="width:70px;text-align:right;font-size:.78rem;color:var(--color-text-dim);flex-shrink:0">${g.picks.toLocaleString()} picks</div>
+          <div style="width:70px;font-size:.75rem;flex-shrink:0">${tag}</div>
+        </div>`;
+    }).join("");
+
+    return `
+      <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+        <div class="trn-section-card-title">Draft Pace by ${groupLabel}</div>
+        <div style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:10px">Ranked by total picks made so far, not elapsed time.</div>
+        ${rows}
+      </div>`;
+  }
+
   // ── Draft stats ticker ──────────────────────────────────
   // Persistent summary bar shown above all Draft tab views (ADP/Board/Card/ADP Board).
   function _computeDraftStats(picks, leagues, adp) {
@@ -12580,34 +12679,53 @@ Good luck this season!
   }
   function _renderDraftStatsBar(picks, leagues, adp) {
     const s = _computeDraftStats(picks, leagues, adp);
-    const POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DEF"];
-    const posPills = POS_ORDER.filter(p => s.posCounts[p]).map(p =>
-      `<span class="trn-draft-stat-pill" style="border-color:${(POS_COLOR[p]||"#9ca3af")}55;color:${POS_COLOR[p]||"#9ca3af"}">${p} ${s.posCounts[p]}</span>`
+    const POS_ORDER  = ["QB", "RB", "WR", "TE", "K", "DEF"];
+    const completePct = s.totalLeagues ? Math.round((s.completed / s.totalLeagues) * 100) : 0;
+
+    // Position-mix bar: proportional colored segments summing to 100%
+    const posSegments = POS_ORDER.filter(p => s.posCounts[p]).map(p => {
+      const pct = s.totalPicks ? (s.posCounts[p] / s.totalPicks) * 100 : 0;
+      return `<div style="width:${pct}%;background:${POS_COLOR[p] || "#9ca3af"}" title="${p}: ${s.posCounts[p]} (${pct.toFixed(0)}%)"></div>`;
+    }).join("");
+    const posLegend = POS_ORDER.filter(p => s.posCounts[p]).map(p =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;color:var(--color-text-dim)">
+        <span style="width:8px;height:8px;border-radius:2px;background:${POS_COLOR[p] || "#9ca3af"};display:inline-block"></span>${p} ${s.posCounts[p]}
+      </span>`
     ).join("");
-    const statusLine = s.inProgress
-      ? `${s.completed} complete · ${s.inProgress} drafting live`
-      : `${s.completed} complete`;
+
     return `
-      <div class="trn-draft-stats-bar">
-        <div class="trn-draft-stats-main">
-          <div class="trn-draft-stat-big">
-            <span class="trn-draft-stat-num">${s.totalPicks.toLocaleString()}</span>
-            <span class="trn-draft-stat-label">picks made</span>
-          </div>
-          <div class="trn-draft-stat-sep"></div>
-          <div class="trn-draft-stat-small">
-            <span class="trn-draft-stat-num">${s.totalLeagues}</span> leagues · ${statusLine}
-          </div>
-          <div class="trn-draft-stat-sep"></div>
-          <div class="trn-draft-stat-small">
-            <span class="trn-draft-stat-num">${s.uniquePlayers}</span> unique players
-          </div>
-          <div class="trn-draft-stat-pills">${posPills}</div>
+      <div class="trn-overview-grid" style="margin-bottom:var(--space-3)">
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${s.totalPicks.toLocaleString()}</div>
+          <div class="trn-stat-label">Picks Made</div>
         </div>
-        <div class="trn-draft-stats-actions">
-          <button class="btn-secondary btn-sm" id="trn-draft-export-picks-btn">⬇ Export Picks CSV</button>
-          <button class="btn-secondary btn-sm" id="trn-draft-export-adp-btn">⬇ Export ADP CSV</button>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${s.completed}<span style="font-size:.6em;color:var(--color-text-dim)">/${s.totalLeagues}</span></div>
+          <div class="trn-stat-label">Leagues Drafted</div>
+          <div style="height:4px;background:var(--color-border);border-radius:2px;overflow:hidden;margin-top:6px">
+            <div style="height:100%;width:${completePct}%;background:var(--color-primary)"></div>
+          </div>
         </div>
+        <div class="trn-stat-card${s.inProgress ? " trn-stat-card--warn" : ""}">
+          <div class="trn-stat-value">${s.inProgress}</div>
+          <div class="trn-stat-label">Drafting Live</div>
+        </div>
+        <div class="trn-stat-card">
+          <div class="trn-stat-value">${s.uniquePlayers}</div>
+          <div class="trn-stat-label">Unique Players</div>
+        </div>
+      </div>
+      ${_renderDraftPaceCard(leagues)}
+      <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-2);margin-bottom:8px">
+          <div class="trn-section-card-title" style="margin:0">Position Mix</div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" id="trn-draft-export-picks-btn">⬇ Export Picks CSV</button>
+            <button class="btn-secondary btn-sm" id="trn-draft-export-adp-btn">⬇ Export ADP CSV</button>
+          </div>
+        </div>
+        <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin-bottom:8px">${posSegments}</div>
+        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">${posLegend}</div>
       </div>`;
   }
 
@@ -12903,19 +13021,18 @@ Good luck this season!
   }
 
   // ── ADP Draftboard (grid) ──────────────────────────────
-  // Lays the tournament-wide ADP list out as a virtual N-team snake draft
-  // grid (SFB16-style) — rank 1 = pick 1.01, rank 2 = pick 1.02, etc, wrapped
-  // into rounds with standard snake column reversal every other round. This
-  // doesn't reflect any real draft; it's a visual re-sorting of ADP data.
+  // Lays the tournament-wide ADP list out as a virtual N-team grid —
+  // rank 1 = pick 1.01, rank 2 = pick 1.02, etc, wrapped into rounds and
+  // read straight left-to-right every round (not snaked) — this is a
+  // reference board for browsing ADP order, not a simulated draft, so a
+  // consistent reading direction is clearer than snake alternation.
   function _buildADPBoardPicks(adp, teamCount, minPicks) {
     const eligible = adp.filter(p => p.count >= minPicks);
     return eligible.map((p, i) => {
       const overall    = i + 1;
       const round      = Math.ceil(overall / teamCount);
       const posInRound = overall - (round - 1) * teamCount;
-      const reversed   = (round % 2 === 0);
-      const slot       = reversed ? (teamCount - posInRound + 1) : posInRound;
-      return { ...p, overall, round, pick: slot };
+      return { ...p, overall, round, pick: posInRound };
     });
   }
 
@@ -12934,45 +13051,55 @@ Good luck this season!
       byRoundSlot[p.round][p.pick] = p;
     });
 
-    let boardHTML = "";
+    const GOLD = "#f0b429";
+    const colHeaderCells = Array.from({ length: N }, (_, i) =>
+      `<div style="text-align:center;font:700 11px 'Barlow',system-ui,sans-serif;color:#8aa3c2;padding:6px 0">${i + 1}</div>`
+    ).join("");
+
+    let rowsHTML = "";
     for (let round = 1; round <= rounds; round++) {
-      boardHTML += `<div class="draft-round"><div class="draft-round-label">Round ${round}</div><div class="draft-picks-row">`;
+      let cells = `<div style="display:flex;align-items:center;justify-content:center;background:#0d1622;color:#8aa3c2;font:600 11px 'Barlow',system-ui,sans-serif;border-radius:4px">${round}</div>`;
       for (let slot = 1; slot <= N; slot++) {
         const pk = byRoundSlot[round]?.[slot];
         if (pk) {
-          const col   = POS_COLOR[pk.position] || "#9ca3af";
+          const col = POS_COLOR[pk.position] || "#9ca3af";
           const rawPick = _draftCache?.picks?.find(x => x.playerId === pk.playerId);
-          const nfl   = rawPick?.nflTeam || "FA";
+          const nfl = rawPick?.nflTeam || "FA";
           const nameParts = (pk.name || "Unknown").trim().split(/\s+/);
           const shortName = nameParts.length > 1
-            ? nameParts[0].charAt(0) + ". " + nameParts.slice(1).join(" ")
+            ? nameParts[0].charAt(0) + " " + nameParts.slice(1).join(" ")
             : pk.name;
-          const clickFn = pk.playerId
-            ? `DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pk.name)}')`
-            : "";
-          boardHTML += `
-            <div class="draft-pick draft-pick--filled"
-              ${clickFn ? `onclick="${clickFn}" style="cursor:pointer;background:${col}18;border-color:${col}40"` : `style="background:${col}18;border-color:${col}40"`}
-              title="${_esc(pk.name)} · ${pk.position} · ADP ${pk.adp.toFixed(1)} · drafted in ${pk.count} league${pk.count === 1 ? "" : "s"}">
-              <div class="draft-pick-num">${pk.overall}</div>
-              <div class="draft-pick-player">
-                <div class="draft-pick-name">${_esc(shortName)} <span class="draft-pick-pos-team">${pk.position} · ${nfl}</span></div>
-              </div>
-              <div class="draft-pick-team">ADP ${pk.adp.toFixed(1)}</div>
+          const clickAttr = pk.playerId
+            ? `onclick="DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pk.name)}')" style="cursor:pointer"` : "";
+          cells += `
+            <div ${clickAttr}
+              title="${_esc(pk.name)} · ${pk.position} · ADP ${pk.adp.toFixed(1)} · drafted in ${pk.count} league${pk.count === 1 ? "" : "s"}"
+              style="background:${col}18;border:1px solid ${col}55;border-radius:6px;padding:6px 8px;min-height:58px;display:flex;flex-direction:column;justify-content:center;gap:2px">
+              <div style="font:700 11px 'Barlow',system-ui,sans-serif;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(shortName)}</div>
+              <div style="font:600 10px 'Barlow',system-ui,sans-serif;color:${col}">${pk.position} · ${nfl}</div>
+              <div style="font:500 9px 'Barlow',system-ui,sans-serif;color:#8aa3c2">#${pk.overall} · ADP ${pk.adp.toFixed(1)}</div>
             </div>`;
         } else {
-          boardHTML += `<div class="draft-pick draft-pick--empty"><div class="draft-pick-num">${(round - 1) * N + slot}</div></div>`;
+          cells += `<div style="background:#141e2c;border:1px solid #26364d;border-radius:6px;min-height:58px"></div>`;
         }
       }
-      boardHTML += `</div></div>`;
+      rowsHTML += `<div style="display:grid;grid-template-columns:32px repeat(${N},minmax(90px,1fr));gap:4px;margin-bottom:4px">${cells}</div>`;
     }
 
     el.innerHTML = `
-      <div class="trn-az-meta">${virtualPicks.length} players · min ${minP} pick${minP === 1 ? "" : "s"} · ${N}-team snake layout</div>
+      <div class="trn-az-meta">${virtualPicks.length} players · min ${minP} pick${minP === 1 ? "" : "s"} · ${N}-team layout</div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-2)">
         <button class="btn-primary btn-sm" id="trn-adpboard-download-btn">⬇ Download Board (PNG)</button>
       </div>
-      <div class="trn-az-section draft-board-scroll"><div class="draft-board">${boardHTML}</div></div>`;
+      <div class="trn-az-section" style="background:#0f1923;border-radius:8px;padding:12px;overflow-x:auto">
+        <div style="min-width:${32 + N * 90}px">
+          <div style="height:3px;background:${GOLD};border-radius:2px;margin-bottom:8px"></div>
+          <div style="display:grid;grid-template-columns:32px repeat(${N},minmax(90px,1fr));gap:4px;margin-bottom:6px">
+            <div></div>${colHeaderCells}
+          </div>
+          ${rowsHTML}
+        </div>
+      </div>`;
 
     document.getElementById("trn-adpboard-download-btn")?.addEventListener("click", () =>
       _downloadADPBoard(virtualPicks, N, rounds, minP, t)
@@ -13022,7 +13149,7 @@ Good luck this season!
       ctx.fillText((t.meta?.name || "TOURNAMENT").toUpperCase() + " · ADP DRAFTBOARD", PAD, 32);
       ctx.fillStyle = C.muted;
       ctx.font = `500 12px 'Barlow', system-ui, sans-serif`;
-      ctx.fillText(`Minimum ${minP} pick${minP === 1 ? "" : "s"} · ${N}-team snake layout · dynastylockerroom.com`, PAD, 54);
+      ctx.fillText(`Minimum ${minP} pick${minP === 1 ? "" : "s"} · ${N}-team layout · dynastylockerroom.com`, PAD, 54);
 
       // Column headers
       let y = HDR_H;
