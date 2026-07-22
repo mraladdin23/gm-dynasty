@@ -1579,6 +1579,7 @@ const DLRTournament = (() => {
           <button class="btn-primary btn-sm" id="trn-admin-wizard-btn">🪄 Setup Wizard</button>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
+          <button class="btn-secondary btn-sm" id="trn-admin-settings-btn">⚙ Tournament Settings</button>
           <button class="btn-secondary btn-sm" id="trn-admin-playoff-btn">🥇 Playoff Config</button>
           <button class="btn-secondary btn-sm" id="trn-admin-scoring-btn">📊 Scoring Settings</button>
           <button class="btn-secondary btn-sm" id="trn-admin-republish-btn">🔄 Re-publish</button>
@@ -1644,6 +1645,7 @@ const DLRTournament = (() => {
     });
 
     // Wizard + shortcut buttons
+    document.getElementById("trn-admin-settings-btn")?.addEventListener("click", () => _openTournamentSettingsModal(tid, t));
     document.getElementById("trn-admin-wizard-btn")?.addEventListener("click", () => _openSetupWizard(tid, t));
     document.getElementById("trn-admin-playoff-btn")?.addEventListener("click", () => _openPlayoffConfigModal(tid, t));
     document.getElementById("trn-admin-scoring-btn")?.addEventListener("click", () => {
@@ -1707,6 +1709,40 @@ const DLRTournament = (() => {
   }
 
   // ── Playoff config modal (admin shortcut) ──────────────
+  // ── Tournament Settings modal (admin shortcut) ──────────
+  // Reconnects _renderAdminOverview + _renderAdminInfoEdit, which lost their
+  // nav entry point when the admin section was restructured to the
+  // Registrants/Participants/Divisions/Donations sub-tabs. Renders each into
+  // its own slot so neither one's innerHTML write clobbers the other;
+  // _renderAdminOverview is called with { embedded: true } to skip the
+  // stat-cards grid, Playoff Config block, and Preview/Republish buttons
+  // that already live in _renderAdminSection.
+  function _openTournamentSettingsModal(tid, t) {
+    _showModal(`
+      <div class="modal-header">
+        <h3>⚙ Tournament Settings</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="trn-settings-overview-slot"></div>
+        <div id="trn-settings-infoedit-slot" style="margin-top:var(--space-4)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="trn-modal-cancel">Close</button>
+      </div>
+    `);
+    const box = document.getElementById("trn-modal-box");
+    if (box) box.className = "modal-box modal-box--lg modal-box--scroll";
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+    document.getElementById("trn-modal-cancel")?.addEventListener("click", _closeModal);
+
+    const liveT = _tournaments[tid] || t;
+    const overviewSlot = document.getElementById("trn-settings-overview-slot");
+    const infoEditSlot = document.getElementById("trn-settings-infoedit-slot");
+    if (overviewSlot) _renderAdminOverview(tid, liveT, overviewSlot, { embedded: true });
+    if (infoEditSlot) _renderAdminInfoEdit(tid, liveT, infoEditSlot);
+  }
+
   function _openPlayoffConfigModal(tid, t) {
     const html = _renderPlayoffConfigHTML(tid, t, _tournamentYear ? String(_tournamentYear) : (_playoffYears(t)[0] || null));
     _showModal(`
@@ -2782,7 +2818,14 @@ const DLRTournament = (() => {
   }
 
   // ── Admin: Overview tab ────────────────────────────────
-  function _renderAdminOverview(tid, t, body) {
+  // opts.embedded: true when rendered inside the merged "Tournament Settings"
+  // modal (see _openTournamentSettingsModal) — suppresses the stat-cards
+  // grid, Playoff Configuration block, Admin Tools card, and pending-regs
+  // alert, since those already exist in _renderAdminSection. Only the
+  // Lifecycle stepper and Tournament Details card (rankBy/medianWins/3RR/
+  // regType/createdBy) are unique to this function and worth keeping.
+  function _renderAdminOverview(tid, t, body, opts = {}) {
+    const embedded  = !!opts.embedded;
     const meta      = t.meta || {};
     const leagueCount = Object.keys(t.leagues || {}).length;
     const regCount    = Object.keys(t.registrations || {}).length;
@@ -2796,6 +2839,7 @@ const DLRTournament = (() => {
     const nextStatus = canAdvance ? STATUSES[statusIdx + 1] : null;
 
     body.innerHTML = `
+      ${embedded ? "" : `
       <div class="trn-overview-grid">
         <div class="trn-stat-card">
           <div class="trn-stat-value">${leagueCount}</div>
@@ -2813,7 +2857,7 @@ const DLRTournament = (() => {
           <div class="trn-stat-value">${roleCount}</div>
           <div class="trn-stat-label">Admins/Staff</div>
         </div>
-      </div>
+      </div>`}
 
       <!-- Lifecycle status control -->
       <div class="trn-section-card">
@@ -2890,9 +2934,10 @@ const DLRTournament = (() => {
       </div>
 
       <!-- Playoff Configuration -->
-      ${_renderPlayoffConfigHTML(tid, t, _playoffYears(t)[0] || null)}
+      ${embedded ? "" : _renderPlayoffConfigHTML(tid, t, _playoffYears(t)[0] || null)}
 
       <!-- Preview as User -->
+      ${embedded ? "" : `
       <div class="trn-section-card">
         <div class="trn-section-card-title">Admin Tools</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)">
@@ -2911,9 +2956,9 @@ const DLRTournament = (() => {
             🔄 Re-publish Public Summary
           </button>
         </div>
-      </div>
+      </div>`}
 
-      ${pendingCount > 0 ? `
+      ${(!embedded && pendingCount > 0) ? `
         <div class="trn-alert">
           ⚠️ You have <strong>${pendingCount}</strong> pending registration${pendingCount !== 1 ? "s" : ""} awaiting review.
           <button class="btn-secondary btn-sm" id="trn-goto-regs-btn">Review Now</button>
@@ -2990,7 +3035,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     // Playoff config (F5-P4-A/B/C) event listeners
-    _wirePlayoffConfigListeners(tid, t);
+    if (!embedded) _wirePlayoffConfigListeners(tid, t);
 
     document.getElementById("trn-preview-user-btn")?.addEventListener("click", () => {
       _viewingAsUser = true;
@@ -6975,8 +7020,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               ${(() => {
                 const sc = t.standingsCache || {};
                 const ids = Object.keys(batch.leagues || {});
-                const nSynced = ids.filter(id => sc[id]?.lastSynced).length;
-                const maxSync = ids.reduce((m, id) => Math.max(m, sc[id]?.lastSynced||0), 0);
+                const ck = (id) => `${batch.year || new Date().getFullYear()}_${id}`;
+                const nSynced = ids.filter(id => sc[ck(id)]?.lastSynced).length;
+                const maxSync = ids.reduce((m, id) => Math.max(m, sc[ck(id)]?.lastSynced||0), 0);
                 return nSynced
                   ? `<span class="trn-batch-sync-tag">✓ ${nSynced}/${ids.length} synced · ${new Date(maxSync).toLocaleDateString()}</span>`
                   : `<span class="trn-batch-sync-tag trn-batch-sync-tag--pending">Not synced</span>`;
@@ -8403,13 +8449,32 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // Available years — year is driven by the global _tournamentYear selector in the header
     const availableYears = [...new Set(allEntries.map(([, lc]) => lc.year).filter(Boolean))].sort((a,b) => b-a);
-    if (!_tournamentYear || !availableYears.includes(_tournamentYear)) {
+    // Only default the (shared, cross-tab) year when nothing has been picked yet.
+    // Previously this forced _tournamentYear down to the latest year with synced
+    // standings any time this ran — even overriding an explicit year-pill click —
+    // which clobbered the year for every other History sub-tab (Draft, Playoffs,
+    // etc). A year with no standings synced yet should just show this tab's own
+    // empty state below, not silently reassign the global year.
+    if (!_tournamentYear) {
       _tournamentYear = availableYears[0] || null;
       _standingsYear  = _tournamentYear;
     }
     const entries = _tournamentYear
       ? allEntries.filter(([, lc]) => lc.year === _tournamentYear)
       : allEntries;
+
+    if (!entries.length) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">&#x1F4CA;</div>
+          <div class="trn-empty-title">No standings synced for ${_esc(String(_tournamentYear || ""))}</div>
+          <div class="trn-empty-sub">${isAdmin
+            ? "Go to the Leagues tab and click Sync Standings for this year."
+            : "The commissioner has not synced standings for this year yet."}
+            ${availableYears.length ? ` Data is available for: ${availableYears.join(", ")}.` : ""}</div>
+        </div>`;
+      return;
+    }
 
     // Build participant lookup — keyed by sleeperUsername/displayName/teamName.
     // Keys are sanitized (trimmed, lowercased, Firebase-illegal chars replaced with _)
@@ -8491,12 +8556,14 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     body.innerHTML = `
       <div class="trn-standings-toolbar">
         <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
-          ${hasConf ? `<select id="trn-st-group" class="trn-filter-select" style="min-width:0">
-            <option value="flat">All Conferences</option>
-            ${conferences.map(conf => `<option value="conf_${_esc(conf)}">${_esc(conf)}</option>`).join("")}
-          </select>` : hasDiv ? `<select id="trn-st-group" class="trn-filter-select" style="min-width:0">
-            <option value="flat">All Divisions</option>
-            ${divisions.map(d => `<option value="div_${_esc(d)}">${_esc(d)}</option>`).join("")}
+          ${(hasConf || hasDiv) ? `<select id="trn-st-group" class="trn-filter-select" style="min-width:0">
+            <option value="flat">All Teams</option>
+            ${hasConf ? `<optgroup label="Conference">
+              ${conferences.map(conf => `<option value="conf_${_esc(conf)}">${_esc(conf)}</option>`).join("")}
+            </optgroup>` : ""}
+            ${hasDiv ? `<optgroup label="Division">
+              ${divisions.map(d => `<option value="div_${_esc(d)}">${_esc(d)}</option>`).join("")}
+            </optgroup>` : ""}
           </select>` : ""}
         </div>
         ${hasLeagueFilter ? `
@@ -12454,7 +12521,7 @@ Good luck this season!
         _draftForceRefresh = true;
         _renderAnalyticsDraft(tid, t, body);
       }
-    }, 15000); // poll every 15 seconds
+    }, 300000); // poll every 5 minutes — was 15s, which felt like constant reloading during active drafts
   }
 
   // Aggregates normalizedPicks from byLeague filtered to a specific year.
@@ -12558,6 +12625,17 @@ Good luck this season!
     const byLeague = cache.byLeague;
     const leagues = Object.values(byLeague)
       .filter(l => l.normalizedPicks?.length && (!l.year || parseInt(l.year) === parseInt(activeYear)));
+
+    // Keep the Board view's selected league in sync with the active year.
+    // Previously this only ran when switching INTO Board view (the pill click
+    // handler below), so changing the global year while already on Board kept
+    // _draftLeague pointing at a stale league from the old year — byLeague
+    // spans all years, so that stale lookup still "succeeded", silently
+    // rendering the wrong year's league mismatched against the visible
+    // year/league-name labels.
+    if (_draftView === "board" && (_draftLeague === "all" || !leagues.some(l => l.cacheKey === _draftLeague))) {
+      _draftLeague = leagues[0]?.cacheKey || _draftLeague;
+    }
 
     // Build unique team list from all picks, with league name for disambiguation
     const teamSet = {};
