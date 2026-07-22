@@ -4,6 +4,7 @@
 //  Admin setup, role management, lifecycle, registration,
 //  CSV export/import, auto-discovery
 //  Firebase path: gmd/tournaments/{tournamentId}/
+//  Owner: Michael Salwan
 // ─────────────────────────────────────────────────────────
 
 const DLRTournament = (() => {
