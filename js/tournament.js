@@ -12620,48 +12620,25 @@ Good luck this season!
   // ── Draft pace by division/conference ──────────────────
   // "Fastest" / "slowest" here means total picks made so far, not time —
   // i.e. which group of leagues has progressed furthest through their
-  // drafts. Groups by division if any league has one tagged, else by
-  // conference, matching the same hasConf/hasDiv precedence used elsewhere.
-  function _computeDraftPaceByGroup(leagues) {
-    const hasDiv  = leagues.some(l => l.division);
-    const hasConf = leagues.some(l => l.conference);
-    const groupKey = hasDiv ? "division" : hasConf ? "conference" : null;
-    if (!groupKey) return { groupLabel: null, groups: [] };
-
+  // drafts. Division is always compared when any league has one tagged.
+  // Conference is shown as an additional, separate comparison — not a
+  // replacement — when any league has one tagged too.
+  function _computeDraftPaceByGroup(leagues, groupKey) {
+    const relevant = leagues.filter(l => l[groupKey]);
+    if (!relevant.length) return { groups: [] };
     const byGroup = {};
-    leagues.forEach(l => {
-      const g = l[groupKey] || "Unassigned";
+    relevant.forEach(l => {
+      const g = l[groupKey];
       if (!byGroup[g]) byGroup[g] = { name: g, picks: 0, leagues: 0 };
       byGroup[g].picks   += l.normalizedPicks?.length || 0;
       byGroup[g].leagues += 1;
     });
-    const groups = Object.values(byGroup).sort((a, b) => b.picks - a.picks);
-    return { groupLabel: groupKey === "division" ? "Division" : "Conference", groups };
+    return { groups: Object.values(byGroup).sort((a, b) => b.picks - a.picks) };
   }
 
-  function _renderDraftPaceCard(leagues) {
-    const { groupLabel, groups } = _computeDraftPaceByGroup(leagues);
-    if (!groupLabel) {
-      return `
-        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
-          <div class="trn-section-card-title">Draft Pace by Division</div>
-          <div style="font-size:.8rem;color:var(--color-text-dim)">
-            None of this year's ${leagues.length} league${leagues.length === 1 ? "" : "s"} have a conference or division tag set.
-            Add them via Leagues → Edit Conferences to see pace comparisons here.
-          </div>
-        </div>`;
-    }
-    if (groups.length < 2) {
-      return `
-        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
-          <div class="trn-section-card-title">Draft Pace by ${groupLabel}</div>
-          <div style="font-size:.8rem;color:var(--color-text-dim)">
-            Only one ${groupLabel.toLowerCase()} (${_esc(groups[0]?.name || "")}) is tagged across this year's leagues — need at least 2 to compare.
-          </div>
-        </div>`;
-    }
+  function _renderPaceGroupRows(groups) {
     const maxPicks = Math.max(...groups.map(g => g.picks), 1);
-    const rows = groups.map((g, i) => {
+    return groups.map((g, i) => {
       const pct = Math.round((g.picks / maxPicks) * 100);
       const tag = i === 0 ? `<span style="color:var(--color-primary);font-weight:600">🏃 Fastest</span>`
         : i === groups.length - 1 ? `<span style="color:var(--color-text-dim)">🐢 Slowest</span>` : "";
@@ -12675,12 +12652,48 @@ Good luck this season!
           <div style="width:70px;font-size:.75rem;flex-shrink:0">${tag}</div>
         </div>`;
     }).join("");
+  }
+
+  function _renderDraftPaceCard(leagues) {
+    const { groups: divGroups }  = _computeDraftPaceByGroup(leagues, "division");
+    const { groups: confGroups } = _computeDraftPaceByGroup(leagues, "conference");
+
+    if (!divGroups.length && !confGroups.length) {
+      return `
+        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+          <div class="trn-section-card-title">Draft Pace</div>
+          <div style="font-size:.8rem;color:var(--color-text-dim)">
+            None of this year's ${leagues.length} league${leagues.length === 1 ? "" : "s"} have a division or conference tag set.
+            Add them via Leagues → Edit Conferences to see pace comparisons here.
+          </div>
+        </div>`;
+    }
+
+    let sections = "";
+    if (divGroups.length) {
+      sections += `
+        <div${confGroups.length ? ' style="margin-bottom:var(--space-3)"' : ""}>
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">By Division</div>
+          ${divGroups.length >= 2
+            ? _renderPaceGroupRows(divGroups)
+            : `<div style="font-size:.78rem;color:var(--color-text-dim)">Only one division (${_esc(divGroups[0].name)}) is tagged — need at least 2 to compare.</div>`}
+        </div>`;
+    }
+    if (confGroups.length) {
+      sections += `
+        <div>
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">By Conference</div>
+          ${confGroups.length >= 2
+            ? _renderPaceGroupRows(confGroups)
+            : `<div style="font-size:.78rem;color:var(--color-text-dim)">Only one conference (${_esc(confGroups[0].name)}) is tagged — need at least 2 to compare.</div>`}
+        </div>`;
+    }
 
     return `
       <div class="trn-section-card" style="margin-bottom:var(--space-3)">
-        <div class="trn-section-card-title">Draft Pace by ${groupLabel}</div>
+        <div class="trn-section-card-title">Draft Pace</div>
         <div style="font-size:.75rem;color:var(--color-text-dim);margin-bottom:10px">Ranked by total picks made so far, not elapsed time.</div>
-        ${rows}
+        ${sections}
       </div>`;
   }
 
