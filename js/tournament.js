@@ -4,7 +4,6 @@
 //  Admin setup, role management, lifecycle, registration,
 //  CSV export/import, auto-discovery
 //  Firebase path: gmd/tournaments/{tournamentId}/
-//  Owner: Michael Salwan
 // ─────────────────────────────────────────────────────────
 
 const DLRTournament = (() => {
@@ -12642,7 +12641,25 @@ Good luck this season!
 
   function _renderDraftPaceCard(leagues) {
     const { groupLabel, groups } = _computeDraftPaceByGroup(leagues);
-    if (!groupLabel || groups.length < 2) return "";
+    if (!groupLabel) {
+      return `
+        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+          <div class="trn-section-card-title">Draft Pace by Division</div>
+          <div style="font-size:.8rem;color:var(--color-text-dim)">
+            None of this year's ${leagues.length} league${leagues.length === 1 ? "" : "s"} have a conference or division tag set.
+            Add them via Leagues → Edit Conferences to see pace comparisons here.
+          </div>
+        </div>`;
+    }
+    if (groups.length < 2) {
+      return `
+        <div class="trn-section-card" style="margin-bottom:var(--space-3)">
+          <div class="trn-section-card-title">Draft Pace by ${groupLabel}</div>
+          <div style="font-size:.8rem;color:var(--color-text-dim)">
+            Only one ${groupLabel.toLowerCase()} (${_esc(groups[0]?.name || "")}) is tagged across this year's leagues — need at least 2 to compare.
+          </div>
+        </div>`;
+    }
     const maxPicks = Math.max(...groups.map(g => g.picks), 1);
     const rows = groups.map((g, i) => {
       const pct = Math.round((g.picks / maxPicks) * 100);
