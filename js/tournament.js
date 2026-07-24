@@ -12237,6 +12237,17 @@ Good luck this season!
       })[0];
       if (!draft) return null;
 
+      // Diagnostic: when a league has more than one draft, or the requested
+      // year didn't have an exact season match, log the full candidate list
+      // and which one got picked — so a wrong selection is visible instead
+      // of silently producing plausible-looking-but-wrong data.
+      if (drafts.length > 1 || !bySeason.length) {
+        console.log(`[Draft] ${leagueId} (year=${year}): ${drafts.length} draft(s) found` +
+          (bySeason.length ? "" : " — NONE matched this season, using all drafts as fallback pool") + ":",
+          drafts.map(d => ({ draft_id: d.draft_id, season: d.season, status: d.status, teams: d.settings?.teams, last_picked: d.last_picked })),
+          "→ selected:", { draft_id: draft.draft_id, season: draft.season, status: draft.status });
+      }
+
       const [rFull, rPicks] = await Promise.all([
         fetch("https://api.sleeper.app/v1/draft/" + draft.draft_id),
         fetch("https://api.sleeper.app/v1/draft/" + draft.draft_id + "/picks")
@@ -12447,10 +12458,8 @@ Good luck this season!
       });
 
       // Worker picks are already in normalized shape: { overall, round, pick, teamId, playerId, name, position }
-      // Just resolve teamNames from standingsCache and participant map, and
-      // improve player names via DLRPlayers where possible.
-      const pMap = _buildParticipantTeamMap(t);
-      const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+      // Resolve teamNames from standingsCache/freshTeamNames (both correctly
+      // league-scoped), and improve player names via DLRPlayers where possible.
       const byLeague = {};
 
       // Build byLeague for ALL years — not just the currently selected year.
@@ -12504,10 +12513,16 @@ Good luck this season!
         const normalized = lc.picks.map(p => {
           const resolvedTeamId = resolveTeamId(p.teamId);
           const qualKey = lcLeagueId ? `${lcLeagueId}:${resolvedTeamId}` : String(resolvedTeamId);
+          // NOTE: deliberately NOT applying _buildParticipantTeamMap here.
+          // That map is keyed by sanitized name with no league qualification,
+          // so two teams in different leagues sharing a name (e.g. still-
+          // default/unclaimed Sleeper team names on freshly created leagues)
+          // collapse onto whichever participant record was written last —
+          // which is exactly what caused "same team name in every division".
+          // teamMap[qualKey] and freshTeamNames are already correctly scoped
+          // per-league, so they're trustworthy without this extra step.
           let teamName = teamMap[qualKey] || teamMap[String(resolvedTeamId)]
             || lc.freshTeamNames?.[String(resolvedTeamId)] || p.teamName || String(resolvedTeamId);
-          const key = _sk(teamName);
-          if (pMap[key]) teamName = pMap[key].displayName;
 
           // Resolve player name/pos via DLRPlayers for Sleeper (has playerId)
           let name = p.name || "Unknown";
