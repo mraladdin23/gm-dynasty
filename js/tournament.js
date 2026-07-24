@@ -12443,8 +12443,15 @@ Good luck this season!
       const allCached = { ...cached, ...results };
       _draftForceRefresh = false;
 
-      // Build team name map from standingsCache — keyed as "{leagueId}:{teamId}" to
-      // prevent roster_id collisions across leagues (each league reuses IDs 1–12).
+      // Build team name map from standingsCache — keyed as "{leagueId}:{teamId}"
+      // to prevent roster_id collisions across leagues (each league reuses IDs
+      // 1-12). Deliberately NOT storing a bare/unqualified teamId fallback here
+      // anymore — it used to ("first league processed wins" for each small
+      // roster_id number), which meant any league missing its own qualified
+      // entry (e.g. standings not synced yet for a new season) would silently
+      // inherit a completely unrelated league's team name for that number,
+      // instead of falling through to the correctly-scoped freshTeamNames
+      // fallback below it in the resolution chain.
       const standings = t.standingsCache || {};
       const teamMap   = {};
       Object.values(standings).forEach(lc => {
@@ -12452,8 +12459,6 @@ Good luck this season!
         (lc.teams || []).forEach(tm => {
           const qualKey = lcLeagueId ? `${lcLeagueId}:${tm.teamId}` : String(tm.teamId);
           teamMap[qualKey] = tm.teamName;
-          // Also store bare key as fallback for legacy data without leagueId
-          if (lcLeagueId) teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
         });
       });
 
@@ -12510,6 +12515,8 @@ Good luck this season!
           return raw;
         };
 
+        const nameSourceSample = {}; // teamId -> which lookup won, for diagnostics
+
         const normalized = lc.picks.map(p => {
           const resolvedTeamId = resolveTeamId(p.teamId);
           const qualKey = lcLeagueId ? `${lcLeagueId}:${resolvedTeamId}` : String(resolvedTeamId);
@@ -12521,8 +12528,12 @@ Good luck this season!
           // which is exactly what caused "same team name in every division".
           // teamMap[qualKey] and freshTeamNames are already correctly scoped
           // per-league, so they're trustworthy without this extra step.
-          let teamName = teamMap[qualKey] || teamMap[String(resolvedTeamId)]
-            || lc.freshTeamNames?.[String(resolvedTeamId)] || p.teamName || String(resolvedTeamId);
+          let teamName, nameSource;
+          if (teamMap[qualKey])                            { teamName = teamMap[qualKey];                          nameSource = "standingsCache[qualKey]"; }
+          else if (lc.freshTeamNames?.[String(resolvedTeamId)]) { teamName = lc.freshTeamNames[String(resolvedTeamId)]; nameSource = "freshTeamNames"; }
+          else if (p.teamName)                              { teamName = p.teamName;                                nameSource = "raw pick.teamName"; }
+          else                                               { teamName = String(resolvedTeamId);                   nameSource = "UNRESOLVED (raw id)"; }
+          if (!nameSourceSample[resolvedTeamId]) nameSourceSample[resolvedTeamId] = { teamName, nameSource };
 
           // Resolve player name/pos via DLRPlayers for Sleeper (has playerId)
           let name = p.name || "Unknown";
@@ -12573,6 +12584,7 @@ Good luck this season!
         }).filter(p => p.teamId && p.teamId !== "undefined" && p.teamId !== "null");
 
         console.log(`[Draft] ${ck}: ${normalized.length} picks, platform=${platform}, sample:`, normalized[0]);
+        console.log(`[Draft] ${ck}: team name sources:`, nameSourceSample);
         const tags = leagueTagMap[lcLeagueId] || {};
         byLeague[ck] = {
           ...lc,
