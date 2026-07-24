@@ -12619,10 +12619,12 @@ Good luck this season!
 
   // ── Draft pace by division/conference ──────────────────
   // "Fastest" / "slowest" here means total picks made so far, not time —
-  // i.e. which group of leagues has progressed furthest through their
-  // drafts. Division is always compared when any league has one tagged.
-  // Conference is shown as an additional, separate comparison — not a
-  // replacement — when any league has one tagged too.
+  // i.e. which division/conference has progressed furthest through their
+  // drafts. There's no separate per-league "division" tag anywhere in the
+  // data model (Add Batch only ever supported an optional conference
+  // column) — each LEAGUE *is* a division, identified by its own name.
+  // Conference, when tagged, is a further grouping of multiple leagues and
+  // is shown as an additional, separate comparison underneath.
   function _computeDraftPaceByGroup(leagues, groupKey) {
     const relevant = leagues.filter(l => l[groupKey]);
     if (!relevant.length) return { groups: [] };
@@ -12644,7 +12646,7 @@ Good luck this season!
         : i === groups.length - 1 ? `<span style="color:var(--color-text-dim)">🐢 Slowest</span>` : "";
       return `
         <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:6px">
-          <div style="width:120px;font-size:.8rem;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(g.name)}</div>
+          <div style="width:140px;font-size:.8rem;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(g.name)}">${_esc(g.name)}</div>
           <div style="flex:1;height:16px;background:var(--color-border);border-radius:3px;overflow:hidden">
             <div style="height:100%;width:${pct}%;background:var(--color-primary)"></div>
           </div>
@@ -12655,28 +12657,41 @@ Good luck this season!
   }
 
   function _renderDraftPaceCard(leagues) {
-    const { groups: divGroups }  = _computeDraftPaceByGroup(leagues, "division");
+    // Division = one row per league (each league is its own division).
+    const divGroups = leagues
+      .map(l => ({ name: l.leagueName || l.leagueId || "League", picks: l.normalizedPicks?.length || 0 }))
+      .sort((a, b) => b.picks - a.picks);
     const { groups: confGroups } = _computeDraftPaceByGroup(leagues, "conference");
 
-    if (!divGroups.length && !confGroups.length) {
+    if (!divGroups.length) {
       return `
         <div class="trn-section-card" style="margin-bottom:var(--space-3)">
           <div class="trn-section-card-title">Draft Pace</div>
-          <div style="font-size:.8rem;color:var(--color-text-dim)">
-            None of this year's ${leagues.length} league${leagues.length === 1 ? "" : "s"} have a division or conference tag set.
-            Add them via Leagues → Edit Conferences to see pace comparisons here.
-          </div>
+          <div style="font-size:.8rem;color:var(--color-text-dim)">No leagues with picks yet this year.</div>
         </div>`;
     }
 
     let sections = "";
-    if (divGroups.length) {
+    if (divGroups.length >= 2) {
+      // Long lists (lots of leagues) get capped to the extremes so this stays a card, not a scroll.
+      const CAP = 10;
+      let shown = divGroups, note = "";
+      if (divGroups.length > CAP) {
+        const half = Math.ceil(CAP / 2);
+        shown = [...divGroups.slice(0, half), ...divGroups.slice(-half)];
+        note = `<div style="font-size:.72rem;color:var(--color-text-dim);margin-bottom:6px">Showing fastest ${half} and slowest ${half} of ${divGroups.length} divisions.</div>`;
+      }
+      sections += `
+        <div${confGroups.length ? ' style="margin-bottom:var(--space-3)"' : ""}>
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">By Division (${divGroups.length} league${divGroups.length === 1 ? "" : "s"})</div>
+          ${note}
+          ${_renderPaceGroupRows(shown)}
+        </div>`;
+    } else {
       sections += `
         <div${confGroups.length ? ' style="margin-bottom:var(--space-3)"' : ""}>
           <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">By Division</div>
-          ${divGroups.length >= 2
-            ? _renderPaceGroupRows(divGroups)
-            : `<div style="font-size:.78rem;color:var(--color-text-dim)">Only one division (${_esc(divGroups[0].name)}) is tagged — need at least 2 to compare.</div>`}
+          <div style="font-size:.78rem;color:var(--color-text-dim)">Only one league drafted so far — need at least 2 to compare.</div>
         </div>`;
     }
     if (confGroups.length) {
