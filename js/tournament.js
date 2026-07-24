@@ -12205,7 +12205,82 @@ Good luck this season!
   let _draftBoardMode = "grid"; // "grid" | "list" for board view
   let _adpBoardTeamCount = 12;  // virtual snake-grid column count for the ADP board
   let _adpBoardMinPicks  = 1;   // minimum times a player must've been drafted to appear on the ADP board
+  const _draftSlotFixLogged = new Set(); // dedup console.warn for the draft-slot-vs-roster_id auto-fix
   let _draftPollInterval = null; // live poll during active drafts
+
+  // Fetch draft data directly from Sleeper — same approach as the main-page
+  // draft.js (api.sleeper.app directly, never through the worker's
+  // /tournament/draft transform). draft.js always uses pick.roster_id for
+  // team identity and pick.draft_slot only for column position, and never
+  // conflates the two; going through the worker for tournaments meant
+  // trusting whatever "teamId" the worker decided to hand back, which is
+  // where the slot/roster_id mixups were coming from. Returns the same
+  // {picks, slot_to_roster_id, draft_type, draft_status} shape the worker
+  // path returns, so the caller doesn't need to know which source was used.
+  async function _fetchSleeperDraftDirect(leagueId, year) {
+    try {
+      const rD = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/drafts");
+      if (!rD.ok) return null;
+      const drafts = await rD.json();
+      if (!drafts?.length) return null;
+
+      // Prefer a draft matching this league-entry's season; among candidates,
+      // prefer one that's actually in progress or complete over pre-draft,
+      // and prefer more picks made if there's still a tie.
+      const bySeason = drafts.filter(d => String(d.season) === String(year));
+      const pool = bySeason.length ? bySeason : drafts;
+      const statusRank = s => s === "complete" ? 0 : s === "drafting" ? 1 : 2;
+      const draft = [...pool].sort((a, b) => {
+        const sr = statusRank(a.status) - statusRank(b.status);
+        if (sr !== 0) return sr;
+        return (b.last_picked || 0) - (a.last_picked || 0);
+      })[0];
+      if (!draft) return null;
+
+      const [rFull, rPicks] = await Promise.all([
+        fetch("https://api.sleeper.app/v1/draft/" + draft.draft_id),
+        fetch("https://api.sleeper.app/v1/draft/" + draft.draft_id + "/picks")
+      ]);
+      if (!rFull.ok || !rPicks.ok) return null;
+      const full  = await rFull.json();
+      const picks = await rPicks.json();
+
+      const teamsCount = full.slot_to_roster_id
+        ? Object.keys(full.slot_to_roster_id).length
+        : (full.settings?.teams || draft.settings?.teams || 12);
+
+      const normalized = (picks || []).map(p => {
+        const overall = parseInt(p.pick_no ?? 1);
+        const round   = parseInt(p.round ?? 1);
+        // "pick" = Nth pick made in this round (1..teams) — informational,
+        // for list views / CSV export. draft_slot is NOT this: it's the
+        // team's fixed original slot, identical across every round, so
+        // using it directly would show round 2+ picks under the wrong
+        // "slot within round" label. Grid placement doesn't use this field
+        // at all (it uses overall + teamId + slot_to_roster_id instead).
+        const posInRound = overall - (round - 1) * teamsCount;
+        return {
+          overall,
+          round,
+          pick:     posInRound > 0 ? posInRound : parseInt(p.draft_slot ?? 1),
+          teamId:   String(p.roster_id ?? ""),     // always the real roster_id, straight from Sleeper
+          playerId: String(p.player_id ?? ""),
+          name:     p.metadata?.first_name ? `${p.metadata.first_name} ${p.metadata.last_name || ""}`.trim() : "",
+          position: (p.metadata?.position || "").toUpperCase(),
+          nflTeam:  p.metadata?.team || "",
+          cost:     p.metadata?.amount != null ? parseInt(p.metadata.amount) : null,
+          teamName: null
+        };
+      });
+
+      return {
+        picks:             normalized,
+        slot_to_roster_id: full.slot_to_roster_id || draft.slot_to_roster_id || null,
+        draft_type:        full.type || draft.type || null,
+        draft_status:      full.status || draft.status || "complete"
+      };
+    } catch(e) { console.warn("[Draft] direct Sleeper fetch failed", leagueId, e.message); return null; }
+  }
 
   // Lightweight team-name fetch — just users+rosters, no scoring/matchup data.
   // Used as a fallback so the Draft tab can resolve team names without
@@ -12295,8 +12370,20 @@ Good luck this season!
 
         await Promise.allSettled(batch.map(async l => {
           try {
-            const [r, freshTeamNames] = await Promise.all([
-              fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
+            let data, freshTeamNames = null;
+
+            if (l.platform === "sleeper") {
+              // Direct-from-Sleeper path: sidesteps whatever the worker's
+              // /tournament/draft transform does internally, which is where
+              // draft-slot-vs-roster_id mixups were coming from (see
+              // _fetchSleeperDraftDirect for the full explanation).
+              [data, freshTeamNames] = await Promise.all([
+                _fetchSleeperDraftDirect(l.leagueId, l.year),
+                _fetchSleeperTeamNames(l.leagueId)
+              ]);
+              if (!data) return;
+            } else {
+              const r = await fetch("https://mfl-proxy.mraladdin23.workers.dev/tournament/draft", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -12306,18 +12393,11 @@ Good luck this season!
                   yahooToken: l.platform === "yahoo" ? yahooToken : undefined,
                   mflCookie:  l.platform === "mfl"   ? mflCreds?.cookie : undefined
                 })
-              }),
-              // Team names used to be resolved purely from standingsCache, which
-              // meant a newly added or not-yet-synced league showed raw roster
-              // IDs instead of names — breaking "my team" auto-detection for the
-              // draft card until an admin manually re-ran Sync Standings. Fetch
-              // Sleeper's own users+rosters directly so team names are available
-              // independent of standings sync state. Cheap: only runs for
-              // leagues actually being fetched fresh, cached into Firebase after.
-              l.platform === "sleeper" ? _fetchSleeperTeamNames(l.leagueId) : Promise.resolve(null)
-            ]);
-            if (!r.ok) return;
-            const data = await r.json();
+              });
+              if (!r.ok) return;
+              data = await r.json();
+            }
+
             if (data.picks) {
               batchResults[l.cacheKey] = {
                 ...l,
@@ -12392,10 +12472,40 @@ Good luck this season!
         const platform   = lc.platform || "sleeper";
         const lcLeagueId = String(lc.leagueId || ck.replace(/^\d+_/, "") || "");
 
+        // Defensive cross-check: pick.teamId is supposed to be the real roster_id,
+        // but if the worker (or an upstream cache) ever hands back the draft SLOT
+        // number instead, every league's picks collapse onto the same small set
+        // of "teamId"s (1..N) — different real teams/leagues get merged together,
+        // which looks like "picks mapping to the same user". slot_to_roster_id's
+        // VALUES are the authoritative real roster_ids for this league; if a
+        // pick's teamId only matches a KEY (slot number) and not a VALUE
+        // (roster_id), translate it through the map instead of trusting it as-is.
+        const s2r = lc.slot_to_roster_id;
+        let slotIdSet = null, rosterIdSet = null;
+        if (s2r && Object.keys(s2r).length) {
+          slotIdSet   = new Set(Object.keys(s2r).map(String));
+          rosterIdSet = new Set(Object.values(s2r).map(String));
+        }
+        const resolveTeamId = (rawId) => {
+          const raw = String(rawId ?? "");
+          if (!s2r || !slotIdSet || !rosterIdSet) return raw;
+          if (rosterIdSet.has(raw)) return raw;                 // already a real roster_id
+          if (slotIdSet.has(raw) && s2r[raw] != null) {         // was a slot number — translate
+            const fixed = String(s2r[raw]);
+            if (!_draftSlotFixLogged.has(ck)) {
+              console.warn(`[Draft] ${ck}: pick.teamId looked like a draft slot, not a roster_id (e.g. "${raw}" → "${fixed}"). Auto-corrected via slot_to_roster_id.`);
+              _draftSlotFixLogged.add(ck);
+            }
+            return fixed;
+          }
+          return raw;
+        };
+
         const normalized = lc.picks.map(p => {
-          const qualKey = lcLeagueId ? `${lcLeagueId}:${p.teamId}` : String(p.teamId);
-          let teamName = teamMap[qualKey] || teamMap[String(p.teamId)]
-            || lc.freshTeamNames?.[String(p.teamId)] || p.teamName || String(p.teamId);
+          const resolvedTeamId = resolveTeamId(p.teamId);
+          const qualKey = lcLeagueId ? `${lcLeagueId}:${resolvedTeamId}` : String(resolvedTeamId);
+          let teamName = teamMap[qualKey] || teamMap[String(resolvedTeamId)]
+            || lc.freshTeamNames?.[String(resolvedTeamId)] || p.teamName || String(resolvedTeamId);
           const key = _sk(teamName);
           if (pMap[key]) teamName = pMap[key].displayName;
 
@@ -12428,8 +12538,9 @@ Good luck this season!
           }
 
           // Use qualified teamId "{leagueId}:{bareId}" so board columns don't collide
-          // across leagues. Store the bare original for display purposes if needed.
-          const bareTeamId  = String(p.teamId || "");
+          // across leagues. bareTeamId is the *resolved* id (see resolveTeamId above) —
+          // guaranteed to be the real roster_id, not a draft slot number.
+          const bareTeamId  = String(resolvedTeamId || "");
           const qualTeamId  = lcLeagueId && bareTeamId ? `${lcLeagueId}:${bareTeamId}` : bareTeamId;
           return {
             overall:  parseInt(p.overall || 1),
