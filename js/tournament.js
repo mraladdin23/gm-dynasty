@@ -7394,6 +7394,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // Firebase: gmd/tournaments/{tid}/participants/{pid}
 
   function _tParticipantsRef(tid) { return GMD.child(`tournaments/${tid}/participants`); }
+  function _tParticipantReviewRef(tid) { return GMD.child(`tournaments/${tid}/participantReviewQueue`); }
 
   function _renderParticipantsTab(tid, t, body) {
     const participants = t.participants || {};
@@ -7402,6 +7403,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const unlinked = pList.filter(([, p]) => !p.dlrLinked);
     const autoReg  = pList.filter(([, p]) => p.autoRegister);
     const optedOut = pList.filter(([, p]) => p.emailOptOut);
+
+    const reviewQueue  = t.participantReviewQueue || {};      // NEW
+    const reviewCount  = Object.keys(reviewQueue).length;      // NEW
 
     const PAGE_SIZE = 100;
     let currentPage   = 1;
@@ -7466,6 +7470,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         </span>
         <div style="display:flex;gap:var(--space-2)">
           <button class="btn-primary btn-sm" id="trn-auto-sync-participants-btn" title="Pull usernames from all linked leagues and upsert into participant list">&#9889; Sync from Leagues</button>
+          <button class="btn-primary btn-sm" id="trn-sync-registrations-btn" title="Match registrations directly to existing participants by email/platform handle; unmatched registrants are queued for review">&#128279; Sync from Registrations</button>
           <button class="btn-primary btn-sm" id="trn-import-participants-btn">Import CSV</button>
           <button class="btn-secondary btn-sm" id="trn-export-participants-btn">Export CSV</button>
           <button class="btn-ghost btn-sm" id="trn-template-participants-btn" title="Download a blank CSV template with the correct column names">&#11015; Template</button>
@@ -7473,8 +7478,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>
       <input type="file" id="trn-participants-csv-input" accept=".csv" style="display:none" />
 
+      ${reviewCount ? `
+        <div class="trn-section-card" style="margin-top:var(--space-3);border-color:var(--color-orange);display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+          <span style="font-size:.85rem">&#9888; <strong>${reviewCount}</strong> registrant${reviewCount !== 1 ? "s" : ""} didn't match an existing participant and ${reviewCount !== 1 ? "need" : "needs"} review.</span>
+          <button class="btn-secondary btn-sm" id="trn-review-queue-btn">Review</button>
+        </div>
+      ` : ""}
+
       ${pList.length ? `
-        <div class="trn-reg-toolbar" style="margin-top:0;margin-bottom:var(--space-3)">
+        <div class="trn-reg-toolbar" style="margin-top:var(--space-3);margin-bottom:var(--space-3)">
           <input type="text" id="trn-participants-search" placeholder="Search name, email, username"
             style="flex:1;padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem" />
           <select id="trn-participants-filter" style="padding:var(--space-2) var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text);font-size:.85rem">
@@ -7528,6 +7540,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
 
     document.getElementById("trn-auto-sync-participants-btn")?.addEventListener("click", () => _autoSyncParticipants(tid, t));
+    document.getElementById("trn-sync-registrations-btn")?.addEventListener("click", () => _syncParticipantsFromRegistrations(tid, t)); // NEW
+    document.getElementById("trn-review-queue-btn")?.addEventListener("click", () => _renderParticipantReviewModal(tid, t));            // NEW
     document.getElementById("trn-import-participants-btn")?.addEventListener("click", () => document.getElementById("trn-participants-csv-input")?.click());
     document.getElementById("trn-participants-csv-input")?.addEventListener("change", async e => {
       const file = e.target.files?.[0]; if (file) await _importParticipantsCSV(tid, file);
@@ -7542,7 +7556,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       URL.revokeObjectURL(url);
     });
   }
-
   function _wireParticipantRows(tid, participants, listEl) {
     listEl.querySelectorAll("[data-view-participant]").forEach(btn =>
       btn.addEventListener("click", () =>
@@ -7863,6 +7876,237 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // only missing fields are filled in. If not found, a new record is created.
   // Registrations are also cross-referenced: if a registration has a matching
   // platform username, that data is pulled in to the participant record too.
+
+  async function _syncParticipantsFromRegistrations(tid, t) {
+    const btn = document.getElementById("trn-sync-registrations-btn");
+    const _setBtn = (txt) => { if (btn) { btn.disabled = !!txt; btn.textContent = txt || "🔗 Sync from Registrations"; } };
+    _setBtn("⏳ Syncing…");
+
+    try {
+      const registrations = t.registrations || {};
+      const regEntries = Object.entries(registrations);
+
+      if (!regEntries.length) {
+        showToast("No registrations to sync", "info");
+        return;
+      }
+
+      // Fresh read of current participants
+      const existingSnap = await _tParticipantsRef(tid).once("value");
+      const existingParticipants = existingSnap.val() || {};
+
+      // Build lookup indexes — email is primary key, platform handles are fallback
+      const byEmail       = {};
+      const bySleeperUser = {};
+      const byMflEmail    = {};
+      const byYahooUser   = {};
+      Object.entries(existingParticipants).forEach(([pid, p]) => {
+        if (p.email)           byEmail[p.email.toLowerCase()]              = pid;
+        if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
+        if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]        = pid;
+        if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]  = pid;
+      });
+
+      const updates   = {};
+      const unmatched = [];
+      let matchedCount = 0;
+
+      for (const [rid, reg] of regEntries) {
+        const emailKey = (reg.email           || "").toLowerCase();
+        const suKey    = (reg.sleeperUsername || "").toLowerCase();
+        const meKey    = (reg.mflEmail        || "").toLowerCase();
+        const yuKey    = (reg.yahooUsername   || "").toLowerCase();
+
+        const pid = (emailKey && byEmail[emailKey])
+                 || (suKey    && bySleeperUser[suKey])
+                 || (meKey    && byMflEmail[meKey])
+                 || (yuKey    && byYahooUser[yuKey])
+                 || null;
+
+        if (pid) {
+          matchedCount++;
+          const existing = existingParticipants[pid];
+          const patch = {};
+          if (!existing.displayName     && reg.displayName)     patch.displayName     = reg.displayName;
+          if (!existing.email           && reg.email)           patch.email           = reg.email;
+          if (!existing.gender          && reg.gender)          patch.gender          = reg.gender;
+          if (!existing.twitterHandle   && reg.twitterHandle)   patch.twitterHandle   = reg.twitterHandle;
+          if (!existing.sleeperUsername && reg.sleeperUsername) patch.sleeperUsername = reg.sleeperUsername;
+          if (!existing.mflEmail        && reg.mflEmail)        patch.mflEmail        = reg.mflEmail;
+          if (!existing.yahooUsername   && reg.yahooUsername)   patch.yahooUsername   = reg.yahooUsername;
+          if (Object.keys(patch).length) updates[pid] = { ...existing, ...patch };
+
+          // Index this pid under any newly-learned keys so later registrations
+          // in this same loop (e.g. two regs sharing a platform handle) still
+          // resolve to it rather than each being treated as a separate miss.
+          if (emailKey) byEmail[emailKey]       = pid;
+          if (suKey)    bySleeperUser[suKey]    = pid;
+          if (meKey)    byMflEmail[meKey]       = pid;
+          if (yuKey)    byYahooUser[yuKey]      = pid;
+        } else {
+          unmatched.push({
+            rid,
+            displayName:     reg.displayName     || null,
+            email:           reg.email           || null,
+            sleeperUsername: reg.sleeperUsername || null,
+            mflEmail:        reg.mflEmail        || null,
+            yahooUsername:   reg.yahooUsername   || null,
+            teamName:        reg.teamName        || null,
+          });
+        }
+      }
+
+      // Chunked write of participant patches (stay well under Firebase's write-size limit)
+      if (Object.keys(updates).length) {
+        const entries      = Object.entries(updates);
+        const WRITE_CHUNK  = 200;
+        const participantsRef = _tParticipantsRef(tid);
+        for (let i = 0; i < entries.length; i += WRITE_CHUNK) {
+          await participantsRef.update(Object.fromEntries(entries.slice(i, i + WRITE_CHUNK)));
+        }
+      }
+
+      // Replace the review queue with this run's misses (a prior miss that now
+      // matches simply won't be re-added; one that's still unresolved will be)
+      await _tParticipantReviewRef(tid).set(
+        unmatched.length ? Object.fromEntries(unmatched.map(u => [u.rid, u])) : null
+      );
+
+      // Re-run DLR linking now that displayName/email/handle gaps may be filled
+      const freshSnap = await _tParticipantsRef(tid).once("value");
+      const freshParticipants = freshSnap.val() || {};
+      const matchResult = await _matchParticipantsToDLR(tid, freshParticipants);
+      const { newMatches = 0 } = matchResult || {};
+
+      if (!_tournaments[tid]) _tournaments[tid] = {};
+      _tournaments[tid].participants          = freshParticipants;
+      _tournaments[tid].participantReviewQueue = unmatched.length
+        ? Object.fromEntries(unmatched.map(u => [u.rid, u]))
+        : null;
+
+      const parts = [`${matchedCount} matched`];
+      if (Object.keys(updates).length) parts.push(`${Object.keys(updates).length} updated`);
+      if (newMatches)                  parts.push(`${newMatches} DLR linked`);
+      if (unmatched.length)            parts.push(`${unmatched.length} need review`);
+      showToast(`Synced: ${parts.join(", ")} ✓`, unmatched.length ? "info" : undefined);
+
+      const body = _getTabBody();
+      if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
+
+    } catch(err) {
+      showToast("Sync failed: " + err.message, "error");
+      console.error("[SyncFromRegistrations]", err);
+    } finally {
+      _setBtn(null);
+    }
+  }
+
+
+  /* ---------------------------------------------------------------------------
+     Review queue modal — lists registrations that didn't match any existing
+     participant. Each row can be resolved by creating a participant from the
+     registration data, or dismissed (removed from the queue with no participant
+     created). Both actions write directly to Firebase and update the row in
+     place so the admin can work through the whole list without re-syncing.
+     --------------------------------------------------------------------------- */
+
+  function _renderParticipantReviewModal(tid, t) {
+    const queue   = t.participantReviewQueue || {};
+    const entries = Object.entries(queue);
+
+    const rowHtml = ([rid, r]) => `
+      <div class="trn-review-row" data-rid="${_esc(rid)}"
+        style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-2) 0;border-bottom:1px solid var(--color-border)">
+        <div style="min-width:0">
+          <div style="font-weight:600;font-size:.88rem">${_esc(r.displayName || r.teamName || "Unnamed registrant")}</div>
+          <div style="font-size:.76rem;color:var(--color-text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${[
+              r.email,
+              r.sleeperUsername ? "Sleeper: " + r.sleeperUsername : null,
+              r.mflEmail        ? "MFL: "     + r.mflEmail        : null,
+              r.yahooUsername   ? "Yahoo: "   + r.yahooUsername   : null
+            ].filter(Boolean).join(" &middot; ") || "No contact/platform info on file"}
+          </div>
+        </div>
+        <div style="display:flex;gap:var(--space-2);flex-shrink:0">
+          <button class="btn-primary btn-sm" data-review-create="${_esc(rid)}">Create Participant</button>
+          <button class="btn-ghost btn-sm" data-review-dismiss="${_esc(rid)}">Dismiss</button>
+        </div>
+      </div>`;
+
+    _showModal(`
+      <div class="modal-header">
+        <h3>Registrants Needing Review (${entries.length})</h3>
+        <button class="modal-close" id="trn-modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="trn-review-list" style="max-height:60vh;overflow-y:auto">
+        ${entries.length
+          ? entries.map(rowHtml).join("")
+          : `<div style="padding:var(--space-4);text-align:center;color:var(--color-text-dim)">Nothing to review ✓</div>`}
+      </div>
+    `);
+    document.getElementById("trn-modal-box")?.classList.add("modal-box--lg", "modal-box--scroll");
+    document.getElementById("trn-modal-close")?.addEventListener("click", _closeModal);
+
+    const _removeRow = (rid) => {
+      document.querySelector(`.trn-review-row[data-rid="${CSS.escape(rid)}"]`)?.remove();
+      if (_tournaments[tid]?.participantReviewQueue) delete _tournaments[tid].participantReviewQueue[rid];
+      const list = document.getElementById("trn-review-list");
+      if (list && !list.querySelector(".trn-review-row")) {
+        list.innerHTML = `<div style="padding:var(--space-4);text-align:center;color:var(--color-text-dim)">Nothing to review ✓</div>`;
+      }
+      // Refresh the tab underneath so the review-count banner updates too
+      const body = _getTabBody();
+      if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
+    };
+
+    document.querySelectorAll("[data-review-create]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const rid = btn.dataset.reviewCreate;
+        const r = queue[rid];
+        if (!r) return;
+        btn.disabled = true;
+        try {
+          const pid = _genId();
+          await _tParticipantsRef(tid).child(pid).set({
+            displayName:        r.displayName || r.teamName || null,
+            teamName:           r.teamName || null,
+            email:               r.email || null,
+            sleeperUsername:     r.sleeperUsername || null,
+            mflEmail:            r.mflEmail || null,
+            yahooUsername:       r.yahooUsername || null,
+            years:               [],
+            dlrLinked:           false,
+            autoRegister:        false,
+            syncedAt:            Date.now(),
+          });
+          await _tParticipantReviewRef(tid).child(rid).remove();
+          if (!_tournaments[tid].participants) _tournaments[tid].participants = {};
+          _tournaments[tid].participants[pid] = { displayName: r.displayName || r.teamName };
+          showToast("Participant created ✓");
+          _removeRow(rid);
+        } catch(e) {
+          showToast("Failed to create participant: " + e.message, "error");
+          btn.disabled = false;
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-review-dismiss]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const rid = btn.dataset.reviewDismiss;
+        btn.disabled = true;
+        try {
+          await _tParticipantReviewRef(tid).child(rid).remove();
+          _removeRow(rid);
+        } catch(e) {
+          showToast("Failed to dismiss: " + e.message, "error");
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
 
   async function _autoSyncParticipants(tid, t) {
     const btn = document.getElementById("trn-auto-sync-participants-btn");
