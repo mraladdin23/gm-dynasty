@@ -12475,6 +12475,27 @@ Good luck this season!
   let _draftCardTeam  = null;
   let _draftPosFilter = "all"; // position filter for ADP view
   let _draftSearch    = "";    // team search for board/card
+  let _draftNameMap   = {};    // sanitized(sleeperUsername|displayName|teamName) → participant displayName
+                                // rebuilt from t.participants each time _renderDraftContent runs; consulted
+                                // by the board/card/download views below, none of which touch `t` directly.
+
+  function _draftSk(s) { return String(s || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_"); }
+
+  function _draftResolveName(raw) {
+    if (!raw) return raw;
+    const hit = _draftNameMap[_draftSk(raw)];
+    return hit || raw;
+  }
+
+  function _rebuildDraftNameMap(t) {
+    _draftNameMap = {};
+    Object.values(t?.participants || {}).forEach(p => {
+      if (!p.displayName) return;
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).forEach(k => {
+        _draftNameMap[_draftSk(k)] = p.displayName;
+      });
+    });
+  }
   let _draftListPage  = 1;     // pagination for board list view
   let _draftBoardMode = "grid"; // "grid" | "list" for board view
   let _adpBoardTeamCount = 12;  // virtual snake-grid column count for the ADP board
@@ -13188,6 +13209,11 @@ Good luck this season!
   }
 
   function _renderDraftView(tid, t, body, cache) {
+    // Keep the participant name-override map current for this render pass —
+    // the team-select dropdown below is built before _renderDraftContent runs,
+    // so it needs this populated up front rather than relying on that call.
+    _rebuildDraftNameMap(t);
+
     // Recompute picks/adp for the currently selected year from the full byLeague.
     // byLeague stores ALL years so switching year tabs is instant — no re-fetch.
     const activeYear = _tournamentYear || new Date().getFullYear();
@@ -13218,7 +13244,7 @@ Good luck this season!
     const teamLeagueMap = {}; // teamId → leagueName
     picks.forEach(p => {
       if (p.teamId) {
-        teamSet[p.teamId] = p.teamName || p.teamId;
+        teamSet[p.teamId] = _draftResolveName(p.teamName) || p.teamId;
         if (!teamLeagueMap[p.teamId]) {
           // Find which league this teamId belongs to
           for (const l of Object.values(byLeague)) {
@@ -13367,6 +13393,10 @@ Good luck this season!
     const picks      = _buildDraftPicksForYear(cache.byLeague, activeYear);
     const adp        = _computeADP(picks);
     const { byLeague } = cache;
+
+    // Rebuild the participant name-override map every render — cheap, and
+    // keeps it current if a sync ran since the last time this tab was open.
+    _rebuildDraftNameMap(t);
 
     if (_draftView === "adp") {
       _renderDraftADP(el, adp, t);
@@ -13754,7 +13784,7 @@ Good luck this season!
     });
     const useSlotLookup = picks.some(p => p.pick > 0); // only if pick slot is populated
 
-    const nameOf = (tid) => picks.find(pk => pk.teamId === tid)?.teamName || tid;
+    const nameOf = (tid) => _draftResolveName(picks.find(pk => pk.teamId === tid)?.teamName || tid);
 
     const draftTypeLabel = is3RR ? "↩ 3rd-round reversal" : isSnake ? "🐍 snake" : "📋 linear";
     const metaLine = `${_esc(leagueName)} · ${rounds} rounds · ${slotOrder.length} teams · ${draftTypeLabel}`;
@@ -13801,7 +13831,7 @@ Good luck this season!
             const pName    = pk.name || "Unknown";
             const pos      = pk.position || "?";
             const nfl      = pk.nflTeam  || "FA";
-            const displayTeam = pk.teamName || nameOf(tid);
+            const displayTeam = _draftResolveName(pk.teamName) || nameOf(tid);
             const clickFn  = pk.playerId
               ? `DLRPlayerCard.show('${_esc(pk.playerId)}','${_esc(pName)}')`
               : "";
@@ -13900,7 +13930,7 @@ Good luck this season!
     const myPicks = allPicks.filter(p => p.teamId === _draftCardTeam).sort((a, b) => a.overall - b.overall);
     if (!myPicks.length) { el.innerHTML = `<div class="trn-empty">No picks found for this team.</div>`; return; }
 
-    const teamName   = myPicks[0].teamName || _draftCardTeam;
+    const teamName   = _draftResolveName(myPicks[0].teamName) || _draftCardTeam;
     const leagueName = _draftCache?.byLeague
       ? (Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))?.leagueName
          || Object.values(_draftCache.byLeague)[0]?.leagueName
@@ -13987,7 +14017,7 @@ Good luck this season!
       if (!myPicks.length) return;
       const adpMap    = {};
       (_draftCache.adp || []).forEach(a => { if (a.playerId) adpMap[a.playerId] = a; });
-      const teamName  = myPicks[0].teamName || _draftCardTeam;
+      const teamName  = _draftResolveName(myPicks[0].teamName) || _draftCardTeam;
       const leagueEntry = _draftCache.byLeague
         ? Object.values(_draftCache.byLeague).find(l => l.normalizedPicks?.some(pk => pk.teamId === _draftCardTeam))
         : null;
