@@ -7470,7 +7470,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         </span>
         <div style="display:flex;gap:var(--space-2)">
           <button class="btn-primary btn-sm" id="trn-auto-sync-participants-btn" title="Pull usernames from all linked leagues and upsert into participant list">&#9889; Sync from Leagues</button>
-          <button class="btn-primary btn-sm" id="trn-sync-registrations-btn" title="Match registrations directly to existing participants by email/platform handle; unmatched registrants are queued for review">&#128279; Sync from Registrations</button>
+          <button class="btn-primary btn-sm" id="trn-sync-registrations-btn" title="Sync from Leagues already runs this step automatically. Use this on its own when you've added new registrants and don't need to re-pull league rosters.">&#128279; Sync from Registrations</button>
           <button class="btn-primary btn-sm" id="trn-import-participants-btn">Import CSV</button>
           <button class="btn-secondary btn-sm" id="trn-export-participants-btn">Export CSV</button>
           <button class="btn-ghost btn-sm" id="trn-template-participants-btn" title="Download a blank CSV template with the correct column names">&#11015; Template</button>
@@ -7877,16 +7877,112 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // Registrations are also cross-referenced: if a registration has a matching
   // platform username, that data is pulled in to the participant record too.
 
+  // ── Shared core: reconcile registrations against a given participants map ──
+  // Used by BOTH _autoSyncParticipants (folded in automatically after a league
+  // pull, so one click handles roster-identity AND registration-name linking)
+  // and the standalone _syncParticipantsFromRegistrations button (for
+  // reconciling newly-added registrants without re-pulling league rosters).
+  //
+  // Matches on email first (most stable), then whichever platform handle the
+  // registration has — sleeperUsername, mflEmail, or yahooUsername — so this
+  // works regardless of which platform a given registrant's identity lives on.
+  // Never creates participants; anything that doesn't match goes to the
+  // review queue (tournaments/{tid}/participantReviewQueue) for manual
+  // resolution via _renderParticipantReviewModal.
+  //
+  // Does NOT call _matchParticipantsToDLR or show a toast — callers do that,
+  // since _autoSyncParticipants folds this into one combined summary.
+  async function _reconcileRegistrationsCore(tid, t, existingParticipants) {
+    const registrations = t.registrations || {};
+    const regEntries = Object.entries(registrations);
+    if (!regEntries.length) return { matchedCount: 0, updatedCount: 0, unmatchedCount: 0, unmatchedMap: null };
+
+    // Build lookup indexes — email is primary key, platform handles are fallback
+    const byEmail       = {};
+    const bySleeperUser = {};
+    const byMflEmail    = {};
+    const byYahooUser   = {};
+    Object.entries(existingParticipants).forEach(([pid, p]) => {
+      if (p.email)           byEmail[p.email.toLowerCase()]              = pid;
+      if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
+      if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]        = pid;
+      if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]  = pid;
+    });
+
+    const updates   = {};
+    const unmatched = [];
+    let matchedCount = 0;
+
+    for (const [rid, reg] of regEntries) {
+      const emailKey = (reg.email           || "").toLowerCase();
+      const suKey    = (reg.sleeperUsername || "").toLowerCase();
+      const meKey    = (reg.mflEmail        || "").toLowerCase();
+      const yuKey    = (reg.yahooUsername   || "").toLowerCase();
+
+      const pid = (emailKey && byEmail[emailKey])
+               || (suKey    && bySleeperUser[suKey])
+               || (meKey    && byMflEmail[meKey])
+               || (yuKey    && byYahooUser[yuKey])
+               || null;
+
+      if (pid) {
+        matchedCount++;
+        const existing = existingParticipants[pid];
+        const patch = {};
+        if (!existing.displayName     && reg.displayName)     patch.displayName     = reg.displayName;
+        if (!existing.email           && reg.email)           patch.email           = reg.email;
+        if (!existing.gender          && reg.gender)          patch.gender          = reg.gender;
+        if (!existing.twitterHandle   && reg.twitterHandle)   patch.twitterHandle   = reg.twitterHandle;
+        if (!existing.sleeperUsername && reg.sleeperUsername) patch.sleeperUsername = reg.sleeperUsername;
+        if (!existing.mflEmail        && reg.mflEmail)        patch.mflEmail        = reg.mflEmail;
+        if (!existing.yahooUsername   && reg.yahooUsername)   patch.yahooUsername   = reg.yahooUsername;
+        if (Object.keys(patch).length) updates[pid] = { ...existing, ...patch };
+
+        // Index this pid under any newly-learned keys so later registrations
+        // in this same loop (e.g. two regs sharing a platform handle) still
+        // resolve to it rather than each being treated as a separate miss.
+        if (emailKey) byEmail[emailKey]       = pid;
+        if (suKey)    bySleeperUser[suKey]    = pid;
+        if (meKey)    byMflEmail[meKey]       = pid;
+        if (yuKey)    byYahooUser[yuKey]      = pid;
+      } else {
+        unmatched.push({
+          rid,
+          displayName:     reg.displayName     || null,
+          email:           reg.email           || null,
+          sleeperUsername: reg.sleeperUsername || null,
+          mflEmail:        reg.mflEmail        || null,
+          yahooUsername:   reg.yahooUsername   || null,
+          teamName:        reg.teamName        || null,
+        });
+      }
+    }
+
+    // Chunked write of participant patches (stay well under Firebase's write-size limit)
+    if (Object.keys(updates).length) {
+      const entries      = Object.entries(updates);
+      const WRITE_CHUNK  = 200;
+      const participantsRef = _tParticipantsRef(tid);
+      for (let i = 0; i < entries.length; i += WRITE_CHUNK) {
+        await participantsRef.update(Object.fromEntries(entries.slice(i, i + WRITE_CHUNK)));
+      }
+    }
+
+    // Replace the review queue with this run's misses (a prior miss that now
+    // matches simply won't be re-added; one that's still unresolved will be)
+    const unmatchedMap = unmatched.length ? Object.fromEntries(unmatched.map(u => [u.rid, u])) : null;
+    await _tParticipantReviewRef(tid).set(unmatchedMap);
+
+    return { matchedCount, updatedCount: Object.keys(updates).length, unmatchedCount: unmatched.length, unmatchedMap };
+  }
+
   async function _syncParticipantsFromRegistrations(tid, t) {
     const btn = document.getElementById("trn-sync-registrations-btn");
     const _setBtn = (txt) => { if (btn) { btn.disabled = !!txt; btn.textContent = txt || "🔗 Sync from Registrations"; } };
     _setBtn("⏳ Syncing…");
 
     try {
-      const registrations = t.registrations || {};
-      const regEntries = Object.entries(registrations);
-
-      if (!regEntries.length) {
+      if (!Object.keys(t.registrations || {}).length) {
         showToast("No registrations to sync", "info");
         return;
       }
@@ -7895,82 +7991,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const existingSnap = await _tParticipantsRef(tid).once("value");
       const existingParticipants = existingSnap.val() || {};
 
-      // Build lookup indexes — email is primary key, platform handles are fallback
-      const byEmail       = {};
-      const bySleeperUser = {};
-      const byMflEmail    = {};
-      const byYahooUser   = {};
-      Object.entries(existingParticipants).forEach(([pid, p]) => {
-        if (p.email)           byEmail[p.email.toLowerCase()]              = pid;
-        if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
-        if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]        = pid;
-        if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]  = pid;
-      });
-
-      const updates   = {};
-      const unmatched = [];
-      let matchedCount = 0;
-
-      for (const [rid, reg] of regEntries) {
-        const emailKey = (reg.email           || "").toLowerCase();
-        const suKey    = (reg.sleeperUsername || "").toLowerCase();
-        const meKey    = (reg.mflEmail        || "").toLowerCase();
-        const yuKey    = (reg.yahooUsername   || "").toLowerCase();
-
-        const pid = (emailKey && byEmail[emailKey])
-                 || (suKey    && bySleeperUser[suKey])
-                 || (meKey    && byMflEmail[meKey])
-                 || (yuKey    && byYahooUser[yuKey])
-                 || null;
-
-        if (pid) {
-          matchedCount++;
-          const existing = existingParticipants[pid];
-          const patch = {};
-          if (!existing.displayName     && reg.displayName)     patch.displayName     = reg.displayName;
-          if (!existing.email           && reg.email)           patch.email           = reg.email;
-          if (!existing.gender          && reg.gender)          patch.gender          = reg.gender;
-          if (!existing.twitterHandle   && reg.twitterHandle)   patch.twitterHandle   = reg.twitterHandle;
-          if (!existing.sleeperUsername && reg.sleeperUsername) patch.sleeperUsername = reg.sleeperUsername;
-          if (!existing.mflEmail        && reg.mflEmail)        patch.mflEmail        = reg.mflEmail;
-          if (!existing.yahooUsername   && reg.yahooUsername)   patch.yahooUsername   = reg.yahooUsername;
-          if (Object.keys(patch).length) updates[pid] = { ...existing, ...patch };
-
-          // Index this pid under any newly-learned keys so later registrations
-          // in this same loop (e.g. two regs sharing a platform handle) still
-          // resolve to it rather than each being treated as a separate miss.
-          if (emailKey) byEmail[emailKey]       = pid;
-          if (suKey)    bySleeperUser[suKey]    = pid;
-          if (meKey)    byMflEmail[meKey]       = pid;
-          if (yuKey)    byYahooUser[yuKey]      = pid;
-        } else {
-          unmatched.push({
-            rid,
-            displayName:     reg.displayName     || null,
-            email:           reg.email           || null,
-            sleeperUsername: reg.sleeperUsername || null,
-            mflEmail:        reg.mflEmail        || null,
-            yahooUsername:   reg.yahooUsername   || null,
-            teamName:        reg.teamName        || null,
-          });
-        }
-      }
-
-      // Chunked write of participant patches (stay well under Firebase's write-size limit)
-      if (Object.keys(updates).length) {
-        const entries      = Object.entries(updates);
-        const WRITE_CHUNK  = 200;
-        const participantsRef = _tParticipantsRef(tid);
-        for (let i = 0; i < entries.length; i += WRITE_CHUNK) {
-          await participantsRef.update(Object.fromEntries(entries.slice(i, i + WRITE_CHUNK)));
-        }
-      }
-
-      // Replace the review queue with this run's misses (a prior miss that now
-      // matches simply won't be re-added; one that's still unresolved will be)
-      await _tParticipantReviewRef(tid).set(
-        unmatched.length ? Object.fromEntries(unmatched.map(u => [u.rid, u])) : null
-      );
+      const reconcile = await _reconcileRegistrationsCore(tid, t, existingParticipants);
 
       // Re-run DLR linking now that displayName/email/handle gaps may be filled
       const freshSnap = await _tParticipantsRef(tid).once("value");
@@ -7979,16 +8000,14 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const { newMatches = 0 } = matchResult || {};
 
       if (!_tournaments[tid]) _tournaments[tid] = {};
-      _tournaments[tid].participants          = freshParticipants;
-      _tournaments[tid].participantReviewQueue = unmatched.length
-        ? Object.fromEntries(unmatched.map(u => [u.rid, u]))
-        : null;
+      _tournaments[tid].participants           = freshParticipants;
+      _tournaments[tid].participantReviewQueue = reconcile.unmatchedMap;
 
-      const parts = [`${matchedCount} matched`];
-      if (Object.keys(updates).length) parts.push(`${Object.keys(updates).length} updated`);
-      if (newMatches)                  parts.push(`${newMatches} DLR linked`);
-      if (unmatched.length)            parts.push(`${unmatched.length} need review`);
-      showToast(`Synced: ${parts.join(", ")} ✓`, unmatched.length ? "info" : undefined);
+      const parts = [`${reconcile.matchedCount} matched`];
+      if (reconcile.updatedCount)   parts.push(`${reconcile.updatedCount} updated`);
+      if (newMatches)                parts.push(`${newMatches} DLR linked`);
+      if (reconcile.unmatchedCount)  parts.push(`${reconcile.unmatchedCount} need review`);
+      showToast(`Synced: ${parts.join(", ")} ✓`, reconcile.unmatchedCount ? "info" : undefined);
 
       const body = _getTabBody();
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
@@ -8345,15 +8364,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
       console.log(`[AutoSync] ${newCount} new, ${updatedCount} updated`);
 
-      if (!Object.keys(updates).length) {
-        const matchResult = await _matchParticipantsToDLR(tid, existingParticipants);
-        const { newMatches = 0, alreadyLinked = 0, total = 0 } = matchResult || {};
-        showToast(
-          newMatches > 0          ? `${newMatches} participant${newMatches !== 1 ? "s" : ""} linked to DLR ✓`
-          : alreadyLinked === total && total > 0 ? `All ${total} participants already up to date ✓`
-          : "Up to date — no new changes", "info"
-        );
-      } else {
+      if (Object.keys(updates).length) {
         // ── Chunked Firebase writes: 200 records per write to stay under 10 MB ─
         const entries       = Object.entries(updates);
         const WRITE_CHUNK   = 200;
@@ -8367,24 +8378,43 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           _setBtn(`⏳ Writing ${chunkNum}/${totalChunks}…`);
           await participantsRef.update(Object.fromEntries(entries.slice(ci, ci + WRITE_CHUNK)));
         }
-
-        _setBtn("⏳ Matching DLR accounts…");
-        const allForMatch = { ...existingParticipants, ...updates };
-        const matchResult = await _matchParticipantsToDLR(tid, allForMatch);
-        const { newMatches = 0 } = matchResult || {};
-
-        const parts = [];
-        if (newCount)     parts.push(`${newCount} new`);
-        if (updatedCount) parts.push(`${updatedCount} updated`);
-        if (newMatches)   parts.push(`${newMatches} DLR linked`);
-        showToast(`Synced: ${parts.length ? parts.join(", ") : "no changes"} ✓`);
       }
 
-      // Surgical: re-read only participants sub-path
-      const freshSnap   = await _tParticipantsRef(tid).once("value");
+      // ── Reconcile against registrations (email + platform-handle matching) ──
+      // Folded in here so one click covers both: the roster pull above already
+      // matches registrations by platform handle at fetch time (sleeperUsername
+      // for Sleeper, mflEmail for MFL, yahooUsername for Yahoo), but that only
+      // catches a registrant if their typed handle exactly matches what came
+      // off the roster. This second pass re-checks everyone against whatever
+      // participant records now exist — by email first, platform handle as
+      // fallback — so a mismatched handle still has a chance to resolve
+      // (e.g. through an email match) before falling to manual review.
+      _setBtn("⏳ Matching registrations…");
+      const afterRosterSnap = await _tParticipantsRef(tid).once("value");
+      const afterRosterParticipants = afterRosterSnap.val() || {};
+      const reconcile = await _reconcileRegistrationsCore(tid, t, afterRosterParticipants);
+
+      _setBtn("⏳ Matching DLR accounts…");
+      const finalSnap = await _tParticipantsRef(tid).once("value");
+      const finalParticipants = finalSnap.val() || {};
+      const matchResult = await _matchParticipantsToDLR(tid, finalParticipants);
+      const { newMatches = 0 } = matchResult || {};
+
+      const parts = [];
+      if (newCount)                  parts.push(`${newCount} new`);
+      if (updatedCount)               parts.push(`${updatedCount} updated`);
+      if (reconcile.updatedCount)     parts.push(`${reconcile.updatedCount} name-matched`);
+      if (newMatches)                 parts.push(`${newMatches} DLR linked`);
+      if (reconcile.unmatchedCount)   parts.push(`${reconcile.unmatchedCount} need review`);
+      showToast(
+        parts.length ? `Synced: ${parts.join(", ")} ✓` : "Up to date — no new changes",
+        reconcile.unmatchedCount ? "info" : undefined
+      );
+
       if (!_tournaments[tid]) _tournaments[tid] = {};
-      _tournaments[tid].participants = freshSnap.val();
-      const body        = _getTabBody();
+      _tournaments[tid].participants           = finalParticipants;
+      _tournaments[tid].participantReviewQueue = reconcile.unmatchedMap;
+      const body = _getTabBody();
       if (body) _renderParticipantsTab(tid, _tournaments[tid], body);
 
     } catch(err) {
