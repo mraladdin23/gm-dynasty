@@ -831,13 +831,75 @@ const DLRStandings = (() => {
     }
   }
 
+  // ── Best-ball optimal lineup calculator ────────────────────────────────────
+  // Mirrors the same logic used for tournaments (tournament.js): Sleeper only
+  // finalizes its own auto-lineup retroactively once a week's games are all
+  // done, so mid-week the raw starters/points fields for a best-ball league
+  // are stale placeholders. This recomputes the actual highest-scoring valid
+  // lineup from the roster's current players_points — narrowest-eligibility
+  // slots filled first (single position, then FLEX, then SUPER_FLEX), which
+  // matches Sleeper's own algorithm exactly once the week is complete.
+  const _BB_SLOT_ELIGIBILITY = {
+    QB: ["QB"], RB: ["RB"], WR: ["WR"], TE: ["TE"], K: ["K"], DEF: ["DEF"],
+    FLEX: ["RB","WR","TE"], WRT: ["WR","TE"], REC_FLEX: ["WR","TE"],
+    RB_FLEX: ["RB","WR"], WRRBTE: ["RB","WR","TE"], WRRB: ["RB","WR"],
+    SUPER_FLEX: ["QB","RB","WR","TE"], SF: ["QB","RB","WR","TE"], SFLEX: ["QB","RB","WR","TE"],
+    IDP_FLEX: ["DL","LB","DB"], DL: ["DL"], LB: ["LB"], DB: ["DB"]
+  };
+
+  function _computeBestBallLineup(rosterPositions, playerIds, playersPoints, posOfFn) {
+    const slots = (rosterPositions || []).filter(s => !["BN","IR","TAXI"].includes(s));
+    const order = slots
+      .map((slot, idx) => ({ slot, idx, elig: _BB_SLOT_ELIGIBILITY[slot] || [slot] }))
+      .sort((a, b) => a.elig.length - b.elig.length || a.idx - b.idx);
+
+    const pool = (playerIds || []).map(id => ({
+      id, pts: +(playersPoints?.[id] ?? 0), pos: (posOfFn(id) || "").toUpperCase()
+    })).filter(p => p.pos);
+
+    const used = new Set();
+    const assigned = new Array(slots.length).fill(null);
+    order.forEach(({ slot, idx, elig }) => {
+      let best = null;
+      pool.forEach(p => {
+        if (used.has(p.id) || !elig.includes(p.pos)) return;
+        if (!best || p.pts > best.pts) best = p;
+      });
+      if (best) { used.add(best.id); assigned[idx] = { ...best, slot }; }
+    });
+
+    const starters = assigned.filter(Boolean);
+    const total = starters.reduce((s, p) => s + p.pts, 0);
+    return {
+      starters: starters.map(p => p.id),
+      startersPoints: Object.fromEntries(starters.map(p => [p.id, p.pts])),
+      total: parseFloat(total.toFixed(2))
+    };
+  }
+
   async function _renderMatchupCards(matchups, week) {
     const grid = document.getElementById("matchups-grid");
     if (!grid || !_leagueData) return;
 
+    // Ensure player DB is loaded — load() is a no-op if already warm
+    const players = await DLRPlayers.load();
+    const _bbPosOf = id => { const p = players[id]; return p ? (p.position || p.fantasy_positions?.[0] || "") : ""; };
+
+    // Best-ball leagues: recompute each team's real score/lineup from player
+    // points instead of trusting Sleeper's mid-week-stale starters/points —
+    // see _computeBestBallLineup above.
+    const rosterSlots = _leagueData.league?.roster_positions || [];
+    const isBestBall   = !!(_leagueData.league?.settings?.best_ball);
+    const matchupsForRender = isBestBall
+      ? matchups.map(m => {
+          const calc = _computeBestBallLineup(rosterSlots, m.players || [], m.players_points || {}, _bbPosOf);
+          return { ...m, points: calc.total, starters: calc.starters, starters_points: calc.startersPoints };
+        })
+      : matchups;
+
     // Group by matchup_id
     const pairs = {};
-    matchups.forEach(m => {
+    matchupsForRender.forEach(m => {
       if (!pairs[m.matchup_id]) pairs[m.matchup_id] = [];
       pairs[m.matchup_id].push(m);
     });
@@ -845,11 +907,7 @@ const DLRStandings = (() => {
     const rosterMap = {};
     (_leagueData.teams || []).forEach(t => { rosterMap[t.roster_id] = t; });
 
-    // Ensure player DB is loaded — load() is a no-op if already warm
-    const players = await DLRPlayers.load();
-
     const pName = id => { const p = players[id]; return p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : id; };
-    const rosterSlots = _leagueData.league?.roster_positions || [];
     const fmt = n => (n || 0).toFixed(2);
     const POS_COLOR = { QB:"var(--color-orange)", RB:"var(--color-green)", WR:"var(--color-cyan)", TE:"var(--color-purple)", K:"var(--color-text-dim)", DEF:"var(--color-text-dim)" };
 

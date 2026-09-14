@@ -9027,6 +9027,31 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   }
 
   // ── Sync standings ─────────────────────────────────────
+  // ── Current NFL week (for capping standings to completed weeks only) ──────
+  // Sleeper's global state endpoint reports the week currently in progress —
+  // e.g. during Week 1 Sunday games, state.week is 1, but Week 1 itself
+  // isn't "complete" until it's over. Regular-season stats should only ever
+  // include weeks strictly before this one; the in-progress week's matchups
+  // shouldn't affect win/loss/PF until it finishes.
+  let _cachedNflState = null;
+  async function _getCompletedNflWeek() {
+    if (_cachedNflState && (Date.now() - _cachedNflState.fetchedAt) < 300000) {
+      return _cachedNflState.completedWeek;
+    }
+    try {
+      const r = await fetch("https://api.sleeper.app/v1/state/nfl");
+      if (!r.ok) return null;
+      const s = await r.json();
+      let completedWeek;
+      if (!s || typeof s.week !== "number") completedWeek = null;
+      else if (s.season_type === "off") completedWeek = 0;
+      else if (s.season_type === "post_season" || s.season_type === "complete") completedWeek = 18;
+      else completedWeek = Math.max(0, s.week - 1);
+      _cachedNflState = { completedWeek, fetchedAt: Date.now() };
+      return completedWeek;
+    } catch(e) { return null; }
+  }
+
   async function _syncStandings(tid, t, yearFilter) {
     const batches = t.leagues || {};
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
@@ -9099,14 +9124,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // Cache key: year_leagueId prevents cross-year collision for same leagueId
     const playoffWeek = t.meta?.playoffStartWeek || null;
+    // Fetched once per sync run — see _fetchSleeperStandings for how it's used
+    // to keep standings from counting a week that hasn't finished yet.
+    const completedWeek = await _getCompletedNflWeek();
 
     // Sleeper — parallel
     const medianWins = !!(t.meta?.medianWins);
     await Promise.allSettled(sleepers.map(async (l) => {
       try {
-        const data = await _fetchSleeperStandings(l.leagueId, playoffWeek);
+        const data = await _fetchSleeperStandings(l.leagueId, playoffWeek, completedWeek);
         if (data) {
-          let { teams, weeklyScores, leagueStatus, playoffWinnerRosterId } = data;
+          let { teams, weeklyScores, leagueStatus, playoffWinnerRosterId, isBestBall, rosterPositions } = data;
           if (medianWins && weeklyScores) {
             const delta = _computeMedianWins(weeklyScores);
             teams = teams.map(tm => {
@@ -9130,7 +9158,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
               (b.wins||0)-(a.wins||0) || (b.pf||0)-(a.pf||0))[0];
             if (regChamp) champion = { ...regChamp, isPlayoffChampion: false };
           }
-          cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now() };
+          cacheUpdates[ck(l)] = { ...l, teams, leagueStatus: leagueStatus||"", champion, lastSynced: Date.now(), isBestBall: !!isBestBall, rosterPositions: rosterPositions || [] };
         }
       } catch(e) { console.warn("[Standings] Sleeper", l.leagueId, e.message); }
       done++; setP(`Syncing${yearLabel} ${done}/${total}…`);
@@ -9312,7 +9340,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     }, []);
   }
 
-  async function _fetchSleeperStandings(leagueId, playoffStartWeek) {
+  async function _fetchSleeperStandings(leagueId, playoffStartWeek, completedWeek) {
     const [rU, rR, rL] = await Promise.all([
       fetch("https://api.sleeper.app/v1/league/" + leagueId + "/users"),
       fetch("https://api.sleeper.app/v1/league/" + leagueId + "/rosters"),
@@ -9340,6 +9368,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const leagueInfo = rL.ok ? await rL.json().catch(() => null) : null;
     const leagueStatus = leagueInfo?.status || "";
     const hasPlayoffs  = leagueStatus === "post_season" || leagueStatus === "complete";
+    // Best-ball flag + roster slot layout, needed to recompute the live optimal
+    // lineup ourselves — see _computeBestBallLineup.
+    const isBestBall      = !!(leagueInfo?.settings?.best_ball);
+    const rosterPositions = leagueInfo?.roster_positions || [];
 
     // If the league ran its own playoffs, fetch the winners bracket to find the champion
     let playoffWinnerRosterId = null;
@@ -9358,7 +9390,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     // so we only count regular season weeks (weeks 1 through playoffStartWeek-1)
     if (playoffStartWeek && playoffStartWeek > 1) {
-      const lastRegWeek = playoffStartWeek - 1;
+      // Cap at the last actually-completed week — the in-progress week's
+      // matchups aren't final yet and shouldn't be counted as wins/losses.
+      const lastRegWeek = (typeof completedWeek === "number")
+        ? Math.min(playoffStartWeek - 1, completedWeek)
+        : playoffStartWeek - 1;
       // Fetch all regular season weeks in parallel
       const weekFetches = [];
       for (let w = 1; w <= lastRegWeek; w++) {
@@ -9385,6 +9421,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           const [a, b] = pair;
           const apts = a.points || 0;
           const bpts = b.points || 0;
+          // Both exactly 0 means the week hasn't been played (or a bye) —
+          // don't count it as a tie.
+          if (apts === 0 && bpts === 0) return;
           if (!stats[a.roster_id]) stats[a.roster_id] = { wins:0, losses:0, ties:0, pf:0, pa:0 };
           if (!stats[b.roster_id]) stats[b.roster_id] = { wins:0, losses:0, ties:0, pf:0, pa:0 };
           stats[a.roster_id].pf += apts;
@@ -9413,7 +9452,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         };
       });
       // Median wins: pass weeklyScores to allow caller to apply them
-      return { teams, weeklyScores: allWeeks, leagueStatus, playoffWinnerRosterId };
+      return { teams, weeklyScores: allWeeks, leagueStatus, playoffWinnerRosterId, isBestBall, rosterPositions };
     }
 
     // No playoff week set — fetch all weeks to compute median wins later
@@ -9447,7 +9486,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       pf:       parseFloat(((r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100).toFixed(2)),
       pa:       parseFloat(((r.settings?.fpts_against || 0) + (r.settings?.fpts_against_decimal || 0) / 100).toFixed(2))
     }));
-    return { teams, weeklyScores, leagueStatus, playoffWinnerRosterId };
+    return { teams, weeklyScores, leagueStatus, playoffWinnerRosterId, isBestBall, rosterPositions };
   }
 
   // ── Compute median wins from weekly matchup arrays ──────
@@ -9480,6 +9519,73 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       });
     }
     return delta;
+  }
+
+  // ── Best-ball optimal lineup calculator ────────────────────────────────────
+  // Sleeper only runs its own auto-lineup calculation retroactively once a
+  // week's games are all final. Mid-week, the "starters"/"points" fields the
+  // matchups API returns for a best-ball league are stale placeholders, not
+  // the actual best lineup. This recomputes the true highest-scoring valid
+  // lineup directly from the roster's current players_points, which exactly
+  // matches Sleeper's own algorithm once the week is complete, and is far
+  // more accurate than the raw fields while games are still live.
+  //
+  // Slots are filled narrowest-eligibility-first (single position, then
+  // FLEX-type, then SUPER_FLEX/anything), which is the optimal fill order
+  // whenever eligibility sets nest inside one another the way Sleeper's do —
+  // provable by a simple exchange argument, and it's the same approach
+  // Sleeper's own engine uses.
+  const _BB_SLOT_ELIGIBILITY = {
+    QB: ["QB"], RB: ["RB"], WR: ["WR"], TE: ["TE"], K: ["K"], DEF: ["DEF"],
+    FLEX: ["RB","WR","TE"], WRT: ["WR","TE"], REC_FLEX: ["WR","TE"],
+    RB_FLEX: ["RB","WR"], WRRBTE: ["RB","WR","TE"], WRRB: ["RB","WR"],
+    SUPER_FLEX: ["QB","RB","WR","TE"], SF: ["QB","RB","WR","TE"], SFLEX: ["QB","RB","WR","TE"],
+    IDP_FLEX: ["DL","LB","DB"], DL: ["DL"], LB: ["LB"], DB: ["DB"]
+  };
+
+  // rosterPositions: league's roster_positions array (BN/IR/TAXI are filtered out here).
+  // playerIds: all player IDs on the roster for that week (Sleeper's "players" array).
+  // playersPoints: { playerId -> points } for that week (Sleeper's "players_points").
+  // posOfFn: (playerId) => "RB"/"WR"/etc — pass a lookup backed by DLRPlayers.
+  function _computeBestBallLineup(rosterPositions, playerIds, playersPoints, posOfFn) {
+    const slots = (rosterPositions || []).filter(s => !["BN","IR","TAXI"].includes(s));
+    const order = slots
+      .map((slot, idx) => ({ slot, idx, elig: _BB_SLOT_ELIGIBILITY[slot] || [slot] }))
+      .sort((a, b) => a.elig.length - b.elig.length || a.idx - b.idx);
+
+    const pool = (playerIds || []).map(id => ({
+      id, pts: +(playersPoints?.[id] ?? 0), pos: (posOfFn(id) || "").toUpperCase()
+    })).filter(p => p.pos);
+
+    const used = new Set();
+    const assigned = new Array(slots.length).fill(null);
+    order.forEach(({ slot, idx, elig }) => {
+      let best = null;
+      pool.forEach(p => {
+        if (used.has(p.id) || !elig.includes(p.pos)) return;
+        if (!best || p.pts > best.pts) best = p;
+      });
+      if (best) { used.add(best.id); assigned[idx] = { ...best, slot }; }
+    });
+
+    const starters = assigned.filter(Boolean);
+    const total = starters.reduce((s, p) => s + p.pts, 0);
+    return {
+      starters: starters.map(p => p.id),
+      startersPoints: Object.fromEntries(starters.map(p => [p.id, p.pts])),
+      total: parseFloat(total.toFixed(2))
+    };
+  }
+
+  // Position lookup used by _computeBestBallLineup — backed by the DLRPlayers
+  // player DB when available, falling back to whatever a matchup payload
+  // already carries (rarely present, but cheap to check).
+  function _bbPosOf(playerId) {
+    if (typeof DLRPlayers !== "undefined") {
+      const dp = DLRPlayers.get(playerId);
+      if (dp) return dp.position || dp.fantasy_positions?.[0] || "";
+    }
+    return "";
   }
 
   async function _fetchMFLStandings(leagueId, year) {
@@ -14373,6 +14479,7 @@ Good luck this season!
     // bare key lets later leagues overwrite earlier ones (B2 fix).
     // Still filter to current year only; also keep bare-key fallback for legacy data.
     const teamMap = {};
+    const bbMap = {}; // leagueId -> { isBestBall, rosterPositions } — for live optimal-lineup recompute
     Object.values(standingsCache).forEach(lc => {
       if (lc.year && parseInt(lc.year) !== parseInt(year)) return;
       const lcLeagueId = String(lc.leagueId || lc.league_id || "");
@@ -14381,9 +14488,12 @@ Good luck this season!
         teamMap[qualKey] = tm.teamName;
         if (lcLeagueId) teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
       });
+      if (lcLeagueId) bbMap[lcLeagueId] = { isBestBall: !!lc.isBestBall, rosterPositions: lc.rosterPositions || [] };
     });
     const pMap = _buildParticipantTeamMap(t);
     const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    // Needed for best-ball position lookups (_bbPosOf reads from this once loaded)
+    if (typeof DLRPlayers !== "undefined") await DLRPlayers.load().catch(() => {});
 
     for (let i = 0; i < leagueIds.length; i += 5) {
       const batch = leagueIds.slice(i, i + 5);
@@ -14399,12 +14509,22 @@ Good luck this season!
             if (!m.matchup_id) return;
             (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m);
           });
+          const bb = bbMap[String(lid)];
           Object.values(byMid).forEach(pair => {
             if (pair.length !== 2) return;
             const [a, b] = pair;
-            // Use points field directly — Sleeper returns it as a float (e.g. 127.46)
-            const apts = parseFloat(a.points) || 0;
-            const bpts = parseFloat(b.points) || 0;
+            let apts, bpts;
+            if (bb?.isBestBall && bb.rosterPositions?.length) {
+              // Recompute the real optimal lineup from player scores rather than
+              // trusting Sleeper's placeholder points, which it doesn't finalize
+              // until the week's games are all done.
+              apts = _computeBestBallLineup(bb.rosterPositions, a.players || [], a.players_points || {}, _bbPosOf).total;
+              bpts = _computeBestBallLineup(bb.rosterPositions, b.players || [], b.players_points || {}, _bbPosOf).total;
+            } else {
+              // Use points field directly — Sleeper returns it as a float (e.g. 127.46)
+              apts = parseFloat(a.points) || 0;
+              bpts = parseFloat(b.points) || 0;
+            }
             // Only skip if BOTH are exactly 0 (unplayed or bye)
             if (apts === 0 && bpts === 0) return;
             // Try qualified key first (prevents roster_id collision across leagues)
@@ -14768,15 +14888,19 @@ Good luck this season!
     el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching week ${_weeklyMuWeek} matchups…</div>`;
 
     const teamMap = {};
+    const bbMap = {}; // leagueId -> { isBestBall, rosterPositions } — for live optimal-lineup recompute
     Object.values(t.standingsCache || {}).forEach(lc => {
       if (String(lc.year) !== String(year)) return;
       const lid = String(lc.leagueId || lc.league_id || "");
       (lc.teams || []).forEach(tm => {
         if (lid) teamMap[`${lid}:${tm.teamId}`] = { name: tm.teamName };
       });
+      if (lid) bbMap[lid] = { isBestBall: !!lc.isBestBall, rosterPositions: lc.rosterPositions || [] };
     });
     const pMap = _buildParticipantTeamMap(t);
     const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    // Needed for best-ball position lookups (_bbPosOf reads from this once loaded)
+    if (typeof DLRPlayers !== "undefined") await DLRPlayers.load().catch(() => {});
 
     const allMatchups = [];
 
@@ -14791,12 +14915,29 @@ Good luck this season!
           if (!Array.isArray(data)) return;
           const byMid = {};
           data.forEach(m => { if (m.matchup_id) (byMid[m.matchup_id] = byMid[m.matchup_id] || []).push(m); });
+          const bb = bbMap[String(lg.leagueId)];
           Object.values(byMid).forEach(pair => {
             if (pair.length !== 2) return;
             const [a, b] = pair;
-            const apts = parseFloat(a.points) || 0;
-            const bpts = parseFloat(b.points) || 0;
+
+            let apts, bpts;
+            let aStarters = a.starters || [], aSP = a.starters_points || {};
+            let bStarters = b.starters || [], bSP = b.starters_points || {};
+            if (bb?.isBestBall && bb.rosterPositions?.length) {
+              // Recompute the real optimal lineup from player scores rather than
+              // trusting Sleeper's placeholder starters/points, which it doesn't
+              // finalize until the week's games are all done.
+              const aCalc = _computeBestBallLineup(bb.rosterPositions, a.players || [], a.players_points || {}, _bbPosOf);
+              const bCalc = _computeBestBallLineup(bb.rosterPositions, b.players || [], b.players_points || {}, _bbPosOf);
+              apts = aCalc.total; bpts = bCalc.total;
+              aStarters = aCalc.starters; aSP = aCalc.startersPoints;
+              bStarters = bCalc.starters; bSP = bCalc.startersPoints;
+            } else {
+              apts = parseFloat(a.points) || 0;
+              bpts = parseFloat(b.points) || 0;
+            }
             if (apts === 0 && bpts === 0) return;
+
             let aName = teamMap[`${lg.leagueId}:${a.roster_id}`]?.name || `Team ${a.roster_id}`;
             let bName = teamMap[`${lg.leagueId}:${b.roster_id}`]?.name || `Team ${b.roster_id}`;
             if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
@@ -14807,13 +14948,13 @@ Good luck this season!
               home: {
                 name: aName, score: parseFloat(apts.toFixed(2)),
                 rosterId: String(a.roster_id),
-                starters: a.starters || [], starters_points: a.starters_points || {},
+                starters: aStarters, starters_points: aSP,
                 players: a.players || [], players_points: a.players_points || {}
               },
               away: {
                 name: bName, score: parseFloat(bpts.toFixed(2)),
                 rosterId: String(b.roster_id),
-                starters: b.starters || [], starters_points: b.starters_points || {},
+                starters: bStarters, starters_points: bSP,
                 players: b.players || [], players_points: b.players_points || {}
               }
             });
