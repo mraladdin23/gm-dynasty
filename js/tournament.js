@@ -9192,6 +9192,19 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     }
 
     try {
+      // Persist to Firebase — chunked at 200 records/write to stay under the
+      // write-size limit (mirrors the participant-sync pattern). MFL entries
+      // were already written incrementally above; re-writing them here via
+      // .update() is harmless (idempotent merge), and this is what actually
+      // makes Sleeper/Yahoo standings survive a page refresh — previously
+      // they were only ever merged into the in-memory cache below and never
+      // reached Firebase at all, so every refresh silently lost them.
+      const persistEntries = Object.entries(cacheUpdates);
+      const WRITE_CHUNK     = 200;
+      for (let ci = 0; ci < persistEntries.length; ci += WRITE_CHUNK) {
+        await _tStandingsRef(tid).update(Object.fromEntries(persistEntries.slice(ci, ci + WRITE_CHUNK)));
+      }
+
       // Surgical: merge updated standingsCache into local cache — no full re-read
       if (!_tournaments[tid]) _tournaments[tid] = {};
       if (!_tournaments[tid].standingsCache) _tournaments[tid].standingsCache = {};
