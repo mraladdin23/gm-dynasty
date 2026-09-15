@@ -26,6 +26,20 @@ const Profile = (() => {
   // { personalLabels: [{name, leagueKeys, color}], commishGroups: [{name, leagueKeys, color}] }
   let _groupsCache     = { personalLabels: [], commishGroups: [] };
 
+  // Throttle for background Sleeper record refreshes — refreshSleeper() re-fetches
+  // ALL of the user's active-season Sleeper leagues in one call, so both the locker
+  // load and repeated Overview-tab opens reuse this instead of hammering the API
+  // every time a card or tab is opened in quick succession.
+  let _lastSleeperRefreshAt = 0;
+  const SLEEPER_REFRESH_THROTTLE_MS = 30000;
+  async function _refreshSleeperThrottled(username) {
+    const now = Date.now();
+    if (now - _lastSleeperRefreshAt < SLEEPER_REFRESH_THROTTLE_MS) return null;
+    _lastSleeperRefreshAt = now;
+    try { return await refreshSleeper(username); }
+    catch(e) { return null; }
+  }
+
   // ── Platform linking ───────────────────────────────────
 
   async function linkSleeper(gmdUsername, sleeperUsername) {
@@ -1052,6 +1066,24 @@ const Profile = (() => {
       GMDB.recomputeStats(_currentUsername).then(stats => {
         if (stats) _renderStatsRow(stats);
       }).catch(() => {});
+    }
+
+    // ── Background Sleeper record refresh ─────────────────────
+    // Non-blocking: pulls current-season wins/losses/PF for all Sleeper leagues
+    // and redraws the cards, so in-season records stay current on every locker
+    // load instead of only updating via the "Refresh Current Season" button
+    // (previously only reachable from the onboarding/Manage Platforms screen).
+    if (profile.platforms?.sleeper?.sleeperUserId) {
+      setTimeout(() => {
+        _refreshSleeperThrottled(_currentUsername).then(result => {
+          if (!result?.leagues || _currentUsername !== profile.username) return;
+          Object.entries(result.leagues).forEach(([key, l]) => {
+            if (_allLeagues[key]) Object.assign(_allLeagues[key], l);
+          });
+          _renderLeagues();
+          return GMDB.recomputeStats(_currentUsername);
+        }).then(stats => { if (stats) _renderStatsRow(stats); }).catch(() => {});
+      }, 1000);
     }
   }
 
@@ -3118,13 +3150,12 @@ const Profile = (() => {
   }
 
   async function _renderOverview(el, leagueKey, league) {
-    // For MFL: always live-fetch if we don't have good standing data stored
-    const needsLiveFetch = league.platform === "mfl" && (
-      !league.wins ||
-      !league.teamName ||
-      league.teamName === "My Team" ||
-      league.teamName === ""
-    );
+    // MFL: always live-fetch on open so wins/losses/PF reflect the current week.
+    // Previously this only fetched when the cached data looked blank (no wins,
+    // no team name) — which meant a league stopped refreshing forever the moment
+    // any real (even week-1-stale) record got cached. Standings/Matchups always
+    // live-fetch on open; Overview now matches that instead of trusting the cache.
+    const needsLiveFetch = league.platform === "mfl";
 
     if (needsLiveFetch) {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
@@ -3177,11 +3208,10 @@ const Profile = (() => {
     }
 
     // ── Yahoo: live-fetch to resolve myTeamId (team_id from is_owned_by_current_login)
-    // and update teamName/record if not yet stored. Runs once per league load when
-    // myRosterId is null (newly imported leagues) or teamName is blank.
-    const needsYahooFetch = league.platform === "yahoo" && (
-      !league.myRosterId || !league.teamName || league.teamName === ""
-    );
+    // and refresh teamName/record on every open — same always-fetch reasoning as MFL
+    // above. The fetch resolves myTeamId itself from the bundle, so it doesn't depend
+    // on myRosterId already being cached.
+    const needsYahooFetch = league.platform === "yahoo";
     if (needsYahooFetch) {
       el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
       try {
@@ -3208,6 +3238,27 @@ const Profile = (() => {
             _renderLeagues();
             GMDB.saveLeagues(_currentUsername, { [leagueKey]: { ..._allLeagues[leagueKey] } }).catch(() => {});
           }
+        }
+      } catch(e) { /* render with what we have */ }
+    }
+
+    // ── Sleeper: live-refresh on open, same as MFL/Yahoo above. There was no
+    // per-league fetch path for Sleeper here previously, so records only updated
+    // via a fresh import or the manual "Refresh Current Season" button. Reuses
+    // refreshSleeper() (already used by that button) rather than talking to
+    // SleeperAPI directly, and is throttled since it refreshes all of the user's
+    // Sleeper leagues in one call — repeated overview opens within 30s reuse
+    // whatever was last fetched instead of re-fetching every league again.
+    if (league.platform === "sleeper") {
+      el.innerHTML = `<div class="detail-loading"><div class="spinner"></div><span>Loading overview…</span></div>`;
+      try {
+        const result = await _refreshSleeperThrottled(_currentUsername);
+        const fresh  = result?.leagues?.[leagueKey];
+        if (fresh) {
+          league = { ...league, ...fresh };
+          if (_allLeagues[leagueKey]) Object.assign(_allLeagues[leagueKey], fresh);
+          if (_detailLeagueKey === leagueKey) _detailLeague = { ..._detailLeague, ...fresh };
+          if (_currentUsername) _renderLeagues();
         }
       } catch(e) { /* render with what we have */ }
     }
