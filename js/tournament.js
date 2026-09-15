@@ -1568,6 +1568,12 @@ const DLRTournament = (() => {
     _activeAdminTab = _activeHistoryTab;
     _activeUserTab  = _activeHistoryTab;
 
+    // Same throttled background auto-sync as _renderTab — this is a separate
+    // history/year-scoped tab router, so it needs its own hook.
+    if (showAdmin && (_activeHistoryTab === "standings" || _activeHistoryTab === "playoffs")) {
+      _autoSyncStandingsIfStale(tid, t);
+    }
+
     switch (_activeHistoryTab) {
       case "standings":      return _renderStandingsTab(tid, t, content, showAdmin);
       case "playoffs":       return _renderPlayoffsTab(tid, t, content);
@@ -2608,6 +2614,13 @@ const DLRTournament = (() => {
   function _renderTab(tid, tab, t, showAdminNav) {
     const body = (_getTabBody());
     if (!body) return;
+
+    // Background auto-sync: opening Standings or Playoffs kicks off a throttled,
+    // silent Sync Standings run (admin only — it writes to Firebase) so the
+    // data underlying both tabs doesn't go stale without a manual sync click.
+    if (showAdminNav && (tab === "standings" || tab === "playoffs")) {
+      _autoSyncStandingsIfStale(tid, t);
+    }
 
     // Stop live draft polling whenever we navigate away from the draft tab
     if (tab !== "draft") _stopDraftPoll();
@@ -3751,10 +3764,22 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const qualMethod = qual.method   || "composite";
     const qualCount  = qual.count    || 8;
     const qualPerGroup = qual.perGroup || 2;
+    const qualScope    = qual.scope    || "division"; // top_per_group grouping — defaults to "division" to match prior (hardcoded) behavior for existing tournaments
     const qualSteps  = (qual.steps && qual.steps.length) ? qual.steps : [
       { type:"wins_threshold", minWins:13 },
       { type:"top_pf", count:8 }
     ];
+
+    // Live qualifier count using the SAME engine that actually runs at
+    // playoff time — as opposed to the "Overall qualifier slots" number
+    // below, which is a naive sum of each step's configured count and can't
+    // know how many teams a scoped (division/conference) step will actually
+    // add, or whether an "Overall" step will end up re-picking teams a prior
+    // scoped step already qualified (that overlap silently nets to fewer
+    // total qualifiers than the naive sum suggests). This is computed fresh
+    // on every render, so it reflects whatever's currently saved.
+    let liveQualCount = null;
+    try { liveQualCount = _computeQualification(t, activeYear).qualifiers.length; } catch(e) { /* leave null if data isn't ready */ }
     const _runTotals = (steps) => {
       // Returns running totals for display. Scoped steps (per-division/conference) contribute
       // their count (n per group) to display but are flagged separately so the chip shows
@@ -3891,6 +3916,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const sectionQual = `
       <div class="trn-pc-section" id="trn-pc-qual" ${showQual?"":'style="display:none"'}>
         ${!showQual?`<div class="trn-pc-na-note">Qualification rules don't apply in Total Points mode — the full field competes.</div>`:`
+        ${liveQualCount != null ? `
+        <div class="trn-detail-row" style="margin-bottom:var(--space-2)">
+          <span>Currently qualifying</span>
+          <span><strong>${liveQualCount}</strong> team${liveQualCount!==1?"s":""} with your saved rules and current standings data
+            <button class="trn-help-btn" title="Computed the same way playoff time will — if this looks lower than you expect, a step's scope may be set to Overall instead of Division/Conference (an Overall step can end up re-picking teams a prior scoped step already qualified, adding nothing new), or the per-group method may be grouping by Division when you meant Conference.">?</button>
+          </span>
+        </div>` : ""}
         <div class="trn-detail-rows" style="margin-bottom:var(--space-3)">
           <div class="trn-detail-row">
             <span>Method</span>
@@ -3916,6 +3948,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             <span>Qualifiers per Division / Conf</span>
             <span><input type="number" id="trn-qual-pergroup" min="1" max="20" value="${qualPerGroup}"
               style="width:60px;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center" /></span>
+          </div>
+          <div id="trn-qual-pergroup-scope-row" class="trn-detail-row"
+            ${qualMethod==="top_per_group"?"":'style="display:none"'}>
+            <span>Grouped by</span>
+            <span>
+              <div class="trn-yn-toggle">
+                <button class="trn-yn-btn trn-qual-pergroup-scope-btn ${qualScope==="division"?"trn-yn-btn--active":""}" data-scope="division">Division</button>
+                <button class="trn-yn-btn trn-qual-pergroup-scope-btn ${qualScope==="conference"?"trn-yn-btn--active":""}" data-scope="conference">Conference</button>
+              </div>
+              <button class="trn-help-btn" title="Which grouping 'per Division / Conf' actually uses. Division: the N-highest scorer(s) from each division. Conference: the N-highest scorer(s) from each conference (ignores division boundaries).">?</button>
+            </span>
           </div>
           <div id="trn-qual-manual-note" class="trn-detail-row"
             ${qualMethod==="manual"?"":'style="display:none"'}>
@@ -4838,12 +4881,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         ["top_record","top_pf"].includes(method)?""   :"none");
       document.getElementById("trn-qual-pergroup-row")?.style.setProperty("display",
         method==="top_per_group"               ?""   :"none");
+      document.getElementById("trn-qual-pergroup-scope-row")?.style.setProperty("display",
+        method==="top_per_group"               ?""   :"none");
       document.getElementById("trn-qual-composite-section")?.style.setProperty("display",
         method==="composite"                    ?""   :"none");
       document.getElementById("trn-qual-manual-note")?.style.setProperty("display",
         method==="manual"                       ?""   :"none");
     };
     qualMethodEl?.addEventListener("change", ()=>_updateQualVis(qualMethodEl.value));
+    document.querySelectorAll(".trn-qual-pergroup-scope-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".trn-qual-pergroup-scope-btn").forEach(b =>
+          b.classList.toggle("trn-yn-btn--active", b === btn));
+      });
+    });
 
     const _getSteps = () => Array.from(stepsListEl?.querySelectorAll(".trn-qual-step-card")||[]).map(card => {
       const idx  = card.dataset.stepIdx;
@@ -4941,7 +4992,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const method = qualMethodEl?.value||"composite";
       const qualData = { method };
       if (["top_record","top_pf"].includes(method)) qualData.count    = parseInt(document.getElementById("trn-qual-count")?.value)||8;
-      else if (method==="top_per_group")            qualData.perGroup = parseInt(document.getElementById("trn-qual-pergroup")?.value)||2;
+      else if (method==="top_per_group") {
+        qualData.perGroup = parseInt(document.getElementById("trn-qual-pergroup")?.value)||2;
+        qualData.scope    = document.querySelector(".trn-qual-pergroup-scope-btn.trn-yn-btn--active")?.dataset.scope || "division";
+      }
       else if (method==="composite")                qualData.steps    = _getSteps();
       try {
         await _poSave({qualification:qualData});
@@ -9117,12 +9171,38 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     } catch(e) { return null; }
   }
 
-  async function _syncStandings(tid, t, yearFilter) {
+  // ── Background auto-sync: keeps standingsCache from going stale without
+  // requiring an admin to remember the manual Admin → Leagues → Sync Standings
+  // button. Throttled per-tournament so viewing standings/playoffs repeatedly
+  // doesn't re-trigger a full batch sync on every click — same idea as the
+  // Sleeper refresh throttle in profile.js. Admin-only: this writes to
+  // Firebase, and only admins have write access to standingsCache.
+  const _autoStandingsSyncAt = {};
+  const AUTO_STANDINGS_SYNC_INTERVAL_MS = 3 * 60 * 60 * 1000; // 3 hours
+  function _autoSyncStandingsIfStale(tid, t) {
+    const now  = Date.now();
+    const last = _autoStandingsSyncAt[tid] || 0;
+    if (now - last < AUTO_STANDINGS_SYNC_INTERVAL_MS) return;
+    _autoStandingsSyncAt[tid] = now;
+    // Silent + fire-and-forget: runs in the background while the admin browses.
+    // _syncStandings already merges results into _tournaments[tid].standingsCache
+    // in place, so the NEXT tab render (this view or a future one) picks up the
+    // fresh data automatically — this view itself isn't force-refreshed mid-look.
+    _syncStandings(tid, t, null, true).catch(e =>
+      console.warn(`[Standings] Background auto-sync failed for ${tid}:`, e.message));
+  }
+
+  // `silent` suppresses the toast notifications (progress/success/error) for
+  // background auto-syncs triggered by viewing a tab (see
+  // _autoSyncStandingsIfStale above), rather than the admin explicitly
+  // clicking the Sync Standings button — the actual sync/write behavior is
+  // identical either way.
+  async function _syncStandings(tid, t, yearFilter, silent = false) {
     const batches = t.leagues || {};
     const isBatch = (v) => v && typeof v === "object" && v.leagues !== undefined;
     const realBatches = Object.entries(batches).filter(([, v]) => isBatch(v));
 
-    if (!realBatches.length) { showToast("No league batches to sync", "info"); return; }
+    if (!realBatches.length) { if (!silent) showToast("No league batches to sync", "info"); return; }
 
     // Existing standingsCache — used to detect completed leagues that don't
     // need re-fetching. A league with leagueStatus === "complete" has its
@@ -9171,7 +9251,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const msg = yearFilter
         ? `No leagues to sync for ${yearFilter} — all may already be complete.`
         : "All leagues are already up to date.";
-      showToast(msg, "info");
+      if (!silent) showToast(msg, "info");
       return;
     }
 
@@ -9258,7 +9338,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // Yahoo — 2 at a time, 600ms gap
     const yahooToken = localStorage.getItem("dlr_yahoo_access_token");
     if (yahoos.length && !yahooToken) {
-      showToast("Yahoo standings skipped — connect Yahoo in your profile first", "info");
+      if (!silent) showToast("Yahoo standings skipped — connect Yahoo in your profile first", "info");
       syncWarnings.push({ platform: "yahoo", message: `${yahoos.length} Yahoo league${yahoos.length !== 1 ? "s" : ""} skipped — connect Yahoo in your profile first.` });
       done += yahoos.length;
     } else {
@@ -9280,7 +9360,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     if (!Object.keys(cacheUpdates).length) {
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
-      showToast("No standings data retrieved", "error");
+      if (!silent) showToast("No standings data retrieved", "error");
       return;
     }
 
@@ -9307,7 +9387,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       _syncScoringSettings(tid, toSync, activeYear).catch(e =>
         console.warn("[tournament.js] Scoring settings sync failed:", e));
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
-      showToast(`Standings synced${yearLabel} — ${Object.keys(cacheUpdates).length}/${total} leagues${skippedComplete ? `, ${skippedComplete} skipped (complete)` : ""}`);
+      if (!silent) showToast(`Standings synced${yearLabel} — ${Object.keys(cacheUpdates).length}/${total} leagues${skippedComplete ? `, ${skippedComplete} skipped (complete)` : ""}`);
       _writePublicSummary(tid, _tournaments[tid]);
       // Show cross-platform warning banner if anything was skipped/failed,
       // or if scoring settings differ across platforms
@@ -9319,7 +9399,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
     } catch(err) {
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
-      showToast("Failed to save: " + err.message, "error");
+      if (!silent) showToast("Failed to save: " + err.message, "error");
     }
   }
 
@@ -16853,9 +16933,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (q.method === "top_pf")        return _sortByMetric(sortedTeams, "pf").slice(0, q.count||8);
       if (q.method === "top_per_group") {
         const n = q.perGroup || 2;
+        const scope = q.scope || "division"; // defaults to "division" — prior hardcoded behavior
         const groups = {};
         sortedTeams.forEach(tm => {
-          const g = _groupKey(tm, "division") || "__all__";
+          const g = _groupKey(tm, scope) || "__all__";
           if (!groups[g]) groups[g] = [];
           groups[g].push(tm);
         });
@@ -18630,9 +18711,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (q.method === "top_pf")     return _sortByMetric(sortedTeams, "pf").slice(0, q.count||8);
       if (q.method === "top_per_group") {
         const n = q.perGroup || 2;
+        const scope = q.scope || "division"; // defaults to "division" — prior hardcoded behavior
         const groups = {};
         sortedTeams.forEach(tm => {
-          const g = _groupKey(tm, "division") || "__all__";
+          const g = _groupKey(tm, scope) || "__all__";
           if (!groups[g]) groups[g] = [];
           groups[g].push(tm);
         });
@@ -19399,22 +19481,48 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             }
           }
 
-          // Build rows — first pass computes each row's advance/eliminate state
-          // so cut-line placement can look ahead to the next row (needed for
-          // conference-scoped rounds, which have one cut line per conference
-          // block instead of a single global one).
+          // Preview fallback (used only before displayEliminatedKeys exists, i.e.
+          // scores aren't all in yet) needs its own per-conference position
+          // counter for conference-scoped rounds — sortedPool is grouped by
+          // conference in that case (see the compSection_ sort above), so a
+          // flat global index no longer lines up with "top N of THIS
+          // conference". Without this, the preview would mark an entire early
+          // conference (alphabetically) as advancing and every later
+          // conference as cut, regardless of their actual scores — that
+          // mismatch is what caused Round 1 to appear to only advance a
+          // handful of teams total instead of top-N per conference.
+          const previewBlockPos  = {};
+          const previewBlockSize = {};
+          if (roundConfScoped && !displayEliminatedKeys) {
+            pool.slice(poolByes).forEach(tm => {
+              const g = tm.conference || "__none__";
+              previewBlockSize[g] = (previewBlockSize[g] || 0) + 1;
+            });
+          }
           const rowStates = sortedPool.map((tm, i) => {
             const isByeTeam = isByeRound && i < poolByes;
             const compIdx   = i - poolByes;
             // Prefer the tie-aware result (displayEliminatedKeys) when available —
-            // falls back to a raw positional check only if scores aren't all in
-            // yet (so there's nothing tie-aware to compute against). Note: that
-            // fallback is a flat positional guess even for conference-scoped
-            // rounds (accurate per-conference cuts only exist once scores land
-            // and displayEliminatedKeys is populated).
-            const isCompAdv = !isByeTeam && (displayEliminatedKeys
-              ? !displayEliminatedKeys.has(_teamKey(tm))
-              : compIdx < advFromComp);
+            // falls back to a positional check only if scores aren't all in yet
+            // (so there's nothing tie-aware to compute against). The positional
+            // fallback is per-conference-block for conference-scoped rounds,
+            // and flat/global otherwise.
+            let isCompAdv;
+            if (isByeTeam) {
+              isCompAdv = false;
+            } else if (displayEliminatedKeys) {
+              isCompAdv = !displayEliminatedKeys.has(_teamKey(tm));
+            } else if (roundConfScoped) {
+              const g = tm.conference || "__none__";
+              const posInBlock = previewBlockPos[g] || 0;
+              previewBlockPos[g] = posInBlock + 1;
+              const advForThisConf = round.advanceMethod === "pct"
+                ? Math.round((previewBlockSize[g] || 0) * (round.advancePct || 50) / 100)
+                : (round.advanceCount || 0);
+              isCompAdv = posInBlock < advForThisConf;
+            } else {
+              isCompAdv = compIdx < advFromComp;
+            }
             return { tm, isByeTeam, isCompAdv };
           });
 
