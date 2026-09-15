@@ -154,6 +154,51 @@ const DLRTournament = (() => {
     };
   }
 
+  // ── Conference-scoped wrapper around _resolveRoundElimination ──────────
+  // Points Rounds normally advances the top N/% from one flat pool. When a
+  // round's `scope` is "conference", the same top-N/% cut is instead applied
+  // independently within each conference group (e.g. "top 8 of 12 per
+  // conference" rather than "top 8 of 24 overall"), then the results are
+  // merged. `compSection` must already be sorted by score descending — that
+  // order is preserved within each conference's sub-list, so no re-sort is
+  // needed here. `advForGroup(groupKey, groupSize)` computes each group's own
+  // advance count (count or pct of that group's size, minus any deferred
+  // elimination carried into this round for that group).
+  // Returns the same shape as _resolveRoundElimination, except
+  // `deferredElimination` is replaced by `deferredByGroup` (an object keyed
+  // by group name) when scope is "conference" — a flat round only ever had
+  // one number to defer, but a conference-scoped round can have a different
+  // deferred count per conference.
+  function _resolveGroupedElimination(compSection, tieHandling, scoreOf, scope, groupKeyFn, advForGroup) {
+    if (scope !== "conference") {
+      throw new Error("_resolveGroupedElimination called with scope !== \"conference\" — use _resolveRoundElimination directly for overall scope.");
+    }
+    const groups = {};
+    const groupOrder = [];
+    compSection.forEach(tm => {
+      const g = groupKeyFn(tm) || "__none__";
+      if (!groups[g]) { groups[g] = []; groupOrder.push(g); }
+      groups[g].push(tm);
+    });
+    let advancing = [], eliminated = [];
+    const tieNotes = [];
+    const deferredByGroup = {};
+    groupOrder.forEach(g => {
+      const teams = groups[g];
+      const adv   = advForGroup(g, teams.length);
+      const result = _resolveRoundElimination(teams, adv, tieHandling, scoreOf);
+      advancing  = advancing.concat(result.advancing);
+      eliminated = eliminated.concat(result.eliminated);
+      if (result.tieNote) tieNotes.push(`[${g}] ${result.tieNote}`);
+      if (result.deferredElimination) deferredByGroup[g] = result.deferredElimination;
+    });
+    return {
+      advancing, eliminated,
+      tieNote: tieNotes.length ? tieNotes.join(" ") : null,
+      deferredByGroup: Object.keys(deferredByGroup).length ? deferredByGroup : null
+    };
+  }
+
   // ── 1v1 H2H tie resolution (H2H Bracket, World Cup knockout) ───────────
   // A bracket match must always produce exactly one winner — "eliminate both"
   // or "eliminate neither" aren't structurally valid for a single 1v1 slot.
@@ -3253,6 +3298,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const advPct     = round.advancePct    || 50;
     const wpr        = round.weeksPerRound || 1;
     const isFinal    = idx === total - 1;
+    const scope      = round.scope || "overall";
 
     return `
       <div class="trn-pr-round-row" data-round-idx="${idx}">
@@ -3284,6 +3330,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 <input type="number" class="trn-pr-adv-pct-input" data-round-idx="${idx}"
                   min="1" max="99" value="${advPct}"
                   style="width:46px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;${advMethod!=="pct"?"display:none;":""}" />
+              </div>
+              <div class="trn-pr-advance-row" style="margin-top:4px">
+                <span class="trn-pr-field-label">Scope</span>
+                <div class="trn-yn-toggle">
+                  <button class="trn-yn-btn trn-pr-scope-overall-btn ${scope==="overall"?"trn-yn-btn--active":""}"
+                    data-round-idx="${idx}">Overall</button>
+                  <button class="trn-yn-btn trn-pr-scope-conf-btn ${scope==="conference"?"trn-yn-btn--active":""}"
+                    data-round-idx="${idx}">Per Conference</button>
+                </div>
+                <button class="trn-help-btn" title="Overall: the Advance count/% above is applied once, across every remaining team. Per Conference: it's applied separately within each conference (e.g. top 8 of 12 in each conference), then those groups carry forward into the next round. Use Per Conference for conference-bracketed formats; the Championship round always merges everyone into one pool regardless of this setting.">?</button>
               </div>
 `}
           ${_blendRowHTML(`trn-pr-r${idx}`, round.blend)}
@@ -5000,8 +5056,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const idx=row.dataset.roundIdx;
       const byPct=row.querySelector(`.trn-pr-adv-pct-btn[data-round-idx="${idx}"]`)?.classList.contains("trn-yn-btn--active");
       const wpr=parseInt(row.querySelector(".trn-pr-wpr-input")?.value)||1;
+      const byConf=row.querySelector(`.trn-pr-scope-conf-btn[data-round-idx="${idx}"]`)?.classList.contains("trn-yn-btn--active");
       const entry={ advanceMethod:byPct?"pct":"count", advanceCount:parseInt(row.querySelector(".trn-pr-adv-count-input")?.value)||0,
-        advancePct:parseInt(row.querySelector(".trn-pr-adv-pct-input")?.value)||50, blend:_readBlend(row) };
+        advancePct:parseInt(row.querySelector(".trn-pr-adv-pct-input")?.value)||50, scope:byConf?"conference":"overall", blend:_readBlend(row) };
       if(wpr>1) entry.weeksPerRound=wpr;
       return entry;
     });
@@ -5018,6 +5075,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           if(ci) ci.style.display=byC?"":"none"; if(pi) pi.style.display=byC?"none":"";
         });
       });
+      prList?.querySelectorAll(".trn-pr-scope-overall-btn,.trn-pr-scope-conf-btn").forEach(btn=>{
+        btn.addEventListener("click",()=>{
+          const idx=btn.dataset.roundIdx; const byOverall=btn.classList.contains("trn-pr-scope-overall-btn");
+          prList.querySelector(`.trn-pr-scope-overall-btn[data-round-idx="${idx}"]`)?.classList.toggle("trn-yn-btn--active",byOverall);
+          prList.querySelector(`.trn-pr-scope-conf-btn[data-round-idx="${idx}"]`)?.classList.toggle("trn-yn-btn--active",!byOverall);
+        });
+      });
       prList?.querySelectorAll(".trn-pr-round-remove").forEach(btn=>{
         btn.addEventListener("click",()=>{ const r=_getPRRounds(); if(r.length<=1)return; r.splice(parseInt(btn.dataset.roundIdx),1); _rebuildPR(r); });
       });
@@ -5025,7 +5089,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     _wirePREvents();
     document.getElementById("trn-pr-add-round")?.addEventListener("click",()=>{
       const r=_getPRRounds(); const prev=r[r.length-2];
-      r.splice(r.length-1,0,{advanceMethod:"count",advanceCount:Math.max(1,(prev?.advanceCount||4)-1),blend:null}); _rebuildPR(r);
+      r.splice(r.length-1,0,{advanceMethod:"count",advanceCount:Math.max(1,(prev?.advanceCount||4)-1),scope:prev?.scope||"overall",blend:null}); _rebuildPR(r);
     });
     document.getElementById("trn-pr-save")?.addEventListener("click", async()=>{
       const rounds=_getPRRounds();
@@ -6767,8 +6831,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const rounds = po.pointsRounds?.rounds || [];
         return rounds.slice(0,-1).map((r,i) => {
           const adv = r.advanceMethod==="pct" ? `top ${r.advancePct||"?"}%` : `top ${r.advanceCount||"?"}`;
+          const scopeNote = r.scope === "conference" ? " per conference" : "";
           const blend = r.blend?.enabled ? ` (${r.blend.mode==="weighted"?`wk×${100-(r.blend.weight||30)}%+avg×${r.blend.weight||30}%`:`wk+avg×${r.blend.weight||30}%`})` : "";
-          return `Round ${i+1}: ${adv} advance${blend}`;
+          return `Round ${i+1}: ${adv}${scopeNote} advance${blend}`;
         }).join("; ") || "Rounds TBD";
       }
       if (mode === "custom_rounds") {
@@ -19029,6 +19094,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           <div class="trn-po-round-header">
             <span>${isFinal?"🏆 Championship":`Round ${roundIdx+1}`}</span>
             ${weekNum?`<span class="trn-po-week-tag">${wpr > 1 ? `Weeks ${weekNum}–${weekNum+wpr-1}` : `Week ${weekNum}`}</span>`:""}
+            ${!isFinal && round.scope === "conference" ? `<span class="trn-po-week-tag" title="Advance count/% below is applied separately within each conference">Per Conference</span>` : ""}
           </div>
           <div class="trn-po-round-blend-note">${blendNote}</div>
         </div>
@@ -19123,12 +19189,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             } else {
               // No locked record for this round yet — fall back to live simulation
               // using whatever score data is currently available.
-              const competitors = compSection.length;
-              const advFromComp = r.advanceMethod === "pct"
-                ? Math.round(competitors * (r.advancePct || 50) / 100)
-                : (r.advanceCount || 0);
-              const carriedDeferred = po.pointsRounds?.deferredEliminations?.[ri] || 0;
-              const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
+              const competitors      = compSection.length;
+              const rConfScoped      = r.scope === "conference";
+              const rDeferredEntry   = po.pointsRounds?.deferredEliminations?.[ri];
 
               // Sort competing section by combined round score (desc), then by pf as tiebreak
               const sorted = [...compSection].sort((a, b) => {
@@ -19151,9 +19214,26 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
               // Tie-aware advancement using the global tieHandling setting —
               // mirrors the lock-write logic so a live preview before lock
-              // matches what will actually be locked in.
+              // matches what will actually be locked in. When the round is
+              // conference-scoped, the advance count/% is applied per conference
+              // instead of to the whole competing section.
               const scoreOfSim = (tm) => _weekScore(tm, rWeekNum, rWpr) ?? tm.pf ?? -1;
-              const simTie = _resolveRoundElimination(sorted, effectiveAdvFromComp, po.tieHandling, scoreOfSim);
+              let simTie;
+              if (rConfScoped) {
+                const advForGroup = (g, size) => {
+                  const raw     = r.advanceMethod === "pct" ? Math.round(size * (r.advancePct || 50) / 100) : (r.advanceCount || 0);
+                  const carried = (rDeferredEntry && typeof rDeferredEntry === "object") ? (rDeferredEntry[g] || 0) : 0;
+                  return Math.max(0, raw - carried);
+                };
+                simTie = _resolveGroupedElimination(sorted, po.tieHandling, scoreOfSim, "conference", tm => tm.conference || null, advForGroup);
+              } else {
+                const advFromComp = r.advanceMethod === "pct"
+                  ? Math.round(competitors * (r.advancePct || 50) / 100)
+                  : (r.advanceCount || 0);
+                const carriedDeferred = (typeof rDeferredEntry === "number") ? rDeferredEntry : 0;
+                const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
+                simTie = _resolveRoundElimination(sorted, effectiveAdvFromComp, po.tieHandling, scoreOfSim);
+              }
               if (simTie.tieNote) console.warn(`[Points Rounds] Round ${ri+1} (simulated): ${simTie.tieNote}`);
 
               // Next pool = byes + advancing competitive scorers
@@ -19162,13 +19242,31 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
 
           // ── Now pool is correct for this round ─────────────────────────
-          const isByeRound  = roundIdx === 0 && byeCount > 0;
-          const poolByes    = isByeRound ? byeCount : 0;
-          const competitors = pool.length - poolByes;
+          const isByeRound      = roundIdx === 0 && byeCount > 0;
+          const poolByes        = isByeRound ? byeCount : 0;
+          const competitors     = pool.length - poolByes;
+          // Conference scope never applies to the final round — the championship
+          // always merges every remaining team (across all conferences) into one pool.
+          const roundConfScoped = !isFinal && round.scope === "conference";
+          // advFromComp is a display/summary total here (header count, tie-adjusted
+          // note) — for a conference-scoped round it's the SUM of each conference's
+          // own top-N/%, not one flat cut. The actual per-team advance/eliminate
+          // determination always goes through the grouped resolver below, which is
+          // the real source of truth; this total just needs to match it for display.
           const advFromComp = isFinal ? 1
-            : round.advanceMethod === "pct"
-              ? Math.round(competitors * (round.advancePct || 50) / 100)
-              : (round.advanceCount || 0);
+            : roundConfScoped
+              ? (() => {
+                  const sizes = {};
+                  pool.slice(poolByes).forEach(tm => {
+                    const g = tm.conference || "__none__";
+                    sizes[g] = (sizes[g] || 0) + 1;
+                  });
+                  return Object.values(sizes).reduce((sum, size) => sum +
+                    (round.advanceMethod === "pct" ? Math.round(size * (round.advancePct || 50) / 100) : (round.advanceCount || 0)), 0);
+                })()
+              : round.advanceMethod === "pct"
+                ? Math.round(competitors * (round.advancePct || 50) / 100)
+                : (round.advanceCount || 0);
           const totalAdvancing = poolByes + advFromComp;
           const eliminated     = pool.length - totalAdvancing;
 
@@ -19185,9 +19283,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           });
 
           // Sort: byes stay at top (position 0..poolByes-1);
-          // competing section sorted by blend score (or week score) desc
+          // competing section sorted by blend score (or week score) desc.
+          // For a conference-scoped round, sort by conference first so each
+          // conference's teams render as a contiguous block in the table
+          // (matching the per-conference cut lines below) — within a block,
+          // still ordered by score desc. This doesn't affect the actual
+          // advance/eliminate determination (the grouped resolver regroups
+          // internally regardless of input order); it's purely display order.
           const byeSection_  = poolScored.slice(0, poolByes);
           const compSection_ = poolScored.slice(poolByes).sort((a, b) => {
+            if (roundConfScoped) {
+              const ca = a.conference || "", cb = b.conference || "";
+              if (ca !== cb) return ca.localeCompare(cb);
+            }
             const sa = blendEnabled ? (b.bScore ?? b.wkScore ?? b.pf)
                                     : (b.wkScore ?? b.pf);
             const sb = blendEnabled ? (a.bScore ?? a.wkScore ?? a.pf)
@@ -19207,8 +19315,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // table even though the locked/computed record correctly excluded
           // them from the next round's pool. Single source of truth now.
           const scoreOf = (tm) => blendEnabled ? (tm.bScore ?? tm.wkScore ?? tm.pf) : (tm.wkScore ?? tm.pf);
-          const carriedDeferred = po.pointsRounds?.deferredEliminations?.[roundIdx] || 0;
-          const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
+          const deferredEntry = po.pointsRounds?.deferredEliminations?.[roundIdx];
           let displayEliminatedKeys = null; // Set of team keys eliminated, for badge/cut-line display
 
           if (lockedElims[roundIdx]) {
@@ -19217,7 +19324,22 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           } else if (!isFinal) {
             const allScored = compSection_.every(tm => tm.wkScore != null);
             if (allScored && compSection_.length > 0) {
-              const tieResult = _resolveRoundElimination(compSection_, effectiveAdvFromComp, po.tieHandling, scoreOf);
+              // Conference-scoped rounds resolve each conference independently
+              // (and can carry a different deferred-tie count per conference);
+              // overall rounds resolve the whole competing section as one pool.
+              let tieResult;
+              if (roundConfScoped) {
+                const advForGroup = (g, size) => {
+                  const raw     = round.advanceMethod === "pct" ? Math.round(size * (round.advancePct || 50) / 100) : (round.advanceCount || 0);
+                  const carried = (deferredEntry && typeof deferredEntry === "object") ? (deferredEntry[g] || 0) : 0;
+                  return Math.max(0, raw - carried);
+                };
+                tieResult = _resolveGroupedElimination(compSection_, po.tieHandling, scoreOf, "conference", tm => tm.conference || null, advForGroup);
+              } else {
+                const carriedDeferred = (typeof deferredEntry === "number") ? deferredEntry : 0;
+                const effectiveAdvFromComp = Math.max(0, advFromComp - carriedDeferred);
+                tieResult = _resolveRoundElimination(compSection_, effectiveAdvFromComp, po.tieHandling, scoreOf);
+              }
               if (tieResult.tieNote) console.warn(`[Points Rounds] Round ${roundIdx+1}: ${tieResult.tieNote}`);
               displayEliminatedKeys = new Set(tieResult.eliminated.map(tm => _teamKey(tm)));
 
@@ -19226,8 +19348,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 const elimMap = {};
                 eliminatedTeams.forEach(tm => { elimMap[_teamKey(tm)] = true; });
                 const writes = { [`pointsRounds/eliminations/${roundIdx}`]: elimMap };
-                if (tieResult.deferredElimination) {
-                  writes[`pointsRounds/deferredEliminations/${roundIdx + 1}`] = tieResult.deferredElimination;
+                // Deferred ties: a flat number for overall-scoped rounds, or an
+                // object keyed by conference for conference-scoped rounds.
+                const deferredToWrite = roundConfScoped ? tieResult.deferredByGroup : tieResult.deferredElimination;
+                if (deferredToWrite) {
+                  writes[`pointsRounds/deferredEliminations/${roundIdx + 1}`] = deferredToWrite;
                 }
                 _tPlayoffsRef(tid, activeY).update(writes)
                   .then(() => {
@@ -19235,9 +19360,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                     if (!po.pointsRounds) po.pointsRounds = {};
                     if (!po.pointsRounds.eliminations) po.pointsRounds.eliminations = {};
                     po.pointsRounds.eliminations[roundIdx] = elimMap;
-                    if (tieResult.deferredElimination) {
+                    if (deferredToWrite) {
                       if (!po.pointsRounds.deferredEliminations) po.pointsRounds.deferredEliminations = {};
-                      po.pointsRounds.deferredEliminations[roundIdx + 1] = tieResult.deferredElimination;
+                      po.pointsRounds.deferredEliminations[roundIdx + 1] = deferredToWrite;
                     }
                   })
                   .catch(e => console.warn(`[Points Rounds] Failed to lock round ${roundIdx+1} eliminations:`, e.message));
@@ -19274,16 +19399,39 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             }
           }
 
-          // Build rows
-          const rows = sortedPool.map((tm, i) => {
+          // Build rows — first pass computes each row's advance/eliminate state
+          // so cut-line placement can look ahead to the next row (needed for
+          // conference-scoped rounds, which have one cut line per conference
+          // block instead of a single global one).
+          const rowStates = sortedPool.map((tm, i) => {
             const isByeTeam = isByeRound && i < poolByes;
             const compIdx   = i - poolByes;
             // Prefer the tie-aware result (displayEliminatedKeys) when available —
             // falls back to a raw positional check only if scores aren't all in
-            // yet (so there's nothing tie-aware to compute against).
+            // yet (so there's nothing tie-aware to compute against). Note: that
+            // fallback is a flat positional guess even for conference-scoped
+            // rounds (accurate per-conference cuts only exist once scores land
+            // and displayEliminatedKeys is populated).
             const isCompAdv = !isByeTeam && (displayEliminatedKeys
               ? !displayEliminatedKeys.has(_teamKey(tm))
               : compIdx < advFromComp);
+            return { tm, isByeTeam, isCompAdv };
+          });
+
+          // Per-block (per-conference, or one "__all__" block for overall-scoped
+          // rounds) totals — used for the cut-line divider text so each
+          // conference's divider shows that conference's own advance/eliminate
+          // counts instead of the global total.
+          const groupTotals = {}, groupAdvancing = {};
+          rowStates.forEach(({ tm, isByeTeam, isCompAdv }) => {
+            if (isByeTeam) return;
+            const g = roundConfScoped ? (tm.conference || "__none__") : "__all__";
+            groupTotals[g] = (groupTotals[g] || 0) + 1;
+            if (isCompAdv) groupAdvancing[g] = (groupAdvancing[g] || 0) + 1;
+          });
+
+          const rows = rowStates.map(({ tm, isByeTeam, isCompAdv }, i) => {
+            const compIdx   = i - poolByes;
             const isChamp   = isFinal && i === poolByes;
             const rowCls    = isChamp ? "trn-po-row--champion"
               : isByeTeam ? "trn-po-row--bye-seed"
@@ -19294,11 +19442,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
               : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
               : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
-            // Cut line now renders at the ACTUAL boundary (after the last
-            // advancing row in sorted order), not the configured advFromComp —
-            // so a tie resolved via eliminate_both/eliminate_neither shows the
-            // divider in the right place instead of mid-tied-group.
-            const cutAfter = !isFinal && !isByeTeam && compIdx === actualAdvCount - 1;
+            // Cut line renders after the last advancing row in a block. For an
+            // overall-scoped round there's one block (the whole competing
+            // section), so this reduces to the single boundary as before. For a
+            // conference-scoped round, rows are grouped by conference (see the
+            // compSection_ sort above), so a new block starts wherever the
+            // conference changes — each conference gets its own divider.
+            const next = rowStates[i + 1];
+            const nextIsDifferentBlock = !next || next.isByeTeam || !next.isCompAdv
+              || (roundConfScoped && next.tm.conference !== tm.conference);
+            const cutAfter = !isFinal && !isByeTeam && isCompAdv && nextIsDifferentBlock;
             const wkCell = isByeTeam
               ? `<td class="trn-po-num dim trn-po-col-wk">—</td>${blendEnabled ? `<td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : ""}`
               : blendEnabled
@@ -19306,7 +19459,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                    <td class="trn-po-num trn-po-col-avg">${tm.regAvgPW.toFixed(2)}</td>
                    <td class="trn-po-num trn-po-pf trn-po-col-blend">${tm.bScore != null ? tm.bScore.toFixed(2) : "—"}</td>`
                 : `<td class="trn-po-num trn-po-pf">${tm.wkScore != null ? tm.wkScore.toFixed(2) : "—"}</td>`;
-            const tieAdjustedNote = actualAdvCount !== advFromComp
+            const g            = roundConfScoped ? (tm.conference || "__none__") : "__all__";
+            const blockAdv      = groupAdvancing[g] || 0;
+            const blockElim     = (groupTotals[g] || 0) - blockAdv;
+            const blockLabel    = roundConfScoped ? `${_esc(tm.conference || "Unassigned")} — ` : "";
+            // Tie-adjusted note only applies cleanly to the overall (single-block)
+            // case, where actualAdvCount/advFromComp are directly comparable.
+            const tieAdjustedNote = (!roundConfScoped && actualAdvCount !== advFromComp)
               ? ` <span style="color:var(--color-text-dim);font-weight:400">(tie-adjusted from ${advFromComp})</span>` : "";
 
             // Lineup breakdown — byes have no week score for this round, so
@@ -19325,7 +19484,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               </td>
               ${wkCell}
               <td>${badge}${expandInfo.hasData ? `<span class="trn-po-expand-hint">▾ Lineup</span>` : ""}</td>
-            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden"><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— Cut Line — ${actualAdvCount} advance · ${competitors - actualAdvCount} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
+            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden"><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— ${blockLabel}Cut Line — ${blockAdv} advance · ${blockElim} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
           }).join("");
 
           const table  = document.getElementById(tableId);
