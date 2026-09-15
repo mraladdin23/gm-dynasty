@@ -4702,14 +4702,6 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
   // ── Wire playoff config ──────────────────────────────────────────────────────
   function _wirePlayoffConfigListeners(tid, t, initialYear) {
-    const MODE_DESC = {
-      total_points:  "Champion = highest cumulative PF through season end week.",
-      points_rounds: "Teams qualify, then advance each week by top score. One pool per round.",
-      h2h_bracket:   "Standard single-elimination bracket. System manages draws and advancement.",
-      custom_rounds: "Author each round manually: groups, teams per group, advancement rules.",
-      worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round).",
-      decathlon:     "Same participants play across multiple leagues. Overall winner by combined PF or finish-points earned from each league's regular season standings."
-    };
     const currentNFLYear = String(new Date().getMonth() >= 8
       ? new Date().getFullYear() : new Date().getFullYear() - 1);
     // Use initialYear if provided (passed from _rerender to preserve selection across re-wires)
@@ -4852,15 +4844,26 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     document.querySelectorAll(".trn-mode-card").forEach(btn => {
       btn.addEventListener("click", async () => {
         const val = btn.dataset.mode;
-        document.querySelectorAll(".trn-mode-card").forEach(b =>
-          b.classList.toggle("trn-mode-card--active", b.dataset.mode===val));
-        const descEl = document.getElementById("trn-mode-desc");
-        if (descEl) descEl.textContent = MODE_DESC[val]||"";
-        _updateModeVisibility(val);
         try {
           await _poSave({ mode: val });
           Object.assign(_poLocal(), { mode: val });
           showToast("Format saved ✓");
+          // Full re-render (not just _updateModeVisibility) — every other
+          // section's HTML (Qualification, Seeding, Round Config, etc.) was
+          // built once at initial load for whatever mode was active THEN.
+          // _updateModeVisibility only toggles show/hide and disabled state
+          // on that already-baked markup, so a mode with its own settings
+          // UI (Chopped's Championship Week stepper, Decathlon's config,
+          // World Cup's group setup) would never actually appear — the
+          // admin would be looking at stale content for the OLD mode until
+          // a full page reload. This is what made Chopped's Championship
+          // Week seem to silently fail to save: the stepper the admin was
+          // interacting with either didn't exist yet or belonged to the
+          // previous mode's stale DOM.
+          await _rerender(_activePoYear);
+          const selAfter = document.getElementById("trn-pc-section-select");
+          if (val === "decathlon") { _showPCSection("decathlon"); if (selAfter) selAfter.value = "decathlon"; }
+          if (val === "chopped")   { _showPCSection("rounds");    if (selAfter) selAfter.value = "rounds"; }
         } catch(e) { showToast("Failed to save format","error"); }
       });
     });
@@ -8657,12 +8660,14 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       return `<option value="${wi}">Week ${wi+1}${startWeekPo ? ` (NFL Wk ${nflWk})` : ""}</option>`;
     }).join("");
 
+    const mismatchId = `trn-wcs-mismatch-${gi}`;
     const el = document.getElementById("trn-wc-group-body");
     if (!el) return;
     el.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);align-items:start" class="trn-wc-group-layout">
         <div>
           <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">⏳ Loading…</div>
+          <div id="${mismatchId}"></div>
           <div class="trn-po-table-wrap">
             <table class="trn-po-table trn-wc-group-table" id="${tableId}" style="display:none">
               <thead><tr><th>#</th><th>Team</th><th class="trn-po-th-num">W</th><th class="trn-po-th-num">L</th><th class="trn-po-th-num">PF</th><th class="trn-po-th-num">PA</th><th>Status</th></tr></thead>
@@ -8710,7 +8715,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
       const lid = lc.leagueId || ck.replace(/^\d+_/,"");
-      (lc.teams||[]).forEach(tm => { if (tm.teamName) teamInfoMap[_skWC(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid }; });
+      const plat = (lc.platform || "sleeper").toLowerCase();
+      (lc.teams||[]).forEach(tm => { if (tm.teamName) teamInfoMap[_skWC(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid, platform: plat }; });
     });
 
     const _nflWeek = wi => startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
@@ -8718,7 +8724,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     (async () => {
       try {
         const records = {};
-        members.forEach(n => { records[n] = { wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{} }; });
+        members.forEach(n => {
+          const info = teamInfoMap[_skWC(n)];
+          const plat = info?.platform || null;
+          records[n] = { wins:0, losses:0, pf:0, pa:0, h2h:{}, h2hPF:{}, nonSleeper: !!(plat && plat !== "sleeper"), unmatched: !info };
+        });
         const weeksNeeded = new Set(), leagueIds = new Set();
         for (let wi = 0; wi < regWeeks; wi++) {
           if ((schedule[String(wi)]||[]).length) {
@@ -8779,9 +8789,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const trs = sorted.map((name,i) => {
           const r=records[name], isAdv=i<advCount;
           const rowCls = regComplete ? (isAdv?"trn-po-row--advance":"trn-po-row--cut") : "trn-po-row--neutral";
-          const badge  = regComplete
-            ? (isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
-            : "";
+          const badge  = r.unmatched
+            ? `<span class="trn-po-badge trn-po-badge--eliminated" title="No team in this year's synced standings matches the name '${_esc2(name)}' exactly (even after trimming/case). Most likely that team renamed itself on Sleeper since this group was set up — check the league's current roster and update this member's name in Admin → Playoffs → Group Setup to match.">❓ No standings match</span>`
+            : r.nonSleeper
+              ? `<span class="trn-po-badge" title="Live weekly scoring for World Cup groups only supports Sleeper right now — MFL/Yahoo teams won't show a W-L/PF here even though their matchups display fine.">⚠️ Non-Sleeper — no live score</span>`
+              : regComplete
+                ? (isAdv?`<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`:`<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
+                : "";
           const divider=(i===advCount&&sorted.length>advCount)
             ?`<tr class="trn-po-cut-row"><td colspan="7"><div class="trn-po-cut-divider">— Cut Line (top ${advCount}${regComplete?" advance":""}) —</div></td></tr>`
             :"";
@@ -8795,6 +8809,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const tableEl=document.getElementById(tableId), loaderEl=document.getElementById(loaderId);
         if(tableEl){tableEl.querySelector("tbody").innerHTML=trs;tableEl.style.display="";}
         if(loaderEl)loaderEl.style.display="none";
+
+        // Surface unmatched names up top too, not just per-row — this is the
+        // fastest way to spot a Sleeper rename without scanning every row.
+        const unmatchedNames = members.filter(n => records[n]?.unmatched);
+        const mismatchEl = document.getElementById(mismatchId);
+        if (mismatchEl) {
+          mismatchEl.innerHTML = unmatchedNames.length ? `
+            <div class="trn-section-help" style="margin-bottom:var(--space-2);border-color:var(--color-warning,#f59e0b)">
+              <strong>❓ ${unmatchedNames.length} team${unmatchedNames.length!==1?"s":""} not found in synced standings:</strong>
+              ${unmatchedNames.map(n=>_esc2(n)).join(", ")}.
+              Likely renamed on Sleeper since this group was set up — check the league's current roster and
+              update the name in Admin → Playoffs → Group Setup to match exactly.
+            </div>` : "";
+        }
 
         const _loadMatchups = async (wi) => {
           const muEl=document.getElementById(muId); if(!muEl)return;
@@ -9479,13 +9507,21 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (!silent) showToast(`Standings synced${yearLabel} — ${Object.keys(cacheUpdates).length}/${total} leagues${skippedComplete ? `, ${skippedComplete} skipped (complete)` : ""}`);
       _writePublicSummary(tid, _tournaments[tid]);
       // Show cross-platform warning banner if anything was skipped/failed,
-      // or if scoring settings differ across platforms
-      const scoringDiffs = _getScoringDiffs(_tournaments[tid], toSync[0]?.year || new Date().getFullYear());
-      if (syncWarnings.length || scoringDiffs.length) {
-        _showSyncWarningBanner(syncWarnings, scoringDiffs);
+      // or if scoring settings differ across platforms. Skipped for silent
+      // (background auto-triggered) syncs — a banner popping up and the
+      // Leagues admin panel silently overwriting whatever tab the admin is
+      // actually looking at (Standings, Playoffs, ...) is exactly the
+      // "outside the admin panel" surprise this was meant to eliminate.
+      // A manual Sync Standings click (silent=false) still gets both, since
+      // that only ever happens while the admin is already on the Leagues tab.
+      if (!silent) {
+        const scoringDiffs = _getScoringDiffs(_tournaments[tid], toSync[0]?.year || new Date().getFullYear());
+        if (syncWarnings.length || scoringDiffs.length) {
+          _showSyncWarningBanner(syncWarnings, scoringDiffs);
+        }
+        const body = (_getTabBody());
+        if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
       }
-      const body = (_getTabBody());
-      if (body) _renderLeaguesTab(tid, _tournaments[tid], body);
     } catch(err) {
       if (btn) { btn.disabled = false; btn.textContent = "Sync Standings"; }
       if (!silent) showToast("Failed to save: " + err.message, "error");
