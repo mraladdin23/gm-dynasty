@@ -468,6 +468,7 @@ const DLRTournament = (() => {
     worldcup:      "🌍 World Cup",
     total_points:  "🎯 Total Points",
     decathlon:     "🏅 Decathlon",
+    chopped:       "🔪 Chopped Championship",
   };
 
   async function _renderView(tab) {
@@ -698,6 +699,7 @@ const DLRTournament = (() => {
     worldcup:      { icon: "🌍", label: "World Cup",     cls: "trn-type-wc"      },
     total_points:  { icon: "🎯", label: "Total Points",  cls: "trn-type-total"   },
     decathlon:     { icon: "🏅", label: "Decathlon",     cls: "trn-type-decathlon"},
+    chopped:       { icon: "🔪", label: "Chopped",       cls: "trn-type-chopped" },
   };
 
   // Derive the active playoff mode from a tournament object (handles year-keyed + legacy flat)
@@ -3831,7 +3833,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       h2h_bracket:   "Standard single-elimination bracket. System manages draws and advancement.",
       custom_rounds: "Author each round manually: groups, teams per group, advancement rules.",
       worldcup:      "World Cup style: admin assigns teams to groups and sets the weekly matchup schedule. Teams play a round-robin regular season, then top finishers advance to an admin-seeded H2H bracket (2 weeks per round).",
-      decathlon:     "Same participants play in multiple leagues simultaneously. Overall winner is determined by combined PF across all leagues or finish-points earned from regular season standings in each league. Division (league) winners are also recognized."
+      decathlon:     "Same participants play in multiple leagues simultaneously. Overall winner is determined by combined PF across all leagues or finish-points earned from regular season standings in each league. Division (league) winners are also recognized.",
+      chopped:       "Each division runs its own weekly elimination — the lowest scorer in the division is chopped every week. Divisions play independently (and are shown separately) until the Championship Week, when every team still standing across all divisions merges into one pool and highest score wins it all."
     };
 
     // ── Year bar HTML (rendered outside sections, always visible) ────────────
@@ -3870,7 +3873,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             { val:"h2h_bracket",   icon:"🥊", label:"H2H Bracket",   sub:"System bracket"    },
             { val:"custom_rounds", icon:"⚙️", label:"Custom Rounds", sub:"Author each round" },
             { val:"worldcup",      icon:"🌍", label:"World Cup",     sub:"Groups → bracket"  },
-            { val:"decathlon",     icon:"🏅", label:"Decathlon",     sub:"Multi-league combined" }
+            { val:"decathlon",     icon:"🏅", label:"Decathlon",     sub:"Multi-league combined" },
+            { val:"chopped",       icon:"🔪", label:"Chopped",       sub:"Weekly low-score cut, per division" }
           ].map(m=>`
             <button class="trn-mode-card ${mode===m.val?"trn-mode-card--active":""}" data-mode="${m.val}">
               <span class="trn-mode-icon">${m.icon}</span>
@@ -4127,6 +4131,11 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const showRounds    = ["points_rounds","custom_rounds","h2h_bracket"].includes(mode);
     const showWC        = mode === "worldcup";
     const showDecathlon = mode === "decathlon";
+    const showChopped   = mode === "chopped";
+
+    // ── Chopped Championship config data ────────────────────────────────────
+    const choppedConfig     = po.chopped || {};
+    const chopChampWeek     = choppedConfig.championshipWeek || null;
 
     // ── Decathlon config data ───────────────────────────────────────────────────
     const decConfig        = po.decathlon || {};
@@ -4304,8 +4313,23 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     const sectionRounds = `
       <div class="trn-pc-section" id="trn-pc-rounds">
-        ${!showRounds && !showWC
-          ? `<div class="trn-pc-na-note">Round configuration applies to Points Rounds, H2H Bracket, Custom Rounds, and World Cup modes only.</div>`
+        ${!showRounds && !showWC && !showChopped
+          ? `<div class="trn-pc-na-note">Round configuration applies to Points Rounds, H2H Bracket, Custom Rounds, World Cup, and Chopped modes only.</div>`
+          : mode==="chopped" ? `
+            <div class="trn-section-help" style="margin-bottom:var(--space-3)">
+              <strong>🔪 Chopped Championship</strong> — every week from the Playoff Start Week (set in the Format tab)
+              through the Championship Week below, each division chops its own lowest scorer. A division holding a
+              single survivor just waits there. At the Championship Week, every team still alive across every
+              division merges into one pool and highest score wins the whole thing.
+              Divisions are read directly from each league's Division tag (Leagues tab) — no separate qualification step.
+            </div>
+            <div class="trn-detail-rows">
+              ${_weekStepperHTML("trn-chop-champweek-stepper", chopChampWeek, "Championship Week",
+                "The week all surviving teams (across every division) merge into one pool for the title. Must be after the Playoff Start Week.")}
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:var(--space-2)">
+              <button class="btn-primary btn-sm" id="trn-chop-save">Save Championship Week</button>
+            </div>`
           : mode==="h2h_bracket" ? `
             <div id="trn-h2h-rounds-list" class="trn-rounds-list">
               ${h2hRounds.map((r,i)=>_h2hRoundRowHTML(r,i,h2hRounds.length)).join("")}
@@ -4658,9 +4682,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ${yearBarHTML}
           <select class="trn-pc-section-select" id="trn-pc-section-select">
             <option value="format">⚙️ Playoff Format</option>
-            <option value="qual"   ${(!showQual||showWC)?"disabled":""} title="${showWC?"World Cup: set advance count on each group card instead":""}">📋 Qualification Rules${(!showQual||showWC)?" (n/a)":""}</option>
-            <option value="seeding" ${(!showSeeding||showWC)?"disabled":""} title="${showWC?"World Cup: bracket seeding is done manually in the Playoffs → Bracket tab":""}">🏅 Seeding &amp; Byes${(!showSeeding||showWC)?" (n/a)":""}</option>
-            <option value="rounds" ${(!showRounds&&!showWC)?"disabled":""}>🔄 Round Config${mode==="h2h_bracket"?" (H2H)":(!showRounds&&!showWC)?" (n/a)":""}</option>
+            <option value="qual"   ${(!showQual||showWC||showChopped)?"disabled":""} title="${showWC?"World Cup: set advance count on each group card instead":showChopped?"Chopped: every division's teams play — no separate qualification step":""}">📋 Qualification Rules${(!showQual||showWC||showChopped)?" (n/a)":""}</option>
+            <option value="seeding" ${(!showSeeding||showWC||showChopped)?"disabled":""} title="${showWC?"World Cup: bracket seeding is done manually in the Playoffs → Bracket tab":showChopped?"Chopped: no seeding — every division just runs its own elimination":""}">🏅 Seeding &amp; Byes${(!showSeeding||showWC||showChopped)?" (n/a)":""}</option>
+            <option value="rounds" ${(!showRounds&&!showWC&&!showChopped)?"disabled":""}>🔄 Round Config${mode==="h2h_bracket"?" (H2H)":mode==="chopped"?" (Championship Week)":(!showRounds&&!showWC&&!showChopped)?" (n/a)":""}</option>
             <option value="scoring">📊 Scoring Settings</option>
             <option value="decathlon" ${!showDecathlon?"disabled":""}>🏅 Decathlon Config${!showDecathlon?" (n/a)":""}</option>
           </select>
@@ -4783,9 +4807,9 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       // Update section-select options availability
       const sel = document.getElementById("trn-pc-section-select");
       if (sel) {
-        sel.querySelector('option[value="qual"]')?.toggleAttribute("disabled",    ["total_points","worldcup"].includes(mode));
-        sel.querySelector('option[value="seeding"]')?.toggleAttribute("disabled", ["total_points","worldcup"].includes(mode));
-        sel.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",  !["points_rounds","custom_rounds","worldcup","h2h_bracket"].includes(mode));
+        sel.querySelector('option[value="qual"]')?.toggleAttribute("disabled",    ["total_points","worldcup","chopped"].includes(mode));
+        sel.querySelector('option[value="seeding"]')?.toggleAttribute("disabled", ["total_points","worldcup","chopped"].includes(mode));
+        sel.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",  !["points_rounds","custom_rounds","worldcup","h2h_bracket","chopped"].includes(mode));
       }
       document.getElementById("trn-start-week-row")?.style.setProperty("display", mode==="total_points"?"none":"");
       document.getElementById("trn-seed-method-row")?.style.setProperty("display", mode==="h2h_bracket"?"":"none");
@@ -4811,14 +4835,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       if (sel2) {
         sel2.querySelector('option[value="decathlon"]')?.toggleAttribute("disabled", mode !== "decathlon");
         sel2.querySelector('option[value="qual"]')?.toggleAttribute("disabled",
-          ["total_points","worldcup","decathlon"].includes(mode));
+          ["total_points","worldcup","decathlon","chopped"].includes(mode));
         sel2.querySelector('option[value="seeding"]')?.toggleAttribute("disabled",
-          ["total_points","worldcup","decathlon"].includes(mode));
+          ["total_points","worldcup","decathlon","chopped"].includes(mode));
         sel2.querySelector('option[value="rounds"]')?.toggleAttribute("disabled",
-          !["points_rounds","custom_rounds","worldcup","h2h_bracket"].includes(mode));
+          !["points_rounds","custom_rounds","worldcup","h2h_bracket","chopped"].includes(mode));
       }
       // Auto-navigate to decathlon section when mode is selected
       if (mode === "decathlon") _showPCSection("decathlon");
+      // Chopped has nothing configurable in Format beyond Start Week (shared
+      // with every mode) — jump straight to Round Config where Championship
+      // Week lives, same reasoning as the decathlon auto-navigate above.
+      if (mode === "chopped") _showPCSection("rounds");
     };
 
     document.querySelectorAll(".trn-mode-card").forEach(btn => {
@@ -4855,6 +4883,20 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     };
     _wireWeekStepper("trn-start-week-stepper");
     _wireWeekStepper("trn-end-week-stepper");
+    _wireWeekStepper("trn-chop-champweek-stepper");
+
+    document.getElementById("trn-chop-save")?.addEventListener("click", async () => {
+      const cEl = document.querySelector("#trn-chop-champweek-stepper .trn-week-step-val");
+      const cw  = parseInt(cEl?.dataset.raw)||null;
+      if (!cw) { showToast("Set a Championship Week", "error"); return; }
+      if (po.startWeek && cw <= po.startWeek) { showToast("Championship Week must be after the Start Week","error"); return; }
+      try {
+        await _poSave({ "chopped/championshipWeek": cw });
+        if (!_poLocal().chopped) _poLocal().chopped = {};
+        Object.assign(_poLocal().chopped, { championshipWeek: cw });
+        showToast("Championship Week saved ✓");
+      } catch(e) { showToast("Failed to save","error"); }
+    });
 
     document.getElementById("trn-weeks-save")?.addEventListener("click", async () => {
       const sEl = document.querySelector("#trn-start-week-stepper .trn-week-step-val");
@@ -8654,10 +8696,21 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     };
 
     const teamInfoMap = {};
+    // Sanitized key (trim/lowercase/strip Firebase-illegal chars) — matches
+    // the pattern used everywhere else World Cup team names get matched
+    // against standingsCache (e.g. _wcTeamInfoMap in the Playoffs tab). This
+    // function previously keyed by the raw tm.teamName with no sanitization,
+    // so any formatting drift between the admin-entered group/schedule name
+    // and the live-synced standings name (case, stray whitespace, etc.)
+    // silently failed to match — the matchup still displayed (it's driven
+    // by the schedule entry, not this map) but that team's score/record
+    // never populated, which is exactly the "matchups show up fine, half
+    // the teams are missing from standings" symptom.
+    const _skWC = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
     Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
       if (String(lc.year) !== String(activeY)) return;
       const lid = lc.leagueId || ck.replace(/^\d+_/,"");
-      (lc.teams||[]).forEach(tm => { if (tm.teamName) teamInfoMap[tm.teamName] = { teamId: String(tm.teamId||""), leagueId: lid }; });
+      (lc.teams||[]).forEach(tm => { if (tm.teamName) teamInfoMap[_skWC(tm.teamName)] = { teamId: String(tm.teamId||""), leagueId: lid }; });
     });
 
     const _nflWeek = wi => startWeekPo ? (startWeekPo - regWeeks + wi) : (wi + 1);
@@ -8670,7 +8723,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         for (let wi = 0; wi < regWeeks; wi++) {
           if ((schedule[String(wi)]||[]).length) {
             weeksNeeded.add(_nflWeek(wi));
-            members.forEach(n => { const info=teamInfoMap[n]; if(info?.leagueId) leagueIds.add(info.leagueId); });
+            members.forEach(n => { const info=teamInfoMap[_skWC(n)]; if(info?.leagueId) leagueIds.add(info.leagueId); });
           }
         }
         await Promise.all([...leagueIds].flatMap(lid => [...weeksNeeded].map(w => _fetchWk(lid, w))));
@@ -8679,7 +8732,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           const nflWk = _nflWeek(wi);
           (schedule[String(wi)]||[]).forEach(({home,away}) => {
             if (!home||!away||home===away||!records[home]||!records[away]) return;
-            const hi=teamInfoMap[home], ai=teamInfoMap[away];
+            const hi=teamInfoMap[_skWC(home)], ai=teamInfoMap[_skWC(away)];
             const hs=hi?(_wsc[hi.leagueId+"|"+nflWk]?.[hi.teamId]??null):null;
             const as_=ai?(_wsc[ai.leagueId+"|"+nflWk]?.[ai.teamId]??null):null;
             if (hs!==null&&as_!==null) {
@@ -8717,7 +8770,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             if (!matchups.length) return true;
             const nflWk = _nflWk2(wi);
             return members.some(n => {
-              const info = teamInfoMap[n];
+              const info = teamInfoMap[_skWC(n)];
               return info?.leagueId && _wsc[info.leagueId+"|"+nflWk]?.[info.teamId] != null;
             });
           });
@@ -8750,7 +8803,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           const wkMus=schedule[String(wi)]||[];
           if(!wkMus.length){muEl.innerHTML=`<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`;return;}
           const cards=wkMus.map(m=>{
-            const hi=teamInfoMap[m.home],ai=teamInfoMap[m.away];
+            const hi=teamInfoMap[_skWC(m.home)],ai=teamInfoMap[_skWC(m.away)];
             const hs=hi?(_wsc[hi.leagueId+"|"+nflWk]?.[hi.teamId]??null):null;
             const as_=ai?(_wsc[ai.leagueId+"|"+nflWk]?.[ai.teamId]??null):null;
             const has=hs!==null&&as_!==null,wH=has&&hs>as_,wA=has&&as_>hs;
@@ -8775,7 +8828,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     })();
   }
 
-  function _renderStandingsTab(tid, t, body, isAdmin) {
+  function _renderStandingsTab(tid, t, body, isAdmin, _syncAttempted = false) {
     const cache  = t.standingsCache || {};
     const meta   = t.meta || {};
     const rankBy = meta.rankBy || "record";
@@ -8829,12 +8882,29 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       : allEntriesRaw;
 
     if (!allEntries.length) {
+      // Auto-heal instead of telling the commissioner to go click a button:
+      // sync right away (bypassing the normal throttle — there's nothing to
+      // lose by syncing immediately when the view is otherwise empty) and
+      // re-render once it resolves. Only tries once per view (_syncAttempted)
+      // so a tournament with genuinely no league batches yet doesn't loop.
+      if (isAdmin && !_syncAttempted) {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">&#x1F4CA;</div>
+            <div class="trn-empty-title">Loading standings…</div>
+            <div class="trn-empty-sub">Fetching the latest data — this only takes a moment.</div>
+          </div>`;
+        _autoSyncStandingsIfStale(tid, t, true).then(() => {
+          _renderStandingsTab(tid, _tournaments[tid] || t, body, isAdmin, true);
+        });
+        return;
+      }
       body.innerHTML = `
         <div class="trn-empty">
           <div class="trn-empty-icon">&#x1F4CA;</div>
           <div class="trn-empty-title">No standings data yet</div>
           <div class="trn-empty-sub">${isAdmin
-            ? "Go to the Leagues tab and click Sync Standings."
+            ? "No league batches are configured yet — add leagues under the Leagues tab first."
             : "The commissioner has not synced standings yet."}</div>
         </div>`;
       return;
@@ -8857,12 +8927,25 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       : allEntries;
 
     if (!entries.length) {
+      // Same auto-heal as above, scoped to this year not being synced yet.
+      if (isAdmin && !_syncAttempted) {
+        body.innerHTML = `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">&#x1F4CA;</div>
+            <div class="trn-empty-title">Loading standings…</div>
+            <div class="trn-empty-sub">Fetching the latest data — this only takes a moment.</div>
+          </div>`;
+        _autoSyncStandingsIfStale(tid, t, true).then(() => {
+          _renderStandingsTab(tid, _tournaments[tid] || t, body, isAdmin, true);
+        });
+        return;
+      }
       body.innerHTML = `
         <div class="trn-empty">
           <div class="trn-empty-icon">&#x1F4CA;</div>
           <div class="trn-empty-title">No standings synced for ${_esc(String(_tournamentYear || ""))}</div>
           <div class="trn-empty-sub">${isAdmin
-            ? "Go to the Leagues tab and click Sync Standings for this year."
+            ? "No league batches are configured for this year yet."
             : "The commissioner has not synced standings for this year yet."}
             ${availableYears.length ? ` Data is available for: ${availableYears.join(", ")}.` : ""}</div>
         </div>`;
@@ -9177,18 +9260,24 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
   // doesn't re-trigger a full batch sync on every click — same idea as the
   // Sleeper refresh throttle in profile.js. Admin-only: this writes to
   // Firebase, and only admins have write access to standingsCache.
+  // `force` bypasses the throttle — used when there's genuinely nothing
+  // cached yet (an empty-state view has nothing to lose by syncing right
+  // away rather than waiting out the interval) and returns the underlying
+  // promise so the caller can re-render once it resolves.
   const _autoStandingsSyncAt = {};
   const AUTO_STANDINGS_SYNC_INTERVAL_MS = 3 * 60 * 60 * 1000; // 3 hours
-  function _autoSyncStandingsIfStale(tid, t) {
+  function _autoSyncStandingsIfStale(tid, t, force = false) {
     const now  = Date.now();
     const last = _autoStandingsSyncAt[tid] || 0;
-    if (now - last < AUTO_STANDINGS_SYNC_INTERVAL_MS) return;
+    if (!force && now - last < AUTO_STANDINGS_SYNC_INTERVAL_MS) return Promise.resolve();
     _autoStandingsSyncAt[tid] = now;
-    // Silent + fire-and-forget: runs in the background while the admin browses.
-    // _syncStandings already merges results into _tournaments[tid].standingsCache
-    // in place, so the NEXT tab render (this view or a future one) picks up the
-    // fresh data automatically — this view itself isn't force-refreshed mid-look.
-    _syncStandings(tid, t, null, true).catch(e =>
+    // Silent: runs in the background while the admin browses. _syncStandings
+    // already merges results into _tournaments[tid].standingsCache in place,
+    // so the NEXT tab render (this view or a future one) picks up the fresh
+    // data automatically — callers that need this view itself to refresh
+    // (e.g. an empty-state that's actively waiting) chain off the returned
+    // promise and re-render themselves.
+    return _syncStandings(tid, t, null, true).catch(e =>
       console.warn(`[Standings] Background auto-sync failed for ${tid}:`, e.message));
   }
 
@@ -18375,6 +18464,239 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     };
   }
 
+  // ── Chopped Championship ──────────────────────────────────────────────────
+  // Each division runs its own weekly elimination: every week from the
+  // Playoff Start Week through (but not including) the Championship Week,
+  // the lowest scorer remaining in that division is chopped. A division that
+  // reaches its last remaining team simply holds there (can't eliminate the
+  // only team left) until the Championship Week. At the Championship Week,
+  // every team still alive across every division — regardless of which
+  // division they came from — is merged into one pool and highest score
+  // that week wins the whole tournament.
+  //
+  // Deliberately simple tie handling: if multiple teams are tied for lowest
+  // in a division in a given week, ALL of them are chopped that week (rather
+  // than running the full tiebreaker chain points_rounds uses) — a common
+  // house rule for this style of format, and it keeps this mode self-
+  // contained. Locked eliminations are stored at
+  // playoffs/{year}/chopped/eliminations/{sanitizedDivisionKey}/{week} = [teamKey,...]
+  // once every remaining team in that division has a real score for that
+  // week — write-once, same pattern as Points Rounds, so a later score-API
+  // gap can't retroactively change history.
+  function _renderChoppedPlayoffs(tid, t, body, po, activeY, isAdmin) {
+    const chopped   = po.chopped || {};
+    const champWeek = chopped.championshipWeek || null;
+    const startWeek = po.startWeek || null;
+
+    if (!startWeek || !champWeek) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">🔪</div>
+          <div class="trn-empty-title">Chopped Championship isn't fully configured yet</div>
+          <div class="trn-empty-sub">${isAdmin
+            ? "Set a Playoff Start Week (Admin → Playoffs → Format) and a Championship Week (Admin → Playoffs → Round Config)."
+            : "The commissioner hasn't finished configuring this tournament yet."}</div>
+        </div>`;
+      return;
+    }
+    if (champWeek <= startWeek) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">⚠️</div>
+          <div class="trn-empty-title">Championship Week must be after the Start Week</div>
+          <div class="trn-empty-sub">Fix this in Admin → Playoffs → Round Config.</div>
+        </div>`;
+      return;
+    }
+
+    const _skC     = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+    const _teamKeyC = tm => (tm.leagueName||"") + "|" + (tm.teamId||tm.rawTeamName||tm.teamName);
+    const _dn      = tm => (tm.sleeperUsername ? null : null) || tm.teamName || "—"; // display name (teamName is already the display field standingsCache stores)
+
+    // Assemble all teams for the active year, tagged with division + leagueId
+    const allTeams = [];
+    Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== String(activeY)) return;
+      const lid = String(lc.leagueId || lc.league_id || ck.replace(/^\d+_/,""));
+      (lc.teams||[]).forEach(tm => {
+        allTeams.push({ ...tm, leagueName: lc.leagueName || ck, division: lc.division || "", leagueId: lid });
+      });
+    });
+
+    if (!allTeams.length) {
+      body.innerHTML = `
+        <div class="trn-empty">
+          <div class="trn-empty-icon">🔪</div>
+          <div class="trn-empty-title">No standings data yet</div>
+          <div class="trn-empty-sub">${isAdmin ? "Standings sync automatically — check back in a moment." : "The commissioner hasn't synced standings yet."}</div>
+        </div>`;
+      return;
+    }
+
+    const divisions = {};
+    allTeams.forEach(tm => {
+      const d = tm.division || tm.leagueName || "Unassigned";
+      if (!divisions[d]) divisions[d] = [];
+      divisions[d].push(tm);
+    });
+    const divNames = Object.keys(divisions).sort();
+
+    body.innerHTML = `
+      <div id="trn-chop-loader" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">⏳ Computing eliminations…</div>
+      <div id="trn-chop-body" style="display:none"></div>`;
+
+    (async () => {
+      try {
+        // Self-contained live-score fetch (Sleeper only, same pattern used by
+        // the other World Cup / round engines in this file) — deliberately
+        // not reusing _renderPlayoffsTab's own _fetchWeekScores/_weekScoreCache
+        // since this function returns before those are built (see the early
+        // return above).
+        const _wsc = {};
+        const _fetchWk = async (leagueId, week) => {
+          const key = leagueId + "|" + week;
+          if (_wsc[key]) return _wsc[key];
+          try {
+            const r = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week);
+            if (!r.ok) return {};
+            const data = await r.json();
+            const map = {};
+            (data||[]).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
+            _wsc[key] = map;
+            return map;
+          } catch(e) { return {}; }
+        };
+        const scoreOf = (tm, week) => {
+          const v = _wsc[tm.leagueId+"|"+week]?.[String(tm.teamId)];
+          return v == null ? null : v;
+        };
+
+        const weeks = [];
+        for (let w = startWeek; w < champWeek; w++) weeks.push(w);
+        weeks.push(champWeek);
+        const leagueIds = [...new Set(allTeams.map(tm => tm.leagueId).filter(Boolean))];
+        await Promise.all(weeks.flatMap(w => leagueIds.map(lid => _fetchWk(lid, w))));
+
+        const lockedElims   = chopped.eliminations || {}; // { [sanitizedDivKey]: { [week]: [teamKey,...] } }
+        const pendingWrites = {}; // same shape, only the NEWLY computed weeks this pass
+        const divisionResults = {}; // divName -> { eliminatedAt: {teamKey:week}, survivors:[tm], allMembers:[tm], stalledWeek: number|null }
+
+        divNames.forEach(dName => {
+          let alive = [...divisions[dName]];
+          const eliminatedAt = {};
+          const divLocked = lockedElims[_skC(dName)] || {};
+          let stalledWeek = null; // first week we couldn't fully compute (scores not in yet)
+
+          for (let w = startWeek; w < champWeek; w++) {
+            if (alive.length <= 1) break; // can't eliminate the only team left — it holds to the championship
+            const wKey = String(w);
+            if (divLocked[wKey]) {
+              const elimKeys = Array.isArray(divLocked[wKey]) ? divLocked[wKey] : [divLocked[wKey]];
+              elimKeys.forEach(k => { eliminatedAt[k] = w; });
+              alive = alive.filter(tm => !elimKeys.includes(_teamKeyC(tm)));
+              continue;
+            }
+            const scored = alive.map(tm => ({ tm, score: scoreOf(tm, w) }));
+            if (scored.some(s => s.score == null)) { stalledWeek = w; break; }
+            const minScore = Math.min(...scored.map(s => s.score));
+            const elimGroup = scored.filter(s => s.score === minScore).map(s => s.tm);
+            if (alive.length - elimGroup.length < 1) { stalledWeek = w; break; } // everyone tied — needs manual review, don't wipe the division
+            elimGroup.forEach(tm => { eliminatedAt[_teamKeyC(tm)] = w; });
+            if (!pendingWrites[_skC(dName)]) pendingWrites[_skC(dName)] = {};
+            pendingWrites[_skC(dName)][wKey] = elimGroup.map(_teamKeyC);
+            alive = alive.filter(tm => !elimGroup.includes(tm));
+          }
+          divisionResults[dName] = { eliminatedAt, survivors: alive, allMembers: divisions[dName], stalledWeek };
+        });
+
+        // Persist any newly-computed eliminations (admin only — write access
+        // to standingsCache/playoffs is admin-gated the same way everywhere
+        // else in this file).
+        if (isAdmin && Object.keys(pendingWrites).length) {
+          const writes = {};
+          Object.entries(pendingWrites).forEach(([dKey, weekMap]) => {
+            Object.entries(weekMap).forEach(([wKey, keys]) => {
+              writes[`chopped/eliminations/${dKey}/${wKey}`] = keys;
+            });
+          });
+          _tPlayoffsRef(tid, activeY).update(writes).then(() => {
+            if (!po.chopped) po.chopped = {};
+            if (!po.chopped.eliminations) po.chopped.eliminations = {};
+            Object.entries(pendingWrites).forEach(([dKey, weekMap]) => {
+              if (!po.chopped.eliminations[dKey]) po.chopped.eliminations[dKey] = {};
+              Object.assign(po.chopped.eliminations[dKey], weekMap);
+            });
+          }).catch(e => console.warn("[Chopped] Failed to lock eliminations:", e.message));
+        }
+
+        // ── Championship Week: merge every surviving team across all divisions ──
+        const allSurvivors = [];
+        divNames.forEach(d => divisionResults[d].survivors.forEach(tm => allSurvivors.push({ ...tm, _division: d })));
+        const champScored   = allSurvivors.map(tm => ({ tm, score: scoreOf(tm, champWeek) }));
+        const champAllIn    = champScored.length > 0 && champScored.every(s => s.score != null);
+        const champSorted   = [...champScored].sort((a,b) => (b.score??-1) - (a.score??-1));
+        const champion      = champAllIn ? champSorted[0] : null;
+
+        // ── Render ────────────────────────────────────────────────────────────
+        const divisionsHTML = divNames.map(dName => {
+          const res = divisionResults[dName];
+          // Alive teams first (by current PF, so leaders show up top), then
+          // eliminated teams most-recently-chopped first — reads like "who's
+          // still standing" at a glance.
+          const aliveSorted = [...res.survivors].sort((a,b) => (b.pf||0)-(a.pf||0));
+          const eliminatedSorted = res.allMembers
+            .filter(tm => res.eliminatedAt[_teamKeyC(tm)] != null)
+            .sort((a,b) => res.eliminatedAt[_teamKeyC(b)] - res.eliminatedAt[_teamKeyC(a)]);
+          const rows = [...aliveSorted, ...eliminatedSorted].map(tm => {
+            const wkElim = res.eliminatedAt[_teamKeyC(tm)];
+            const isAlive = wkElim == null;
+            return `<div class="trn-po-group-row ${isAlive?"trn-po-row--advance":"trn-po-row--cut"}">
+              <span class="trn-po-team-name">${_esc(_dn(tm))}</span>
+              <span class="trn-po-pf" style="margin-left:auto">${(tm.pf||0).toFixed(1)} PF</span>
+              ${isAlive
+                ? `<span class="trn-po-badge trn-po-badge--advance">🟢 Alive</span>`
+                : `<span class="trn-po-badge trn-po-badge--eliminated">🔪 Chopped Wk ${wkElim}</span>`}
+            </div>`;
+          }).join("");
+          const stalledNote = res.stalledWeek != null
+            ? `<div style="font-size:.72rem;color:var(--color-text-dim);margin-top:4px">Week ${res.stalledWeek} scores aren't all in yet — elimination will lock once they land.</div>`
+            : "";
+          return `<div class="trn-po-group-card">
+            <div class="trn-po-group-title">${_esc(dName)} <span style="font-weight:400;color:var(--color-text-dim)">(${res.survivors.length} of ${res.allMembers.length} remaining)</span></div>
+            ${rows}
+            ${stalledNote}
+          </div>`;
+        }).join("");
+
+        const champRows = champSorted.map(({tm, score}, i) => `
+          <div class="trn-po-group-row ${champAllIn && i===0 ? "trn-po-row--champion" : ""}">
+            <span class="trn-po-rank">${i+1}</span>
+            <span class="trn-po-team-name">${_esc(_dn(tm))} <span class="trn-po-team-sub">(${_esc(tm._division)})</span></span>
+            <span class="trn-po-pf" style="margin-left:auto">${score!=null?score.toFixed(2):"—"}</span>
+            ${champAllIn && i===0 ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>` : ""}
+          </div>`).join("");
+
+        const champCard = `
+          <div class="trn-po-round-card trn-po-round-card--final" style="margin-bottom:var(--space-3)">
+            <div class="trn-po-round-header"><span>🏆 Championship — Week ${champWeek}</span></div>
+            <div class="trn-po-round-blend-note">${allSurvivors.length} team${allSurvivors.length!==1?"s":""} remaining, ${allSurvivors.length ? "one from " + new Set(allSurvivors.map(tm=>tm._division)).size + " division" + (new Set(allSurvivors.map(tm=>tm._division)).size!==1?"s":"") : ""} — highest score Week ${champWeek} wins it all.</div>
+          </div>
+          <div class="trn-po-groups-wrap" style="margin-bottom:var(--space-4)">${champRows || `<div class="trn-po-empty">No survivors yet — waiting on earlier weeks to resolve.</div>`}</div>`;
+
+        const loaderEl = document.getElementById("trn-chop-loader");
+        const bodyEl   = document.getElementById("trn-chop-body");
+        if (loaderEl) loaderEl.style.display = "none";
+        if (bodyEl) {
+          bodyEl.style.display = "";
+          bodyEl.innerHTML = champCard + `<div class="trn-po-groups-wrap">${divisionsHTML}</div>`;
+        }
+      } catch(e) {
+        const loaderEl = document.getElementById("trn-chop-loader");
+        if (loaderEl) loaderEl.textContent = "⚠️ Could not load: " + e.message;
+      }
+    })();
+  }
+
   function _renderPlayoffsTab(tid, t, body) {
     const years   = _playoffYears(t);
     const activeY = _tournamentYear ? String(_tournamentYear)
@@ -18407,6 +18729,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         </div>`;
       return;
     }
+
+    // ── Chopped Championship: early return, fully self-contained ─────────────
+    // Deliberately NOT woven into the shared qualifier/bracket machinery below
+    // (which points_rounds/custom_rounds/h2h_bracket/worldcup/decathlon all
+    // share and lean on heavily) — that logic assumes a single qualifier pool
+    // and round list, neither of which fits "each division runs its own
+    // independent weekly elimination." Keeping this isolated also means it
+    // can't destabilize the existing modes.
+    if (mode === "chopped") { return _renderChoppedPlayoffs(tid, t, body, po, activeY, isAdmin); }
 
     // ── World Cup: sorted advancers helper ───────────────────────────────────
     // Returns the qualified teams for a group, sorted by standings (wins desc,
@@ -20150,13 +20481,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           // Map from team display name → { teamId, leagueId } via standingsCache
           const _sk = (s) => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
-          const teamInfoMap = {}; // displayName -> { teamId, leagueId }
+          const teamInfoMap = {}; // sanitized displayName -> { teamId, leagueId }
           Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
             if (String(lc.year) !== String(activeY)) return;
             const lid = lc.leagueId || ck.replace(/^\d+_/,"");
             (lc.teams||[]).forEach(tm => {
               const dn = tm.teamName || "";
-              if (dn) teamInfoMap[dn] = { teamId: String(tm.teamId||""), leagueId: lid };
+              if (dn) teamInfoMap[_sk(dn)] = { teamId: String(tm.teamId||""), leagueId: lid };
             });
           });
 
@@ -20169,7 +20500,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             if (wkMatchups.length) {
               weeksNeeded.add(_nflWeek(wi));
               members.forEach(name => {
-                const info = teamInfoMap[name];
+                const info = teamInfoMap[_sk(name)];
                 if (info?.leagueId) leagueIds.add(info.leagueId);
               });
             }
@@ -20184,8 +20515,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             wkMatchups.forEach(({ home, away }) => {
               if (!home || !away || home === away) return;
               if (!records[home] || !records[away]) return;
-              const homeInfo = teamInfoMap[home];
-              const awayInfo = teamInfoMap[away];
+              const homeInfo = teamInfoMap[_sk(home)];
+              const awayInfo = teamInfoMap[_sk(away)];
               const homeScore = homeInfo ? (_weekScoreCache[homeInfo.leagueId+"|"+nflWk]?.[homeInfo.teamId] ?? null) : null;
               const awayScore = awayInfo ? (_weekScoreCache[awayInfo.leagueId+"|"+nflWk]?.[awayInfo.teamId] ?? null) : null;
 
@@ -20294,8 +20625,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                   ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
                   : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`)
               : ""; // no badge until reg season done
-            const info = teamInfoMap[name] || {};
-            const lc   = Object.values(t.standingsCache||{}).find(lc => String(lc.year)===String(activeY) && (lc.teams||[]).some(tm=>tm.teamName===name));
+            const info = teamInfoMap[_sk(name)] || {};
+            const lc   = Object.values(t.standingsCache||{}).find(lc => String(lc.year)===String(activeY) && (lc.teams||[]).some(tm=>_sk(tm.teamName)===_sk(name)));
             return `<tr class="${rowCls}">
               <td class="trn-po-rank">${i+1}</td>
               <td class="trn-po-team-name">
