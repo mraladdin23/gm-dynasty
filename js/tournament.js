@@ -8813,15 +8813,94 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         // Surface unmatched names up top too, not just per-row — this is the
         // fastest way to spot a Sleeper rename without scanning every row.
         const unmatchedNames = members.filter(n => records[n]?.unmatched);
+
+        // Separate (and more actionable) diagnosis: the weekly Schedule is
+        // its own saved data (po.worldcupSchedule) — a fixed roster name in
+        // Group Setup does NOT retroactively update matchup rows that were
+        // already built against the old name, because each row just stores
+        // a plain "home"/"away" string, not a live reference. So after
+        // fixing a name in the roster, any week that already had that team
+        // scheduled still points at the OLD string, which no longer exists
+        // in `members` at all — that's why standings (built from the current
+        // roster) look right while matchups (built from the old schedule
+        // strings) don't. Find every schedule name that isn't in the current
+        // roster and offer a one-click remap instead of making the admin
+        // hunt through Group Setup → Schedule week by week.
+        const scheduleNames = new Set();
+        Object.values(schedule).forEach(wk => (wk||[]).forEach(m => {
+          if (m.home) scheduleNames.add(m.home);
+          if (m.away) scheduleNames.add(m.away);
+        }));
+        const orphanedScheduleNames = [...scheduleNames].filter(n => !members.includes(n));
+
         const mismatchEl = document.getElementById(mismatchId);
         if (mismatchEl) {
-          mismatchEl.innerHTML = unmatchedNames.length ? `
+          const memberOpts = members.map(n => `<option value="${_esc2(n)}">${_esc2(n)}</option>`).join("");
+          const orphanRows = orphanedScheduleNames.map((n,oi) => `
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap">
+              <span style="font-size:.78rem">"${_esc2(n)}" →</span>
+              <select id="trn-wc-remap-sel-${gi}-${oi}" style="font-size:.78rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                <option value="">— pick correct team —</option>${memberOpts}
+              </select>
+              <button class="btn-secondary btn-xs trn-wc-remap-btn" data-gi="${gi}" data-old="${_esc2(n)}" data-sel="trn-wc-remap-sel-${gi}-${oi}">Fix in schedule</button>
+            </div>`).join("");
+          const orphanBlock = orphanedScheduleNames.length ? `
+            <div class="trn-section-help" style="margin-bottom:var(--space-2);border-color:var(--color-warning,#f59e0b)">
+              <strong>📅 ${orphanedScheduleNames.length} name${orphanedScheduleNames.length!==1?"s":""} in the schedule don't match anyone in this group's current roster:</strong>
+              This is almost always a leftover from before a name got corrected in Group Setup — the schedule stores each
+              matchup as a plain team name, so fixing the roster doesn't update weeks that were already scheduled against
+              the old name. Pick the right team for each one below and it'll be swapped in every week it appears.
+              ${orphanRows}
+            </div>` : "";
+          const unmatchedBlock = unmatchedNames.length ? `
             <div class="trn-section-help" style="margin-bottom:var(--space-2);border-color:var(--color-warning,#f59e0b)">
               <strong>❓ ${unmatchedNames.length} team${unmatchedNames.length!==1?"s":""} not found in synced standings:</strong>
               ${unmatchedNames.map(n=>_esc2(n)).join(", ")}.
               Likely renamed on Sleeper since this group was set up — check the league's current roster and
               update the name in Admin → Playoffs → Group Setup to match exactly.
             </div>` : "";
+          mismatchEl.innerHTML = orphanBlock + unmatchedBlock;
+          mismatchEl.querySelectorAll(".trn-wc-remap-btn").forEach(btn => {
+            btn.addEventListener("click", async () => {
+              const oldName = btn.dataset.old;
+              const selEl   = document.getElementById(btn.dataset.sel);
+              const newName = selEl?.value;
+              if (!newName) { showToast("Pick the correct team first", "info"); return; }
+              btn.disabled = true; btn.textContent = "Fixing…";
+              try {
+                const updates = {};
+                let changedCount = 0;
+                Object.entries(schedule).forEach(([wi, matchups]) => {
+                  let changed = false;
+                  const fixed = (matchups||[]).map(m => {
+                    const mm = { ...m };
+                    if (mm.home === oldName) { mm.home = newName; changed = true; }
+                    if (mm.away === oldName) { mm.away = newName; changed = true; }
+                    return mm;
+                  });
+                  if (changed) { updates[`worldcupSchedule/${gi}/${wi}`] = fixed; changedCount += fixed.length; }
+                });
+                if (!Object.keys(updates).length) { showToast("Nothing to fix — name not found in any week","info"); btn.disabled=false; btn.textContent="Fix in schedule"; return; }
+                await _tPlayoffsRef(tid, activeY).update(updates);
+                // Keep local cache in sync so re-rendering this view (or the
+                // Schedule tab) reflects the fix without a full page reload.
+                if (!po.worldcupSchedule) po.worldcupSchedule = {};
+                if (!po.worldcupSchedule[String(gi)]) po.worldcupSchedule[String(gi)] = {};
+                Object.entries(schedule).forEach(([wi, matchups]) => {
+                  const fixed = (matchups||[]).map(m => ({
+                    home: m.home === oldName ? newName : m.home,
+                    away: m.away === oldName ? newName : m.away
+                  }));
+                  po.worldcupSchedule[String(gi)][wi] = fixed;
+                });
+                showToast(`Fixed ✓ "${oldName}" → "${newName}" across the schedule`);
+                _renderWCGroupStandalone(tid, t, body, gi, po, activeY); // full re-render to pick up the fix everywhere
+              } catch(e) {
+                showToast("Failed to fix: " + e.message, "error");
+                btn.disabled = false; btn.textContent = "Fix in schedule";
+              }
+            });
+          });
         }
 
         const _loadMatchups = async (wi) => {
