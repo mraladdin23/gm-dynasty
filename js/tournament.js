@@ -4892,7 +4892,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const cEl = document.querySelector("#trn-chop-champweek-stepper .trn-week-step-val");
       const cw  = parseInt(cEl?.dataset.raw)||null;
       if (!cw) { showToast("Set a Championship Week", "error"); return; }
-      if (po.startWeek && cw <= po.startWeek) { showToast("Championship Week must be after the Start Week","error"); return; }
+      const curStartWeek = _poLocal().startWeek;
+      if (curStartWeek && cw <= curStartWeek) { showToast("Championship Week must be after the Start Week","error"); return; }
       try {
         await _poSave({ "chopped/championshipWeek": cw });
         if (!_poLocal().chopped) _poLocal().chopped = {};
@@ -18803,7 +18804,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         if (loaderEl) loaderEl.style.display = "none";
         if (bodyEl) {
           bodyEl.style.display = "";
-          bodyEl.innerHTML = champCard + `<div class="trn-po-groups-wrap">${divisionsHTML}</div>`;
+          bodyEl.innerHTML = `
+            <div class="trn-history-tabs" style="margin-bottom:var(--space-3)">
+              <button class="trn-history-tab trn-chop-subtab trn-history-tab--active" data-sub="divisions">Divisions</button>
+              <button class="trn-history-tab trn-chop-subtab" data-sub="championship">🏆 Championship</button>
+            </div>
+            <div id="trn-chop-pane-divisions"><div class="trn-po-groups-wrap">${divisionsHTML}</div></div>
+            <div id="trn-chop-pane-championship" style="display:none">${champCard}</div>`;
+          bodyEl.querySelectorAll(".trn-chop-subtab").forEach(btn => {
+            btn.addEventListener("click", () => {
+              bodyEl.querySelectorAll(".trn-chop-subtab").forEach(b => b.classList.toggle("trn-history-tab--active", b === btn));
+              const sub = btn.dataset.sub;
+              const divPane = document.getElementById("trn-chop-pane-divisions");
+              const champPane = document.getElementById("trn-chop-pane-championship");
+              if (divPane)   divPane.style.display   = sub === "divisions"   ? "" : "none";
+              if (champPane) champPane.style.display = sub === "championship" ? "" : "none";
+            });
+          });
         }
       } catch(e) {
         const loaderEl = document.getElementById("trn-chop-loader");
