@@ -12971,6 +12971,9 @@ Good luck this season!
   let _adpBoardMinPicks  = 1;   // minimum times a player must've been drafted to appear on the ADP board
   const _draftSlotFixLogged = new Set(); // dedup console.warn for the draft-slot-vs-roster_id auto-fix
   let _draftPollInterval = null; // live poll during active drafts
+  let _choppedPollInterval = null; // live score poll for Chopped Championship, in-progress week only
+  let _choppedActiveDiv = null; // remembers the selected division across live-poll re-renders
+  let _choppedActiveSub = "divisions"; // remembers Divisions vs Championship sub-tab across live-poll re-renders
 
   // Fetch draft data directly from Sleeper — same approach as the main-page
   // draft.js (api.sleeper.app directly, never through the worker's
@@ -18600,6 +18603,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // week — write-once, same pattern as Points Rounds, so a later score-API
   // gap can't retroactively change history.
   function _renderChoppedPlayoffs(tid, t, body, po, activeY, isAdmin) {
+    // Any previous poll belongs to whatever was on screen before — always
+    // clear it here and let the logic below decide whether to start a new
+    // one, so navigating between tabs/divisions never leaves a stray poll
+    // running against a container that's no longer visible.
+    if (_choppedPollInterval) { clearInterval(_choppedPollInterval); _choppedPollInterval = null; }
+
     const chopped   = po.chopped || {};
     const champWeek = chopped.championshipWeek || null;
     const startWeek = po.startWeek || null;
@@ -18722,7 +18731,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             pendingWrites[_skC(dName)][wKey] = elimGroup.map(_teamKeyC);
             alive = alive.filter(tm => !elimGroup.includes(tm));
           }
-          divisionResults[dName] = { eliminatedAt, survivors: alive, allMembers: divisions[dName], stalledWeek };
+          // Weekly score grid + season total, for every ORIGINAL member (not
+          // just survivors) — powers the week-by-week table below so you can
+          // see exactly what score got a team chopped, and rank by total
+          // points scored regardless of alive/eliminated status.
+          const weeklyScores = {}; // teamKey -> { week: score|null }
+          const totalPF = {};      // teamKey -> sum of every played week so far
+          divisions[dName].forEach(tm => {
+            const key = _teamKeyC(tm);
+            weeklyScores[key] = {};
+            let sum = 0;
+            for (let w = startWeek; w < champWeek; w++) {
+              const s = scoreOf(tm, w);
+              weeklyScores[key][w] = s;
+              if (s != null) sum += s;
+            }
+            totalPF[key] = sum;
+          });
+
+          divisionResults[dName] = { eliminatedAt, survivors: alive, allMembers: divisions[dName], stalledWeek, weeklyScores, totalPF };
         });
 
         // Persist any newly-computed eliminations (admin only — write access
@@ -18745,44 +18772,80 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }).catch(e => console.warn("[Chopped] Failed to lock eliminations:", e.message));
         }
 
-        // ── Championship Week: merge every surviving team across all divisions ──
+        // ── Championship Week: only meaningful once every division has fully
+        // resolved through the week before it — showing a partial survivor
+        // pool while a division is still mid-elimination would be misleading
+        // (the "remaining teams" list isn't final yet).
+        const unresolvedDivs = divNames.filter(d => divisionResults[d].stalledWeek != null);
+        const allDivisionsResolved = unresolvedDivs.length === 0;
+
         const allSurvivors = [];
         divNames.forEach(d => divisionResults[d].survivors.forEach(tm => allSurvivors.push({ ...tm, _division: d })));
-        const champScored   = allSurvivors.map(tm => ({ tm, score: scoreOf(tm, champWeek) }));
+        const champScored   = allDivisionsResolved ? allSurvivors.map(tm => ({ tm, score: scoreOf(tm, champWeek) })) : [];
         const champAllIn    = champScored.length > 0 && champScored.every(s => s.score != null);
         const champSorted   = [...champScored].sort((a,b) => (b.score??-1) - (a.score??-1));
-        const champion      = champAllIn ? champSorted[0] : null;
 
-        // ── Render ────────────────────────────────────────────────────────────
-        const divisionsHTML = divNames.map(dName => {
+        // ── Render: Divisions (one at a time via dropdown) ─────────────────────
+        const divPickerOpts = divNames.map(d => `<option value="${_esc(d)}">${_esc(d)} (${divisionResults[d].survivors.length} of ${divisionResults[d].allMembers.length} left)</option>`).join("");
+
+        const divisionPaneHTML = dName => {
           const res = divisionResults[dName];
-          // Alive teams first (by current PF, so leaders show up top), then
-          // eliminated teams most-recently-chopped first — reads like "who's
-          // still standing" at a glance.
-          const aliveSorted = [...res.survivors].sort((a,b) => (b.pf||0)-(a.pf||0));
-          const eliminatedSorted = res.allMembers
-            .filter(tm => res.eliminatedAt[_teamKeyC(tm)] != null)
-            .sort((a,b) => res.eliminatedAt[_teamKeyC(b)] - res.eliminatedAt[_teamKeyC(a)]);
-          const rows = [...aliveSorted, ...eliminatedSorted].map(tm => {
-            const wkElim = res.eliminatedAt[_teamKeyC(tm)];
+          // In-danger candidate: among teams still alive going into the
+          // stalled (in-progress) week, the lowest score that's actually
+          // > 0 — a 0 means Sleeper just hasn't reported that team's games
+          // yet, not that they're actually losing.
+          let dangerKey = null;
+          if (res.stalledWeek != null) {
+            const candidates = res.survivors
+              .map(tm => ({ tm, score: res.weeklyScores[_teamKeyC(tm)][res.stalledWeek] }))
+              .filter(c => c.score != null && c.score > 0)
+              .sort((a,b) => a.score - b.score);
+            if (candidates.length) dangerKey = _teamKeyC(candidates[0].tm);
+          }
+          const weekCols = [];
+          for (let w = startWeek; w < champWeek; w++) weekCols.push(w);
+
+          const rows = [...res.allMembers].sort((a,b) => res.totalPF[_teamKeyC(b)] - res.totalPF[_teamKeyC(a)]).map(tm => {
+            const key = _teamKeyC(tm);
+            const wkElim = res.eliminatedAt[key];
             const isAlive = wkElim == null;
-            return `<div class="trn-po-group-row ${isAlive?"trn-po-row--advance":"trn-po-row--cut"}">
-              <span class="trn-po-team-name">${_esc(_dn(tm))}</span>
-              <span class="trn-po-pf" style="margin-left:auto">${(tm.pf||0).toFixed(1)} PF</span>
-              ${isAlive
-                ? `<span class="trn-po-badge trn-po-badge--advance">🟢 Alive</span>`
-                : `<span class="trn-po-badge trn-po-badge--eliminated">🔪 Chopped Wk ${wkElim}</span>`}
-            </div>`;
+            const isDanger = dangerKey === key;
+            const cells = weekCols.map(w => {
+              const s = res.weeklyScores[key][w];
+              const isElimWeek = wkElim === w;
+              const isDangerWeek = isDanger && w === res.stalledWeek;
+              // Inline-styled (not just classed) so the highlight is guaranteed
+              // visible without depending on a matching CSS rule existing.
+              const style = isElimWeek
+                ? "background:rgba(239,68,68,.15);color:#ef4444;font-weight:700"
+                : isDangerWeek
+                  ? "background:rgba(245,158,11,.15);color:#f59e0b;font-weight:700"
+                  : "";
+              const label = s != null ? s.toFixed(1) : (w === res.stalledWeek ? "…" : "—");
+              return `<td class="trn-po-num" style="${style}" ${isElimWeek?`title="Chopped this week"`:isDangerWeek?`title="Lowest positive score so far this week — in danger of being chopped"`:""}>${label}${isElimWeek?" 🔪":isDangerWeek?" 🔻":""}</td>`;
+            }).join("");
+            return `<tr class="${isAlive?"trn-po-row--advance":"trn-po-row--cut"}">
+              <td class="trn-po-team-name">${_esc(_dn(tm))}</td>
+              ${cells}
+              <td class="trn-po-num trn-po-pf"><strong>${res.totalPF[key].toFixed(1)}</strong></td>
+              <td>${isAlive
+                ? (isDanger?`<span class="trn-po-badge trn-po-badge--eliminated">🔻 In Danger</span>`:`<span class="trn-po-badge trn-po-badge--advance">🟢 Alive</span>`)
+                : `<span class="trn-po-badge trn-po-badge--eliminated">🔪 Wk ${wkElim}</span>`}</td>
+            </tr>`;
           }).join("");
+
+          const headerCells = weekCols.map(w => `<th class="trn-po-th-num">Wk ${w}</th>`).join("");
           const stalledNote = res.stalledWeek != null
-            ? `<div style="font-size:.72rem;color:var(--color-text-dim);margin-top:4px">Week ${res.stalledWeek} scores aren't all in yet — elimination will lock once they land.</div>`
-            : "";
-          return `<div class="trn-po-group-card">
-            <div class="trn-po-group-title">${_esc(dName)} <span style="font-weight:400;color:var(--color-text-dim)">(${res.survivors.length} of ${res.allMembers.length} remaining)</span></div>
-            ${rows}
-            ${stalledNote}
-          </div>`;
-        }).join("");
+            ? `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:6px">⏳ Week ${res.stalledWeek} is still in progress — scores refresh live; the chop for that week locks once everyone's final.</div>`
+            : `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:6px">✅ Fully resolved through Week ${champWeek - 1} — ${res.survivors.length} team${res.survivors.length!==1?"s":""} heading to the Championship.</div>`;
+
+          return `<div class="trn-po-table-wrap">
+            <table class="trn-po-table">
+              <thead><tr><th>Team</th>${headerCells}<th class="trn-po-th-num">Total PF</th><th>Status</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>${stalledNote}`;
+        };
 
         const champRows = champSorted.map(({tm, score}, i) => `
           <div class="trn-po-group-row ${champAllIn && i===0 ? "trn-po-row--champion" : ""}">
@@ -18792,12 +18855,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             ${champAllIn && i===0 ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>` : ""}
           </div>`).join("");
 
-        const champCard = `
+        const champCard = !allDivisionsResolved ? `
+          <div class="trn-empty">
+            <div class="trn-empty-icon">⏳</div>
+            <div class="trn-empty-title">Championship pool isn't final yet</div>
+            <div class="trn-empty-sub">Still waiting on: ${unresolvedDivs.map(d=>`${_esc(d)} (Week ${divisionResults[d].stalledWeek})`).join(", ")}.
+              The list of who's left only means something once every division has finished eliminating through Week ${champWeek-1}.</div>
+          </div>` : `
           <div class="trn-po-round-card trn-po-round-card--final" style="margin-bottom:var(--space-3)">
             <div class="trn-po-round-header"><span>🏆 Championship — Week ${champWeek}</span></div>
-            <div class="trn-po-round-blend-note">${allSurvivors.length} team${allSurvivors.length!==1?"s":""} remaining, ${allSurvivors.length ? "one from " + new Set(allSurvivors.map(tm=>tm._division)).size + " division" + (new Set(allSurvivors.map(tm=>tm._division)).size!==1?"s":"") : ""} — highest score Week ${champWeek} wins it all.</div>
+            <div class="trn-po-round-blend-note">${allSurvivors.length} team${allSurvivors.length!==1?"s":""} remaining across ${new Set(allSurvivors.map(tm=>tm._division)).size} division${new Set(allSurvivors.map(tm=>tm._division)).size!==1?"s":""} — highest score Week ${champWeek} wins it all.</div>
           </div>
-          <div class="trn-po-groups-wrap" style="margin-bottom:var(--space-4)">${champRows || `<div class="trn-po-empty">No survivors yet — waiting on earlier weeks to resolve.</div>`}</div>`;
+          <div class="trn-po-groups-wrap">${champRows || `<div class="trn-po-empty">Week ${champWeek} hasn't started yet.</div>`}</div>`;
 
         const loaderEl = document.getElementById("trn-chop-loader");
         const bodyEl   = document.getElementById("trn-chop-body");
@@ -18809,18 +18878,54 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <button class="trn-history-tab trn-chop-subtab trn-history-tab--active" data-sub="divisions">Divisions</button>
               <button class="trn-history-tab trn-chop-subtab" data-sub="championship">🏆 Championship</button>
             </div>
-            <div id="trn-chop-pane-divisions"><div class="trn-po-groups-wrap">${divisionsHTML}</div></div>
+            <div id="trn-chop-pane-divisions">
+              <div style="margin-bottom:var(--space-3)">
+                <select id="trn-chop-div-picker" style="font-size:.85rem;padding:4px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)">
+                  ${divPickerOpts}
+                </select>
+              </div>
+              <div id="trn-chop-div-detail"></div>
+            </div>
             <div id="trn-chop-pane-championship" style="display:none">${champCard}</div>`;
+
+          const divDetailEl = document.getElementById("trn-chop-div-detail");
+          const divPickerEl = document.getElementById("trn-chop-div-picker");
+          const _showDiv = (dName) => { _choppedActiveDiv = dName; if (divDetailEl) divDetailEl.innerHTML = divisionPaneHTML(dName); };
+          const initialDiv = (_choppedActiveDiv && divNames.includes(_choppedActiveDiv)) ? _choppedActiveDiv : divNames[0];
+          if (divPickerEl) divPickerEl.value = initialDiv;
+          if (divNames.length) _showDiv(initialDiv);
+          divPickerEl?.addEventListener("change", () => _showDiv(divPickerEl.value));
+
           bodyEl.querySelectorAll(".trn-chop-subtab").forEach(btn => {
             btn.addEventListener("click", () => {
               bodyEl.querySelectorAll(".trn-chop-subtab").forEach(b => b.classList.toggle("trn-history-tab--active", b === btn));
               const sub = btn.dataset.sub;
+              _choppedActiveSub = sub;
               const divPane = document.getElementById("trn-chop-pane-divisions");
               const champPane = document.getElementById("trn-chop-pane-championship");
               if (divPane)   divPane.style.display   = sub === "divisions"   ? "" : "none";
               if (champPane) champPane.style.display = sub === "championship" ? "" : "none";
             });
           });
+          if (_choppedActiveSub === "championship") {
+            bodyEl.querySelector('.trn-chop-subtab[data-sub="championship"]')?.click();
+          }
+
+          // Live score refresh: only worth polling while at least one
+          // division has a week actually in progress (unresolvedDivs) — once
+          // everything's locked for the season there's nothing left to
+          // change until next week. Stops itself the moment this view is
+          // navigated away from (container no longer in the DOM), same
+          // pattern as the live draft poll above.
+          if (unresolvedDivs.length) {
+            _choppedPollInterval = setInterval(() => {
+              if (!document.getElementById("trn-chop-body")) {
+                clearInterval(_choppedPollInterval); _choppedPollInterval = null;
+                return;
+              }
+              _renderChoppedPlayoffs(tid, t, body, po, activeY, isAdmin);
+            }, 30000);
+          }
         }
       } catch(e) {
         const loaderEl = document.getElementById("trn-chop-loader");
