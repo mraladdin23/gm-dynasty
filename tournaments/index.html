@@ -2336,8 +2336,8 @@
       const leagueChamps = po.leagueChamps || [];
       const showChamps = po.recognizeLeagueChampions && leagueChamps.length > 0;
 
-      const modeLabel = {total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup"}[mode]||mode;
-      const modeIcon  = {total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍"}[mode]||"🏆";
+      const modeLabel = {total_points:"Total Points",points_rounds:"Points Rounds",h2h_bracket:"H2H Bracket",custom_rounds:"Custom Rounds",worldcup:"World Cup",chopped:"Chopped Championship"}[mode]||mode;
+      const modeIcon  = {total_points:"📊",points_rounds:"📈",h2h_bracket:"🥊",custom_rounds:"⚙️",worldcup:"🌍",chopped:"🔪"}[mode]||"🏆";
       const sw = po.startWeek, ew = po.endWeek;
 
       // Helper: prefer displayName over teamName everywhere
@@ -2345,7 +2345,8 @@
 
       // ── Tabs ──────────────────────────────────────────────
       // Worldcup: playoffs tab shows bracket only — standings live on the Standings tab
-      const tabs = mode === "worldcup" ? [] : [{ id:"standings", label:"📊 Standings" }];
+      // Chopped: has its own Divisions/Championship layout, not the generic standings table
+      const tabs = (mode === "worldcup" || mode === "chopped") ? [] : [{ id:"standings", label:"📊 Standings" }];
       if (mode==="total_points")    tabs.push({id:"leaderboard", label:"🏆 Leaderboard"});
       else if (mode==="points_rounds") rounds.forEach((_,i) => {
         tabs.push({id:`round_${i}`, label: i===rounds.length-1 ? "🏆 Championship" : `Round ${i+1}`});
@@ -2358,6 +2359,10 @@
         // In worldcup mode the Playoffs tab only shows the bracket.
         // All group standings + matchups are in the Standings tab.
         tabs.push({id:"wc_bracket", label:"🥊 Bracket"});
+      }
+      else if (mode==="chopped") {
+        tabs.push({id:"chop_divisions", label:"Divisions"});
+        tabs.push({id:"chop_championship", label:"🏆 Championship"});
       }
       if (showChamps) tabs.push({id:"league_champs", label:"🏅 League Champs"});
 
@@ -2946,12 +2951,92 @@
         return `<div class="trn-wc-bracket-wrap"><div class="trn-wc-bracket">${cols}${champCol}</div></div>`;
       };
 
+      // ── Chopped Championship: Divisions (dropdown-filtered week-by-week table) ──
+      const _choppedDivisionsView = () => {
+        const cp = po.chopped_public;
+        if (!cp || !cp.divisions?.length) return `<div class="trn-po-empty">No division data published yet.</div>`;
+        const divPickerOpts = cp.divisions.map(d => `<option value="${esc(d.name)}">${esc(d.name)} (${d.teams.filter(tm=>tm.eliminatedWeek==null).length} of ${d.teams.length} left)</option>`).join("");
+
+        const _paneFor = (dName) => {
+          const div = cp.divisions.find(d => d.name === dName);
+          if (!div) return `<div class="trn-po-empty">Division not found.</div>`;
+          const weekCols = [];
+          for (let w = cp.startWeek; w < cp.championshipWeek; w++) weekCols.push(w);
+          const rows = [...div.teams].sort((a,b) => b.totalPF - a.totalPF).map(tm => {
+            const isAlive = tm.eliminatedWeek == null;
+            const cells = weekCols.map(w => {
+              const s = tm.weeklyScores?.[w];
+              const isElimWeek = tm.eliminatedWeek === w;
+              const style = isElimWeek ? "background:rgba(239,68,68,.15);color:#ef4444;font-weight:700" : "";
+              const label = s != null ? Number(s).toFixed(1) : (w === div.stalledWeek ? "…" : "—");
+              return `<td class="trn-po-num" style="${style}" ${isElimWeek?'title="Chopped this week"':""}>${label}${isElimWeek?" 🔪":""}</td>`;
+            }).join("");
+            return `<tr class="${isAlive?"trn-po-row--advance":"trn-po-row--cut"}">
+              <td class="trn-po-team-name">${esc(tm.name)}</td>
+              ${cells}
+              <td class="trn-po-num trn-po-pf"><strong>${tm.totalPF.toFixed(1)}</strong></td>
+              <td>${isAlive
+                ? `<span class="trn-po-badge trn-po-badge--advance">🟢 Alive</span>`
+                : `<span class="trn-po-badge trn-po-badge--eliminated">🔪 Wk ${tm.eliminatedWeek}</span>`}</td>
+            </tr>`;
+          }).join("");
+          const headerCells = weekCols.map(w => `<th class="trn-po-th-num">Wk ${w}</th>`).join("");
+          const note = div.stalledWeek != null
+            ? `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:6px">⏳ Week ${div.stalledWeek} was still in progress as of the last publish.</div>`
+            : `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:6px">✅ Fully resolved through Week ${cp.championshipWeek - 1}.</div>`;
+          return `<div class="trn-po-table-wrap"><table class="trn-po-table">
+            <thead><tr><th>Team</th>${headerCells}<th class="trn-po-th-num">Total PF</th><th>Status</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>${note}`;
+        };
+
+        setTimeout(() => {
+          const sel = document.getElementById("pub-chop-div-picker");
+          const out = document.getElementById("pub-chop-div-detail");
+          if (!sel || !out) return;
+          out.innerHTML = _paneFor(cp.divisions[0].name);
+          sel.addEventListener("change", () => { out.innerHTML = _paneFor(sel.value); });
+        }, 0);
+
+        return `
+          <div style="margin-bottom:var(--space-3)">
+            <select id="pub-chop-div-picker" class="trn-po-tab-select" style="display:inline-block;width:auto">${divPickerOpts}</select>
+          </div>
+          <div id="pub-chop-div-detail"></div>`;
+      };
+
+      // ── Chopped Championship: Championship pool ─────────────────────────
+      const _choppedChampionshipView = () => {
+        const cp = po.chopped_public;
+        if (!cp) return `<div class="trn-po-empty">No championship data published yet.</div>`;
+        if (!cp.allResolved) {
+          return `<div class="trn-po-empty">Championship pool isn't final yet — still waiting on: ${
+            (cp.unresolvedDivisions||[]).map(esc).join(", ")
+          }. Check back once the commissioner publishes an update.</div>`;
+        }
+        if (!cp.championship?.length) return `<div class="trn-po-empty">Championship Week hasn't started yet.</div>`;
+        const rows = cp.championship.map((tm, i) => `
+          <div class="trn-po-group-row ${i===0?"trn-po-row--champion":""}">
+            <span class="trn-po-rank">${i+1}</span>
+            <span class="trn-po-team-name">${esc(tm.name)} <span class="trn-po-team-sub">(${esc(tm.division)})</span></span>
+            <span class="trn-po-pf" style="margin-left:auto">${tm.score!=null?Number(tm.score).toFixed(2):"—"}</span>
+            ${i===0 ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>` : ""}
+          </div>`).join("");
+        return `
+          <div class="trn-po-round-card trn-po-round-card--final" style="margin-bottom:var(--space-3)">
+            <div class="trn-po-round-header"><span>🏆 Championship — Week ${cp.championshipWeek}</span></div>
+          </div>
+          <div class="trn-po-groups-wrap">${rows}</div>`;
+      };
+
       const _renderContent = (tabId) => {
         if (tabId==="standings")    return _standingsView();
         if (tabId==="leaderboard")  return _leaderboard();
         if (tabId==="bracket")      return _bracketView();
         if (tabId==="league_champs") return _leagueChampsView();
         if (tabId==="wc_bracket")   return _wcBracketView();
+        if (tabId==="chop_divisions")   return _choppedDivisionsView();
+        if (tabId==="chop_championship") return _choppedChampionshipView();
         if (tabId.startsWith("round_"))  return _roundView(parseInt(tabId.split("_")[1]), false);
         if (tabId.startsWith("cround_")) return _roundView(parseInt(tabId.split("_")[1]), true);
         return `<div class="trn-po-empty">Tab not found.</div>`;
