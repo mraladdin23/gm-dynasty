@@ -9271,9 +9271,18 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 : '<span class="trn-po-badge trn-po-badge--eliminated">Out</span>')
             : "")
         : "";
+      // Division leader: rank 1 within its own league (a "division" in this
+      // app is a single league) — shown whenever division data exists, not
+      // gated to any one playoff mode, since it's meaningful for any
+      // tournament that groups leagues into divisions. Inline-styled (not
+      // just classed) so it's visible without depending on new CSS existing.
+      const isDivLeader = hasDiv && r.division && r.rank === 1;
+      const leaderBadge = isDivLeader
+        ? ' <span title="Leading its division" style="background:rgba(234,179,8,.15);color:#eab308;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">👑 Leader</span>'
+        : "";
       return "<tr" + (rowCls ? ' class="' + rowCls + '"' : "") + ">" +
         '<td class="standings-rank">' + r.overallRank + "</td>" +
-        '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + twitterLink(r) + '</span>' +
+        '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + leaderBadge + twitterLink(r) + '</span>' +
         (hasConf && r.conference ? '<span class="trn-st-sub">' + _esc(r.conference) + "</span>" : "") +
         (hasDiv  && r.division   ? '<span class="trn-st-sub">' + _esc(r.division)   + "</span>" : "") +
         '<span class="trn-st-sub trn-st-sub--league">' + _esc(r.leagueName) + "</span>" +
@@ -18874,9 +18883,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         if (bodyEl) {
           bodyEl.style.display = "";
           bodyEl.innerHTML = `
-            <div class="trn-history-tabs" style="margin-bottom:var(--space-3)">
-              <button class="trn-history-tab trn-chop-subtab trn-history-tab--active" data-sub="divisions">Divisions</button>
-              <button class="trn-history-tab trn-chop-subtab" data-sub="championship">🏆 Championship</button>
+            <div class="trn-history-tabs" style="margin-bottom:var(--space-3);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-2)">
+              <div>
+                <button class="trn-history-tab trn-chop-subtab trn-history-tab--active" data-sub="divisions">Divisions</button>
+                <button class="trn-history-tab trn-chop-subtab" data-sub="championship">🏆 Championship</button>
+              </div>
+              ${isAdmin ? `<button class="btn-secondary btn-sm" id="trn-chop-publish-btn">📢 Publish to Public Page</button>` : ""}
             </div>
             <div id="trn-chop-pane-divisions">
               <div style="margin-bottom:var(--space-3)">
@@ -18887,6 +18899,49 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <div id="trn-chop-div-detail"></div>
             </div>
             <div id="trn-chop-pane-championship" style="display:none">${champCard}</div>`;
+
+          document.getElementById("trn-chop-publish-btn")?.addEventListener("click", async (ev) => {
+            const btn = ev.currentTarget;
+            btn.disabled = true; btn.textContent = "Publishing…";
+            try {
+              // Serialize exactly what's already been computed above — same
+              // simulation, just written down instead of rendered to DOM.
+              // The public page (index.html) re-renders from this directly;
+              // it does not re-run the simulation itself, so it needs every
+              // week's score, not just the final totals.
+              const publicDivisions = divNames.map(dName => {
+                const res = divisionResults[dName];
+                return {
+                  name: dName,
+                  stalledWeek: res.stalledWeek,
+                  teams: res.allMembers.map(tm => ({
+                    name: _dn(tm),
+                    teamKey: _teamKeyC(tm),
+                    eliminatedWeek: res.eliminatedAt[_teamKeyC(tm)] ?? null,
+                    totalPF: res.totalPF[_teamKeyC(tm)] || 0,
+                    weeklyScores: res.weeklyScores[_teamKeyC(tm)] || {}
+                  }))
+                };
+              });
+              const publicChampionship = allDivisionsResolved ? champSorted.map(({tm, score}) => ({
+                name: _dn(tm), division: tm._division, score: score ?? null
+              })) : null;
+              const snapshot = {
+                startWeek, championshipWeek: champWeek,
+                allResolved: allDivisionsResolved,
+                unresolvedDivisions: unresolvedDivs,
+                divisions: publicDivisions,
+                championship: publicChampionship,
+                publishedAt: Date.now()
+              };
+              await _tPlayoffsRef(tid, activeY).update({ chopped_public: snapshot });
+              showToast("Published ✓ — visible on the public page now");
+            } catch(e) {
+              showToast("Failed to publish: " + e.message, "error");
+            } finally {
+              btn.disabled = false; btn.textContent = "📢 Publish to Public Page";
+            }
+          });
 
           const divDetailEl = document.getElementById("trn-chop-div-detail");
           const divPickerEl = document.getElementById("trn-chop-div-picker");
@@ -19738,6 +19793,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const tableClass = blendEnabled ? "trn-po-table trn-po-table--blend" : "trn-po-table";
       const colSpan = blendEnabled ? 7 : 5;
 
+      // Conference filter — only meaningful for a conference-scoped round.
+      // Built synchronously from `qualifiers` (already available in this
+      // closure) so the dropdown can render immediately in the shell,
+      // before scores are fetched.
+      const roundConfListSync = (!isFinal && round.scope === "conference")
+        ? [...new Set(qualifiers.map(tm => tm.conference).filter(Boolean))].sort()
+        : [];
+      const confFilterId = `trn-po-round-conf-${roundIdx}`;
+
       // Shell renders synchronously; pool/scores filled async
       const shell = `
         <div class="trn-po-round-card ${isFinal?"trn-po-round-card--final":""}">
@@ -19748,6 +19812,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </div>
           <div class="trn-po-round-blend-note">${blendNote}</div>
         </div>
+        ${roundConfListSync.length ? `
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-2)">
+          <label style="font-size:.82rem;font-weight:600;color:var(--color-text-dim)">Conference</label>
+          <select id="${confFilterId}" class="trn-filter-select" style="font-size:.82rem">
+            <option value="">All Conferences (${roundConfListSync.length})</option>
+            ${roundConfListSync.map(c => `<option value="${_esc(c)}">${_esc(c)}</option>`).join("")}
+          </select>
+        </div>` : ""}
         <div class="trn-po-table-wrap" style="margin-top:var(--space-2)">
           <div id="${loaderId}" style="font-size:.8rem;color:var(--color-text-dim);padding:var(--space-2) 0">
             ⏳ Loading scores…
@@ -20152,6 +20224,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               : _playoffExpandRowAttrs(tm, leagueIdByTeamKey[_teamKey(tm)], weekNum);
 
             return `<tr class="${rowCls}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"
+              ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}
               ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}>
               <td class="trn-po-rank">${i+1}</td>
               <td class="trn-po-team-name">
@@ -20160,7 +20233,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               </td>
               ${wkCell}
               <td>${badge}${expandInfo.hasData ? `<span class="trn-po-expand-hint">▾ Lineup</span>` : ""}</td>
-            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden"><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row"><td colspan="${colSpan}"><div class="trn-po-cut-divider">— ${blockLabel}Cut Line — ${blockAdv} advance · ${blockElim} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
+            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-cut-divider">— ${blockLabel}Cut Line — ${blockAdv} advance · ${blockElim} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
           }).join("");
 
           const table  = document.getElementById(tableId);
@@ -20175,6 +20248,24 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           }
           if (loader) loader.style.display = "none";
 
+          // Conference filter: show/hide rows by their data-conf tag. Bye
+          // rows are deliberately skipped here — they're exclusively managed
+          // by the bye-collapse toggle below (which also re-applies whenever
+          // this filter changes), so the two mechanisms don't fight over the
+          // same rows' display style.
+          const confFilterEl = document.getElementById(confFilterId);
+          if (confFilterEl && table) {
+            const _applyConfFilter = () => {
+              const val = confFilterEl.value;
+              table.querySelectorAll("tbody tr[data-conf]").forEach(tr => {
+                if (tr.classList.contains("trn-po-bye-row-data")) return;
+                tr.style.display = (!val || tr.dataset.conf === val) ? "" : "none";
+              });
+            };
+            confFilterEl.addEventListener("change", _applyConfFilter);
+            _applyConfFilter();
+          }
+
           // Bye collapse bar
           if (poolByes > 0) {
             const byeBar = document.getElementById(tableId + "-bye-bar");
@@ -20185,8 +20276,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                   ${byesVisible ? "▼" : "▶"} ${byesVisible ? "Hide" : "Show"} ${poolByes} bye${poolByes!==1?"s":""} (auto-advance)
                 </button>`;
                 byeBar.style.display = "";
+                // Respect the conference filter too — a bye from a
+                // conference that's currently filtered out should stay
+                // hidden even when "Show byes" is on.
+                const confVal = confFilterEl?.value || "";
                 table.querySelectorAll(".trn-po-bye-row-data").forEach(tr => {
-                  tr.style.display = byesVisible ? "" : "none";
+                  const matchesConf = !confVal || !tr.dataset.conf || tr.dataset.conf === confVal;
+                  tr.style.display = (byesVisible && matchesConf) ? "" : "none";
                 });
                 byeBar.querySelector("button").onclick = () => {
                   byesVisible = !byesVisible;
@@ -20194,6 +20290,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 };
               };
               _updateByeBar(); // start collapsed
+              // Re-apply bye visibility whenever the conference filter changes too.
+              confFilterEl?.addEventListener("change", _updateByeBar);
             }
           }
 
