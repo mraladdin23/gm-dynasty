@@ -9236,6 +9236,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // Badges: show "↑ Advances" / "Eliminated" only when regular season is complete.
     // Cut line divider is always shown when qualCount is configured.
     if (!rows.length) return '<div class="empty-state">No teams match your filters.</div>';
+    const leagueCount = new Set(rows.map(r => r.leagueName)).size;
 
     const si = (col) => {
       if (_standingsSort.col !== col) return '<span style="margin-left:3px;font-size:.65rem;opacity:.4">⇅</span>';
@@ -9278,12 +9279,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
                 : '<span class="trn-po-badge trn-po-badge--eliminated">Out</span>')
             : "")
         : "";
-      // Division leader: rank 1 within its own league (a "division" in this
-      // app is a single league) — shown whenever division data exists, not
-      // gated to any one playoff mode, since it's meaningful for any
-      // tournament that groups leagues into divisions. Inline-styled (not
-      // just classed) so it's visible without depending on new CSS existing.
-      const isDivLeader = hasDiv && r.division && r.rank === 1;
+      // Division leader: rank 1 within its own league. Originally gated on
+      // hasDiv/r.division (an explicit Division field per league), but
+      // qualification's own "top 1 per division" step doesn't require that
+      // field either — it falls back to treating each league as its own
+      // division when the field is blank (_groupKey's behavior). Gating the
+      // crown on hasDiv meant it silently never showed for any tournament
+      // that leans on that same fallback, which is exactly what was
+      // happening here. Now it matches that fallback: shown whenever there's
+      // more than one league in the current view, regardless of whether an
+      // explicit Division label was ever set.
+      const isDivLeader = leagueCount > 1 && r.rank === 1;
       const leaderBadge = isDivLeader
         ? ' <span title="Leading its division" style="background:rgba(234,179,8,.15);color:#eab308;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">👑 Leader</span>'
         : "";
