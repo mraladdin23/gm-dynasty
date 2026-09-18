@@ -3691,7 +3691,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         <div class="trn-qual-step-card-body">
           <div class="trn-qs-body-record" ${type==="top_record"?"":"style=\"display:none\""}>
             <div class="trn-qs-inline-label">Take top
-              <input type="number" class="trn-qs-count" data-step-idx="${idx}"
+              <input type="number" class="trn-qs-count trn-qs-count-record" data-step-idx="${idx}"
                 min="1" max="999" value="${count}"
                 style="width:54px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;margin:0 4px" />
               <span style="font-size:.8rem;color:var(--color-text-dim)">by H2H record (not yet qualified)</span>
@@ -3699,7 +3699,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           </div>
           <div class="trn-qs-body-pf" ${type==="top_pf"?"":"style=\"display:none\""}>
             <div class="trn-qs-inline-label">Take top
-              <input type="number" class="trn-qs-count" data-step-idx="${idx}"
+              <input type="number" class="trn-qs-count trn-qs-count-pf" data-step-idx="${idx}"
                 min="1" max="999" value="${count}"
                 style="width:54px;font-size:.8rem;padding:2px 5px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);text-align:center;margin:0 4px" />
               <span style="font-size:.8rem;color:var(--color-text-dim)">by Points For (not yet qualified)</span>
@@ -4947,7 +4947,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const type = card.querySelector(".trn-qs-type")?.value||"top_pf";
       const base = { type };
       if (["top_record","top_pf"].includes(type)) {
-        base.count = parseInt(card.querySelector(`.trn-qs-count[data-step-idx="${idx}"]`)?.value)||2;
+        // These two metrics have separate count inputs (only one shown at a
+        // time based on type) — must select by the type-specific class, not
+        // the shared .trn-qs-count, which matches BOTH (one hidden) and
+        // silently reads whichever comes first in the DOM regardless of
+        // which one the person actually edited.
+        const countCls = type==="top_record" ? ".trn-qs-count-record" : ".trn-qs-count-pf";
+        base.count = parseInt(card.querySelector(`${countCls}[data-step-idx="${idx}"]`)?.value)||2;
         base.scope = card.querySelector(".trn-qs-scope-pill--active")?.dataset.scope || "overall";
       }
       if (type==="wins_threshold") base.minWins = parseInt(card.querySelector(".trn-qs-min-wins")?.value)||13;
@@ -4968,9 +4974,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const idx   = card.dataset.stepIdx;
         const scope = card.querySelector(".trn-qs-scope-pill--active")?.dataset.scope || "overall";
         const isScoped = ["top_record","top_pf","top_subgroup"].includes(type) && scope!=="overall";
+        const countCls = type==="top_record" ? ".trn-qs-count-record" : ".trn-qs-count-pf";
         const add   = type==="wins_threshold" ? 0
           : type==="top_subgroup" ? (parseInt(card.querySelector(".trn-qs-sub-count")?.value)||2)
-          : (parseInt(card.querySelector(`.trn-qs-count[data-step-idx="${idx}"]`)?.value)||2);
+          : (parseInt(card.querySelector(`${countCls}[data-step-idx="${idx}"]`)?.value)||2);
         if (!isScoped) sum += add;
         const chip = card.querySelector(".trn-qs-total-chip");
         if (chip) {
