@@ -9144,6 +9144,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const leagues = [...new Set(allRows.map(r => r.leagueName).filter(Boolean))].sort();
     const hasLeagueFilter = leagues.length > 1;
 
+    // Donor flag — fetched async (registrations + donation totals aren't
+    // part of standingsCache), so the table renders immediately without it
+    // and re-renders once resolved. Cached for 5 min in _getDonorTeamKeys
+    // so switching filters/tabs doesn't refetch every time.
+    let donorKeys = new Set();
+
     body.innerHTML = `
       <div class="trn-standings-toolbar">
         <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
@@ -9164,7 +9170,12 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
             ${leagues.map(l => `<option value="${_esc(l)}">${_esc(l)}</option>`).join("")}
           </select>
         </div>` : ""}
-        <input type="text" id="trn-st-search" placeholder="Search team or league…" class="trn-st-search" />
+        <div style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
+          <input type="text" id="trn-st-search" placeholder="Search team or league…" class="trn-st-search" style="flex:1" />
+          <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;color:var(--color-text-dim);white-space:nowrap;cursor:pointer">
+            <input type="checkbox" id="trn-st-donors-only" /> 💲 Donors only
+          </label>
+        </div>
       </div>
       <div class="trn-standings-meta">
         Last synced: ${_esc(lastSyncedStr)}
@@ -9173,7 +9184,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         </span>
       </div>
       <div id="trn-standings-wrap">
-        ${_buildStandingsTable(allRows, hasConf, hasDiv, "flat", extraCols, regComplete, stQualCount)}
+        ${_buildStandingsTable(allRows, hasConf, hasDiv, "flat", extraCols, regComplete, stQualCount, donorKeys)}
       </div>
     `;
 
@@ -9181,8 +9192,10 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const q        = (document.getElementById("trn-st-search")?.value || "").toLowerCase();
       const grpVal   = document.getElementById("trn-st-group")?.value || "flat";
       const leagueVal = document.getElementById("trn-st-league")?.value || "";
+      const donorsOnly = document.getElementById("trn-st-donors-only")?.checked || false;
       let rows = allRows;
       if (leagueVal) rows = rows.filter(r => r.leagueName === leagueVal);
+      if (donorsOnly) rows = rows.filter(r => donorKeys.has(_skDonor(r.teamName)) || donorKeys.has(_skDonor(r.rawTeamName)));
       if (q) rows = rows.filter(r =>
         r.teamName.toLowerCase().includes(q) ||
         (r.rawTeamName||"").toLowerCase().includes(q) ||
@@ -9200,14 +9213,21 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       }
       rows = _sortRows(rows, _standingsSort.col, _standingsSort.dir);
       const wrap = document.getElementById("trn-standings-wrap");
-      if (wrap) wrap.innerHTML = _buildStandingsTable(rows, hasConf, hasDiv, grp, extraCols, regComplete, stQualCount);
+      if (wrap) wrap.innerHTML = _buildStandingsTable(rows, hasConf, hasDiv, grp, extraCols, regComplete, stQualCount, donorKeys);
       _wireStandingSortHeaders(allRows, hasConf, hasDiv);
     };
 
     document.getElementById("trn-st-search")?.addEventListener("input", refilter);
     document.getElementById("trn-st-group")?.addEventListener("change", refilter);
     document.getElementById("trn-st-league")?.addEventListener("change", refilter);
+    document.getElementById("trn-st-donors-only")?.addEventListener("change", refilter);
     _wireStandingSortHeaders(allRows, hasConf, hasDiv);
+
+    // Resolve donor flags in the background and re-render once known.
+    _getDonorTeamKeys(tid, activePoYear).then(keys => {
+      donorKeys = keys;
+      if (donorKeys.size) refilter();
+    });
   }
 
   function _wireStandingSortHeaders(allRows, hasConf, hasDiv) {
@@ -9230,7 +9250,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     });
   }
 
-  function _buildStandingsTable(rows, hasConf, hasDiv, groupMode, extraCols, regComplete, qualCount) {
+  function _buildStandingsTable(rows, hasConf, hasDiv, groupMode, extraCols, regComplete, qualCount, donorKeys) {
+    donorKeys = donorKeys || new Set();
     const extra = extraCols || [];
     const showCutLine = qualCount != null && qualCount > 0 && qualCount < rows.length;
     // Badges: show "↑ Advances" / "Eliminated" only when regular season is complete.
@@ -9293,9 +9314,13 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const leaderBadge = isDivLeader
         ? ' <span title="Leading its division" style="background:rgba(234,179,8,.15);color:#eab308;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">👑 Leader</span>'
         : "";
+      const isDonor = donorKeys.has(_skDonor(r.teamName)) || donorKeys.has(_skDonor(r.rawTeamName));
+      const donorBadge = isDonor
+        ? ' <span title="Donated" style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">💲</span>'
+        : "";
       return "<tr" + (rowCls ? ' class="' + rowCls + '"' : "") + ">" +
         '<td class="standings-rank">' + r.overallRank + "</td>" +
-        '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + leaderBadge + twitterLink(r) + '</span>' +
+        '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + leaderBadge + donorBadge + twitterLink(r) + '</span>' +
         (hasConf && r.conference ? '<span class="trn-st-sub">' + _esc(r.conference) + "</span>" : "") +
         (hasDiv  && r.division   ? '<span class="trn-st-sub">' + _esc(r.division)   + "</span>" : "") +
         '<span class="trn-st-sub trn-st-sub--league">' + _esc(r.leagueName) + "</span>" +
@@ -12958,6 +12983,38 @@ Good luck this season!
     return byKey;
   }
 
+  // ── Donor lookup ──────────────────────────────────────────────────────────
+  // Donations are recorded per-registrant (tournaments/{tid}/donations/{year}/{rid}),
+  // not per-team — this resolves that into a Set of sanitized team-name keys
+  // so any view that already has a team name (Standings, Season Analysis, ...)
+  // can cheaply check "did this team's registrant donate" without re-fetching
+  // registrations every time. Cached per tid+year for 5 minutes since
+  // donation totals don't change from click to click.
+  const _donorKeysCache = {}; // `${tid}_${year}` -> { keys: Set, fetchedAt }
+  const _skDonor = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+  async function _getDonorTeamKeys(tid, year) {
+    const ck = `${tid}_${year}`;
+    const cached = _donorKeysCache[ck];
+    if (cached && (Date.now() - cached.fetchedAt) < 300000) return cached.keys;
+    try {
+      const [regSnap, donSnap] = await Promise.all([
+        _tRegsRef(tid).once("value"),
+        GMD.child(`tournaments/${tid}/donations/${year}`).once("value"),
+      ]);
+      const regsObj = regSnap.val() || {};
+      const donsObj = donSnap.val() || {};
+      const keys = new Set();
+      Object.entries(donsObj).forEach(([rid, d]) => {
+        if (!(d?.total > 0)) return;
+        const r = regsObj[rid];
+        const name = r?.displayName || r?.teamName || rid;
+        keys.add(_skDonor(name));
+      });
+      _donorKeysCache[ck] = { keys, fetchedAt: Date.now() };
+      return keys;
+    } catch(e) { return new Set(); }
+  }
+
   // ── ANALYTICS: Draft tab ───────────────────────────────────────────────────
   let _draftCache        = null;  // { picks, adp, byLeague, fetchedAt, tid }
   let _draftForceRefresh = false; // set true by refresh button to bypass Firebase cache
@@ -16435,19 +16492,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         <div class="trn-az-loading"><div class="spinner"></div> Computing season stats…</div>
       </div>`;
 
+    // Fetched after the loading spinner is already showing, so this doesn't
+    // delay first paint — it's cached for 5 min so it's only slow once.
+    const donorKeys = await _getDonorTeamKeys(tid, year);
+
     document.getElementById("trn-sa-refresh-btn")?.addEventListener("click", async () => {
       const ck = `${tid}_${year}`;
       delete _seasonAnalysisCache[ck];
       await _tAnalyticsRef(tid).child(`seasonMatchups/${year}`).remove().catch(() => {});
       const el2 = document.getElementById("trn-sa-content");
       if (el2) el2.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Refreshing…</div>`;
-      await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, document.getElementById("trn-sa-content"));
+      await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, donorKeys, document.getElementById("trn-sa-content"));
     });
 
-    await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, document.getElementById("trn-sa-content"));
+    await _loadAndRenderSeasonAnalysis(tid, t, sleeperLeagues, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, donorKeys, document.getElementById("trn-sa-content"));
   }
 
-  async function _loadAndRenderSeasonAnalysis(tid, t, leagueIds, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, el) {
+  async function _loadAndRenderSeasonAnalysis(tid, t, leagueIds, year, maxRegWeek, maxPoWeek, myKeys, isAdmin, standingsCache, donorKeys, el) {
     if (!el) return;
 
     // ── Build team name map and league name map from standingsCache ─────────
@@ -16521,11 +16582,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         } catch(e) {}
 
         if (!hasMatchupData) {
-          // Fetch regular-season weeks only on initial load.
-          // Playoff weeks are fetched lazily when the toggle is turned on
-          // (see the toggle handler in _renderSeasonAnalysisContent).
-          el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching ${maxRegWeek} weeks of matchup data…</div>`;
-          const weeks = Array.from({ length: maxRegWeek }, (_, i) => i + 1);
+          // Only fetch weeks that have actually happened — previously this
+          // pulled every configured regular-season week (e.g. all 13)
+          // regardless of how far into the season it actually is, which
+          // wastes a fetch per league per week for weeks that haven't been
+          // played yet and return nothing. Cap at the real completed NFL
+          // week; falls back to the full configured range if that lookup
+          // fails, so this never fetches LESS than before, only skips
+          // fetching weeks that can't have data yet.
+          const completedNflWeek = await _getCompletedNflWeek();
+          const effectiveMaxWeek = completedNflWeek != null ? Math.min(maxRegWeek, completedNflWeek) : maxRegWeek;
+          el.innerHTML = `<div class="trn-az-loading"><div class="spinner"></div> Fetching ${effectiveMaxWeek} week${effectiveMaxWeek!==1?"s":""} of matchup data…</div>`;
+          const weeks = Array.from({ length: effectiveMaxWeek }, (_, i) => i + 1);
           for (let wi = 0; wi < weeks.length; wi++) {
             const wk = weeks[wi];
             for (let i = 0; i < leagueIds.length; i += 5) {
@@ -16575,17 +16643,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       }
     }
 
-    _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, leagueIds.length, leagueNameMap, myKeys, year, maxRegWeek, maxPoWeek, tid, leagueIds);
+    _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, leagueIds.length, leagueNameMap, myKeys, year, maxRegWeek, maxPoWeek, tid, leagueIds, donorKeys);
   }
 
-  function _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, numLeagues, leagueNameMap, myKeys, year, maxRegWeek, maxPoWeek, tid, leagueIds) {
+  function _renderSeasonAnalysisContent(el, seasonTeams, allMatchups, hasMatchupData, numLeagues, leagueNameMap, myKeys, year, maxRegWeek, maxPoWeek, tid, leagueIds, donorKeys) {
     if (!el) return;
+    donorKeys = donorKeys || new Set();
 
     // ── Helpers ─────────────────────────────────────────────────────────────
     const _isMe  = name => _isMyTeam(name, myKeys);
     const _me    = name => _isMe(name) ? ' <span class="trn-you-badge">you</span>' : "";
     const _lname = lid  => leagueNameMap[String(lid)] || "";
     const _ord   = n   => ["1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th"][n] || `${n+1}th`;
+    const _isDonorName = name => donorKeys.has(_skDonor(name));
 
     // Show the toggle whenever playoffs are configured — don't gate on whether
     // playoff data is in cache yet (it's fetched lazily when toggled on).
@@ -16660,7 +16730,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // Called on initial render and again when the playoff toggle changes.
     // Returns the full sections[] array so the nav and panel can be rebuilt.
     const _buildSections = (includePO) => {
-      let blowoutsHtml = "", lowWinHtml = "", highLossHtml = "", highIndivHtml = "";
+      let blowoutsHtml = "", lowWinHtml = "", highLossHtml = "", highIndivHtml = "", highDonorHtml = "";
 
       if (hasMatchupData) {
         // Apply playoff filter
@@ -16684,11 +16754,19 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           allIndivScores.push({ name: m.away.name, score: m.away.score, week: m.week, leagueId: m.leagueId, result: m.away.score > m.home.score ? "W" : "L" });
         });
         const highestIndiv = allIndivScores.sort((a, b) => b.score - a.score).slice(0, 10);
+        // Same data, filtered to donor teams only — answers "highest weekly
+        // score among teams that donated" directly, reusing the individual
+        // per-team-per-week scores already computed above rather than a
+        // separate fetch.
+        const highestDonorIndiv = donorKeys.size
+          ? allIndivScores.filter(s => _isDonorName(s.name)).sort((a, b) => b.score - a.score).slice(0, 10)
+          : [];
 
         blowoutsHtml  = biggestBlowouts.map((m, i) => muCard(m, `#${i+1}`, `Δ${m.diff.toFixed(2)}`)).join("");
         lowWinHtml    = lowestWins.map((m, i)       => muCard(m, `#${i+1}`, `Win: ${m.winner.score.toFixed(2)}`)).join("");
         highLossHtml  = highestLosses.map((m, i)    => muCard(m, `#${i+1}`, `Loss: ${m.loser.score.toFixed(2)}`)).join("");
         highIndivHtml = highestIndiv.map((ts, i)    => indivScoreCard(ts, i)).join("");
+        highDonorHtml = highestDonorIndiv.map((ts, i) => indivScoreCard(ts, i)).join("");
       }
 
       const matchupCount = hasMatchupData
@@ -16717,6 +16795,11 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             { id: "lowest_win",   icon: "🍀", label: "Lowest Winning Scores",     html: `<div class="trn-sa-mugrid">${lowWinHtml}</div>` },
             { id: "highest_loss", icon: "😤", label: "Highest Losing Scores",     html: `<div class="trn-sa-mugrid">${highLossHtml}</div>` },
             { id: "high_indiv",   icon: "🔥", label: "Highest Individual Scores", html: `<div class="trn-sa-statgrid">${highIndivHtml}</div>` },
+            ...(donorKeys.size ? [
+              { id: "high_donor", icon: "💲", label: "Highest Donor Scores", html: highDonorHtml
+                  ? `<div class="trn-sa-statgrid">${highDonorHtml}</div>`
+                  : `<div class="trn-az-meta">No donor teams have a scored matchup in this range yet.</div>` },
+            ] : []),
           ] : []),
         ]
       };
@@ -18728,6 +18811,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const pendingWrites = {}; // same shape, only the NEWLY computed weeks this pass
         const divisionResults = {}; // divName -> { eliminatedAt: {teamKey:week}, survivors:[tm], allMembers:[tm], stalledWeek: number|null }
 
+        // Sleeper returns 0 (not null) for a game that simply hasn't been
+        // played yet, indistinguishable from a genuine 0-point week by score
+        // alone. Checking only for null let the loop believe an entire
+        // in-progress week was "fully scored" the moment every team had
+        // SOME value — even if that value was just "hasn't played" — and
+        // then eliminate everyone tied at that false floor of 0. Gate on
+        // the actual NFL week state instead: a week can only be simulated
+        // once it's genuinely completed.
+        const completedNflWeek = await _getCompletedNflWeek();
+
         divNames.forEach(dName => {
           let alive = [...divisions[dName]];
           const eliminatedAt = {};
@@ -18743,6 +18836,10 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               alive = alive.filter(tm => !elimKeys.includes(_teamKeyC(tm)));
               continue;
             }
+            // Don't even attempt this week until the NFL schedule itself
+            // says it's done — the strongest available signal, since score
+            // values alone can't tell "hasn't played" from "scored zero".
+            if (completedNflWeek != null && w > completedNflWeek) { stalledWeek = w; break; }
             const scored = alive.map(tm => ({ tm, score: scoreOf(tm, w) }));
             if (scored.some(s => s.score == null)) { stalledWeek = w; break; }
             const minScore = Math.min(...scored.map(s => s.score));
@@ -18804,7 +18901,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         const allSurvivors = [];
         divNames.forEach(d => divisionResults[d].survivors.forEach(tm => allSurvivors.push({ ...tm, _division: d })));
         const champScored   = allDivisionsResolved ? allSurvivors.map(tm => ({ tm, score: scoreOf(tm, champWeek) })) : [];
-        const champAllIn    = champScored.length > 0 && champScored.every(s => s.score != null);
+        // Same fix as the division elimination loop: require the Championship
+        // Week to actually be over per the NFL schedule, not just "everyone
+        // has some score value" — 0 from an unplayed game would otherwise
+        // let this crown a "champion" mid-week.
+        const champWeekComplete = completedNflWeek != null && champWeek <= completedNflWeek;
+        const champAllIn    = champWeekComplete && champScored.length > 0 && champScored.every(s => s.score != null);
         const champSorted   = [...champScored].sort((a,b) => (b.score??-1) - (a.score??-1));
 
         // ── Render: Divisions (one at a time via dropdown) ─────────────────────
@@ -18838,32 +18940,37 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               const isDangerWeek = isDanger && w === res.stalledWeek;
               // Inline-styled (not just classed) so the highlight is guaranteed
               // visible without depending on a matching CSS rule existing.
-              const style = isElimWeek
-                ? "background:rgba(239,68,68,.15);color:#ef4444;font-weight:700"
+              const style = (isElimWeek
+                ? "background:rgba(239,68,68,.15);color:#ef4444;font-weight:700;"
                 : isDangerWeek
-                  ? "background:rgba(245,158,11,.15);color:#f59e0b;font-weight:700"
-                  : "";
+                  ? "background:rgba(245,158,11,.15);color:#f59e0b;font-weight:700;"
+                  : "") + "white-space:nowrap";
               const label = s != null ? s.toFixed(1) : (w === res.stalledWeek ? "…" : "—");
               return `<td class="trn-po-num" style="${style}" ${isElimWeek?`title="Chopped this week"`:isDangerWeek?`title="Lowest positive score so far this week — in danger of being chopped"`:""}>${label}${isElimWeek?" 🔪":isDangerWeek?" 🔻":""}</td>`;
             }).join("");
             return `<tr class="${isAlive?"trn-po-row--advance":"trn-po-row--cut"}">
-              <td class="trn-po-team-name">${_esc(_dn(tm))}</td>
+              <td class="trn-po-team-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;position:sticky;left:0;background:var(--color-surface);z-index:1" title="${_esc(_dn(tm))}">${_esc(_dn(tm))}</td>
               ${cells}
-              <td class="trn-po-num trn-po-pf"><strong>${res.totalPF[key].toFixed(1)}</strong></td>
-              <td>${isAlive
+              <td class="trn-po-num trn-po-pf" style="white-space:nowrap"><strong>${res.totalPF[key].toFixed(1)}</strong></td>
+              <td style="white-space:nowrap">${isAlive
                 ? (isDanger?`<span class="trn-po-badge trn-po-badge--eliminated">🔻 In Danger</span>`:`<span class="trn-po-badge trn-po-badge--advance">🟢 Alive</span>`)
                 : `<span class="trn-po-badge trn-po-badge--eliminated">🔪 Wk ${wkElim}</span>`}</td>
             </tr>`;
           }).join("");
 
-          const headerCells = weekCols.map(w => `<th class="trn-po-th-num">Wk ${w}</th>`).join("");
+          const headerCells = weekCols.map(w => `<th class="trn-po-th-num" style="white-space:nowrap;min-width:52px">Wk ${w}</th>`).join("");
           const stalledNote = res.stalledWeek != null
             ? `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:6px">⏳ Week ${res.stalledWeek} is still in progress — scores refresh live; the chop for that week locks once everyone's final.</div>`
             : `<div style="font-size:.75rem;color:var(--color-text-dim);margin-top:6px">✅ Fully resolved through Week ${champWeek - 1} — ${res.survivors.length} team${res.survivors.length!==1?"s":""} heading to the Championship.</div>`;
 
-          return `<div class="trn-po-table-wrap">
-            <table class="trn-po-table">
-              <thead><tr><th>Team</th>${headerCells}<th class="trn-po-th-num">Total PF</th><th>Status</th></tr></thead>
+          // Horizontal scroll instead of wrapping/squishing on narrow screens —
+          // the team-name column stays pinned (sticky) so it's still readable
+          // while scrolling through week columns. overflow-x is set inline
+          // since this table can have many week columns and shouldn't depend
+          // on a specific CSS rule existing for it.
+          return `<div class="trn-po-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+            <table class="trn-po-table" style="white-space:nowrap">
+              <thead><tr><th style="position:sticky;left:0;background:var(--color-surface);z-index:2">Team</th>${headerCells}<th class="trn-po-th-num" style="white-space:nowrap">Total PF</th><th style="white-space:nowrap">Status</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>${stalledNote}`;
@@ -19900,6 +20007,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // causing an already-eliminated team to reappear as "advancing".
           const lockedElims = po.pointsRounds?.eliminations || {};
 
+          // Don't attempt to show this round at all until every prior round
+          // has actually locked. Before that, this round's "pool" is only a
+          // guess built from incomplete/zero scores in an earlier round —
+          // showing advance/cut results built on top of a guess compounds
+          // the problem rather than just being early. Wait for the real
+          // thing instead of simulating a preview.
+          const firstUnlockedPriorRound = Array.from({length: roundIdx}, (_, ri) => ri)
+            .find(ri => !lockedElims[ri]);
+          if (firstUnlockedPriorRound != null) {
+            const loaderEl = document.getElementById(loaderId);
+            const tableEl  = document.getElementById(tableId);
+            if (loaderEl) {
+              loaderEl.style.display = "";
+              loaderEl.textContent = `⏳ Waiting for Round ${firstUnlockedPriorRound + 1} to finish before this round's field is final.`;
+            }
+            if (tableEl) tableEl.style.display = "none";
+            return;
+          }
+
           // Build cumulative start weeks for each prior round
           let rCursor = po.startWeek || 0;
           for (let ri = 0; ri < roundIdx; ri++) {
@@ -20110,15 +20236,23 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // eliminate_neither (more advance, with a deferred elimination next
           // round). Derive the real boundary from displayEliminatedKeys so the
           // cut-line divider, header summary, and labels all reflect what
-          // actually happened, not just the configured target.
+          // actually happened, not just the configured target. When
+          // displayEliminatedKeys doesn't exist yet (this round's own scores
+          // aren't all in), there IS no real count yet — don't fabricate one
+          // from the configured target, since that's exactly what produced
+          // "wrong number of teams advancing" while everyone's still at 0.
           const actualAdvCount = displayEliminatedKeys
             ? compSection_.length - displayEliminatedKeys.size
-            : advFromComp;
-          const actualEliminated = competitors - actualAdvCount;
+            : null;
+          const actualEliminated = actualAdvCount != null ? competitors - actualAdvCount : null;
 
-          const summary = isByeRound
-            ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${actualAdvCount} advance · ${actualEliminated} eliminated`
-            : `${pool.length} competing · ${actualAdvCount} advance · ${actualEliminated} eliminated`;
+          const summary = actualAdvCount == null
+            ? (isByeRound
+                ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · results pending`
+                : `${pool.length} competing · results pending`)
+            : isByeRound
+              ? `${pool.length} total · ${poolByes} byes · ${competitors} competing · ${actualAdvCount} advance · ${actualEliminated} eliminated`
+              : `${pool.length} competing · ${actualAdvCount} advance · ${actualEliminated} eliminated`;
 
           // Update the header meta text
           const headerEl = document.querySelector(`#${tableId}`)?.closest(".trn-po-table-wrap")
@@ -20134,58 +20268,30 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             }
           }
 
-          // Preview fallback (used only before displayEliminatedKeys exists, i.e.
-          // scores aren't all in yet) needs its own per-conference position
-          // counter for conference-scoped rounds — sortedPool is grouped by
-          // conference in that case (see the compSection_ sort above), so a
-          // flat global index no longer lines up with "top N of THIS
-          // conference". Without this, the preview would mark an entire early
-          // conference (alphabetically) as advancing and every later
-          // conference as cut, regardless of their actual scores — that
-          // mismatch is what caused Round 1 to appear to only advance a
-          // handful of teams total instead of top-N per conference.
-          const previewBlockPos  = {};
-          const previewBlockSize = {};
-          if (roundConfScoped && !displayEliminatedKeys) {
-            pool.slice(poolByes).forEach(tm => {
-              const g = tm.conference || "__none__";
-              previewBlockSize[g] = (previewBlockSize[g] || 0) + 1;
-            });
-          }
+          // isCompAdv is a tri-state: true (advancing), false (cut), or null
+          // (pending — no real result yet, only shown once displayEliminatedKeys
+          // exists). No positional/guessed fallback anymore — showing a guess
+          // built from partial or all-zero scores is exactly what produced
+          // "weird cuts" and the wrong advance count before a week's games
+          // had actually been played. Byes are still always non-null (they
+          // never depend on this round's scores).
           const rowStates = sortedPool.map((tm, i) => {
             const isByeTeam = isByeRound && i < poolByes;
-            const compIdx   = i - poolByes;
-            // Prefer the tie-aware result (displayEliminatedKeys) when available —
-            // falls back to a positional check only if scores aren't all in yet
-            // (so there's nothing tie-aware to compute against). The positional
-            // fallback is per-conference-block for conference-scoped rounds,
-            // and flat/global otherwise.
-            let isCompAdv;
-            if (isByeTeam) {
-              isCompAdv = false;
-            } else if (displayEliminatedKeys) {
-              isCompAdv = !displayEliminatedKeys.has(_teamKey(tm));
-            } else if (roundConfScoped) {
-              const g = tm.conference || "__none__";
-              const posInBlock = previewBlockPos[g] || 0;
-              previewBlockPos[g] = posInBlock + 1;
-              const advForThisConf = round.advanceMethod === "pct"
-                ? Math.round((previewBlockSize[g] || 0) * (round.advancePct || 50) / 100)
-                : (round.advanceCount || 0);
-              isCompAdv = posInBlock < advForThisConf;
-            } else {
-              isCompAdv = compIdx < advFromComp;
-            }
+            let isCompAdv = null;
+            if (isByeTeam) isCompAdv = false;
+            else if (displayEliminatedKeys) isCompAdv = !displayEliminatedKeys.has(_teamKey(tm));
             return { tm, isByeTeam, isCompAdv };
           });
 
           // Per-block (per-conference, or one "__all__" block for overall-scoped
           // rounds) totals — used for the cut-line divider text so each
           // conference's divider shows that conference's own advance/eliminate
-          // counts instead of the global total.
+          // counts instead of the global total. Pending rows (isCompAdv still
+          // null) are skipped — there's nothing real to count yet, and the
+          // divider that would use these never renders in that case anyway.
           const groupTotals = {}, groupAdvancing = {};
           rowStates.forEach(({ tm, isByeTeam, isCompAdv }) => {
-            if (isByeTeam) return;
+            if (isByeTeam || isCompAdv == null) return;
             const g = roundConfScoped ? (tm.conference || "__none__") : "__all__";
             groupTotals[g] = (groupTotals[g] || 0) + 1;
             if (isCompAdv) groupAdvancing[g] = (groupAdvancing[g] || 0) + 1;
@@ -20194,13 +20300,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const rows = rowStates.map(({ tm, isByeTeam, isCompAdv }, i) => {
             const compIdx   = i - poolByes;
             const isChamp   = isFinal && i === poolByes;
+            const isPending = !isByeTeam && !isChamp && isCompAdv == null;
             const rowCls    = isChamp ? "trn-po-row--champion"
               : isByeTeam ? "trn-po-row--bye-seed"
+              : isPending ? ""
               : isCompAdv ? "trn-po-row--advance"
               : "trn-po-row--cut";
             const badge = isChamp
               ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
               : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
+              : isPending ? `<span class="trn-po-badge" style="opacity:.6">⏳ Pending</span>`
               : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
               : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
             // Cut line renders after the last advancing row in a block. For an
@@ -20209,10 +20318,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             // conference-scoped round, rows are grouped by conference (see the
             // compSection_ sort above), so a new block starts wherever the
             // conference changes — each conference gets its own divider.
+            // Only ever renders when isCompAdv is the real (non-pending) true,
+            // so no divider shows until there's an actual result to divide.
             const next = rowStates[i + 1];
-            const nextIsDifferentBlock = !next || next.isByeTeam || !next.isCompAdv
+            const nextIsDifferentBlock = !next || next.isByeTeam || next.isCompAdv !== true
               || (roundConfScoped && next.tm.conference !== tm.conference);
-            const cutAfter = !isFinal && !isByeTeam && isCompAdv && nextIsDifferentBlock;
+            const cutAfter = !isFinal && !isByeTeam && isCompAdv === true && nextIsDifferentBlock;
             const wkCell = isByeTeam
               ? `<td class="trn-po-num dim trn-po-col-wk">—</td>${blendEnabled ? `<td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : ""}`
               : blendEnabled
@@ -20226,7 +20337,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             const blockLabel    = roundConfScoped ? `${_esc(tm.conference || "Unassigned")} — ` : "";
             // Tie-adjusted note only applies cleanly to the overall (single-block)
             // case, where actualAdvCount/advFromComp are directly comparable.
-            const tieAdjustedNote = (!roundConfScoped && actualAdvCount !== advFromComp)
+            const tieAdjustedNote = (!roundConfScoped && actualAdvCount != null && actualAdvCount !== advFromComp)
               ? ` <span style="color:var(--color-text-dim);font-weight:400">(tie-adjusted from ${advFromComp})</span>` : "";
 
             // Lineup breakdown — byes have no week score for this round, so
@@ -20640,11 +20751,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             if (!valid.length) return "";
             const scored = valid.map(name => ({name, score: _score(name)}))
               .sort((a,b) => (b.score??-1) - (a.score??-1));
-            scored.slice(0, apg).forEach(({name}) => winners.push({name, groupIdx: gi}));
+            // Only decide who advances once every team in THIS group actually
+            // has a real score — sorting nulls as -1 and taking the top apg
+            // when nobody's played yet just picks an arbitrary subset (array
+            // order) and shows it as a real result, which is exactly the
+            // "weird cuts while everyone's at 0" problem.
+            const groupAllScored = valid.every(name => _score(name) !== null);
+            if (groupAllScored) scored.slice(0, apg).forEach(({name}) => winners.push({name, groupIdx: gi}));
             return `<div class="trn-po-group-card">
               <div class="trn-po-group-title">Group ${gi+1}</div>
               ${scored.map(({name, score}, ti) => {
-                const adv = ti < apg;
+                const adv = groupAllScored && ti < apg;
+                const isPending = !groupAllScored;
                 // Lineup breakdown — reuses the same shared helper and
                 // _expandTrnRow handler as Points Rounds (works for any row
                 // element, not just <tr>, since it just checks classList/siblings).
@@ -20652,14 +20770,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
                 const expandInfo = tm
                   ? _playoffExpandRowAttrs(tm, leagueIdByTeamKey[_teamKey(tm)], weekNum)
                   : { hasData: false };
-                return `<div class="trn-po-group-row ${adv?"trn-po-row--advance":"trn-po-row--cut"}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"
+                return `<div class="trn-po-group-row ${isPending?"":(adv?"trn-po-row--advance":"trn-po-row--cut")}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"
                   ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}>
                   <span class="trn-po-rank">${ti+1}</span>
                   <span class="trn-po-team-name">${_esc(name)}</span>
-                  ${scored.length===2&&score!==null?`<span class="trn-po-badge" style="background:${adv?"rgba(74,222,128,.15)":"rgba(248,113,113,.12)"};color:${adv?"#4ade80":"#f87171"}">${adv?"W":"L"}</span>`:""}
+                  ${!isPending && scored.length===2&&score!==null?`<span class="trn-po-badge" style="background:${adv?"rgba(74,222,128,.15)":"rgba(248,113,113,.12)"};color:${adv?"#4ade80":"#f87171"}">${adv?"W":"L"}</span>`:""}
                   <span class="trn-po-pf" style="margin-left:auto">${score!=null?score.toFixed(2):"—"}</span>
-                  ${adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
-                      :'<span class="trn-po-badge trn-po-badge--eliminated">✕</span>'}
+                  ${isPending
+                      ? '<span class="trn-po-badge" style="opacity:.6">⏳ Pending</span>'
+                      : (adv?'<span class="trn-po-badge trn-po-badge--advance">↑</span>'
+                            :'<span class="trn-po-badge trn-po-badge--eliminated">✕</span>')}
                   ${expandInfo.hasData ? `<span class="trn-po-expand-hint">▾</span>` : ""}
                 </div>${expandInfo.hasData ? `<div class="trn-po-lineup-detail hidden"><div class="trn-po-lineup-detail-inner"></div></div>` : ""}`;
               }).join("")}
