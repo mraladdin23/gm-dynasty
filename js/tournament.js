@@ -20184,7 +20184,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             // Already locked — that record is the permanent source of truth.
             displayEliminatedKeys = new Set(Object.keys(lockedElims[roundIdx]));
           } else if (!isFinal) {
-            const allScored = compSection_.every(tm => tm.wkScore != null);
+            // Same fix applied to Chopped Championship after the same bug
+            // there: Sleeper returns 0 (not null) for a game that simply
+            // hasn't been played yet, indistinguishable from a genuine 0 by
+            // score alone. Checking only for null let a round lock the
+            // moment every team had SOME value — even "hasn't played" — and
+            // then eliminate whoever was lowest among a mix of real and
+            // false-zero scores. Require the round's actual last week to be
+            // done per the NFL schedule itself before ever attempting to lock.
+            const roundLastWeek = weekNum != null ? weekNum + wpr - 1 : null;
+            const completedNflWeek = await _getCompletedNflWeek();
+            const weekGenuinelyOver = roundLastWeek != null && completedNflWeek != null && roundLastWeek <= completedNflWeek;
+            const allScored = weekGenuinelyOver && compSection_.every(tm => tm.wkScore != null);
             if (allScored && compSection_.length > 0) {
               // Conference-scoped rounds resolve each conference independently
               // (and can carry a different deferred-tie count per conference);
@@ -20746,6 +20757,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           const apg = isFinal ? 1 : (round.advPerGroup || 1);
           const winners = [];
+          // Same fix as Points Rounds/Chopped: require the NFL week itself to
+          // be genuinely over (not just "everyone has some score value" —
+          // Sleeper returns 0, not null, for a game that hasn't been played)
+          // before treating any group's result as final.
+          const completedNflWeek = await _getCompletedNflWeek();
+          const weekGenuinelyOver = weekNum != null && completedNflWeek != null && weekNum <= completedNflWeek;
 
           const groupsHTML = (storedGroups||[]).map((groupTeams, gi) => {
             const valid = (groupTeams||[]).filter(Boolean);
@@ -20757,7 +20774,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             // when nobody's played yet just picks an arbitrary subset (array
             // order) and shows it as a real result, which is exactly the
             // "weird cuts while everyone's at 0" problem.
-            const groupAllScored = valid.every(name => _score(name) !== null);
+            const groupAllScored = weekGenuinelyOver && valid.every(name => _score(name) !== null);
             if (groupAllScored) scored.slice(0, apg).forEach(({name}) => winners.push({name, groupIdx: gi}));
             return `<div class="trn-po-group-card">
               <div class="trn-po-group-title">Group ${gi+1}</div>
