@@ -17171,6 +17171,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           || displayNameMap[_skQ(tm.teamName)] || displayNameMap[_skQ(tm.rawTeamName)] || tm.teamName || "";
         allTeams.push({ ...tm, displayName,
           leagueName:  lc.leagueName || ck,
+          leagueId:    String(lc.leagueId || lc.league_id || ck.replace(/^\d+_/, "")),
           division:    lc.division   || "",
           conference:  lc.conference || "",
           gender,
