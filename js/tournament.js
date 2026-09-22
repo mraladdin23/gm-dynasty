@@ -24354,29 +24354,72 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     const leagueIds = [...new Set(pool.map(tm => tm.leagueId).filter(Boolean))];
     const scoreCache = {};
-    await Promise.all(leagueIds.map(async lid => {
+    const failedLeagues = []; // { lid, reason } — so a fetch problem is visible instead of silently producing "—" scores
+    const _fetchLeagueWeek = async (lid, attempt = 1) => {
       try {
         const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${weekNum}`);
-        if (!r.ok) return;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         const map = {};
         (data||[]).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
         scoreCache[lid] = map;
-      } catch(e) { /* leave unscored */ }
-    }));
-    const scoreOf = tm => scoreCache[tm.leagueId]?.[String(tm.teamId)];
-
-    const withScores = pool.map(tm => ({ tm, key: _teamKey(tm), score: scoreOf(tm) }));
-    if (withScores.some(s => s.score == null)) {
-      console.log("⚠️ Not every team has a current score back from Sleeper right now — this comparison itself may be reading an incomplete fetch. Re-run in a moment if results look odd.");
+      } catch(e) {
+        if (attempt < 2) { await new Promise(res => setTimeout(res, 400)); return _fetchLeagueWeek(lid, attempt + 1); }
+        failedLeagues.push({ lid, reason: e.message });
+      }
+    };
+    // Staggered rather than all-at-once — firing 10-15+ simultaneous requests
+    // at Sleeper's API in one burst (which is what a plain Promise.all over
+    // every league does) is a plausible way to trip rate limiting; spacing
+    // them out a little is cheap insurance against that being the cause of
+    // missing scores rather than a genuine stat-correction mismatch.
+    for (let i = 0; i < leagueIds.length; i++) {
+      await _fetchLeagueWeek(leagueIds[i]);
+      if (i < leagueIds.length - 1) await new Promise(res => setTimeout(res, 120));
     }
 
-    const sorted     = [...withScores].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    if (failedLeagues.length) {
+      console.log(`⚠️ ${failedLeagues.length} of ${leagueIds.length} league fetches failed even after a retry:`);
+      failedLeagues.forEach(f => console.log(`   ${f.lid} — ${f.reason}`));
+    }
+
+    const scoreOf = tm => scoreCache[tm.leagueId]?.[String(tm.teamId)];
+    // Distinguish "league fetch failed" (score truly unknown right now, not
+    // safe to include in the ranking at all) from "fetch succeeded but this
+    // team's score is a genuine value" — mixing an unknown score into the
+    // sort as -1 corrupts the whole comparison, which is exactly what
+    // produced a wall of "— pts" mismatches last run: several league
+    // fetches came back empty, and every one of those teams' real rank was
+    // unknowable, not actually tied for last.
+    const withScores = pool.map(tm => {
+      const leagueFailed = failedLeagues.some(f => f.lid === tm.leagueId);
+      return { tm, key: _teamKey(tm), score: leagueFailed ? undefined : scoreOf(tm) };
+    });
+    const unknown = withScores.filter(s => s.score === undefined);
+    const known   = withScores.filter(s => s.score !== undefined);
+    if (unknown.length) {
+      console.log(`❓ ${unknown.length} team(s) excluded from the comparison below — their league's score fetch failed, so their real rank right now is unknown:`);
+      unknown.forEach(s => console.log(`   ${s.tm.teamName} (${s.tm.leagueName})`));
+    }
+    if (known.some(s => s.score == null)) {
+      console.log("⚠️ Some teams have a successful league fetch but no score entry for this week (bye, no matchup generated, etc.) — treated as 0 below.");
+    }
+
+    const sorted     = [...known].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
     const lockedKeys = new Set(Object.keys(targetLocked));
     const advCount   = pool.length - lockedKeys.size;
-    const currentBottom = new Set(sorted.slice(advCount).map(s => s.key));
+    // The cut line within the known-only ranking — only exact if every team's
+    // score was fetched successfully. With unknowns excluded, this is an
+    // approximation (an unknown team could belong on either side of the real
+    // line), which is why the mismatch list below is clearly caveated rather
+    // than asserted as ground truth when unknown.length > 0.
+    const currentBottomCount = Math.max(0, known.length - advCount);
+    const currentBottom = new Set(sorted.slice(sorted.length - currentBottomCount).map(s => s.key));
 
-    console.log(`Locked eliminated: ${lockedKeys.size} · Current-score bottom-${pool.length - advCount}: ${currentBottom.size}`);
+    console.log(`Locked eliminated: ${lockedKeys.size} · Known teams: ${known.length}/${pool.length} · Current-score bottom-${currentBottomCount} (within known): ${currentBottom.size}`);
+    if (unknown.length) {
+      console.log(`Note: ${unknown.length} team(s) above are excluded from this ranking entirely, so the comparison below is approximate — re-run once all league fetches succeed for a fully reliable result.`);
+    }
 
     const mismatches = [];
     sorted.forEach((s, i) => {
@@ -24386,11 +24429,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     });
 
     if (!mismatches.length) {
-      console.log("✅ Locked eliminations match the current bottom-N by score exactly — no mismatch.");
+      console.log(unknown.length
+        ? "✅ Among teams with a known current score, locked eliminations match the current bottom-N exactly — no mismatch (still re-run once the unknown teams resolve to be fully sure)."
+        : "✅ Locked eliminations match the current bottom-N by score exactly — no mismatch.");
     } else {
       console.log(`⚠️ ${mismatches.length} team(s) disagree between the locked record and current scores:`);
       mismatches.forEach(m => {
-        console.log(`   ${m.isLockedElim ? "❌ locked ELIMINATED" : "✅ locked as advancing"}, but currently ranks #${m.rank} of ${pool.length} at ${m.score != null ? m.score.toFixed(2) : "—"} pts — ${m.tm.teamName}`);
+        console.log(`   ${m.isLockedElim ? "❌ locked ELIMINATED" : "✅ locked as advancing"}, but currently ranks #${m.rank} of ${known.length} known scores at ${m.score != null ? m.score.toFixed(2) : "—"} pts — ${m.tm.teamName}`);
       });
       console.log("Likely cause: this round locked using whatever scores were available AT THAT MOMENT. Eliminations are " +
         "intentionally write-once (so a later API gap can't un-eliminate someone) — but that means if the round locked " +
@@ -24401,7 +24446,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     }
 
     console.groupEnd();
-    return { yr, pool, weekNum, lockedKeys, mismatches };
+    return { yr, pool, weekNum, lockedKeys, mismatches, unknown, failedLeagues };
   }
 
   // Clears the locked elimination record for one round (or all rounds if
