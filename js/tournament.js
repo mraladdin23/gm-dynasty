@@ -24288,9 +24288,15 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
   // ── Points Rounds: eliminations diagnostic & reset ───────────────────────
   // Shows what's currently locked in playoffs/{year}/pointsRounds/eliminations
-  // and which teams are in each round. Call from console:
-  //   await DLRTournament.diagnosePointsRounds('tid', 2025)
-  async function diagnosePointsRounds(tid, year) {
+  // and which teams are in each round. Pass roundIdx to deep-dive one round:
+  // reconstructs that round's actual competing pool (qualifiers minus every
+  // prior round's locked cuts), fetches CURRENT scores, and directly compares
+  // "who's locked as eliminated" against "who the current scores say should
+  // be in the bottom N" — printing exactly which teams disagree and why.
+  // Call from console:
+  //   await DLRTournament.diagnosePointsRounds('tid', 2025)        // overview of all rounds
+  //   await DLRTournament.diagnosePointsRounds('tid', 2025, 1)     // deep-dive round 2 (0-indexed)
+  async function diagnosePointsRounds(tid, year, roundIdx) {
     const t  = _tournaments[tid];
     if (!t) { console.log("Unknown tid:", tid); return; }
     const yr = String(year || Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort().pop());
@@ -24300,20 +24306,102 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     const rounds = po.pointsRounds?.rounds || [];
     const elims  = po.pointsRounds?.eliminations || {};
+    const startWeek = po.startWeek;
 
     console.group(`[diagnosePointsRounds] tid=${tid} year=${yr}`);
-    console.log("startWeek:", po.startWeek, "rounds configured:", rounds.length);
+    console.log("startWeek:", startWeek, "rounds configured:", rounds.length);
     rounds.forEach((r, i) => {
       const locked = elims[i];
       const count  = locked ? Object.keys(locked).length : 0;
       console.log(`Round ${i+1} (${i===rounds.length-1?"final":`advance ${r.advanceCount ?? r.advancePct+"%"}`}):`,
         locked ? `🔒 LOCKED — ${count} eliminated` : "⚪ not locked yet (will simulate live)");
-      if (locked) {
-        Object.keys(locked).forEach(k => console.log("   ❌", k));
-      }
+      if (locked && roundIdx == null) Object.keys(locked).forEach(k => console.log("   ❌", k));
     });
+
+    if (roundIdx == null) {
+      console.log("Pass a round index (0-based) as the 3rd argument to compare locked eliminations against current scores, e.g. diagnosePointsRounds(tid, year, 1) for Round 2.");
+      console.groupEnd();
+      return { yr, rounds, elims };
+    }
+
+    const targetLocked = elims[roundIdx];
+    if (!targetLocked) { console.log(`Round ${roundIdx+1} isn't locked yet — nothing to compare.`); console.groupEnd(); return; }
+
+    // Same key shape used everywhere else in this file — leagueName + teamId.
+    // Defined locally since the shared version lives inside other closures
+    // this top-level function doesn't have access to.
+    const _teamKey = tm => (tm.leagueName || "") + "|" + (tm.teamId || tm.rawTeamName || tm.teamName);
+
+    // Reconstruct the pool that actually entered this round: qualifiers
+    // minus everyone cut in any earlier round. This only works if every
+    // earlier round is itself locked (same requirement the live UI enforces
+    // before it'll show a round at all).
+    const qualResult = _computeQualification(t, yr);
+    let pool = qualResult.qualifiers;
+    for (let ri = 0; ri < roundIdx; ri++) {
+      const priorLocked = elims[ri];
+      if (!priorLocked) {
+        console.log(`⚠️ Round ${ri+1} isn't locked — can't reliably reconstruct Round ${roundIdx+1}'s pool.`);
+        console.groupEnd();
+        return;
+      }
+      const cutKeys = new Set(Object.keys(priorLocked));
+      pool = pool.filter(tm => !cutKeys.has(_teamKey(tm)));
+    }
+
+    const weekNum = startWeek + rounds.slice(0, roundIdx).reduce((sum, r) => sum + (r.weeksPerRound || 1), 0);
+    console.log(`Round ${roundIdx+1} pool: ${pool.length} teams, week ${weekNum}`);
+
+    const leagueIds = [...new Set(pool.map(tm => tm.leagueId).filter(Boolean))];
+    const scoreCache = {};
+    await Promise.all(leagueIds.map(async lid => {
+      try {
+        const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${weekNum}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        const map = {};
+        (data||[]).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
+        scoreCache[lid] = map;
+      } catch(e) { /* leave unscored */ }
+    }));
+    const scoreOf = tm => scoreCache[tm.leagueId]?.[String(tm.teamId)];
+
+    const withScores = pool.map(tm => ({ tm, key: _teamKey(tm), score: scoreOf(tm) }));
+    if (withScores.some(s => s.score == null)) {
+      console.log("⚠️ Not every team has a current score back from Sleeper right now — this comparison itself may be reading an incomplete fetch. Re-run in a moment if results look odd.");
+    }
+
+    const sorted     = [...withScores].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    const lockedKeys = new Set(Object.keys(targetLocked));
+    const advCount   = pool.length - lockedKeys.size;
+    const currentBottom = new Set(sorted.slice(advCount).map(s => s.key));
+
+    console.log(`Locked eliminated: ${lockedKeys.size} · Current-score bottom-${pool.length - advCount}: ${currentBottom.size}`);
+
+    const mismatches = [];
+    sorted.forEach((s, i) => {
+      const isLockedElim = lockedKeys.has(s.key);
+      const isCurrentBottom = currentBottom.has(s.key);
+      if (isLockedElim !== isCurrentBottom) mismatches.push({ ...s, rank: i + 1, isLockedElim });
+    });
+
+    if (!mismatches.length) {
+      console.log("✅ Locked eliminations match the current bottom-N by score exactly — no mismatch.");
+    } else {
+      console.log(`⚠️ ${mismatches.length} team(s) disagree between the locked record and current scores:`);
+      mismatches.forEach(m => {
+        console.log(`   ${m.isLockedElim ? "❌ locked ELIMINATED" : "✅ locked as advancing"}, but currently ranks #${m.rank} of ${pool.length} at ${m.score != null ? m.score.toFixed(2) : "—"} pts — ${m.tm.teamName}`);
+      });
+      console.log("Likely cause: this round locked using whatever scores were available AT THAT MOMENT. Eliminations are " +
+        "intentionally write-once (so a later API gap can't un-eliminate someone) — but that means if the round locked " +
+        "before every game had finished, or Sleeper corrected stats afterward (final stats often settle a day or two " +
+        "after games), the locked set stops matching a fresh score-sorted read, and it will NOT self-correct. Use " +
+        "resetPointsRoundsElimination(tid, year, roundIdx) to clear the bad lock, then reopen the round once you're " +
+        "confident this week's scores are truly final — it'll recompute and relock from scratch.");
+    }
+
     console.groupEnd();
-    return { yr, rounds, elims };
+    return { yr, pool, weekNum, lockedKeys, mismatches };
   }
 
   // Clears the locked elimination record for one round (or all rounds if
