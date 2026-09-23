@@ -1531,6 +1531,65 @@ const DLRSalaryCap = (() => {
     return (_salaryData[username]?.players || []);
   }
 
+  // ── Ownership transfer (roster changed hands to a new Sleeper user) ────────
+  // Root cause this exists for: salary/contract data is stored keyed by the
+  // OWNER'S username (_salaryData[username]), not by the stable Sleeper
+  // roster_id. That's fine as long as the same person keeps the roster, but
+  // Sleeper's roster_id is what actually persists across an ownership change
+  // — the username is not. When a league replaces a departed owner with a
+  // new manager on the same roster, Sleeper updates owner_id/username on that
+  // roster immediately, but nothing here moves the OLD username's salary
+  // entries over to the new one — they just sit orphaned under a username
+  // that no longer owns anything, while the new owner shows an empty cap.
+  //
+  // listOrphanedSalaryEntries() finds any _salaryData key that doesn't match
+  // a username on any CURRENT roster — usually the departed owner's data —
+  // so you don't have to remember their exact username.
+  // Console: DLRSalaryCap.listOrphanedSalaryEntries()
+  function listOrphanedSalaryEntries() {
+    if (!_salaryData || !_rosterData) { console.log("Salary module not loaded for this league yet."); return []; }
+    const currentUsernames = new Set(_rosterData.map(r => r.username));
+    const orphans = Object.keys(_salaryData).filter(k => !currentUsernames.has(k) && (_salaryData[k]?.players || []).length);
+    if (!orphans.length) { console.log("No orphaned salary entries found — every _salaryData key matches a current roster owner."); return []; }
+    console.log(`${orphans.length} orphaned salary entr${orphans.length===1?"y":"ies"} (no current roster owns this username):`);
+    orphans.forEach(k => console.log(`   "${k}" — ${_salaryData[k].players.length} player(s) with salary data`));
+    console.log("Current roster owners for reference:", _rosterData.map(r => `${r.username} (${r.teamName})`));
+    return orphans;
+  }
+
+  // Moves one owner's salary/contract data to another username — for when a
+  // roster changed hands and the new owner's cap is showing empty.
+  // Does NOT touch anything else (transactions, standings, etc.) — only the
+  // _salaryData entry this module owns.
+  // Console: await DLRSalaryCap.transferOwnership('old_username', 'new_username')
+  //   Pass { overwrite: true } as a 3rd argument if the new username already
+  //   has some salary data you want replaced rather than merged.
+  async function transferOwnership(oldUsername, newUsername, opts) {
+    opts = opts || {};
+    if (!_salaryData || !_storageKey) { console.log("Salary module not loaded for this league yet."); return false; }
+    const oldKey = String(oldUsername || "").toLowerCase().trim();
+    const newKey = String(newUsername || "").toLowerCase().trim();
+    if (!oldKey || !newKey) { console.log("Both old and new username are required."); return false; }
+    if (oldKey === newKey) { console.log("Old and new username are the same — nothing to do."); return false; }
+    const oldEntry = _salaryData[oldKey];
+    if (!oldEntry || !(oldEntry.players || []).length) {
+      console.log(`No salary data found under "${oldKey}". Run listOrphanedSalaryEntries() to see what's actually there.`);
+      return false;
+    }
+    const newEntry = _salaryData[newKey];
+    if (newEntry && (newEntry.players || []).length && !opts.overwrite) {
+      console.log(`"${newKey}" already has ${newEntry.players.length} player(s) with salary data. ` +
+        `Re-run with a 3rd argument { overwrite: true } to replace it, or move the old data to a fresh key if you want to keep both sets.`);
+      return false;
+    }
+    const movedCount = oldEntry.players.length;
+    _salaryData[newKey] = { ...oldEntry }; // move (not merge) — new owner inherits exactly what the old one had
+    delete _salaryData[oldKey];
+    await _saveSalaryData();
+    console.log(`✓ Moved ${movedCount} player salary record(s) from "${oldKey}" to "${newKey}" and saved.`);
+    return true;
+  }
+
   // Returns true if salary data is fully loaded and rendered for this leagueKey.
   // Used by profile.js to skip redundant re-init when the background eager init
   // already completed before the user clicks the Roster tab.
@@ -1545,6 +1604,7 @@ const DLRSalaryCap = (() => {
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
     getCapData, getTeamSalaryEntries,
+    listOrphanedSalaryEntries, transferOwnership,
     applyTransactions: _checkTransactions,  // exposed for manual trigger
   };
 
