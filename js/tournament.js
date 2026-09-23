@@ -24489,6 +24489,189 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       `Re-open the round to re-simulate and re-lock with current data.`);
   }
 
+  // ── Chopped Championship: eliminations diagnostic & reset ────────────────
+  // Same idea as diagnosePointsRounds, adapted to Chopped's per-division,
+  // per-week locking. Call with just tid/year for an overview of every
+  // division's locked weeks; add a division name and week to deep-dive one:
+  // reconstructs who was alive in that division going into that week
+  // (replaying every earlier locked week), fetches CURRENT scores, and
+  // compares against who's actually locked as eliminated that week.
+  // Console:
+  //   await DLRTournament.diagnoseChopped('tid', 2025)                       // overview
+  //   await DLRTournament.diagnoseChopped('tid', 2025, 'Division Name', 2)   // deep-dive week 2
+  async function diagnoseChopped(tid, year, divisionName, week) {
+    const t  = _tournaments[tid];
+    if (!t) { console.log("Unknown tid:", tid); return; }
+    const yr = String(year || Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort().pop());
+    const po = t.playoffs?.[yr];
+    if (!po) { console.log("No playoff config for year", yr); return; }
+    if ((po.mode || "") !== "chopped") { console.log("Mode is", po.mode, "— not chopped"); return; }
+
+    const chopped   = po.chopped || {};
+    const champWeek = chopped.championshipWeek;
+    const startWeek = po.startWeek;
+    const lockedElims = chopped.eliminations || {};
+    const _skC     = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+    const _teamKeyC = tm => (tm.leagueName||"") + "|" + (tm.teamId||tm.rawTeamName||tm.teamName);
+
+    const allTeams = [];
+    Object.entries(t.standingsCache||{}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== String(yr)) return;
+      const lid = String(lc.leagueId || lc.league_id || ck.replace(/^\d+_/,""));
+      (lc.teams||[]).forEach(tm => {
+        allTeams.push({ ...tm, leagueName: lc.leagueName || ck, division: lc.division || "", leagueId: lid });
+      });
+    });
+    const divisions = {};
+    allTeams.forEach(tm => {
+      const d = tm.division || tm.leagueName || "Unassigned";
+      if (!divisions[d]) divisions[d] = [];
+      divisions[d].push(tm);
+    });
+    const divNames = Object.keys(divisions).sort();
+
+    console.group(`[diagnoseChopped] tid=${tid} year=${yr}`);
+    console.log("startWeek:", startWeek, "championshipWeek:", champWeek, "divisions:", divNames.length);
+
+    if (!divisionName) {
+      divNames.forEach(dName => {
+        const dKey = _skC(dName);
+        const wkKeys = Object.keys(lockedElims[dKey] || {}).sort((a,b) => +a - +b);
+        console.log(`${dName}: ${wkKeys.length ? "locked weeks " + wkKeys.join(", ") : "no locked eliminations yet"}`);
+      });
+      console.log("Pass a division name and week as the 3rd/4th argument to deep-dive one, e.g. diagnoseChopped(tid, year, 'Division Name', 2).");
+      console.groupEnd();
+      return { yr, divisions: divNames, lockedElims };
+    }
+
+    const dKey = _skC(divisionName);
+    const divMembers = divisions[divisionName];
+    if (!divMembers) { console.log(`No division named "${divisionName}" found. Divisions:`, divNames); console.groupEnd(); return; }
+    const divLocked = lockedElims[dKey] || {};
+    if (!divLocked[String(week)]) { console.log(`Week ${week} isn't locked for "${divisionName}" yet — nothing to compare.`); console.groupEnd(); return; }
+
+    // Reconstruct who was alive going into `week` by replaying every earlier
+    // locked week for this division — only valid if those earlier weeks are
+    // themselves locked (same requirement the live Chopped view enforces).
+    let alive = [...divMembers];
+    for (let w = startWeek; w < week; w++) {
+      const wk = divLocked[String(w)];
+      if (!wk) {
+        console.log(`Week ${w} isn't locked for "${divisionName}" — can't reliably reconstruct who was alive going into week ${week}.`);
+        console.groupEnd();
+        return;
+      }
+      const elimKeys = new Set(Array.isArray(wk) ? wk : [wk]);
+      alive = alive.filter(tm => !elimKeys.has(_teamKeyC(tm)));
+    }
+    console.log(`"${divisionName}" pool going into week ${week}: ${alive.length} team(s)`);
+
+    const leagueIds = [...new Set(alive.map(tm => tm.leagueId).filter(Boolean))];
+    const scoreCache = {};
+    const failedLeagues = [];
+    const _fetchLeagueWeek = async (lid, attempt = 1) => {
+      try {
+        const r = await fetch(`https://api.sleeper.app/v1/league/${lid}/matchups/${week}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const map = {};
+        (data||[]).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
+        scoreCache[lid] = map;
+      } catch(e) {
+        if (attempt < 2) { await new Promise(res => setTimeout(res, 400)); return _fetchLeagueWeek(lid, attempt + 1); }
+        failedLeagues.push({ lid, reason: e.message });
+      }
+    };
+    for (let i = 0; i < leagueIds.length; i++) {
+      await _fetchLeagueWeek(leagueIds[i]);
+      if (i < leagueIds.length - 1) await new Promise(res => setTimeout(res, 120));
+    }
+    if (failedLeagues.length) {
+      console.log(`⚠️ ${failedLeagues.length} of ${leagueIds.length} league fetches failed even after a retry:`);
+      failedLeagues.forEach(f => console.log(`   ${f.lid} — ${f.reason}`));
+    }
+
+    const scoreOf = tm => scoreCache[tm.leagueId]?.[String(tm.teamId)];
+    const withScores = alive.map(tm => {
+      const leagueFailed = failedLeagues.some(f => f.lid === tm.leagueId);
+      return { tm, key: _teamKeyC(tm), score: leagueFailed ? undefined : scoreOf(tm) };
+    });
+    const unknown = withScores.filter(s => s.score === undefined);
+    const known   = withScores.filter(s => s.score !== undefined);
+    if (unknown.length) {
+      console.log(`❓ ${unknown.length} team(s) excluded from the comparison — their league's score fetch failed, so their real score right now is unknown:`);
+      unknown.forEach(s => console.log(`   ${s.tm.teamName} (${s.tm.leagueName})`));
+    }
+
+    const lockedKeys = new Set(Array.isArray(divLocked[String(week)]) ? divLocked[String(week)] : [divLocked[String(week)]]);
+    const minScore = known.length ? Math.min(...known.map(s => s.score)) : null;
+    const currentLowest = new Set(known.filter(s => s.score === minScore).map(s => s.key));
+
+    console.log(`Locked eliminated week ${week}: ${lockedKeys.size} · Current lowest score (${minScore != null ? minScore.toFixed(2) : "—"}) among known: ${currentLowest.size} team(s)`);
+    if (unknown.length) {
+      console.log(`Note: ${unknown.length} team(s) excluded from this ranking entirely, so the comparison below is approximate — re-run once all league fetches succeed for a fully reliable result.`);
+    }
+
+    const mismatches = [];
+    known.forEach(s => {
+      const isLockedElim = lockedKeys.has(s.key);
+      const isCurrentLowest = currentLowest.has(s.key);
+      if (isLockedElim !== isCurrentLowest) mismatches.push({ ...s, isLockedElim });
+    });
+    lockedKeys.forEach(k => {
+      if (!known.some(s => s.key === k) && !unknown.some(s => s.key === k)) {
+        mismatches.push({ key: k, isLockedElim: true, tm: { teamName: k }, score: null, notInPool: true });
+      }
+    });
+
+    if (!mismatches.length) {
+      console.log(unknown.length
+        ? "✅ Among teams with a known current score, the locked elimination matches the current lowest score — no mismatch (still re-run once the unknown teams resolve to be fully sure)."
+        : "✅ Locked elimination matches the current lowest score exactly — no mismatch.");
+    } else {
+      console.log(`⚠️ ${mismatches.length} team(s) disagree between the locked record and current scores:`);
+      mismatches.forEach(m => {
+        console.log(`   ${m.isLockedElim ? "❌ locked ELIMINATED" : "✅ not locked as eliminated"}${m.notInPool ? " (not found in reconstructed pool — check the name matches exactly)" : ""}, currently at ${m.score != null ? m.score.toFixed(2) : "—"} pts — ${m.tm.teamName}`);
+      });
+      console.log("Likely cause: this week locked using whatever scores were available AT THAT MOMENT — before the " +
+        "completed-week guard was added, or from a transient scoring gap. Eliminations are intentionally write-once " +
+        "(so a later API gap can't un-eliminate someone), so this will NOT self-correct on its own. Use " +
+        "resetChoppedElimination(tid, year, divisionName, week) to clear this week's lock for this division, then " +
+        "reopen the Chopped Playoffs tab once you're confident this week's scores are truly final — it'll recompute " +
+        "and relock from scratch.");
+    }
+
+    console.groupEnd();
+    return { yr, division: divisionName, week, alive, lockedKeys, mismatches, unknown, failedLeagues };
+  }
+
+  // Clears the locked elimination record for one division/week (or the whole
+  // division if week omitted) so it will be re-simulated/re-locked on next
+  // view of the Chopped Playoffs tab. Use this if a week was locked in with
+  // incorrect/incomplete data (confirm with diagnoseChopped first).
+  //   await DLRTournament.resetChoppedElimination('tid', 2025, 'Division Name', 2)  // week 2 only
+  //   await DLRTournament.resetChoppedElimination('tid', 2025, 'Division Name')     // whole division
+  async function resetChoppedElimination(tid, year, divisionName, week) {
+    const t  = _tournaments[tid];
+    if (!t) { console.log("Unknown tid:", tid); return; }
+    const yr = String(year || Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort().pop());
+    const po = t.playoffs?.[yr];
+    if (!po || (po.mode || "") !== "chopped") { console.log("Not a Chopped Championship tournament for that year."); return; }
+    if (!divisionName) { console.log("A division name is required — see diagnoseChopped(tid, year) for the list."); return; }
+    const _skC = s => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g,"_");
+    const dKey = _skC(divisionName);
+    const ref = week != null
+      ? GMD.child(`tournaments/${tid}/playoffs/${yr}/chopped/eliminations/${dKey}/${week}`)
+      : GMD.child(`tournaments/${tid}/playoffs/${yr}/chopped/eliminations/${dKey}`);
+    await ref.remove();
+    if (po.chopped?.eliminations?.[dKey]) {
+      if (week != null) delete po.chopped.eliminations[dKey][String(week)];
+      else delete po.chopped.eliminations[dKey];
+    }
+    console.log(`[resetChoppedElimination] Cleared ${week != null ? `week ${week}` : "all weeks"} for division "${divisionName}" (${yr}). ` +
+      `Reopen the Chopped Playoffs tab to re-simulate and re-lock with current data.`);
+  }
+
   // ── Diagnose division-join failures ─────────────────────────────────────
   // Checks every condition the public division-join lookup requires
   // (email match, status==="approved", year match) against a specific
@@ -24657,6 +24840,8 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     diagnoseDecathlon,
     diagnosePointsRounds,
     resetPointsRoundsElimination,
+    diagnoseChopped,
+    resetChoppedElimination,
     diagnoseDivisionJoin,
     diagPerf,
     rebuildTournamentIndex,
