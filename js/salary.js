@@ -1557,7 +1557,89 @@ const DLRSalaryCap = (() => {
     return orphans;
   }
 
-  // Moves one owner's salary/contract data to another username — for when a
+  // Fills in salaries for players the new owner CURRENTLY has, using the old
+  // (orphaned) owner's data as the source — without transferOwnership's
+  // all-or-nothing move. Built for exactly the case where the new owner has
+  // already made roster moves since taking over: some inherited players got
+  // dropped (their old salary should NOT come back), and some new players
+  // got added (those aren't touched — they're not in the old data anyway).
+  // Only the intersection — players in the old salary list AND on the new
+  // owner's CURRENT roster/IR/taxi — gets a salary written.
+  // Console: await DLRSalaryCap.syncInheritedSalaries('old_username', 'new_username')
+  //   Pass { overwrite: true } as a 3rd argument to replace a player's salary
+  //   even if the new owner already has one entered for them.
+  async function syncInheritedSalaries(oldUsername, newUsername, opts) {
+    opts = opts || {};
+    if (!_salaryData || !_storageKey || !_rosterData) { console.log("Salary module not loaded for this league yet."); return false; }
+    const oldKey = String(oldUsername || "").toLowerCase().trim();
+    const newKey = String(newUsername || "").toLowerCase().trim();
+    if (!oldKey || !newKey) { console.log("Both old and new username are required."); return false; }
+    const oldEntry = _salaryData[oldKey];
+    if (!oldEntry || !(oldEntry.players || []).length) {
+      console.log(`No salary data found under "${oldKey}". Run listOrphanedSalaryEntries() to see what's actually there.`);
+      return false;
+    }
+    const newRoster = _rosterData.find(r => r.username === newKey);
+    if (!newRoster) {
+      console.log(`No current roster found for "${newKey}". Check the username matches exactly — run listOrphanedSalaryEntries() to see current owners.`);
+      return false;
+    }
+    // Active roster + IR/reserve + taxi — salary cap can apply to all three
+    // depending on league settings (irCapPct/taxiCapPct), so a player parked
+    // on IR or taxi still counts as "currently on this roster" for matching.
+    const currentPlayerIds = new Set([
+      ...(newRoster.players || []), ...(newRoster.reserve || []), ...(newRoster.taxi || [])
+    ].map(String));
+
+    const prevNewEntry = _salaryData[newKey] ? JSON.parse(JSON.stringify(_salaryData[newKey])) : undefined;
+    if (!_salaryData[newKey]) _salaryData[newKey] = { players: [] };
+    const newPlayers = [...(_salaryData[newKey].players || [])];
+    const existingIds = new Set(newPlayers.map(p => String(p.playerId)));
+
+    const synced = [], skippedDropped = [], skippedAlreadyHasSalary = [];
+    oldEntry.players.forEach(p => {
+      const pid = String(p.playerId);
+      if (!currentPlayerIds.has(pid)) { skippedDropped.push(p); return; } // no longer on this roster — don't re-add
+      if (existingIds.has(pid) && !opts.overwrite) { skippedAlreadyHasSalary.push(p); return; } // already has a salary entry — don't clobber unless asked
+      const idx = newPlayers.findIndex(np => String(np.playerId) === pid);
+      const entry = { ...p, playerId: pid };
+      if (idx >= 0) newPlayers[idx] = entry; else newPlayers.push(entry);
+      synced.push(p);
+    });
+
+    console.log(`Matched ${synced.length} player(s) currently on "${newKey}"'s roster with salary data from "${oldKey}":`);
+    synced.forEach(p => console.log(`   ${_playerName(p.playerId)} — $${p.salary} (${p.years||1}yr${p.holdout?", holdout":""})`));
+    if (skippedDropped.length) {
+      console.log(`${skippedDropped.length} player(s) from the old data are no longer on this roster (already dropped) — left alone:`);
+      skippedDropped.forEach(p => console.log(`   ${_playerName(p.playerId)} — was $${p.salary}`));
+    }
+    if (skippedAlreadyHasSalary.length) {
+      console.log(`${skippedAlreadyHasSalary.length} player(s) already had a salary entry under "${newKey}" and were left as-is (pass { overwrite: true } to replace them too):`);
+      skippedAlreadyHasSalary.forEach(p => console.log(`   ${_playerName(p.playerId)}`));
+    }
+    if (!synced.length) { console.log("Nothing to save — no matches found."); return false; }
+
+    let cleaned;
+    try {
+      cleaned = JSON.parse(JSON.stringify({ players: newPlayers }));
+    } catch(e) {
+      console.log(`Couldn't prepare data for saving: ${e.message}`);
+      return false;
+    }
+    _salaryData[newKey] = cleaned;
+    try {
+      await _saveSalaryData();
+    } catch(e) {
+      if (prevNewEntry) _salaryData[newKey] = prevNewEntry; else delete _salaryData[newKey];
+      console.log(`✗ Save failed, nothing was changed: ${e.message || e}`);
+      console.log("Full error for debugging:", e);
+      return false;
+    }
+    console.log(`✓ Synced ${synced.length} salary record(s) into "${newKey}" and saved. The old "${oldKey}" entry was left untouched — clean it up separately once you're confident everything transferred correctly.`);
+    return true;
+  }
+
+
   // roster changed hands and the new owner's cap is showing empty.
   // Does NOT touch anything else (transactions, standings, etc.) — only the
   // _salaryData entry this module owns.
@@ -1583,9 +1665,37 @@ const DLRSalaryCap = (() => {
       return false;
     }
     const movedCount = oldEntry.players.length;
-    _salaryData[newKey] = { ...oldEntry }; // move (not merge) — new owner inherits exactly what the old one had
+    // Keep the previous state so a failed save can be rolled back in memory
+    // rather than leaving _salaryData out of sync with what's actually on
+    // Firebase.
+    const prevNewEntry = newEntry ? { ...newEntry } : undefined;
+    const prevOldEntry = { ...oldEntry };
+    // Firebase's .set()/.update() rejects any value containing `undefined`
+    // anywhere in it — a field that was merely absent when this entry was
+    // last read back can still trip that on write. Round-tripping through
+    // JSON strips undefined values the same way Firebase would need them
+    // stripped, so a save that would otherwise throw a cryptic "contains
+    // undefined in property..." error succeeds instead.
+    let cleaned;
+    try {
+      cleaned = JSON.parse(JSON.stringify(oldEntry));
+    } catch(e) {
+      console.log(`Couldn't prepare "${oldKey}"'s data for saving — it may contain a value Firebase can't store (e.g. a function or circular reference). Error: ${e.message}`);
+      return false;
+    }
+    _salaryData[newKey] = cleaned; // move (not merge) — new owner inherits exactly what the old one had
     delete _salaryData[oldKey];
-    await _saveSalaryData();
+    try {
+      await _saveSalaryData();
+    } catch(e) {
+      // Roll back the in-memory change so a failed write doesn't leave this
+      // session showing data that was never actually persisted.
+      _salaryData[oldKey] = prevOldEntry;
+      if (prevNewEntry) _salaryData[newKey] = prevNewEntry; else delete _salaryData[newKey];
+      console.log(`✗ Save failed, nothing was changed: ${e.message || e}`);
+      console.log("Full error for debugging:", e);
+      return false;
+    }
     console.log(`✓ Moved ${movedCount} player salary record(s) from "${oldKey}" to "${newKey}" and saved.`);
     return true;
   }
@@ -1604,7 +1714,7 @@ const DLRSalaryCap = (() => {
     saveSettings,
     downloadTemplate, handleFileUpload, processBulkCSV, confirmBulkSave,
     getCapData, getTeamSalaryEntries,
-    listOrphanedSalaryEntries, transferOwnership,
+    listOrphanedSalaryEntries, transferOwnership, syncInheritedSalaries,
     applyTransactions: _checkTransactions,  // exposed for manual trigger
   };
 
