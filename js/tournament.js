@@ -14984,6 +14984,7 @@ Good luck this season!
     // bare key lets later leagues overwrite earlier ones (B2 fix).
     // Still filter to current year only; also keep bare-key fallback for legacy data.
     const teamMap = {};
+    const teamSuMap = {}; // same keys as teamMap, holding sleeperUsername for the preferred lookup
     const bbMap = {}; // leagueId -> { isBestBall, rosterPositions } — for live optimal-lineup recompute
     Object.values(standingsCache).forEach(lc => {
       if (lc.year && parseInt(lc.year) !== parseInt(year)) return;
@@ -14991,12 +14992,22 @@ Good luck this season!
       (lc.teams || []).forEach(tm => {
         const qualKey = lcLeagueId ? `${lcLeagueId}:${tm.teamId}` : String(tm.teamId);
         teamMap[qualKey] = tm.teamName;
-        if (lcLeagueId) teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
+        teamSuMap[qualKey] = tm.sleeperUsername || "";
+        if (lcLeagueId) { teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName; teamSuMap[String(tm.teamId)] = teamSuMap[String(tm.teamId)] || (tm.sleeperUsername || ""); }
       });
       if (lcLeagueId) bbMap[lcLeagueId] = { isBestBall: !!lc.isBestBall, rosterPositions: lc.rosterPositions || [] };
     });
     const pMap = _buildParticipantTeamMap(t);
     const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    // Prefer resolving via the team's stable Sleeper username (survives
+    // renames) over matching on the current team name — same fix already
+    // applied to Standings, Weekly Matchups, and Season Analysis.
+    const _resolveByNameOrUsername = (rawName, sleeperUsername) => {
+      const bySu = sleeperUsername ? pMap[_sk(sleeperUsername)] : null;
+      if (bySu) return bySu.displayName;
+      const byName = pMap[_sk(rawName)];
+      return byName ? byName.displayName : rawName;
+    };
     // Needed for best-ball position lookups (_bbPosOf reads from this once loaded)
     if (typeof DLRPlayers !== "undefined") await DLRPlayers.load().catch(() => {});
 
@@ -15035,9 +15046,10 @@ Good luck this season!
             // Try qualified key first (prevents roster_id collision across leagues)
             let aName = teamMap[`${lid}:${a.roster_id}`] || teamMap[String(a.roster_id)] || `Team ${a.roster_id}`;
             let bName = teamMap[`${lid}:${b.roster_id}`] || teamMap[String(b.roster_id)] || `Team ${b.roster_id}`;
-            const aKey = _sk(aName), bKey = _sk(bName);
-            if (pMap[aKey]) aName = pMap[aKey].displayName;
-            if (pMap[bKey]) bName = pMap[bKey].displayName;
+            const aSu = teamSuMap[`${lid}:${a.roster_id}`] || teamSuMap[String(a.roster_id)] || "";
+            const bSu = teamSuMap[`${lid}:${b.roster_id}`] || teamSuMap[String(b.roster_id)] || "";
+            aName = _resolveByNameOrUsername(aName, aSu);
+            bName = _resolveByNameOrUsername(bName, bSu);
             const diff = parseFloat((Math.abs(apts - bpts)).toFixed(2));
             allMatchups.push({
               leagueId: lid, week: _matchupsWeek,
@@ -20373,17 +20385,45 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
           // isCompAdv is a tri-state: true (advancing), false (cut), or null
           // (pending — no real result yet, only shown once displayEliminatedKeys
-          // exists). No positional/guessed fallback anymore — showing a guess
-          // built from partial or all-zero scores is exactly what produced
-          // "weird cuts" and the wrong advance count before a week's games
+          // exists). No positional/guessed fallback for the REAL status anymore —
+          // showing a guess built from partial or all-zero scores as a definitive
+          // result is exactly what produced "weird cuts" before a week's games
           // had actually been played. Byes are still always non-null (they
           // never depend on this round's scores).
+          //
+          // While pending, we DO compute a separate, clearly-labeled PROJECTED
+          // status from current scores — a live "if the round ended right now"
+          // read, same idea as Chopped's "in danger" indicator. A team that
+          // simply hasn't played yet (wkScore null or 0) is never slotted into
+          // this as if a false floor of 0 were a real ranking — it gets its own
+          // "not started" state instead of a misleading "projected cut" label.
+          const projGroupTotals = {};
+          if (!displayEliminatedKeys) {
+            sortedPool.slice(poolByes).forEach(tm => {
+              const g = roundConfScoped ? (tm.conference || "__none__") : "__all__";
+              projGroupTotals[g] = (projGroupTotals[g] || 0) + 1;
+            });
+          }
+          const _projAdvForGroup = (size) => round.advanceMethod === "pct"
+            ? Math.round(size * (round.advancePct || 50) / 100)
+            : (round.advanceCount || 0);
+          const projGroupPos = {};
           const rowStates = sortedPool.map((tm, i) => {
             const isByeTeam = isByeRound && i < poolByes;
             let isCompAdv = null;
             if (isByeTeam) isCompAdv = false;
             else if (displayEliminatedKeys) isCompAdv = !displayEliminatedKeys.has(_teamKey(tm));
-            return { tm, isByeTeam, isCompAdv };
+
+            let isProjAdv = null, hasStarted = null;
+            if (!isByeTeam && isCompAdv == null) {
+              hasStarted = tm.wkScore != null && tm.wkScore > 0;
+              const g = roundConfScoped ? (tm.conference || "__none__") : "__all__";
+              const pos = projGroupPos[g] || 0;
+              projGroupPos[g] = pos + 1;
+              const target = _projAdvForGroup(projGroupTotals[g] || 0);
+              isProjAdv = pos < target;
+            }
+            return { tm, isByeTeam, isCompAdv, isProjAdv, hasStarted };
           });
 
           // Per-block (per-conference, or one "__all__" block for overall-scoped
@@ -20400,21 +20440,30 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             if (isCompAdv) groupAdvancing[g] = (groupAdvancing[g] || 0) + 1;
           });
 
-          const rows = rowStates.map(({ tm, isByeTeam, isCompAdv }, i) => {
+          const rows = rowStates.map(({ tm, isByeTeam, isCompAdv, isProjAdv, hasStarted }, i) => {
             const compIdx   = i - poolByes;
             const isChamp   = isFinal && i === poolByes;
             const isPending = !isByeTeam && !isChamp && isCompAdv == null;
             const rowCls    = isChamp ? "trn-po-row--champion"
               : isByeTeam ? "trn-po-row--bye-seed"
-              : isPending ? ""
-              : isCompAdv ? "trn-po-row--advance"
-              : "trn-po-row--cut";
+              : isCompAdv === true ? "trn-po-row--advance"
+              : isCompAdv === false ? "trn-po-row--cut"
+              : "";
+            // Projected-cut rows get an inline style (not just a class) so the
+            // highlight is guaranteed visible without depending on new CSS —
+            // same reasoning as the Chopped "in danger" highlight.
+            const rowStyle = (isPending && hasStarted && !isProjAdv) ? ' style="background:rgba(248,113,113,.06)"' : "";
             const badge = isChamp
               ? `<span class="trn-po-badge trn-po-badge--champion">🏆 Champion</span>`
               : isByeTeam ? `<span class="trn-po-badge trn-po-badge--bye">BYE</span>`
-              : isPending ? `<span class="trn-po-badge" style="opacity:.6">⏳ Pending</span>`
-              : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
-              : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
+              : isPending
+                ? (!hasStarted
+                    ? `<span class="trn-po-badge" style="opacity:.6">⏳ Not Started</span>`
+                    : isProjAdv
+                      ? `<span class="trn-po-badge" style="background:rgba(74,222,128,.12);color:#4ade80">↑ Projected Advance</span>`
+                      : `<span class="trn-po-badge" style="background:rgba(248,113,113,.12);color:#f87171">🔻 Projected Cut</span>`)
+                : isCompAdv ? `<span class="trn-po-badge trn-po-badge--advance">↑ Advances</span>`
+                : `<span class="trn-po-badge trn-po-badge--eliminated">Eliminated</span>`;
             // Cut line renders after the last advancing row in a block. For an
             // overall-scoped round there's one block (the whole competing
             // section), so this reduces to the single boundary as before. For a
@@ -20427,6 +20476,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             const nextIsDifferentBlock = !next || next.isByeTeam || next.isCompAdv !== true
               || (roundConfScoped && next.tm.conference !== tm.conference);
             const cutAfter = !isFinal && !isByeTeam && isCompAdv === true && nextIsDifferentBlock;
+            // Projected cut line — same idea, but for the PENDING state, drawn
+            // at the current projected boundary (isProjAdv) rather than a real
+            // one. Dashed/muted styling and "(Projected)" wording keep it
+            // visually distinct from the real cut line above so it's never
+            // mistaken for a final result.
+            const nextProjDifferentBlock = !next || next.isByeTeam || next.isProjAdv !== true
+              || (roundConfScoped && next.tm.conference !== tm.conference);
+            const projCutAfter = !isFinal && !isByeTeam && isPending && isProjAdv === true && nextProjDifferentBlock;
             const wkCell = isByeTeam
               ? `<td class="trn-po-num dim trn-po-col-wk">—</td>${blendEnabled ? `<td class="trn-po-num dim trn-po-col-avg">—</td><td class="trn-po-num dim trn-po-col-blend">—</td>` : ""}`
               : blendEnabled
@@ -20438,6 +20495,12 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
             const blockAdv      = groupAdvancing[g] || 0;
             const blockElim     = (groupTotals[g] || 0) - blockAdv;
             const blockLabel    = roundConfScoped ? `${_esc(tm.conference || "Unassigned")} — ` : "";
+            // Projected-line block counts — how many are projected to advance
+            // within this same block, using the running position counters
+            // already computed above.
+            const projBlockTotal = projGroupTotals[g] || 0;
+            const projBlockAdv   = Math.min(_projAdvForGroup(projBlockTotal), projBlockTotal);
+            const projBlockElim  = projBlockTotal - projBlockAdv;
             // Tie-adjusted note only applies cleanly to the overall (single-block)
             // case, where actualAdvCount/advFromComp are directly comparable.
             const tieAdjustedNote = (!roundConfScoped && actualAdvCount != null && actualAdvCount !== advFromComp)
@@ -20450,7 +20513,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               ? { hasData: false }
               : _playoffExpandRowAttrs(tm, leagueIdByTeamKey[_teamKey(tm)], weekNum);
 
-            return `<tr class="${rowCls}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"
+            return `<tr class="${rowCls}${expandInfo.hasData ? " trn-po-row--expandable" : ""}"${rowStyle}
               ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}
               ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}>
               <td class="trn-po-rank">${i+1}</td>
@@ -20460,7 +20523,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               </td>
               ${wkCell}
               <td>${badge}${expandInfo.hasData ? `<span class="trn-po-expand-hint">▾ Lineup</span>` : ""}</td>
-            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-cut-divider">— ${blockLabel}Cut Line — ${blockAdv} advance · ${blockElim} eliminated${tieAdjustedNote}</div></td></tr>` : ""}`;
+            </tr>${expandInfo.hasData ? `<tr class="trn-po-lineup-detail hidden" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-lineup-detail-inner"></div></td></tr>` : ""}${cutAfter ? `<tr class="trn-po-cut-row" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-cut-divider">— ${blockLabel}Cut Line — ${blockAdv} advance · ${blockElim} eliminated${tieAdjustedNote}</div></td></tr>` : ""}${projCutAfter ? `<tr class="trn-po-cut-row" ${roundConfScoped ? `data-conf="${_esc(tm.conference || "Unassigned")}"` : ""}><td colspan="${colSpan}"><div class="trn-po-cut-divider" style="border-style:dashed;opacity:.75">— ${blockLabel}Projected Cut Line — ${projBlockAdv} advance · ${projBlockElim} eliminated <span style="font-weight:400">(live, not final — updates as scores come in)</span></div></td></tr>` : ""}`;
           }).join("");
 
           const table  = document.getElementById(tableId);
