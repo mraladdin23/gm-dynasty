@@ -8694,6 +8694,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       </div>`;
 
     const _wsc = {};
+    const _wscFull = {}; // leagueId|week -> { rosterId -> {starters, starters_points, players, players_points} } — for the lineup-expand feature only, kept separate from _wsc (plain points) so the existing standings/record math is untouched
     const _fetchWk = async (leagueId, week) => {
       const key = leagueId + "|" + week;
       if (_wsc[key]) return _wsc[key];
@@ -8701,9 +8702,17 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         const r = await fetch("https://api.sleeper.app/v1/league/" + leagueId + "/matchups/" + week);
         if (!r.ok) return {};
         const data = await r.json();
-        const map = {};
-        (data||[]).forEach(m => { if (m.roster_id) map[String(m.roster_id)] = m.points || 0; });
+        const map = {}, fullMap = {};
+        (data||[]).forEach(m => {
+          if (!m.roster_id) return;
+          map[String(m.roster_id)] = m.points || 0;
+          fullMap[String(m.roster_id)] = {
+            starters: m.starters || [], starters_points: m.starters_points || {},
+            players: m.players || [], players_points: m.players_points || {}
+          };
+        });
         _wsc[key] = map;
+        _wscFull[key] = fullMap;
         return map;
       } catch(e) { return {}; }
     };
@@ -8917,16 +8926,29 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           await Promise.all([...leagueIds].map(lid=>_fetchWk(lid,nflWk)));
           const wkMus=schedule[String(wi)]||[];
           if(!wkMus.length){muEl.innerHTML=`<div style="font-size:.78rem;color:var(--color-text-dim)">No matchups this week.</div>`;return;}
-          const cards=wkMus.map(m=>{
+          const cards=wkMus.map((m, mi)=>{
             const hi=teamInfoMap[_skWC(m.home)],ai=teamInfoMap[_skWC(m.away)];
             const hs=hi?(_wsc[hi.leagueId+"|"+nflWk]?.[hi.teamId]??null):null;
             const as_=ai?(_wsc[ai.leagueId+"|"+nflWk]?.[ai.teamId]??null):null;
             const has=hs!==null&&as_!==null,wH=has&&hs>as_,wA=has&&as_>hs;
             const fmt=v=>v!==null?v.toFixed(2):"–";
-            return `<div class="trn-wc-mu-card">
+            // Same lineup-breakdown expand used on the Weekly Matchups tab —
+            // reuses its _expandTrnMatchup handler and .trn-wmu-detail/
+            // .trn-wmu-expand-hint classes verbatim, just fed from this
+            // group's own fetched data instead of the Matchups tab's.
+            const hFull = hi ? _wscFull[hi.leagueId+"|"+nflWk]?.[hi.teamId] : null;
+            const aFull = ai ? _wscFull[ai.leagueId+"|"+nflWk]?.[ai.teamId] : null;
+            const hasStarters = !!(hFull?.starters?.length || aFull?.starters?.length);
+            const cardId = `trn-wc-mu-card-${gi}-${wi}-${mi}`;
+            return `<div class="trn-wc-mu-card${hasStarters?" trn-wc-mu-card--expandable":""}" id="${cardId}"
+                ${hasStarters?`onclick="DLRTournament._expandTrnMatchup(this)"`:""}>
               <div class="trn-wc-mu-team ${wH?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${_esc2(m.home||"?")}</span><span class="trn-wc-mu-score">${fmt(hs)}</span></div>
               <div class="trn-wc-mu-vs">vs</div>
               <div class="trn-wc-mu-team ${wA?"trn-wc-mu-team--win":has?"trn-wc-mu-team--loss":""}"><span class="trn-wc-mu-name">${_esc2(m.away||"?")}</span><span class="trn-wc-mu-score">${fmt(as_)}</span></div>
+              ${hasStarters?`<div class="trn-wmu-expand-hint" style="text-align:center;font-size:.68rem;color:var(--color-text-dim);margin-top:2px">Tap for lineups ↓</div>`:""}
+              ${hasStarters?`<div class="trn-wmu-detail hidden" data-home='${JSON.stringify({name:m.home||"?",starters:hFull?.starters||[],sp:hFull?.starters_points||{},pp:hFull?.players_points||{},players:hFull?.players||[]})}' data-away='${JSON.stringify({name:m.away||"?",starters:aFull?.starters||[],sp:aFull?.starters_points||{},pp:aFull?.players_points||{},players:aFull?.players||[]})}'>
+                <div class="trn-wmu-detail-loading"><div class="spinner spinner--sm"></div></div>
+              </div>`:""}
             </div>`;
           }).join("");
           muEl.innerHTML=`<div class="trn-wc-mu-cards">${cards}</div>`;
@@ -9072,8 +9094,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     // so they match the participantMap keys written by _writePublicSummary.
     const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
     const participants = t.participants || {};
-    const displayNameByKey = {}; // sanitized key → participant displayName
-    const genderByKey      = {}; // sanitized key → participant gender
+    const displayNameByKey = {}; // sanitized team-name key → participant displayName (fallback only)
+    const genderByKey      = {}; // sanitized team-name key → participant gender (fallback only)
+    // Keyed by the participant's Sleeper username instead of a team name —
+    // this is the PREFERRED match, since a username is stable across a whole
+    // season (and years) while a team name can be renamed at any time. The
+    // team-name-keyed maps above stay as a fallback for MFL/Yahoo teams (no
+    // Sleeper username to match on) or a participant record with no username
+    // captured yet.
+    const slUDisplayMap = {}, slUGenderMap = {}, slUTwitterMap = {};
     Object.values(participants).forEach(p => {
       const keys = [p.sleeperUsername, p.displayName, p.teamName]
         .filter(Boolean).map(_sk).filter(Boolean);
@@ -9081,9 +9110,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         if (p.displayName) displayNameByKey[k] = p.displayName;
         if (p.gender)      genderByKey[k]      = p.gender;
       });
+      if (p.sleeperUsername) {
+        const suk = p.sleeperUsername.toLowerCase();
+        if (p.displayName)   slUDisplayMap[suk] = p.displayName;
+        if (p.gender)        slUGenderMap[suk]  = p.gender;
+        if (p.twitterHandle) slUTwitterMap[suk] = p.twitterHandle;
+      }
     });
-    const hasGender = Object.keys(genderByKey).length > 0;
-    const twitterByKey = {}; // sanitized key → participant twitterHandle
+    const hasGender = Object.keys(genderByKey).length > 0 || Object.keys(slUGenderMap).length > 0;
+    const twitterByKey = {}; // sanitized team-name key → participant twitterHandle (fallback only)
     Object.values(participants).forEach(p => {
       if (!p.twitterHandle) return;
       const keys = [p.sleeperUsername, p.displayName, p.teamName]
@@ -9098,12 +9133,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const ranked = _rankTeams(lc.teams || [], rankBy);
       ranked.forEach(team => {
         const _tnKey = _sk(team.teamName || "");
+        const suKey  = team.sleeperUsername ? team.sleeperUsername.toLowerCase() : null;
         allRows.push({
           rank:        team.computedRank,
-          // Show participant displayName if matched; fall back to what Sleeper returned
-          teamName:    displayNameByKey[_tnKey] || team.teamName || "Unknown",
+          // Prefer a match on the team's stable Sleeper username (survives
+          // renames); fall back to matching on the current team name, then
+          // to whatever Sleeper is currently reporting for this team.
+          teamName:    (suKey && slUDisplayMap[suKey]) || displayNameByKey[_tnKey] || team.teamName || "Unknown",
           // Keep original API name for search/matching
           rawTeamName: team.teamName || "Unknown",
+          sleeperUsername: team.sleeperUsername || "",
           leagueName:  lc.leagueName || cacheKey,
           conference:  lc.conference || "",
           division:    lc.division   || "",
@@ -9112,8 +9151,8 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
           ties:        team.ties     || 0,
           pf:          team.pf       || 0,
           pa:          team.pa       || 0,
-          gender:        genderByKey[_tnKey]   || "",
-          twitterHandle: twitterByKey[_tnKey]  || "",
+          gender:        (suKey && slUGenderMap[suKey])  || genderByKey[_tnKey]  || "",
+          twitterHandle: (suKey && slUTwitterMap[suKey]) || twitterByKey[_tnKey] || "",
           cacheKey,
           platform:      lc.platform            || ""
         });
@@ -9195,7 +9234,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const donorsOnly = document.getElementById("trn-st-donors-only")?.checked || false;
       let rows = allRows;
       if (leagueVal) rows = rows.filter(r => r.leagueName === leagueVal);
-      if (donorsOnly) rows = rows.filter(r => donorKeys.has(_skDonor(r.teamName)) || donorKeys.has(_skDonor(r.rawTeamName)));
+      if (donorsOnly) rows = rows.filter(r => donorKeys.has(_skDonor(r.sleeperUsername)) || donorKeys.has(_skDonor(r.teamName)) || donorKeys.has(_skDonor(r.rawTeamName)));
       if (q) rows = rows.filter(r =>
         r.teamName.toLowerCase().includes(q) ||
         (r.rawTeamName||"").toLowerCase().includes(q) ||
@@ -9314,7 +9353,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const leaderBadge = isDivLeader
         ? ' <span title="Leading its division" style="background:rgba(234,179,8,.15);color:#eab308;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">👑 Leader</span>'
         : "";
-      const isDonor = donorKeys.has(_skDonor(r.teamName)) || donorKeys.has(_skDonor(r.rawTeamName));
+      const isDonor = donorKeys.has(_skDonor(r.sleeperUsername)) || donorKeys.has(_skDonor(r.teamName)) || donorKeys.has(_skDonor(r.rawTeamName));
       const donorBadge = isDonor
         ? ' <span title="Donated" style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">💲</span>'
         : "";
@@ -13009,6 +13048,12 @@ Good luck this season!
         const r = regsObj[rid];
         const name = r?.displayName || r?.teamName || rid;
         keys.add(_skDonor(name));
+        // Also key by the registrant's Sleeper username — team-name-only
+        // matching breaks the moment that team gets renamed, same issue as
+        // the Standings display-name lookup. A username-based match survives
+        // renames; this is additive, so the name-based key above still
+        // covers MFL/Yahoo donors with no Sleeper username on file.
+        if (r?.sleeperUsername) keys.add(_skDonor(r.sleeperUsername));
       });
       _donorKeysCache[ck] = { keys, fetchedAt: Date.now() };
       return keys;
