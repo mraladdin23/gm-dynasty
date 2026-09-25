@@ -9134,12 +9134,25 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       ranked.forEach(team => {
         const _tnKey = _sk(team.teamName || "");
         const suKey  = team.sleeperUsername ? team.sleeperUsername.toLowerCase() : null;
+        // Priority: (1) registration display name matched via the stable
+        // Sleeper username, (2) registration display name matched via the
+        // current team name (fallback path for MFL/Yahoo or an unlinked
+        // participant record), (3) the raw Sleeper username itself — still
+        // one of the two identifiers wanted, even with no participant record
+        // on file at all, (4) the current team name — true last resort, only
+        // reached when there's no participant match AND no username to show
+        // (e.g. an MFL/Yahoo team nobody's registration links to yet).
+        // nameSource records which tier actually won, so a mis-shown row can
+        // be traced instead of guessed at.
+        let resolvedName, nameSource;
+        if (suKey && slUDisplayMap[suKey])      { resolvedName = slUDisplayMap[suKey];   nameSource = "registration (by username)"; }
+        else if (displayNameByKey[_tnKey])      { resolvedName = displayNameByKey[_tnKey]; nameSource = "registration (by team name)"; }
+        else if (team.sleeperUsername)          { resolvedName = team.sleeperUsername;   nameSource = "sleeper username (no registration match)"; }
+        else                                     { resolvedName = team.teamName || "Unknown"; nameSource = "team name (no username, no registration match)"; }
         allRows.push({
           rank:        team.computedRank,
-          // Prefer a match on the team's stable Sleeper username (survives
-          // renames); fall back to matching on the current team name, then
-          // to whatever Sleeper is currently reporting for this team.
-          teamName:    (suKey && slUDisplayMap[suKey]) || displayNameByKey[_tnKey] || team.teamName || "Unknown",
+          teamName:    resolvedName,
+          nameSource,
           // Keep original API name for search/matching
           rawTeamName: team.teamName || "Unknown",
           sleeperUsername: team.sleeperUsername || "",
@@ -9357,9 +9370,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const donorBadge = isDonor
         ? ' <span title="Donated" style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:999px;padding:1px 7px;font-size:.7rem;font-weight:700;white-space:nowrap">💲</span>'
         : "";
+      // Flags rows still showing a team name because no registered
+      // participant matched (by username or by name) and there's no raw
+      // Sleeper username either — the true last-resort fallback. Visible
+      // right in the table so these don't have to be hunted down in console.
+      const nameFallbackBadge = r.nameSource === "team name (no username, no registration match)"
+        ? ' <span title="No linked registration and no Sleeper username on file — showing team name as a last resort. Link this team to a registrant to fix." style="background:rgba(148,163,184,.15);color:#94a3b8;border-radius:999px;padding:1px 6px;font-size:.68rem;font-weight:700;white-space:nowrap">⚠︎</span>'
+        : "";
       return "<tr" + (rowCls ? ' class="' + rowCls + '"' : "") + ">" +
         '<td class="standings-rank">' + r.overallRank + "</td>" +
-        '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + leaderBadge + donorBadge + twitterLink(r) + '</span>' +
+        '<td><span class="standings-team-cell"><span class="st-av">' + _esc((r.teamName||"?").slice(0,2).toUpperCase()) + '</span><span class="trn-st-name-wrap"><span class="trn-st-name">' + _esc(r.teamName) + genderBadge(r.gender) + leaderBadge + donorBadge + nameFallbackBadge + twitterLink(r) + '</span>' +
         (hasConf && r.conference ? '<span class="trn-st-sub">' + _esc(r.conference) + "</span>" : "") +
         (hasDiv  && r.division   ? '<span class="trn-st-sub">' + _esc(r.division)   + "</span>" : "") +
         '<span class="trn-st-sub trn-st-sub--league">' + _esc(r.leagueName) + "</span>" +
@@ -24774,6 +24794,61 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
   // ── Performance diagnostic ───────────────────────────────────────────────
   // Run in browser console to understand what's making a tournament slow to load.
   //   DLRTournament.diagPerf('tid')
+  // ── Standings name-resolution diagnostic ─────────────────────────────────
+  // Shows exactly which tier each team's displayed Standings name came from
+  // (registration-by-username, registration-by-teamname, raw Sleeper
+  // username, or last-resort team name) — so "why is this still showing a
+  // team name" can be answered per-team instead of guessed at. Mirrors the
+  // exact priority _renderStandingsTab uses.
+  // Console: await DLRTournament.diagnoseNameSources('tid', 2025)
+  async function diagnoseNameSources(tid, year) {
+    const t  = _tournaments[tid];
+    if (!t) { console.log("Unknown tid:", tid); return; }
+    const yr = String(year || Object.keys(t.playoffs || {}).filter(k => /^\d{4}$/.test(k)).sort().pop());
+    const _sk = (s) => String(s||"").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    const participants = t.participants || {};
+    const displayNameByKey = {}, slUDisplayMap = {};
+    Object.values(participants).forEach(p => {
+      [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).map(_sk).filter(Boolean)
+        .forEach(k => { if (p.displayName) displayNameByKey[k] = p.displayName; });
+      if (p.sleeperUsername && p.displayName) slUDisplayMap[p.sleeperUsername.toLowerCase()] = p.displayName;
+    });
+
+    const tiers = { "registration (by username)": [], "registration (by team name)": [], "sleeper username (no registration match)": [], "team name (no username, no registration match)": [] };
+    Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
+      if (String(lc.year) !== yr) return;
+      (lc.teams || []).forEach(team => {
+        const _tnKey = _sk(team.teamName || "");
+        const suKey  = team.sleeperUsername ? team.sleeperUsername.toLowerCase() : null;
+        let shown, tier;
+        if (suKey && slUDisplayMap[suKey])      { shown = slUDisplayMap[suKey];   tier = "registration (by username)"; }
+        else if (displayNameByKey[_tnKey])      { shown = displayNameByKey[_tnKey]; tier = "registration (by team name)"; }
+        else if (team.sleeperUsername)          { shown = team.sleeperUsername;   tier = "sleeper username (no registration match)"; }
+        else                                     { shown = team.teamName || "Unknown"; tier = "team name (no username, no registration match)"; }
+        tiers[tier].push({ shown, rawTeamName: team.teamName, sleeperUsername: team.sleeperUsername || null, league: lc.leagueName || ck });
+      });
+    });
+
+    console.group(`[diagnoseNameSources] tid=${tid} year=${yr}`);
+    Object.entries(tiers).forEach(([tier, list]) => {
+      console.log(`${tier}: ${list.length}`);
+    });
+    const problemTiers = ["sleeper username (no registration match)", "team name (no username, no registration match)"];
+    problemTiers.forEach(tier => {
+      if (tiers[tier].length) {
+        console.log(`\nDetail — ${tier}:`);
+        tiers[tier].forEach(x => console.log(`   "${x.shown}" — raw team name: "${x.rawTeamName}", sleeper username: ${x.sleeperUsername ? `"${x.sleeperUsername}"` : "none"} (${x.league})`));
+      }
+    });
+    if (tiers["team name (no username, no registration match)"].length) {
+      console.log("\nTo fix a 'team name' row: either link that team's registrant in Admin → Participants (so it matches by " +
+        "username or name), or if it's a non-Sleeper team with no participant match at all, there's currently nothing more " +
+        "stable to fall back to than the team name for that one.");
+    }
+    console.groupEnd();
+    return tiers;
+  }
+
   async function diagPerf(tid) {
     console.group(`[diagPerf] tid=${tid}`);
     const t0 = performance.now();
@@ -24887,6 +24962,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     resetPointsRoundsElimination,
     diagnoseChopped,
     resetChoppedElimination,
+    diagnoseNameSources,
     diagnoseDivisionJoin,
     diagPerf,
     rebuildTournamentIndex,
