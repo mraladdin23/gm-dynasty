@@ -9816,7 +9816,15 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const displayName = (u.display_name || u.username || u.user_id || "").trim();
       teamNameMap[u.user_id]      = fantasyName || displayName;  // prefer league team name
       displayNameMap_u[u.user_id] = displayName;
-      if (u.username) sleeperUsernameMap[u.user_id] = u.username.toLowerCase();
+      // Sleeper accounts don't always have a distinct "username" set — some
+      // (often older accounts, or ones that never went through the flow that
+      // sets one) only have a display_name populated, with username coming
+      // back null from the API. Skipping those entirely (as this used to)
+      // meant every team owned by one of those accounts silently had no
+      // stable identifier captured at all, even though display_name is
+      // right there and just as usable — same fallback already used by the
+      // participant-matching sync path (line ~8358), just missing here.
+      if (u.username || u.display_name) sleeperUsernameMap[u.user_id] = (u.username || u.display_name).toLowerCase();
     });
     const uMap = teamNameMap; // alias — rest of function uses uMap unchanged
 
