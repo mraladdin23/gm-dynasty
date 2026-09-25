@@ -15398,12 +15398,22 @@ Good luck this season!
       if (String(lc.year) !== String(year)) return;
       const lid = String(lc.leagueId || lc.league_id || "");
       (lc.teams || []).forEach(tm => {
-        if (lid) teamMap[`${lid}:${tm.teamId}`] = { name: tm.teamName };
+        if (lid) teamMap[`${lid}:${tm.teamId}`] = { name: tm.teamName, sleeperUsername: tm.sleeperUsername || "" };
       });
       if (lid) bbMap[lid] = { isBestBall: !!lc.isBestBall, rosterPositions: lc.rosterPositions || [] };
     });
     const pMap = _buildParticipantTeamMap(t);
     const _sk  = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    // Prefer resolving a team's display name via its stable Sleeper username
+    // (survives team renames) over matching on the current team name — same
+    // fix already applied to the Standings tab. Falls back to name-based
+    // matching for MFL/Yahoo teams, which have no Sleeper username to key on.
+    const _resolveName = (rawName, sleeperUsername) => {
+      const bySu = sleeperUsername ? pMap[_sk(sleeperUsername)] : null;
+      if (bySu) return bySu.displayName;
+      const byName = pMap[_sk(rawName)];
+      return byName ? byName.displayName : rawName;
+    };
     // Needed for best-ball position lookups (_bbPosOf reads from this once loaded)
     if (typeof DLRPlayers !== "undefined") await DLRPlayers.load().catch(() => {});
 
@@ -15445,8 +15455,8 @@ Good luck this season!
 
             let aName = teamMap[`${lg.leagueId}:${a.roster_id}`]?.name || `Team ${a.roster_id}`;
             let bName = teamMap[`${lg.leagueId}:${b.roster_id}`]?.name || `Team ${b.roster_id}`;
-            if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
-            if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+            aName = _resolveName(aName, teamMap[`${lg.leagueId}:${a.roster_id}`]?.sleeperUsername);
+            bName = _resolveName(bName, teamMap[`${lg.leagueId}:${b.roster_id}`]?.sleeperUsername);
             allMatchups.push({
               leagueId: lg.leagueId, leagueName: lg.name,
               conference: lg.conference, division: lg.division, platform: "sleeper",
@@ -15497,8 +15507,8 @@ Good luck this season!
             if (apts === 0 && bpts === 0) continue;
             let aName = teamMap[`${lg.leagueId}:${a.id}`]?.name || a.id;
             let bName = teamMap[`${lg.leagueId}:${b.id}`]?.name || b.id;
-            if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
-            if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+            aName = _resolveName(aName, null); // MFL has no Sleeper username to key on — name-based match only
+            bName = _resolveName(bName, null);
             allMatchups.push({
               leagueId: lg.leagueId, leagueName: lg.name,
               conference: lg.conference, division: lg.division, platform: "mfl",
@@ -15531,8 +15541,8 @@ Good luck this season!
           if (apts === 0 && bpts === 0) continue;
           let aName = a.name || a.teamName || "Team A";
           let bName = b.name || b.teamName || "Team B";
-          if (pMap[_sk(aName)]) aName = pMap[_sk(aName)].displayName;
-          if (pMap[_sk(bName)]) bName = pMap[_sk(bName)].displayName;
+          aName = _resolveName(aName, null); // Yahoo has no Sleeper username to key on — name-based match only
+          bName = _resolveName(bName, null);
           allMatchups.push({
             leagueId: lg.leagueId, leagueName: lg.name,
             conference: lg.conference, division: lg.division, platform: "yahoo",
@@ -16586,23 +16596,33 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
 
     // ── Build team name map and league name map from standingsCache ─────────
     const teamMap = {};
+    const teamSuMap = {}; // same keys as teamMap, holding sleeperUsername for the preferred lookup
     const leagueNameMap = {};
     Object.values(standingsCache).forEach(lc => {
       if (String(lc.year) !== String(year)) return;
       const lid = String(lc.leagueId || lc.league_id || "");
       if (lid && lc.leagueName) leagueNameMap[lid] = lc.leagueName;
       (lc.teams || []).forEach(tm => {
-        if (lid) teamMap[`${lid}:${tm.teamId}`] = tm.teamName;
+        if (lid) { teamMap[`${lid}:${tm.teamId}`] = tm.teamName; teamSuMap[`${lid}:${tm.teamId}`] = tm.sleeperUsername || ""; }
         teamMap[String(tm.teamId)] = teamMap[String(tm.teamId)] || tm.teamName;
+        teamSuMap[String(tm.teamId)] = teamSuMap[String(tm.teamId)] || (tm.sleeperUsername || "");
       });
     });
     const pMap = _buildParticipantTeamMap(t);
     const _sk  = s => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+    // Prefer resolving via the team's stable Sleeper username (survives
+    // renames) over matching on whatever the current team name happens to
+    // be — same fix already applied to Standings and Weekly Matchups.
+    const _resolveByNameOrUsername = (rawName, sleeperUsername) => {
+      const bySu = sleeperUsername ? pMap[_sk(sleeperUsername)] : null;
+      if (bySu) return bySu.displayName;
+      const byName = pMap[_sk(rawName)];
+      return byName ? byName.displayName : rawName;
+    };
     const _name = (lid, rosterId, raw) => {
       let n = teamMap[`${lid}:${rosterId}`] || teamMap[String(rosterId)] || raw || `Team ${rosterId}`;
-      const k = _sk(n);
-      if (pMap[k]) n = pMap[k].displayName;
-      return n;
+      const su = teamSuMap[`${lid}:${rosterId}`] || teamSuMap[String(rosterId)] || "";
+      return _resolveByNameOrUsername(n, su);
     };
 
     // ── Season-PF / season-PA from standingsCache (no API needed) ─────────
@@ -16612,9 +16632,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       const lid = String(lc.leagueId || "");
       (lc.teams || []).forEach(tm => {
         if (!tm.teamName) return;
-        let name = tm.teamName;
-        const k = _sk(name);
-        if (pMap[k]) name = pMap[k].displayName;
+        const name = _resolveByNameOrUsername(tm.teamName, tm.sleeperUsername || "");
         seasonTeams.push({
           name,
           pf:   tm.pf   || 0,
