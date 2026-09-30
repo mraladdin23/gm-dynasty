@@ -8076,7 +8076,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
     const byYahooUser   = {};
     Object.entries(existingParticipants).forEach(([pid, p]) => {
       if (p.email)           byEmail[p.email.toLowerCase()]              = pid;
-      if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()] = pid;
+      if (p.sleeperUsername) bySleeperUser[_normSleeperUsername(p.sleeperUsername)] = pid;
       if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]        = pid;
       if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]  = pid;
     });
@@ -8087,7 +8087,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
 
     for (const [rid, reg] of regEntries) {
       const emailKey = (reg.email           || "").toLowerCase();
-      const suKey    = (reg.sleeperUsername || "").toLowerCase();
+      const suKey    = _normSleeperUsername(reg.sleeperUsername);
       const meKey    = (reg.mflEmail        || "").toLowerCase();
       const yuKey    = (reg.yahooUsername   || "").toLowerCase();
 
@@ -8431,7 +8431,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const byMflEmail      = {};
       const byYahooUser     = {};
       Object.entries(existingParticipants).forEach(([pid, p]) => {
-        if (p.sleeperUsername) bySleeperUser[p.sleeperUsername.toLowerCase()]  = pid;
+        if (p.sleeperUsername) bySleeperUser[_normSleeperUsername(p.sleeperUsername)]  = pid;
         if (p.sleeperUserId)   bySleeperUserId[p.sleeperUserId]                = pid;
         if (p.mflEmail)        byMflEmail[p.mflEmail.toLowerCase()]            = pid;
         if (p.yahooUsername)   byYahooUser[p.yahooUsername.toLowerCase()]       = pid;
@@ -8455,7 +8455,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const regByMflEmail    = {};
       const regByYahooUser   = {};
       Object.values(registrations).forEach(reg => {
-        if (reg.sleeperUsername) regBySleeperUser[reg.sleeperUsername.toLowerCase()] = reg;
+        if (reg.sleeperUsername) regBySleeperUser[_normSleeperUsername(reg.sleeperUsername)] = reg;
         if (reg.mflEmail)        regByMflEmail[reg.mflEmail.toLowerCase()]           = reg;
         if (reg.yahooUsername)   regByYahooUser[reg.yahooUsername.toLowerCase()]      = reg;
       });
@@ -8464,7 +8464,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       let newCount = 0, updatedCount = 0;
 
       for (const tm of dedupedTeams) {
-        const suKey = tm.sleeperUsername?.toLowerCase();
+        const suKey = tm.sleeperUsername ? _normSleeperUsername(tm.sleeperUsername) : null;
         const meKey = tm.mflEmail?.toLowerCase();
         const yuKey = tm.yahooUsername?.toLowerCase();
 
@@ -9111,7 +9111,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
         if (p.gender)      genderByKey[k]      = p.gender;
       });
       if (p.sleeperUsername) {
-        const suk = p.sleeperUsername.toLowerCase();
+        const suk = _normSleeperUsername(p.sleeperUsername);
         if (p.displayName)   slUDisplayMap[suk] = p.displayName;
         if (p.gender)        slUGenderMap[suk]  = p.gender;
         if (p.twitterHandle) slUTwitterMap[suk] = p.twitterHandle;
@@ -9133,7 +9133,7 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       const ranked = _rankTeams(lc.teams || [], rankBy);
       ranked.forEach(team => {
         const _tnKey = _sk(team.teamName || "");
-        const suKey  = team.sleeperUsername ? team.sleeperUsername.toLowerCase() : null;
+        const suKey  = team.sleeperUsername ? _normSleeperUsername(team.sleeperUsername) : null;
         // Priority: (1) registration display name matched via the stable
         // Sleeper username, (2) registration display name matched via the
         // current team name (fallback path for MFL/Yahoo or an unlinked
@@ -13038,13 +13038,31 @@ Good luck this season!
 
   // ── Build participant→teamId mapping from standingsCache ─────────────────
   // Returns { displayName: participantDisplayName } keyed by sanitized Sleeper username / teamName
+  // Normalizes a Sleeper username for matching purposes — trims whitespace,
+  // strips a leading "@" (people commonly type their username the way
+  // they'd tag someone, e.g. "@johnsmith123", when a registration form just
+  // asks for "your Sleeper username"), and lowercases. Sleeper's own API
+  // never returns a leading "@", so this only ever changes registration-side
+  // values that were typed with one — applying it to both sides is a no-op
+  // for anything that was already clean. Used everywhere a sleeperUsername
+  // is turned into a lookup key, so a typo like this can't silently break
+  // matching without anyone noticing.
+  function _normSleeperUsername(s) {
+    return String(s || "").trim().replace(/^@+/, "").toLowerCase();
+  }
+
   function _buildParticipantTeamMap(t) {
     const _sk = (s) => String(s).trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
     const participants = t.participants || {};
     const byKey = {}; // sanitizedKey → { displayName, twitterHandle }
     Object.values(participants).forEach(p => {
-      const keys = [p.sleeperUsername, p.displayName, p.teamName]
-        .filter(Boolean).map(_sk).filter(Boolean);
+      // sleeperUsername gets its own normalizer (strips a stray leading "@",
+      // which the generic _sk sanitizer doesn't) — displayName/teamName don't
+      // have that failure mode, so they stay on the plain sanitizer.
+      const keys = [
+        p.sleeperUsername ? _normSleeperUsername(p.sleeperUsername) : null,
+        ...[p.displayName, p.teamName].filter(Boolean).map(_sk)
+      ].filter(Boolean);
       keys.forEach(k => { byKey[k] = { displayName: p.displayName || p.teamName || k, twitterHandle: p.twitterHandle || "" }; });
     });
     return byKey;
@@ -15003,7 +15021,7 @@ Good luck this season!
     // renames) over matching on the current team name — same fix already
     // applied to Standings, Weekly Matchups, and Season Analysis.
     const _resolveByNameOrUsername = (rawName, sleeperUsername) => {
-      const bySu = sleeperUsername ? pMap[_sk(sleeperUsername)] : null;
+      const bySu = sleeperUsername ? pMap[_normSleeperUsername(sleeperUsername)] : null;
       if (bySu) return bySu.displayName;
       const byName = pMap[_sk(rawName)];
       return byName ? byName.displayName : rawName;
@@ -15421,7 +15439,7 @@ Good luck this season!
     // fix already applied to the Standings tab. Falls back to name-based
     // matching for MFL/Yahoo teams, which have no Sleeper username to key on.
     const _resolveName = (rawName, sleeperUsername) => {
-      const bySu = sleeperUsername ? pMap[_sk(sleeperUsername)] : null;
+      const bySu = sleeperUsername ? pMap[_normSleeperUsername(sleeperUsername)] : null;
       if (bySu) return bySu.displayName;
       const byName = pMap[_sk(rawName)];
       return byName ? byName.displayName : rawName;
@@ -16626,7 +16644,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // renames) over matching on whatever the current team name happens to
     // be — same fix already applied to Standings and Weekly Matchups.
     const _resolveByNameOrUsername = (rawName, sleeperUsername) => {
-      const bySu = sleeperUsername ? pMap[_sk(sleeperUsername)] : null;
+      const bySu = sleeperUsername ? pMap[_normSleeperUsername(sleeperUsername)] : null;
       if (bySu) return bySu.displayName;
       const byName = pMap[_sk(rawName)];
       return byName ? byName.displayName : rawName;
@@ -17257,7 +17275,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         if (p.displayName) displayNameMap[k] = p.displayName;
       });
       if (p.sleeperUsername) {
-        const k = p.sleeperUsername.toLowerCase();
+        const k = _normSleeperUsername(p.sleeperUsername);
         if (p.gender)      slUGenderMap[k]  = p.gender;
         if (p.displayName) slUDisplayMap[k] = p.displayName;
       }
@@ -17268,9 +17286,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     Object.entries(t.standingsCache || {}).forEach(([ck, lc]) => {
       if (String(lc.year) !== yr) return;
       (lc.teams || []).forEach(tm => {
-        const gender      = (tm.sleeperUsername ? slUGenderMap[tm.sleeperUsername.toLowerCase()] : null)
+        const gender      = (tm.sleeperUsername ? slUGenderMap[_normSleeperUsername(tm.sleeperUsername)] : null)
           || genderMap[_skQ(tm.teamName)] || genderMap[_skQ(tm.rawTeamName)] || "";
-        const displayName = (tm.sleeperUsername ? slUDisplayMap[tm.sleeperUsername.toLowerCase()] : null)
+        const displayName = (tm.sleeperUsername ? slUDisplayMap[_normSleeperUsername(tm.sleeperUsername)] : null)
           || displayNameMap[_skQ(tm.teamName)] || displayNameMap[_skQ(tm.rawTeamName)] || tm.teamName || "";
         allTeams.push({ ...tm, displayName,
           leagueName:  lc.leagueName || ck,
@@ -18620,7 +18638,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const nameToTeamId = {};
           lg.teams.forEach(tm => {
             const n1 = String(tm.teamName||"").trim().toLowerCase();
-            const n2 = String(tm.sleeperUsername||"").trim().toLowerCase();
+            const n2 = _normSleeperUsername(tm.sleeperUsername);
             if (n1) nameToTeamId[n1] = String(tm.teamId || "");
             if (n2) nameToTeamId[n2] = String(tm.teamId || "");
           });
@@ -19428,13 +19446,13 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       });
       // sleeperUsername is a stable login handle that doesn't change when display name changes
       if (p.sleeperUsername) {
-        const k = p.sleeperUsername.toLowerCase();
+        const k = _normSleeperUsername(p.sleeperUsername);
         if (p.gender)      sleeperUsernameGenderMap[k]      = p.gender;
         if (p.displayName) sleeperUsernameDisplayNameMap[k] = p.displayName;
       }
     });
     const _displayName = (tm) =>
-      (tm.sleeperUsername ? sleeperUsernameDisplayNameMap[tm.sleeperUsername.toLowerCase()] : null) ||
+      (tm.sleeperUsername ? sleeperUsernameDisplayNameMap[_normSleeperUsername(tm.sleeperUsername)] : null) ||
       displayNameMap[_skPo(tm.teamName)] ||
       displayNameMap[_skPo(tm.rawTeamName)] ||
       tm.teamName || '—';
@@ -19446,9 +19464,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       (lc.teams || []).forEach(tm => {
         // Try sleeperUsername first (stable login handle, doesn't change with display name)
         // then fall back to display-name based lookup
-        const gender      = (tm.sleeperUsername ? sleeperUsernameGenderMap[tm.sleeperUsername.toLowerCase()] : null)
+        const gender      = (tm.sleeperUsername ? sleeperUsernameGenderMap[_normSleeperUsername(tm.sleeperUsername)] : null)
           || genderMap[_skPo(tm.teamName)] || genderMap[_skPo(tm.rawTeamName)] || '';
-        const displayName = (tm.sleeperUsername ? sleeperUsernameDisplayNameMap[tm.sleeperUsername.toLowerCase()] : null)
+        const displayName = (tm.sleeperUsername ? sleeperUsernameDisplayNameMap[_normSleeperUsername(tm.sleeperUsername)] : null)
           || displayNameMap[_skPo(tm.teamName)] || displayNameMap[_skPo(tm.rawTeamName)] || tm.teamName || '';
         allTeams.push({
           ...tm,
@@ -24900,7 +24918,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     Object.values(participants).forEach(p => {
       [p.sleeperUsername, p.displayName, p.teamName].filter(Boolean).map(_sk).filter(Boolean)
         .forEach(k => { if (p.displayName) displayNameByKey[k] = p.displayName; });
-      if (p.sleeperUsername && p.displayName) slUDisplayMap[p.sleeperUsername.toLowerCase()] = p.displayName;
+      if (p.sleeperUsername && p.displayName) slUDisplayMap[_normSleeperUsername(p.sleeperUsername)] = p.displayName;
     });
 
     const tiers = { "registration (by username)": [], "registration (by team name)": [], "sleeper username (no registration match)": [], "team name (no username, no registration match)": [] };
@@ -24908,7 +24926,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       if (String(lc.year) !== yr) return;
       (lc.teams || []).forEach(team => {
         const _tnKey = _sk(team.teamName || "");
-        const suKey  = team.sleeperUsername ? team.sleeperUsername.toLowerCase() : null;
+        const suKey  = team.sleeperUsername ? _normSleeperUsername(team.sleeperUsername) : null;
         let shown, tier;
         if (suKey && slUDisplayMap[suKey])      { shown = slUDisplayMap[suKey];   tier = "registration (by username)"; }
         else if (displayNameByKey[_tnKey])      { shown = displayNameByKey[_tnKey]; tier = "registration (by team name)"; }
