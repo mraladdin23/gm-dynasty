@@ -9463,9 +9463,16 @@ document.getElementById("trn-rankby-points")?.addEventListener("click", () => _s
       else if (s.season_type === "off") completedWeek = 0;
       else if (s.season_type === "post_season" || s.season_type === "complete") completedWeek = 18;
       else completedWeek = Math.max(0, s.week - 1);
-      _cachedNflState = { completedWeek, fetchedAt: Date.now() };
+      _cachedNflState = { completedWeek, fetchedAt: Date.now(),
+        liveWeek: (s && (s.season_type === "regular" || s.season_type === "post_season") && typeof s.week === "number") ? s.week : null };
       return completedWeek;
     } catch(e) { return null; }
+  }
+  // The NFL week currently being played (Thu→Mon), or null in the offseason / when unknown.
+  // Used by H2H / World Cup bracket matchups to decide whether to show a LIVE badge and poll.
+  async function _getNflLiveWeek() {
+    await _getCompletedNflWeek();
+    return _cachedNflState ? _cachedNflState.liveWeek : null;
   }
 
   // ── Background auto-sync: keeps standingsCache from going stale without
@@ -15873,7 +15880,161 @@ Good luck this season!
   // connector math. So these open a centered modal instead, reusing the same
   // .trn-ph-modal-backdrop pattern as the player-career-history modal.
   // `trigger` is the clicked card element carrying data-home/data-away.
+  // Live mode: when the trigger carries data-live, the modal fetches fresh Sleeper
+  // matchups for every week of the round (per-week tabs + round total) and
+  // re-polls every 30s while an NFL week is in progress.
+  let _lineupLivePoll = null;
+  async function _openLiveMatchupModal(trigger, live) {
+    if (_lineupLivePoll) { clearInterval(_lineupLivePoll); _lineupLivePoll = null; }
+    document.getElementById("trn-lineup-modal-root")?.remove();
+
+    const modalRoot = document.createElement("div");
+    modalRoot.id        = "trn-lineup-modal-root";
+    modalRoot.className = "trn-ph-modal-backdrop";
+    modalRoot.style.display = "flex";
+    modalRoot.innerHTML = `
+      <div class="trn-ph-modal" style="max-width:520px">
+        <div class="trn-ph-modal-header">
+          <span class="trn-ph-modal-title">Matchup Scoring</span>
+          <button class="modal-close" id="trn-lineup-modal-close">✕</button>
+        </div>
+        <div class="trn-ph-modal-body">
+          <div id="trn-lineup-modal-loading" style="display:flex;justify-content:center;padding:var(--space-3)">
+            <div class="spinner spinner--sm"></div>
+          </div>
+          <div id="trn-lineup-modal-content" class="hidden"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(modalRoot);
+    document.body.style.overflow = "hidden";
+    const _close = () => {
+      if (_lineupLivePoll) { clearInterval(_lineupLivePoll); _lineupLivePoll = null; }
+      modalRoot.remove(); document.body.style.overflow = "";
+    };
+    document.getElementById("trn-lineup-modal-close")?.addEventListener("click", _close);
+    modalRoot.addEventListener("click", (e) => { if (e.target === modalRoot) _close(); });
+
+    const weeks = live.weeks || [];
+    const rowFor = (rows, teamId) => (rows || []).find(r => String(r.roster_id) === String(teamId)) || null;
+    const ptsOf  = row => row ? (+row.points || 0) : null;
+    let selected = null;          // "wk:N" or "total"
+    let weekData = {};            // week -> {a: row, b: row}
+    let players  = null;
+
+    const _load = async () => {
+      const lids = [...new Set([live.a.lid, live.b.lid])];
+      const out = {};
+      await Promise.all(weeks.map(async wk => {
+        const byLid = {};
+        await Promise.all(lids.map(async lid => {
+          try {
+            const r = await fetch("https://api.sleeper.app/v1/league/" + lid + "/matchups/" + wk);
+            byLid[lid] = r.ok ? (await r.json()) : [];
+          } catch(e) { byLid[lid] = []; }
+        }));
+        out[wk] = { a: rowFor(byLid[live.a.lid], live.a.teamId), b: rowFor(byLid[live.b.lid], live.b.teamId) };
+      }));
+      weekData = out;
+    };
+
+    const _paint = async () => {
+      const contentEl = document.getElementById("trn-lineup-modal-content");
+      const loadingEl = document.getElementById("trn-lineup-modal-loading");
+      if (!contentEl) return;
+      const completed = await _getCompletedNflWeek();
+      const liveWk    = await _getNflLiveWeek();
+      const status = wk => (completed != null && wk <= completed) ? "final" : (liveWk != null && wk === liveWk) ? "live" : "upcoming";
+
+      if (!selected) {
+        const lw = weeks.find(w => status(w) === "live");
+        selected = lw ? "wk:" + lw : (weeks.length > 1 ? "total" : "wk:" + weeks[0]);
+        // Multi-week round with nothing live: land on the most recent week with data
+        if (!lw && weeks.length > 1) {
+          const done = weeks.filter(w => status(w) === "final");
+          selected = done.length ? "wk:" + done[done.length - 1] : "wk:" + weeks[0];
+        }
+      }
+
+      const totA = weeks.reduce((n, w) => n + (ptsOf(weekData[w]?.a) || 0), 0);
+      const totB = weeks.reduce((n, w) => n + (ptsOf(weekData[w]?.b) || 0), 0);
+      const anyLive = weeks.some(w => status(w) === "live");
+      const fmt = n => (n == null ? "–" : (+n).toFixed(2));
+
+      const tabs = weeks.length > 1 ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 var(--space-2)">
+        ${weeks.map(w => `<button class="draft-toggle-btn trn-lm-tab${selected === "wk:" + w ? " active" : ""}" data-sel="wk:${w}">Wk ${w}${status(w) === "live" ? " 🔴" : ""}</button>`).join("")}
+        <button class="draft-toggle-btn trn-lm-tab${selected === "total" ? " active" : ""}" data-sel="total">Round total</button>
+      </div>` : "";
+
+      let bodyHtml;
+      if (selected === "total") {
+        const rowHtml = w => `<div class="trn-wmu-sbs-row"><span class="trn-wmu-sbs-pos">Wk ${w}</span>
+            <span class="trn-wmu-sbs-name">${fmt(ptsOf(weekData[w]?.a))}</span>
+            <span class="trn-wmu-sbs-pts">${fmt(ptsOf(weekData[w]?.b))}</span></div>`;
+        bodyHtml = `<div class="trn-wmu-sbs-header" style="display:flex;justify-content:space-between"><span>${_esc(live.a.name)}</span><span>${_esc(live.b.name)}</span></div>
+          ${weeks.map(rowHtml).join("")}
+          <div class="trn-wmu-sbs-row" style="font-weight:700"><span class="trn-wmu-sbs-pos">Total</span>
+            <span class="trn-wmu-sbs-name">${fmt(totA)}</span><span class="trn-wmu-sbs-pts">${fmt(totB)}</span></div>`;
+      } else {
+        const wk = +selected.slice(3);
+        const rA = weekData[wk]?.a, rB = weekData[wk]?.b;
+        const side = (row, name) => ({ name, starters: row?.starters || [], sp: row?.starters_points || {}, pp: row?.players_points || {}, players: row?.players || [] });
+        const sA = ptsOf(rA), sB = ptsOf(rB);
+        const lead = (sA != null && sB != null && status(wk) !== "upcoming") ? (sA > sB ? "a" : sB > sA ? "b" : "") : "";
+        const stLabel = { live: "🔴 In progress", final: "Final", upcoming: "Not started" }[status(wk)];
+        bodyHtml = `<div style="font-size:.72rem;color:var(--color-text-dim);margin-bottom:6px">${stLabel}</div>
+          <div class="trn-wmu-sbs">
+            <div class="trn-wmu-sbs-col">
+              <div class="trn-wmu-sbs-header">${_esc(live.a.name)} <strong${lead === "a" ? ' style="color:var(--color-green)"' : ""}>${fmt(sA)}</strong></div>
+              ${rA ? _renderLineupSide(side(rA, live.a.name), players) : `<div class="trn-wmu-sbs-empty">No lineup data</div>`}
+            </div>
+            <div class="trn-wmu-sbs-divider"></div>
+            <div class="trn-wmu-sbs-col">
+              <div class="trn-wmu-sbs-header">${_esc(live.b.name)} <strong${lead === "b" ? ' style="color:var(--color-green)"' : ""}>${fmt(sB)}</strong></div>
+              ${rB ? _renderLineupSide(side(rB, live.b.name), players) : `<div class="trn-wmu-sbs-empty">No lineup data</div>`}
+            </div>
+          </div>`;
+      }
+
+      const stamp = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+      contentEl.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-2)">
+          <div style="font-weight:700">${_esc(live.a.name)} ${fmt(totA)} <span style="color:var(--color-text-dim);font-weight:400">vs</span> ${fmt(totB)} ${_esc(live.b.name)}</div>
+        </div>
+        ${tabs}${bodyHtml}
+        <div style="font-size:.68rem;color:var(--color-text-dim);margin-top:var(--space-2)">${anyLive ? "🔴 Live · refreshes every 30s · " : ""}Updated ${stamp}</div>`;
+      contentEl.classList.remove("hidden");
+      if (loadingEl) loadingEl.style.display = "none";
+      contentEl.querySelectorAll(".trn-lm-tab").forEach(b => b.addEventListener("click", () => { selected = b.dataset.sel; _paint(); }));
+      return anyLive;
+    };
+
+    try {
+      players = await DLRPlayers.load();
+      await _load();
+      const anyLive = await _paint();
+      if (anyLive) {
+        _lineupLivePoll = setInterval(async () => {
+          if (!document.body.contains(modalRoot)) { clearInterval(_lineupLivePoll); _lineupLivePoll = null; return; }
+          if (document.hidden) return;
+          await _load();
+          await _paint();
+        }, 30000);
+      }
+    } catch(e) {
+      const contentEl = document.getElementById("trn-lineup-modal-content");
+      const loadingEl = document.getElementById("trn-lineup-modal-loading");
+      if (contentEl) {
+        contentEl.innerHTML = `<div class="trn-wmu-sbs-empty" style="color:var(--color-text-dim)">Could not load matchup: ${_esc(e.message)}</div>`;
+        contentEl.classList.remove("hidden");
+      }
+      if (loadingEl) loadingEl.style.display = "none";
+    }
+  }
+
   async function _openLineupModal(trigger) {
+    if (trigger.dataset.live) {
+      try { return _openLiveMatchupModal(trigger, JSON.parse(trigger.dataset.live)); } catch(e) { /* fall through to cached view */ }
+    }
     let homeData, awayData;
     try {
       homeData = JSON.parse(trigger.dataset.home || "{}");
@@ -19983,19 +20144,28 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // detail modal) rather than expanding in place.
     // Returns hasData:false if neither side has lineup data (e.g. non-Sleeper
     // platforms, or the week hasn't been fetched yet).
-    const _playoffLineupModalAttrs = (homeTm, awayTm, homeLid, awayLid, week, homeName, awayName) => {
+    const _playoffLineupModalAttrs = (homeTm, awayTm, homeLid, awayLid, week, homeName, awayName, weeks) => {
       const homeData = _lineupDataFor(homeTm, homeLid, week, homeName);
       const awayData = _lineupDataFor(awayTm, awayLid, week, awayName);
-      if (!homeData && !awayData) return { hasData: false, attrs: "", dataAttr: "" };
+      // Live payload: lets the modal fetch fresh Sleeper data itself (every week of
+      // the round, auto-refreshing during games) instead of relying on the cache.
+      const wkList = (weeks && weeks.length) ? weeks : (week ? [week] : []);
+      const canLive = homeLid && awayLid && homeTm?.teamId != null && awayTm?.teamId != null && wkList.length;
+      if (!homeData && !awayData && !canLive) return { hasData: false, attrs: "", dataAttr: "" };
       const dataHome = JSON.stringify(homeData || { name: homeName || _displayName(homeTm), starters: [], sp: {}, pp: {}, players: [] });
       const dataAway = JSON.stringify(awayData || { name: awayName || _displayName(awayTm), starters: [], sp: {}, pp: {}, players: [] });
+      const live = canLive ? JSON.stringify({
+        weeks: wkList,
+        a: { name: homeName || _displayName(homeTm), teamId: String(homeTm.teamId), lid: String(homeLid) },
+        b: { name: awayName || _displayName(awayTm), teamId: String(awayTm.teamId), lid: String(awayLid) }
+      }) : "";
       return {
         hasData: true,
         attrs: `onclick="DLRTournament._openLineupModal(this)"`,
         // data-* attributes (not inline JSON in onclick) so player names with
         // quotes/apostrophes can't break the attribute — same pattern used
         // by _expandTrnMatchup/_expandTrnRow elsewhere in this file.
-        dataAttr: `data-home='${dataHome}' data-away='${dataAway}'`
+        dataAttr: `data-home='${_esc(dataHome).replace(/'/g,"&#39;")}' data-away='${_esc(dataAway).replace(/'/g,"&#39;")}'${live ? ` data-live='${_esc(live).replace(/'/g,"&#39;")}'` : ""}`
       };
     };
 
@@ -20617,7 +20787,9 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // ── H2H bracket ─────────────────────────────────────────
     // T7: uses the same tight absolute-position canvas math as World Cup.
     // T6: supports per-round week counts (h2hRoundWeeks) and reseed after each round.
-    const _renderBracket = () => {
+    let _bracketLiveWeek = null;     // NFL week in progress (set async), drives the 🔴 dot + polling
+    let _bracketLiveTimer = null;
+    const _renderBracket = (opts = {}) => {
       const bracketSize = po.bracketSize || 8;
       const numRounds   = Math.log2(bracketSize);
       const reseed      = !!(po.h2hReseed);
@@ -20800,13 +20972,18 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // height is load-bearing for the connector-line math above; an
           // inline panel would grow the card and misalign every sibling.
           // Only offered once both sides are real teams with scores in.
-          const expandInfo = (m.teamA && m.teamB && hasA && hasB)
-            ? _playoffLineupModalAttrs(m.teamA, m.teamB, leagueIdByTeamKey[_teamKey(m.teamA)], leagueIdByTeamKey[_teamKey(m.teamB)], roundWk)
+          // Clickable as soon as both teams are known (even before scores exist) so
+          // live games can be opened; the modal fetches its own fresh data.
+          const roundWeeks = roundWk ? Array.from({length: _wprFor(ri)}, (_, i) => roundWk + i) : [];
+          const expandInfo = (m.teamA && m.teamB && roundWk)
+            ? _playoffLineupModalAttrs(m.teamA, m.teamB, leagueIdByTeamKey[_teamKey(m.teamA)], leagueIdByTeamKey[_teamKey(m.teamB)], roundWk, undefined, undefined, roundWeeks)
             : { hasData: false };
+          const isLiveCard = _bracketLiveWeek != null && roundWeeks.includes(_bracketLiveWeek);
 
           return `<div class="trn-wc-card ${connCls}${expandInfo.hasData ? " trn-wc-card--expandable" : ""}"
             ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}
-            style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
+            style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px;${expandInfo.hasData ? "cursor:pointer;" : ""}">
+            ${isLiveCard && m.teamA && m.teamB ? `<span title="Live" style="position:absolute;top:-5px;right:-3px;font-size:.55rem;line-height:1;z-index:2">🔴</span>` : ""}
             ${tRow(m.a, m.scoreA, winA, winB)}<div class="trn-wc-card-divider"></div>${tRow(m.b, m.scoreB, winB, winA)}
           </div>`;
         }).join("");
@@ -20845,9 +21022,14 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           </div>`).join("")}
         </div>`;
 
-      // Async: fetch scores for all rounds, then re-render
+      // Async: fetch scores for all rounds, then re-render (once — only if something
+      // new was actually fetched; otherwise the re-render re-triggers this block forever).
+      const _swapBracket = () => {
+        const wrap = document.querySelector(".trn-wc-bracket-wrap");
+        if (wrap) wrap.outerHTML = `<div class="trn-wc-bracket-wrap">${_renderBracket({ noFetch: true })}</div>`;
+      };
       (async () => {
-        if (!startWk) return;
+        if (!startWk || opts.noFetch) return;
         const allLids  = [...new Set(seeds.map(tm => leagueIdByTeamKey[_teamKey(tm)]).filter(Boolean))];
         // Collect every NFL week touched by any round
         const weeks = [];
@@ -20856,16 +21038,25 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           const w = _wprFor(ri);
           for (let i = 0; i < w; i++) weeks.push(s + i);
         }
-        await Promise.all(allLids.flatMap(lid => weeks.map(wk => _fetchWeekScores(lid, wk))));
-        // Re-render tab now that scores are cached
-        const tabBody = document.getElementById("trn-po-tab-body") || body;
-        const curTab  = tabBody?.dataset?.currentTab || "bracket";
-        if (curTab === "bracket" || document.querySelector(".trn-po-tab-btn--active")?.dataset?.tabId === "bracket") {
-          const wrap = document.querySelector(".trn-wc-bracket-wrap");
-          if (wrap) {
-            // Inline re-render of just the bracket HTML
-            wrap.outerHTML = `<div class="trn-wc-bracket-wrap">${_renderBracket()}</div>`;
-          }
+        const liveWk = await _getNflLiveWeek();
+        const liveChanged = liveWk !== _bracketLiveWeek;
+        _bracketLiveWeek = liveWk;
+        const missing = allLids.some(lid => weeks.some(wk => !_weekScoreCache[lid + "|" + wk]));
+        if (missing) await Promise.all(allLids.flatMap(lid => weeks.map(wk => _fetchWeekScores(lid, wk))));
+        if (missing || liveChanged) {
+          const curTab = body?.dataset?.currentTab || document.querySelector(".trn-po-tab-btn--active")?.dataset?.tabId || "bracket";
+          if (curTab === "bracket") _swapBracket();
+        }
+        // Live polling: while a bracket week is in progress, refresh scores every 60s.
+        if (_bracketLiveTimer) { clearInterval(_bracketLiveTimer); _bracketLiveTimer = null; }
+        if (liveWk != null && weeks.includes(liveWk)) {
+          _bracketLiveTimer = setInterval(async () => {
+            if (!document.querySelector(".trn-wc-bracket-wrap")) { clearInterval(_bracketLiveTimer); _bracketLiveTimer = null; return; }
+            if (document.hidden) return;
+            allLids.forEach(lid => { delete _weekScoreCache[lid + "|" + liveWk]; delete _weekMatchupCache[lid + "|" + liveWk]; });
+            await Promise.all(allLids.map(lid => _fetchWeekScores(lid, liveWk)));
+            _swapBracket();
+          }, 60000);
         }
       })();
 
@@ -21451,7 +21642,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
       // ── Viewer (non-admin): read-only bracket ───────────────
       if (!isAdmin) {
         if (!bracket.length) return `<div class="trn-po-empty">Bracket not yet available. Check back after group stage ends.</div>`;
-        return `<div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, false, _wcTeamInfoMap, _roundWk)}</div>`;
+        return `<div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, false, _wcTeamInfoMap, _roundWk, wcWPR)}</div>`;
       }
 
       // ── Admin: show setup or locked view ────────────────
@@ -21466,7 +21657,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
               <button class="btn-secondary btn-xs" id="trn-wc-score-refresh">↺ Update Scores</button>
             </div>
           </div>
-          <div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, true, _wcTeamInfoMap, _roundWk)}</div>`;
+          <div class="trn-wc-bracket-wrap">${_renderWCBracketCanvas(bracket, numRounds, getRoundName, _weekTag, true, _wcTeamInfoMap, _roundWk, wcWPR)}</div>`;
       }
 
       // ── Unseeded: Round 1 setup UI ───────────────────────
@@ -21574,7 +21765,59 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
     // cardH = matchup card height. pairG = gap between adjacent R0 cards in the same pair.
     // Inter-pair gap = 2*pairG so groups look separate.
     // Every subsequent round card is centred exactly between its two feeder cards.
-    const _renderWCBracketCanvas = (bracket, numRounds, getRoundName, _weekTag, isAdmin, wcTeamInfoMap, roundWeekFn) => {
+    // Live overlay for World Cup knockout cards. Stored bracket scores only change when
+    // an admin hits "Update Scores", so while an NFL week in a card's round is in progress
+    // this fetches the round's weeks straight from Sleeper and paints running totals onto
+    // the cards (display only — nothing is saved). Refreshes every 60s while the bracket is on screen.
+    let _wcLiveWeek = null;
+    let _wcLiveCardTimer = null;
+    const _wcPaintLiveCards = async () => {
+      const cards = [...document.querySelectorAll(".trn-wc-card[data-live]")];
+      if (!cards.length) { if (_wcLiveCardTimer) { clearInterval(_wcLiveCardTimer); _wcLiveCardTimer = null; } return; }
+      await Promise.all(cards.map(async card => {
+        let lv; try { lv = JSON.parse(card.dataset.live); } catch(e) { return; }
+        if (!lv.weeks.includes(_wcLiveWeek)) return;       // only rounds currently in play
+        const sums = { a: 0, b: 0 };
+        await Promise.all(lv.weeks.flatMap(wk => ["a","b"].map(async side => {
+          try {
+            const r = await fetch("https://api.sleeper.app/v1/league/" + lv[side].lid + "/matchups/" + wk);
+            const rows = r.ok ? await r.json() : [];
+            const row = rows.find(x => String(x.roster_id) === String(lv[side].teamId));
+            sums[side] += row ? (+row.points || 0) : 0;
+          } catch(e) {}
+        })));
+        const teamEls = card.querySelectorAll(".trn-wc-bteam");
+        [["a", teamEls[0]], ["b", teamEls[1]]].forEach(([side, el]) => {
+          if (!el) return;
+          let sc = el.querySelector(".trn-wc-bteam-score");
+          if (!sc) { sc = document.createElement("span"); sc.className = "trn-wc-bteam-score"; el.appendChild(sc); }
+          sc.textContent = sums[side].toFixed(1);
+        });
+      }));
+    };
+    const _startWcLiveCards = async () => {
+      if (_wcLiveCardTimer) { clearInterval(_wcLiveCardTimer); _wcLiveCardTimer = null; }
+      const lw = await _getNflLiveWeek();
+      if (lw == null) return;
+      _wcLiveWeek = lw;
+      if (!document.querySelector(".trn-wc-card[data-live]")) return;
+      // The 🔴 dots were rendered before we knew the live week on first paint — add them now.
+      document.querySelectorAll(".trn-wc-card[data-live]").forEach(card => {
+        try {
+          const lv = JSON.parse(card.dataset.live);
+          if (lv.weeks.includes(lw) && !card.querySelector(".trn-wc-live-dot")) {
+            const d = document.createElement("span");
+            d.className = "trn-wc-live-dot"; d.title = "Live"; d.textContent = "🔴";
+            d.style.cssText = "position:absolute;top:-5px;right:-3px;font-size:.55rem;line-height:1;z-index:2";
+            card.appendChild(d);
+          }
+        } catch(e) {}
+      });
+      await _wcPaintLiveCards();
+      _wcLiveCardTimer = setInterval(() => { if (!document.hidden) _wcPaintLiveCards(); }, 60000);
+    };
+
+    const _renderWCBracketCanvas = (bracket, numRounds, getRoundName, _weekTag, isAdmin, wcTeamInfoMap, roundWeekFn, wcWeeksPerRoundFn) => {
       if (!bracket.length) return "";
       const nr    = bracket.length;
       const cardH = 44;  // px — matchup card height
@@ -21645,13 +21888,16 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
           // fixed height is load-bearing for the connector-line math.
           const infoA = wcTeamInfoMap && m.a ? wcTeamInfoMap[_skWC(m.a)] : null;
           const infoB = wcTeamInfoMap && m.b ? wcTeamInfoMap[_skWC(m.b)] : null;
-          const expandInfo = (infoA && infoB && hasScoreA && hasScoreB && roundWk)
-            ? _playoffLineupModalAttrs({teamId: infoA.teamId}, {teamId: infoB.teamId}, infoA.leagueId, infoB.leagueId, roundWk, m.a, m.b)
+          const roundWeeks = roundWk ? Array.from({length: wcWeeksPerRoundFn || 1}, (_, i) => roundWk + i) : [];
+          const expandInfo = (infoA && infoB && roundWk)
+            ? _playoffLineupModalAttrs({teamId: infoA.teamId}, {teamId: infoB.teamId}, infoA.leagueId, infoB.leagueId, roundWk, m.a, m.b, roundWeeks)
             : { hasData: false };
+          const isLiveCard = _wcLiveWeek != null && roundWeeks.includes(_wcLiveWeek) && infoA && infoB;
 
           return `<div class="trn-wc-card ${connCls}${expandInfo.hasData ? " trn-wc-card--expandable" : ""}"
               ${expandInfo.hasData ? `${expandInfo.attrs} ${expandInfo.dataAttr}` : ""}
-              style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px">
+              style="position:absolute;top:${top}px;left:0;right:0;--wc-gap:${gap}px;${expandInfo.hasData ? "cursor:pointer;" : ""}">
+              ${isLiveCard ? `<span title="Live" style="position:absolute;top:-5px;right:-3px;font-size:.55rem;line-height:1;z-index:2">🔴</span>` : ""}
               ${selRow("a", m.a)}<div class="trn-wc-card-divider"></div>${selRow("b", m.b)}
             </div>`;
         }).join("");
@@ -21774,6 +22020,7 @@ Write a 3\u20134 paragraph weekly recap in an engaging, sports-analyst style. Hi
         }
       }
 
+      setTimeout(_startWcLiveCards, 0);
       return `<div class="trn-wc-bracket-wrap"><div class="trn-wc-bracket">${cols}${champCol}</div></div>${nextRoundPanel}`;
     };
 
